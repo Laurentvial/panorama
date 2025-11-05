@@ -17,7 +17,7 @@ register = template.Library()
 def _load_vite_manifest() -> Dict[str, Any]:
     """Load and cache Vite's manifest.json from the built frontend."""
     # Build dir is already in STATICFILES_DIRS; manifest lives next to assets
-    build_dir = Path(settings.BASE_DIR) / "frontend" / "build"
+    build_dir = Path(settings.BASE_DIR) / "frontend" / "dist"
     manifest_path = build_dir / "manifest.json"
     if not manifest_path.exists():
         return {}
