@@ -52,4 +52,5 @@ class NoteDeleteView(generics.DestroyAPIView):
 class ClientView(generics.ListAPIView):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
+    permission_classes = [IsAuthenticated]  # Explicitly set permission
 
