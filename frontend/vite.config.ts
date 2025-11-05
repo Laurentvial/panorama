@@ -5,8 +5,9 @@ import path from 'path';
 
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  // Use '/static/' in production (for Django), '/' in development
-  base: mode === 'production' ? '/static/' : '/',
+  // Use '/' for standalone deployments (Choreo), '/static/' only if served by Django
+  // For Choreo standalone frontend, always use '/'
+  base: '/',
   resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {
