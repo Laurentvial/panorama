@@ -5,7 +5,11 @@ import api from "../utils/api";
 import { ACCESS_TOKEN, REFRESH_TOKEN } from "../utils/constants";
 import { useState, useEffect } from "react";
 
-function ProtectedRoute({ children }) { 
+interface ProtectedRouteProps {
+    children?: React.ReactNode;
+}
+
+function ProtectedRoute({ children }: ProtectedRouteProps) { 
     const [isAuthenticated, setIsAuthenticated] = useState(null)
 
     useEffect(() => {
@@ -43,7 +47,7 @@ function ProtectedRoute({ children }) {
         const tokenExpiry = decoded.exp;
         const currentTime = Date.now() / 1000;
 
-        if (tokenExpiry < currentTime) {
+        if (tokenExpiry && tokenExpiry < currentTime) {
             await refreshToken();
         } else {
             setIsAuthenticated(true);
@@ -51,7 +55,10 @@ function ProtectedRoute({ children }) {
     }
     
     if (isAuthenticated === null) {
-        return <div>Loading...</div>
+        return 
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+            <div>Chargement...</div>
+        </div>
     }
 
     return isAuthenticated ? children : <Navigate to="/login" />

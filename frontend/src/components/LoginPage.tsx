@@ -40,7 +40,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
     try {
       await signIn(email, password);
-      const { user } = await apiCall('/auth/me');
+      const user = await apiCall('/api/user/current/');
       onLogin(user);
     } catch (err: any) {
       console.error('Login error:', err);
@@ -68,14 +68,22 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
 
     try {
-      await apiCall('/auth/signup', {
+      // Map signup data to Django API format
+      await apiCall('/api/users/create/', {
         method: 'POST',
-        body: JSON.stringify(signupData)
+        body: JSON.stringify({
+          username: signupData.email,
+          email: signupData.email,
+          password: signupData.password,
+          first_name: signupData.firstName,
+          last_name: signupData.lastName,
+          role: signupData.role
+        })
       });
 
       // Auto-login after signup
       await signIn(signupData.email, signupData.password);
-      const { user } = await apiCall('/auth/me');
+      const user = await apiCall('/api/user/current/');
       onLogin(user);
     } catch (err: any) {
       console.error('Signup error:', err);

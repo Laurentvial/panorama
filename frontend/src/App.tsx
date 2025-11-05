@@ -1,44 +1,71 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './Pages/Login';
-import Register from './Pages/Register';
 import Home from './Pages/Home';
 import NotFound from './Pages/NotFound';
+import UsersAndTeams from './Pages/UsersAndTeams';
+import Planning from './Pages/Planning';
+import { UserProvider } from './contexts/UserContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import { Layout } from './components/Layout';
+import { Toaster } from './components/ui/sonner';
 
 function Logout() {
     localStorage.clear();
     return <Navigate to="/login" />;
 }
 
-function RegisterAndLogout() {
-  localStorage.clear();
-  return <Register />;
-}
-
 function App() {
     return (
         <Router>
-            <Routes>
-                <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="/home" element={<Home />} />
-                <Route path="/logout" element={<Logout />} />
-                <Route path="/register-and-logout" element={<RegisterAndLogout />} />
-                <Route path="*" element={<NotFound />} />
-            </Routes>
+            <UserProvider>
+                <Toaster />
+                <Routes>
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/logout" element={<Logout />} />
+                    <Route path="/" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Home />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/home" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Home />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/users" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <UsersAndTeams />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/planning" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Planning />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="*" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <NotFound />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                </Routes>
+            </UserProvider>
         </Router>
     );
 }
 
 export default App;
-// import React, { useState, useEffect, lazy, Suspense, startTransition } from 'react';
-// import { LoginPage } from './components/LoginPage';
-// import { Header } from './components/Header';
-// import { Sidebar } from './components/Sidebar';
-// import { getSession } from './utils/auth';
-// import { apiCall } from './utils/api';
+
 
 // // Lazy load page components that export named components
 // const Dashboard = lazy(() => import('./components/Dashboard').then(m => ({ default: m.Dashboard })));

@@ -14,8 +14,9 @@ import {
   DollarSign,
   Mail
 } from 'lucide-react';
-import apiCall from '../utils/api';
+import api from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
+import '../styles/Home.css';
 
 interface DashboardProps {
   user: any;
@@ -35,13 +36,13 @@ export function Dashboard({ user }: DashboardProps) {
 
   async function loadData() {
     try {
-      const [statsData, teamsData] = await Promise.all([
-        apiCall('/stats'),
-        apiCall('/teams')
+      const [statsResponse, teamsResponse] = await Promise.all([
+        api.get('/api/stats'),
+        api.get('/api/teams')
       ]);
       
-      setStats(statsData);
-      setTeams(teamsData.teams || []);
+      setStats(statsResponse.data);
+      setTeams(teamsResponse.data?.teams || []);
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -51,7 +52,7 @@ export function Dashboard({ user }: DashboardProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="dashboard-loading">
         <LoadingIndicator />
       </div>
     );
@@ -62,45 +63,51 @@ export function Dashboard({ user }: DashboardProps) {
       label: 'Chiffre d\'affaires', 
       value: `${(stats?.totalRevenue || 0).toLocaleString('fr-FR')} €`, 
       icon: DollarSign, 
-      color: 'text-green-600' 
+      valueClass: 'dashboard-stat-value-green',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-green'
     },
     { 
       label: 'CA en attente', 
       value: `${(stats?.pendingRevenue || 0).toLocaleString('fr-FR')} €`, 
       icon: Clock, 
-      color: 'text-orange-600' 
+      valueClass: 'dashboard-stat-value-orange',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-orange'
     },
     { 
       label: 'Nb de Notes', 
       value: '0', 
       icon: FileText, 
-      color: 'text-blue-600' 
+      valueClass: 'dashboard-stat-value-blue',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-blue'
     },
     { 
       label: 'Nb de RDV', 
       value: stats?.totalAppointments || 0, 
       icon: Calendar, 
-      color: 'text-purple-600' 
+      valueClass: 'dashboard-stat-value-purple',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-purple'
     },
     { 
       label: 'Nb de leads', 
       value: '0', 
       icon: TrendingUp, 
-      color: 'text-indigo-600' 
+      valueClass: 'dashboard-stat-value-indigo',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-indigo'
     },
     { 
       label: 'Nb clients', 
       value: stats?.totalClients || 0, 
       icon: UsersIcon, 
-      color: 'text-pink-600' 
+      valueClass: 'dashboard-stat-value-pink',
+      iconWrapperClass: 'dashboard-stat-icon-wrapper-pink'
     },
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-slate-900 mb-2">Dashboard</h1>
-        <p className="text-slate-600">Vue d'ensemble de votre activité</p>
+    <div className="dashboard-container">
+      <div className="dashboard-header-section">
+        <h1 className="dashboard-title">Dashboard</h1>
+        <p className="dashboard-subtitle">Vue d'ensemble de votre activité</p>
       </div>
 
       {/* Filters */}
@@ -109,8 +116,8 @@ export function Dashboard({ user }: DashboardProps) {
           <CardTitle>Filtres</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
+          <div className="dashboard-filters-grid">
+            <div className="dashboard-filter-field">
               <Label>Du</Label>
               <Input 
                 type="date" 
@@ -118,7 +125,7 @@ export function Dashboard({ user }: DashboardProps) {
                 onChange={(e) => setDateFrom(e.target.value)} 
               />
             </div>
-            <div className="space-y-2">
+            <div className="dashboard-filter-field">
               <Label>Au</Label>
               <Input 
                 type="date" 
@@ -126,7 +133,7 @@ export function Dashboard({ user }: DashboardProps) {
                 onChange={(e) => setDateTo(e.target.value)} 
               />
             </div>
-            <div className="space-y-2">
+            <div className="dashboard-filter-field">
               <Label>Équipe</Label>
               <Select value={selectedTeam} onValueChange={setSelectedTeam}>
                 <SelectTrigger>
@@ -147,19 +154,19 @@ export function Dashboard({ user }: DashboardProps) {
       </Card>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="dashboard-stats-grid">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
           return (
             <Card key={index}>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">{stat.label}</p>
-                    <p className={`${stat.color}`}>{stat.value}</p>
+              <CardContent className="dashboard-stat-card-content">
+                <div className="dashboard-stat-card-inner">
+                  <div className="dashboard-stat-info">
+                    <p className="dashboard-stat-label">{stat.label}</p>
+                    <p className={stat.valueClass}>{stat.value}</p>
                   </div>
-                  <div className={`${stat.color} bg-slate-50 p-3 rounded-lg`}>
-                    <Icon className="w-6 h-6" />
+                  <div className={`dashboard-stat-icon-wrapper ${stat.iconWrapperClass}`}>
+                    <Icon className="dashboard-stat-icon" />
                   </div>
                 </div>
               </CardContent>
@@ -171,24 +178,24 @@ export function Dashboard({ user }: DashboardProps) {
       {/* Recent Messages */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Mail className="w-5 h-5" />
+          <CardTitle className="dashboard-section-header">
+            <Mail className="dashboard-section-icon" />
             Messages récents
           </CardTitle>
         </CardHeader>
         <CardContent>
           {stats?.recentMessages && stats.recentMessages.length > 0 ? (
-            <div className="space-y-3">
+            <div className="dashboard-messages-list">
               {stats.recentMessages.slice(0, 5).map((message: any) => (
-                <div key={message.id} className="flex items-start justify-between p-3 bg-slate-50 rounded-lg">
-                  <div className="flex-1">
-                    <p className="text-sm">{message.subject}</p>
-                    <p className="text-xs text-slate-500 mt-1">
+                <div key={message.id} className="dashboard-message-item">
+                  <div className="dashboard-message-content">
+                    <p className="dashboard-message-subject">{message.subject}</p>
+                    <p className="dashboard-message-date">
                       {new Date(message.createdAt).toLocaleDateString('fr-FR')}
                     </p>
                   </div>
                   {!message.read && (
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                    <span className="dashboard-message-badge">
                       Non lu
                     </span>
                   )}
@@ -196,7 +203,7 @@ export function Dashboard({ user }: DashboardProps) {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-slate-500">Aucun message récent</p>
+            <p className="dashboard-empty-message">Aucun message récent</p>
           )}
         </CardContent>
       </Card>
@@ -204,33 +211,33 @@ export function Dashboard({ user }: DashboardProps) {
       {/* Recent Transactions */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="w-5 h-5" />
+          <CardTitle className="dashboard-section-header">
+            <TrendingUp className="dashboard-section-icon" />
             Dernières transactions
           </CardTitle>
         </CardHeader>
         <CardContent>
           {stats?.recentTransactions && stats.recentTransactions.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="dashboard-table-container">
+              <table className="dashboard-table">
                 <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left py-2 px-3">Date</th>
-                    <th className="text-left py-2 px-3">Type</th>
-                    <th className="text-left py-2 px-3">Montant</th>
-                    <th className="text-left py-2 px-3">Statut</th>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Montant</th>
+                    <th>Statut</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.recentTransactions.slice(0, 10).map((transaction: any) => (
-                    <tr key={transaction.id} className="border-b border-slate-100">
-                      <td className="py-2 px-3">
+                    <tr key={transaction.id}>
+                      <td>
                         {new Date(transaction.createdAt).toLocaleDateString('fr-FR')}
                       </td>
-                      <td className="py-2 px-3 capitalize">{transaction.type}</td>
-                      <td className="py-2 px-3">{transaction.amount?.toLocaleString('fr-FR')} €</td>
-                      <td className="py-2 px-3">
-                        <span className="px-2 py-1 bg-slate-100 rounded text-xs">
+                      <td className="dashboard-table-type">{transaction.type}</td>
+                      <td>{transaction.amount?.toLocaleString('fr-FR')} €</td>
+                      <td>
+                        <span className="dashboard-table-badge">
                           {transaction.status}
                         </span>
                       </td>
@@ -240,7 +247,7 @@ export function Dashboard({ user }: DashboardProps) {
               </table>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">Aucune transaction récente</p>
+            <p className="dashboard-empty-message">Aucune transaction récente</p>
           )}
         </CardContent>
       </Card>

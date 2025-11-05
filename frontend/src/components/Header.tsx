@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { 
   DropdownMenu, 
@@ -10,17 +11,17 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { Bell, User, LogOut, Building2 } from 'lucide-react';
-import { signOut } from '../utils/auth';
 import api from '../utils/api';
 import React from 'react';
 import '../styles/Header.css';
 
 interface HeaderProps {
   user: any;
-  onLogout: () => void;
 }
 
-export function Header({ user, onLogout }: HeaderProps) {
+export function Header({ user }: HeaderProps) {
+  const navigate = useNavigate();
+
 //   const [unreadMessages, setUnreadMessages] = useState(0);
 
 //   useEffect(() => {
@@ -40,10 +41,9 @@ export function Header({ user, onLogout }: HeaderProps) {
 //     }
 //   }
 
-//   async function handleLogout() {
-//     await signOut();
-//     onLogout();
-//   }
+  function handleLogout() {
+    navigate('/logout');
+  }
 
   return (
     <header className="header">
@@ -92,23 +92,23 @@ export function Header({ user, onLogout }: HeaderProps) {
                 <Button className="header-button header-button-user">
                   <User className="header-icon" />
                   <span className="header-user-name">
-                    {user?.firstName} {user?.lastName}
+                    {user?.username || user?.email || ''}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="header-dropdown" align="end">
                 <DropdownMenuLabel>
                   <div className="header-user-info">
-                    <p className="header-user-name-full">{user?.firstName} {user?.lastName}</p>
+                    <p className="header-user-name-full">{user?.username || `${user?.email || ''} ${user?.userId || ''}`.trim() || 'User'}</p>
                     <p className="header-user-email">{user?.email}</p>
-                    <p className="header-user-role">{user?.role}</p>
+                    {user?.role && <p className="header-user-role">{user?.role}</p>}
                   </div>
                 </DropdownMenuLabel>
-                {/* <DropdownMenuSeparator />
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="header-logout">
                   <LogOut className="header-icon" />
                   Déconnexion
-                </DropdownMenuItem> */}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

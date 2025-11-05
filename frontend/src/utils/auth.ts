@@ -1,41 +1,99 @@
-import { createClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from './supabase/info';
+import api from './api';
+import { ACCESS_TOKEN, REFRESH_TOKEN } from './constants';
 
-const supabase = createClient(
-  `https://${projectId}.supabase.co`,
-  publicAnonKey
-);
+// Get API base URL from environment or use default
+const getEnvVar = (key: string): string | undefined => {
+  // @ts-ignore - Vite environment variables
+  return import.meta.env[key];
+};
+
+const apiUrl = getEnvVar('VITE_API_URL') || 'http://127.0.0.1:8000';
 
 export async function signIn(email: string, password: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  
-  if (error) throw error;
-  
-  if (data.session) {
-    localStorage.setItem('access_token', data.session.access_token);
+  try {
+    const response = await fetch(`${apiUrl}/api/token/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: email, // Django REST Framework JWT uses 'username' field
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Invalid credentials' }));
+      throw new Error(error.detail || 'Invalid credentials');
+    }
+
+    const data = await response.json();
+    
+    if (data.access) {
+      localStorage.setItem(ACCESS_TOKEN, data.access);
+    }
+    
+    if (data.refresh) {
+      localStorage.setItem(REFRESH_TOKEN, data.refresh);
+    }
+    
+    return data;
+  } catch (error: any) {
+    throw error;
   }
-  
-  return data;
 }
 
 export async function signOut() {
-  await supabase.auth.signOut();
-  localStorage.removeItem('access_token');
+  localStorage.removeItem(ACCESS_TOKEN);
+  localStorage.removeItem(REFRESH_TOKEN);
 }
 
 export async function getSession() {
-  const { data, error } = await supabase.auth.getSession();
+  const token = localStorage.getItem(ACCESS_TOKEN);
   
-  if (error) throw error;
-  
-  if (data.session) {
-    localStorage.setItem('access_token', data.session.access_token);
+  if (!token) {
+    return null;
   }
-  
-  return data.session;
-}
 
-export { supabase };
+  try {
+    // Verify token by getting current user
+    const response = await api.get('/api/user/current/');
+    return {
+      access_token: token,
+      user: response.data,
+    };
+  } catch (error) {
+    // Token is invalid, try to refresh
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN);
+    if (refreshToken) {
+      try {
+        const refreshResponse = await fetch(`${apiUrl}/api/token/refresh/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            refresh: refreshToken,
+          }),
+        });
+
+        if (refreshResponse.ok) {
+          const refreshData = await refreshResponse.json();
+          if (refreshData.access) {
+            localStorage.setItem(ACCESS_TOKEN, refreshData.access);
+            return {
+              access_token: refreshData.access,
+            };
+          }
+        }
+      } catch (refreshError) {
+        // Refresh failed, clear tokens
+        signOut();
+        return null;
+      }
+    }
+    
+    signOut();
+    return null;
+  }
+}

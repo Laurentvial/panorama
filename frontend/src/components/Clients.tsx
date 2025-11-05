@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from './ui/badge';
 import { Plus, Search, Eye, Calendar, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { toast } from 'sonner';
 
 interface ClientsProps {
   onSelectClient: (clientId: string) => void;
@@ -53,7 +54,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
     e.preventDefault();
     
     if (formData.password !== formData.confirmPassword) {
-      alert('Les mots de passe ne correspondent pas');
+      toast.error('Les mots de passe ne correspondent pas');
       return;
     }
     
@@ -76,9 +77,10 @@ export function Clients({ onSelectClient }: ClientsProps) {
         managerId: ''
       });
       loadData();
+      toast.success('Client créé avec succès');
     } catch (error) {
       console.error('Error creating client:', error);
-      alert('Erreur lors de la création du client');
+      toast.error('Erreur lors de la création du client');
     }
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Plus, Mail, Send, Trash2, Eye } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import apiCall from '../utils/api';
 
 interface MessagerieProps {
   user: any;
@@ -142,13 +142,13 @@ export function Messagerie({ user }: MessagerieProps) {
                     <SelectValue placeholder="Sélectionner un destinataire" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="" disabled>-- Clients --</SelectItem>
+                    <SelectItem value="__clients__" disabled>-- Clients --</SelectItem>
                     {clients.filter(c => c.authId).map((client) => (
                       <SelectItem key={client.id} value={client.authId}>
                         {client.firstName} {client.lastName}
                       </SelectItem>
                     ))}
-                    <SelectItem value="" disabled>-- Utilisateurs --</SelectItem>
+                    <SelectItem value="__users__" disabled>-- Utilisateurs --</SelectItem>
                     {users.filter(u => u.id !== user.id).map((userRecord) => (
                       <SelectItem key={userRecord.id} value={userRecord.id}>
                         {userRecord.firstName} {userRecord.lastName}

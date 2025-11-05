@@ -111,6 +111,7 @@
 
 .header-user-name {
   display: none;
+  color: var(--foreground);
 }
 
 @media (min-width: 768px) {
@@ -120,7 +121,7 @@
 }
 
 .header-dropdown {
-  width: 20rem;
+  width: 100%;
 }
 
 .header-notification-content {

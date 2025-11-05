@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ArrowLeft, User, Wallet, FileText, Calendar, Mail, TrendingUp, Plus, Pencil, Trash2 } from 'lucide-react';
 import apiCall from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
+import { toast } from 'sonner';
 
 interface ClientDetailProps {
   clientId: string;
@@ -147,9 +148,10 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       
       setIsMessageDialogOpen(false);
       setMessageForm({ subject: '', message: '' });
-      alert('Message envoyé avec succès');
+      toast.success('Message envoyé avec succès');
     } catch (error) {
       console.error('Error sending message:', error);
+      toast.error('Erreur lors de l\'envoi du message');
     }
   }
 

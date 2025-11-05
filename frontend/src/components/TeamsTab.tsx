@@ -1,0 +1,105 @@
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { Eye, Trash2 } from 'lucide-react';
+import { useTeams } from '../hooks/useTeams';
+import api from '../utils/api';
+import { CreateTeamDialog } from './CreateTeamDialog';
+import { TeamDetailDialog } from './TeamDetailDialog';
+import { TeamDetail } from '../types';
+
+export function TeamsTab() {
+  const { teams, refetch: refetchTeams } = useTeams();
+  const [selectedTeam, setSelectedTeam] = useState<TeamDetail | null>(null);
+  const [isTeamDetailOpen, setIsTeamDetailOpen] = useState(false);
+
+  async function viewTeamDetails(teamId: string) {
+    try {
+      const response = await api.get(`/api/teams/${teamId}/`);
+      setSelectedTeam(response.data);
+      setIsTeamDetailOpen(true);
+    } catch (error) {
+      console.error('Error loading team details:', error);
+    }
+  }
+
+  async function handleDeleteTeam(teamId: string) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette équipe ?')) return;
+    
+    try {
+      await api.delete(`/api/teams/${teamId}/delete/`);
+      refetchTeams();
+    } catch (error) {
+      console.error('Error deleting team:', error);
+    }
+  }
+
+  return (
+    <>
+      <div className="users-teams-action-bar">
+        <CreateTeamDialog onTeamCreated={refetchTeams} />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Liste des équipes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {teams.length > 0 ? (
+            <div className="users-teams-table-container">
+              <table className="users-teams-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Nom</th>
+                    <th>Date de création</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teams.map((team) => (
+                    <tr key={team.id}>
+                      <td className="users-teams-table-id">{team.id.substring(0, 8)}...</td>
+                      <td>{team.name}</td>
+                      <td>
+                        {new Date(team.createdAt).toLocaleDateString('fr-FR')}
+                      </td>
+                      <td className="text-right">
+                        <div className="users-teams-table-actions">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => viewTeamDetails(team.id)}
+                          >
+                            <Eye className="users-teams-icon" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleDeleteTeam(team.id)}
+                            className="users-teams-delete-button"
+                          >
+                            <Trash2 className="users-teams-icon" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="users-teams-empty-message">Aucune équipe créée</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <TeamDetailDialog
+        team={selectedTeam}
+        isOpen={isTeamDetailOpen}
+        onOpenChange={setIsTeamDetailOpen}
+      />
+    </>
+  );
+}
+

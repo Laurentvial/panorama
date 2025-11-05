@@ -1,28 +1,3 @@
-// import { projectId, publicAnonKey } from './supabase/info';
-
-// const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-35b53642`;
-
-// export async function apiCall(endpoint: string, options: RequestInit = {}) {
-//   const token = localStorage.getItem('access_token');
-
-//   const response = await fetch(`${API_URL}${endpoint}`, {
-//     ...options,
-//     headers: {
-//       'Content-Type': 'application/json',
-//       'Authorization': token ? `Bearer ${token}` : `Bearer ${publicAnonKey}`,
-//       ...options.headers,
-//     },
-//   });
-
-//   const data = await response.json();
-
-//   if (!response.ok) {
-//     console.error(`API Error on ${endpoint}:`, data);
-//     throw new Error(data.error || 'API request failed');
-//   }
-
-//   return data;
-// }
 import axios from "axios";
 import { ACCESS_TOKEN } from "./constants";
 
@@ -33,7 +8,8 @@ const getEnvVar = (key: string): string | undefined => {
   // @ts-ignore - Vite environment variables
   return import.meta.env[key];
 };
-const apiUrl = getEnvVar('VITE_API_URL') || "/choreo-apis/panorama/backend/v1.0";
+
+const apiUrl = getEnvVar('VITE_API_URL');
 
 const api = axios.create({
   baseURL: apiUrl,
@@ -51,5 +27,26 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+// Helper function for API calls that returns data directly
+export async function apiCall(endpoint: string, options: RequestInit = {}) {
+  const token = localStorage.getItem(ACCESS_TOKEN);
+  
+  const response = await fetch(`${apiUrl}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : '',
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'API request failed' }));
+    throw new Error(error.detail || error.message || 'API request failed');
+  }
+
+  return await response.json();
+}
 
 export default api;

@@ -1,0 +1,261 @@
+/* Main Container */
+.planning-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Header Section */
+.planning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planning-title-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.planning-title {
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+    font-size: 2rem;
+}
+
+.planning-subtitle {
+  color: #475569;
+}
+
+.planning-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.planning-icon-sm {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.planning-icon-md {
+  width: 1rem;
+  height: 1rem;
+}
+
+.planning-icon-with-margin {
+  margin-right: 0.5rem;
+}
+
+/* Modal Overlay */
+.planning-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Modal Content */
+.planning-modal-content {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 100%;
+  margin: 0 1rem;
+}
+
+/* Modal Header */
+.planning-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.planning-modal-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.75rem;
+}
+
+/* Modal Close Button */
+.planning-modal-close {
+  height: 2rem;
+  width: 2rem;
+  padding: 0;
+}
+
+/* Form Styles */
+.planning-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.planning-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.planning-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+/* Calendar Header */
+.planning-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.planning-calendar-nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Calendar Grid */
+.planning-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.5rem;
+}
+
+.planning-weekday {
+  text-align: center;
+  font-size: 0.875rem;
+  color: #475569;
+  padding: 0.5rem;
+}
+
+.planning-calendar-empty {
+  padding: 0.5rem;
+}
+
+.planning-calendar-day {
+  padding: 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  min-height: 6rem;
+}
+
+.planning-calendar-day-today {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.planning-day-number {
+  font-size: 0.875rem;
+  margin-bottom: 0.25rem;
+}
+
+.planning-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Event Badge */
+.planning-event-badge {
+  background-color: #dbeafe;
+  color: #1e40af;
+  font-size: 0.75rem;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.planning-event-time {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.planning-event-client {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Events List */
+.planning-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.planning-event-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.planning-event-content {
+  flex: 1;
+}
+
+.planning-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.planning-event-date-time {
+  display: flex;
+  flex-direction: column;
+}
+
+.planning-event-date-row,
+.planning-event-time-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.planning-event-time-row {
+  margin-bottom: 0.25rem;
+}
+
+.planning-event-client-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.planning-event-comment {
+  font-size: 0.875rem;
+  color: #475569;
+  margin-top: 0.5rem;
+}
+
+.planning-event-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.planning-delete-button {
+  color: #dc2626;
+}
+
+.planning-delete-button:hover {
+  color: #b91c1c;
+}
+
+.planning-empty-message {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+/* Icon Colors */
+.planning-icon-slate {
+  color: #64748b;
+}
+

@@ -2,12 +2,13 @@ import React from "react";
 import "../styles/Note.css"
 
 interface NoteProps {
-  note: { id: string; text: string; createdAt: string };
+  note: { id: string; text: string; createdAt?: string; created_at?: string };
   onDelete: (id: string) => void;
 }
 
 const Note: React.FC<NoteProps> = ({ note, onDelete }) => {
-    const formattedDate = new Date(note.createdAt).toLocaleDateString("fr-FR");
+    const dateStr = note.createdAt || note.created_at || new Date().toISOString();
+    const formattedDate = new Date(dateStr).toLocaleDateString("fr-FR");
     return (
     <div className="note-container">
       <p className="note-text">{note.text}</p>
@@ -19,6 +20,6 @@ const Note: React.FC<NoteProps> = ({ note, onDelete }) => {
       </button>
     </div>
   );
-}
+};
 
 export default Note;
