@@ -132,10 +132,15 @@ STATIC_URL = 'static/'
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-STATICFILES_DIRS = [
+# Only include frontend directories if they exist (for local development)
+# On Choreo, frontend is deployed separately, so these directories won't exist
+STATICFILES_DIRS = []
+for dir_path in [
     BASE_DIR / "frontend/static",
     BASE_DIR / "frontend/dist",
-]
+]:
+    if dir_path.exists():
+        STATICFILES_DIRS.append(dir_path)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
