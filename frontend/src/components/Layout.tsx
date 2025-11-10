@@ -16,7 +16,7 @@ export function Layout({ children }: LayoutProps) {
   const getCurrentPage = () => {
     const path = location.pathname;
     if (path === '/') return 'dashboard';
-    if (path === '/home') return 'dashboard';
+    if (path === '/dashboard') return 'dashboard';
     if (path === '/users') return 'users-teams';
     if (path === '/clients') return 'clients';
     if (path === '/planning') return 'planning';

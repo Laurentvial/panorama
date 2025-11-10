@@ -1,64 +1,96 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Plus } from 'lucide-react';
+import { X } from 'lucide-react';
 import api from '../utils/api';
+import { toast } from 'sonner';
+import '../styles/PlanningCalendar.css';
 
 interface CreateTeamDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
   onTeamCreated: () => void;
 }
 
-export function CreateTeamDialog({ onTeamCreated }: CreateTeamDialogProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function CreateTeamDialog({ isOpen, onClose, onTeamCreated }: CreateTeamDialogProps) {
   const [teamFormData, setTeamFormData] = useState({ name: '' });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleCreateTeam(e: React.FormEvent) {
     e.preventDefault();
+    setError('');
+    setLoading(true);
     
     try {
       await api.post('/api/teams/create/', teamFormData);
-      setIsOpen(false);
+      toast.success('Équipe créée avec succès');
       setTeamFormData({ name: '' });
+      onClose();
       onTeamCreated();
-    } catch (error) {
-      console.error('Error creating team:', error);
+    } catch (err: any) {
+      console.error('Error creating team:', err);
+      const data = err?.response?.data || {};
+      const message = data.detail || Object.values(data).flat().join(', ') || 'Une erreur est survenue lors de la création';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
     }
   }
 
+  if (!isOpen) return null;
+
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="users-teams-icon users-teams-icon-with-margin" />
-          Créer une équipe
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Nouvelle équipe</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleCreateTeam} className="users-teams-form">
-          <div className="users-teams-form-field">
-            <Label>Nom de l'équipe</Label>
+    <div className="planning-modal-overlay" onClick={onClose}>
+      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="planning-modal-header">
+          <h2 className="planning-modal-title">Nouvelle équipe</h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="planning-modal-close"
+            onClick={onClose}
+          >
+            <X className="planning-icon-md" />
+          </Button>
+        </div>
+        <form onSubmit={handleCreateTeam} className="planning-form">
+          <div className="planning-form-field">
+            <Label htmlFor="team-name">Nom de l'équipe</Label>
             <Input
+              id="team-name"
               value={teamFormData.name}
               onChange={(e) => setTeamFormData({ name: e.target.value })}
               placeholder="Ex: Équipe Paris"
               required
             />
           </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
           
-          <div className="users-teams-form-actions">
-            <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
+          <div className="planning-form-actions">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={onClose}
+              disabled={loading}
+            >
               Annuler
             </Button>
-            <Button type="submit">Créer</Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? 'Création...' : 'Créer'}
+            </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 

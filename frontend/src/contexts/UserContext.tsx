@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../utils/api';
+import { ACCESS_TOKEN } from '../utils/constants';
 
 interface UserContextType {
   currentUser: any;
@@ -14,6 +15,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   const getCurrentUser = async () => {
+    const token = localStorage.getItem(ACCESS_TOKEN);
+    
+    // Only make API call if we have a token
+    if (!token) {
+      setCurrentUser(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await api.get("/api/user/current/");
       setCurrentUser(response.data);

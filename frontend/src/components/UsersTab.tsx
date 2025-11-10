@@ -6,11 +6,16 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { useUsers } from '../hooks/useUsers';
 import { useTeams } from '../hooks/useTeams';
 import { CreateUserModal } from './CreateUserModal';
+import { EditUserModal } from './EditUserModal';
+import { User } from '../types';
+import LoadingIndicator from './LoadingIndicator';
 
 export function UsersTab() {
-  const { users, deleteUser, toggleUserActive, refetch } = useUsers();
-  const { teams } = useTeams();
+  const { users, loading: usersLoading, deleteUser, toggleUserActive, refetch } = useUsers();
+  const { teams, loading: teamsLoading } = useTeams();
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   async function handleDelete(userId: string) {
     try {
@@ -33,6 +38,17 @@ export function UsersTab() {
     refetch();
   }
 
+  function handleEditClick(user: User) {
+    setSelectedUser(user);
+    setIsEditModalOpen(true);
+  }
+
+  function handleUserUpdated() {
+    setIsEditModalOpen(false);
+    setSelectedUser(null);
+    refetch();
+  }
+
   return (
     <>
       <div className="users-teams-action-bar">
@@ -48,12 +64,24 @@ export function UsersTab() {
         onUserCreated={handleUserCreated}
       />
 
+      <EditUserModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setSelectedUser(null);
+        }}
+        user={selectedUser}
+        onUserUpdated={handleUserUpdated}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Liste des utilisateurs</CardTitle>
         </CardHeader>
         <CardContent>
-          {users.length > 0 ? (
+          {usersLoading || teamsLoading ? (
+            <LoadingIndicator />
+          ) : users.length > 0 ? (
             <div className="users-teams-table-container">
               <table className="users-teams-table">
                 <thead>
@@ -75,7 +103,7 @@ export function UsersTab() {
                         <td>
                           {user.firstName} {user.lastName}
                         </td>
-                        <td className="users-teams-table-email">{user.email}</td>
+                        <td className="users-teams-table-email">{user.username}</td>
                         <td>
                           <Badge variant="outline">{user.role}</Badge>
                         </td>
@@ -94,7 +122,11 @@ export function UsersTab() {
                         </td>
                         <td className="text-right">
                           <div className="users-teams-table-actions">
-                            <Button variant="ghost" size="sm">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleEditClick(user)}
+                            >
                               <Pencil className="users-teams-icon" />
                             </Button>
                             <Button 

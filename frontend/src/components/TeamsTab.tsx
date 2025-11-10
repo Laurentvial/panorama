@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Eye, Trash2 } from 'lucide-react';
+import { Eye, Trash2, Plus } from 'lucide-react';
 import { useTeams } from '../hooks/useTeams';
 import api from '../utils/api';
 import { CreateTeamDialog } from './CreateTeamDialog';
 import { TeamDetailDialog } from './TeamDetailDialog';
 import { TeamDetail } from '../types';
+import LoadingIndicator from './LoadingIndicator';
 
 export function TeamsTab() {
-  const { teams, refetch: refetchTeams } = useTeams();
+  const { teams, loading, refetch: refetchTeams } = useTeams();
   const [selectedTeam, setSelectedTeam] = useState<TeamDetail | null>(null);
   const [isTeamDetailOpen, setIsTeamDetailOpen] = useState(false);
+  const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
 
   async function viewTeamDetails(teamId: string) {
     try {
@@ -37,15 +39,29 @@ export function TeamsTab() {
   return (
     <>
       <div className="users-teams-action-bar">
-        <CreateTeamDialog onTeamCreated={refetchTeams} />
+        <Button onClick={() => setIsCreateTeamModalOpen(true)}>
+          <Plus className="users-teams-icon users-teams-icon-with-margin" />
+          Créer une équipe
+        </Button>
       </div>
+
+      <CreateTeamDialog
+        isOpen={isCreateTeamModalOpen}
+        onClose={() => setIsCreateTeamModalOpen(false)}
+        onTeamCreated={() => {
+          setIsCreateTeamModalOpen(false);
+          refetchTeams();
+        }}
+      />
 
       <Card>
         <CardHeader>
           <CardTitle>Liste des équipes</CardTitle>
         </CardHeader>
         <CardContent>
-          {teams.length > 0 ? (
+          {loading ? (
+            <LoadingIndicator />
+          ) : teams.length > 0 ? (
             <div className="users-teams-table-container">
               <table className="users-teams-table">
                 <thead>
@@ -57,22 +73,27 @@ export function TeamsTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {teams.map((team) => (
-                    <tr key={team.id}>
-                      <td className="users-teams-table-id">{team.id.substring(0, 8)}...</td>
-                      <td>{team.name}</td>
-                      <td>
-                        {new Date(team.createdAt).toLocaleDateString('fr-FR')}
-                      </td>
+                  {teams.map((team) => {
+                    let formattedDate = '-';
+                    if (team.createdAt) {
+                      try {
+                        const date = new Date(team.createdAt);
+                        if (!isNaN(date.getTime())) {
+                          formattedDate = date.toLocaleDateString('fr-FR');
+                        }
+                      } catch (error) {
+                        console.error('Invalid date:', team.createdAt, error);
+                      }
+                    }
+                    
+                    return (
+                      <tr key={team.id}>
+                        <td className="users-teams-table-id">{team.id.substring(0, 8)}...</td>
+                        <td>{team.name}</td>
+                        <td>{formattedDate}</td>
                       <td className="text-right">
                         <div className="users-teams-table-actions">
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => viewTeamDetails(team.id)}
-                          >
-                            <Eye className="users-teams-icon" />
-                          </Button>
+
                           <Button 
                             variant="ghost" 
                             size="sm"
@@ -84,7 +105,8 @@ export function TeamsTab() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

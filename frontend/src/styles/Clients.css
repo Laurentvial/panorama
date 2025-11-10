@@ -1,0 +1,117 @@
+/* Clients Page Styles */
+
+.clients-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.clients-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clients-title {
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+    font-size: 2rem;
+}
+
+.clients-subtitle {
+  color: #475569;
+}
+
+.clients-filters {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .clients-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.clients-search-wrapper {
+  position: relative;
+}
+
+.clients-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1rem;
+  height: 1rem;
+  color: #94a3b8;
+}
+
+.clients-search-input {
+  padding-left: 2.5rem;
+}
+
+.clients-table-wrapper {
+  overflow-x: auto;
+}
+
+.clients-table {
+  width: 100%;
+  font-size: 0.875rem;
+}
+
+.clients-table thead tr {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.clients-table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+}
+
+.clients-table tbody tr {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.clients-table tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+.clients-table td {
+  padding: 0.75rem 1rem;
+}
+
+.clients-table-id {
+  color: #64748b;
+}
+
+.clients-table-email {
+  color: #475569;
+}
+
+.clients-status-active {
+  color: #16a34a;
+}
+
+.clients-status-inactive {
+  color: #dc2626;
+}
+
+.clients-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.clients-empty {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.clients-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+

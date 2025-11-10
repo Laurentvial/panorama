@@ -53,8 +53,8 @@ export function Header({ user }: HeaderProps) {
             <div className="header-logo">
             </div>
             <div className="header-title-section">
-              <h1 className="header-title">P.A.N.O.R.A.M.A</h1>
-              <p className="header-subtitle">Gestion CRM & Investissements</p>
+              <img src="../static/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 240 }} />
+              <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>
             </div>
           </div>
           

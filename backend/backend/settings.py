@@ -132,6 +132,10 @@ STATIC_URL = 'static/'
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Media files (user uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / "media"
+
 # Only include frontend directories if they exist (for local development)
 # On Choreo, frontend is deployed separately, so these directories won't exist
 STATICFILES_DIRS = []

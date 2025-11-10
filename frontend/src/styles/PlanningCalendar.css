@@ -60,7 +60,6 @@
 /* Modal Content */
 .planning-modal-content {
   background-color: white;
-  border-radius: 0.5rem;
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   padding: 1.5rem;
   max-width: 28rem;
@@ -141,7 +140,6 @@
 .planning-calendar-day {
   padding: 0.5rem;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
   min-height: 6rem;
 }
 
@@ -167,7 +165,6 @@
   color: #1e40af;
   font-size: 0.75rem;
   padding: 0.25rem;
-  border-radius: 0.25rem;
 }
 
 .planning-event-time {
@@ -195,7 +192,6 @@
   justify-content: space-between;
   padding: 1rem;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
 }
 
 .planning-event-content {

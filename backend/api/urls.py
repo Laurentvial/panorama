@@ -8,6 +8,8 @@ urlpatterns = [
     path('notes/create/', api_views.NoteListCreateView.as_view(), name='note-create'),
     # Clients endpoints
     path('clients/', api_views.ClientView.as_view(), name='client-list'),
+    path('clients/create/', api_views.client_create, name='client-create'),
+    path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
     # Teams endpoints
     path('teams/', api_views.team_list, name='team-list'),
     path('teams/create/', api_views.team_create, name='team-create'),  # POST for create
@@ -18,6 +20,7 @@ urlpatterns = [
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),
+    path('users/<str:user_id>/update/', api_views.user_update, name='user-update'),
     path('users/<str:user_id>/toggle-active/', api_views.user_toggle_active, name='user-toggle-active'),
     # Events endpoints
     path('events/', api_views.event_list, name='event-list'),

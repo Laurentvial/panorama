@@ -16,13 +16,16 @@ import {
 } from 'lucide-react';
 import api from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
-import '../styles/Home.css';
+import { useUser } from '../contexts/UserContext';
+import '../styles/Dashboard.css';
 
 interface DashboardProps {
-  user: any;
+  user?: any;
 }
 
-export function Dashboard({ user }: DashboardProps) {
+export function Dashboard({ user: userProp }: DashboardProps) {
+  const { currentUser } = useUser();
+  const user = userProp || currentUser;
   const [stats, setStats] = useState<any>(null);
   const [teams, setTeams] = useState<any[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string>('all');
@@ -254,3 +257,5 @@ export function Dashboard({ user }: DashboardProps) {
     </div>
   );
 }
+
+export default Dashboard;

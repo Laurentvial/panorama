@@ -65,6 +65,109 @@ class ClientView(generics.ListAPIView):
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated]  # Explicitly set permission
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_create(request):
+    # Validate required fields
+    if not request.data.get('firstName'):
+        return Response({'error': 'Le prénom est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not request.data.get('lastName'):
+        return Response({'error': 'Le nom est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not request.data.get('email'):
+        return Response({'error': 'L\'email est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check if email already exists
+    email = request.data.get('email', '').strip()
+    if email and Client.objects.filter(email=email).exists():
+        return Response({'error': 'Un client avec cet email existe déjà'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Generate client ID
+    client_id = uuid.uuid4().hex[:12]
+    while Client.objects.filter(id=client_id).exists():
+        client_id = uuid.uuid4().hex[:12]
+    
+    # Helper function to safely convert to decimal
+    def to_decimal(value, default=0):
+        if value is None or value == '':
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    # Helper function to safely get date
+    def get_date(value):
+        if not value or value == '':
+            return None
+        return value
+    
+    # Map frontend field names to model field names
+    # Informations personnelles
+    client_data = {
+        'id': client_id,
+        'civility': request.data.get('civility', '') or '',
+        'fname': request.data.get('firstName', '') or '',
+        'lname': request.data.get('lastName', '') or '',
+        'platform_access': request.data.get('platformAccess', True),
+        'active': request.data.get('active', True),
+        'template': request.data.get('template', '') or '',
+        'support': request.data.get('support', '') or '',
+        'password': request.data.get('password', 'Access@123') or 'Access@123',
+        'phone': request.data.get('phone', '') or '',
+        'mobile': request.data.get('mobile', '') or '',
+        'email': request.data.get('email', '') or '',
+        'username': request.data.get('username', '') or '',
+        'birth_date': get_date(request.data.get('birthDate')),
+        'birth_place': request.data.get('birthPlace', '') or '',
+        'address': request.data.get('address', '') or '',
+        'postal_code': request.data.get('postalCode', '') or '',
+        'city': request.data.get('city', '') or '',
+        'nationality': request.data.get('nationality', '') or '',
+        'successor': request.data.get('successor', '') or '',
+        'managed_by': request.data.get('managerId', '') or '',
+        # Fiche patrimoniale
+        'professional_activity_status': request.data.get('professionalActivityStatus', '') or '',
+        'professional_activity_comment': request.data.get('professionalActivityComment', '') or '',
+        'professions': request.data.get('professions', []) or [],
+        'professions_comment': request.data.get('professionsComment', '') or '',
+        'bank_name': request.data.get('bankName', '') or '',
+        'current_account': to_decimal(request.data.get('currentAccount')),
+        'livret_ab': to_decimal(request.data.get('livretAB')),
+        'pea': to_decimal(request.data.get('pea')),
+        'pel': to_decimal(request.data.get('pel')),
+        'ldd': to_decimal(request.data.get('ldd')),
+        'cel': to_decimal(request.data.get('cel')),
+        'csl': to_decimal(request.data.get('csl')),
+        'securities_account': to_decimal(request.data.get('securitiesAccount')),
+        'life_insurance': to_decimal(request.data.get('lifeInsurance')),
+        'savings_comment': request.data.get('savingsComment', '') or '',
+        'total_wealth': to_decimal(request.data.get('totalWealth')),
+        'objectives': request.data.get('objectives', []) or [],
+        'objectives_comment': request.data.get('objectivesComment', '') or '',
+        'experience': request.data.get('experience', []) or [],
+        'experience_comment': request.data.get('experienceComment', '') or '',
+        'tax_optimization': request.data.get('taxOptimization', False),
+        'tax_optimization_comment': request.data.get('taxOptimizationComment', '') or '',
+        'annual_household_income': to_decimal(request.data.get('annualHouseholdIncome')),
+    }
+    
+    try:
+        client = Client.objects.create(**client_data)
+        return Response(ClientSerializer(client).data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error creating client: {error_details}")
+        return Response({'error': str(e), 'details': error_details}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_toggle_active(request, client_id):
+    client = get_object_or_404(Client, id=client_id)
+    client.active = not client.active
+    client.save()
+    return Response({'active': client.active})
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_current_user(request):
@@ -150,6 +253,45 @@ def user_toggle_active(request, user_id):
     user_details.active = not user_details.active
     user_details.save()
     return Response({'active': user_details.active})
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def user_update(request, user_id):
+    user_details = get_object_or_404(UserDetails, id=user_id)
+    django_user = user_details.django_user
+    
+    if not django_user:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Update Django User fields
+    if 'first_name' in request.data:
+        django_user.first_name = request.data['first_name']
+    if 'last_name' in request.data:
+        django_user.last_name = request.data['last_name']
+    if 'username' in request.data:
+        django_user.username = request.data['username']
+    if 'email' in request.data:
+        django_user.email = request.data['email']
+    django_user.save()
+    
+    # Update UserDetails fields
+    if 'role' in request.data:
+        user_details.role = request.data['role']
+    if 'teamId' in request.data:
+        team_id = request.data['teamId']
+        if team_id:
+            try:
+                team = Team.objects.get(id=team_id)
+                user_details.team = team
+            except Team.DoesNotExist:
+                return Response({'error': 'Team not found'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            user_details.team = None
+    user_details.save()
+    
+    # Return updated user data
+    serializer = UserDetailsSerializer(user_details)
+    return Response(serializer.data)
 
 # Events endpoints
 @api_view(['GET'])

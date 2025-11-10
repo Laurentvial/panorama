@@ -17,7 +17,14 @@ export function useTeams(options: UseTeamsOptions = { autoLoad: true }) {
     setError(null);
     try {
       const response = await api.get('/api/teams');
-      setTeams(response.data?.teams || []);
+      const teamsData = response.data?.teams || [];
+      // Normalize snake_case to camelCase for consistency
+      const normalizedTeams = teamsData.map((team: any) => ({
+        ...team,
+        createdAt: team.created_at || team.createdAt,
+        updatedAt: team.updated_at || team.updatedAt,
+      }));
+      setTeams(normalizedTeams);
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Erreur lors du chargement des équipes');
       setError(error);

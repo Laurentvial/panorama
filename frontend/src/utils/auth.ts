@@ -9,7 +9,7 @@ const getEnvVar = (key: string): string | undefined => {
 
 const apiUrl = getEnvVar('VITE_API_URL') || 'http://127.0.0.1:8000';
 
-export async function signIn(email: string, password: string) {
+export async function signIn(username: string, password: string) {
   try {
     const response = await fetch(`${apiUrl}/api/token/`, {
       method: 'POST',
@@ -17,7 +17,7 @@ export async function signIn(email: string, password: string) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        username: email, // Django REST Framework JWT uses 'username' field
+        username: username, // Django REST Framework JWT uses 'username' field
         password: password,
       }),
     });
