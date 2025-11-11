@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -440,7 +440,7 @@ export function Placements({ user }: PlacementsProps) {
                       {categories.map((category) => (
                         <tr key={category.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="py-3 px-4 text-slate-500">
-                            {category.id.substring(0, 8)}...
+                            {category.id.substring(0, 8)}
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
@@ -491,3 +491,4 @@ export function Placements({ user }: PlacementsProps) {
     </div>
   );
 }
+export default Placements;

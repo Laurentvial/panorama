@@ -1,6 +1,6 @@
 import React from "react";
 import { useState, useEffect } from "react";
-import api from "../utils/api";
+import { apiCall } from "../utils/api";
 import Note from "../components/Note";
 import "../styles/NoteStyles.css";
 import { Dashboard } from "../components/Dashboard";
@@ -17,40 +17,42 @@ function Home() {
     getNotes();
   }, []);
   
-  const getNotes = () => {
-    api
-      .get("/api/notes/")
-      .then((response) => response.data)
-      .then((data) => setNotes(data))
-      .catch((error) => toast.error(error?.message || 'Erreur lors du chargement des notes'));
+  const getNotes = async () => {
+    try {
+      const data = await apiCall("/api/notes/");
+      setNotes(Array.isArray(data) ? data : data?.notes || []);
+    } catch (error: any) {
+      toast.error(error?.message || 'Erreur lors du chargement des notes');
+    }
   };
 
-  const deleteNote = (id: string) => {
+  const deleteNote = async (id: string) => {
     if (!id) {
       toast.error("Erreur: ID de la note manquant");
       return;
     }
-    api
-      .delete(`/api/notes/delete/${id}/`)
-      .then((response) => {
-        if (response.status === 204) toast.success("Note supprimée avec succès");
-        else toast.error("Erreur lors de la suppression de la note");
-        getNotes();
-      })
-      .catch((error) => toast.error(error?.message || 'Erreur lors de la suppression'))
+    try {
+      await apiCall(`/api/notes/delete/${id}/`, { method: 'DELETE' });
+      toast.success("Note supprimée avec succès");
+      getNotes();
+    } catch (error: any) {
+      toast.error(error?.message || 'Erreur lors de la suppression');
+    }
   };
 
-  const createNote = (e: React.FormEvent) => {
+  const createNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    api
-      .post("/api/notes/create/", { text: content })
-      .then((response) => {
-        if (response.status === 200 || response.status === 201) toast.success("Note créée avec succès");
-        else toast.error("Erreur lors de la création de la note");
-        getNotes();
-      })
-      .catch((error) => toast.error(error?.message || 'Erreur lors de la création'))
-      .then(() => setContent(""));
+    try {
+      await apiCall("/api/notes/create/", {
+        method: 'POST',
+        body: JSON.stringify({ text: content }),
+      });
+      toast.success("Note créée avec succès");
+      getNotes();
+      setContent("");
+    } catch (error: any) {
+      toast.error(error?.message || 'Erreur lors de la création');
+    }
   };
 
   return (

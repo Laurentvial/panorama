@@ -22,7 +22,7 @@ export function RegisterPage() {
     confirmPassword: '',
     phone: '',
     mobile: '',
-    role: 'administrateur'
+    role: 'admin'
   });
   const [signupError, setSignupError] = useState('');
   const [signupLoading, setSignupLoading] = useState(false);
@@ -184,8 +184,8 @@ export function RegisterPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="administrateur">Administrateur</SelectItem>
-                  <SelectItem value="chef d'équipe">Chef d'équipe</SelectItem>
+                  <SelectItem value="admin">Administrateur</SelectItem>
+                  <SelectItem value="teamleader">Chef d'équipe</SelectItem>
                   <SelectItem value="gestionnaire">Gestionnaire</SelectItem>
                 </SelectContent>
               </Select>

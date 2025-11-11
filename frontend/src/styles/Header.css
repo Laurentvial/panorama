@@ -73,13 +73,13 @@
   padding: 0.5rem;
   background: transparent;
   border: none;
-  border-radius: var(--radius);
+  background-color: var(--primary);
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .header-button:hover {
-  background-color: var(--accent);
+  background-color: var(--muted-foreground);
 }
 
 .header-button-notifications {
@@ -87,9 +87,9 @@
 }
 
 .header-icon {
-  width: 1.25rem;
-  height: 1.25rem;
-  color: var(--foreground);
+  width: 1rem;
+  height: 1rem;
+  color: var(--destructive-foreground);
 }
 
 .header-badge {
@@ -111,7 +111,7 @@
 
 .header-user-name {
   display: none;
-  color: var(--foreground);
+  color: var(--destructive-foreground);
 }
 
 @media (min-width: 768px) {

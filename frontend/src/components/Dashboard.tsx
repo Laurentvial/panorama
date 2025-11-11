@@ -14,7 +14,7 @@ import {
   DollarSign,
   Mail
 } from 'lucide-react';
-import api from '../utils/api';
+import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
 import '../styles/Dashboard.css';
@@ -40,12 +40,12 @@ export function Dashboard({ user: userProp }: DashboardProps) {
   async function loadData() {
     try {
       const [statsResponse, teamsResponse] = await Promise.all([
-        api.get('/api/stats'),
-        api.get('/api/teams')
+        apiCall('/api/stats/'),
+        apiCall('/api/teams/')
       ]);
       
-      setStats(statsResponse.data);
-      setTeams(teamsResponse.data?.teams || []);
+      setStats(statsResponse);
+      setTeams(teamsResponse?.teams || teamsResponse || []);
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {

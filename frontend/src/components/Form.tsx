@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import api from '../utils/api';
+import { apiCall } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import { ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 import { Label } from './ui/label';
@@ -28,18 +28,21 @@ function Form({ route, method, onSuccess }: FormProps) {
     try {
       const payload = { username, password };
 
-      const response = await api.post(route, payload);
+      const response = await apiCall(route, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
       if (onSuccess) {
         onSuccess();
       } else {
-        localStorage.setItem(ACCESS_TOKEN, response.data.access);
-        localStorage.setItem(REFRESH_TOKEN, response.data.refresh);
+        localStorage.setItem(ACCESS_TOKEN, response.access);
+        localStorage.setItem(REFRESH_TOKEN, response.refresh);
         navigate('/');
       }
-    } catch (error) {
-      const data = error?.response?.data || {};
-      const message = data.detail || Object.values(data).flat().join(', ') || 'Une erreur est survenue';
+    } catch (error: any) {
+      const data = error?.response || {};
+      const message = data.detail || data.error || error?.message || 'Une erreur est survenue';
       toast.error(message);
     } finally {
       setLoading(false);

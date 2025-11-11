@@ -23,33 +23,38 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
   const location = useLocation();
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teamLeader', 'gestionnaire'], path: '/' },
-    { id: 'planning', label: 'Planning', icon: Calendar, roles: ['admin', 'teamLeader', 'gestionnaire'], path: '/planning' },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/' },
+    { id: 'planning', label: 'Planning', icon: Calendar, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/planning' },
     { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin'], path: '/users' },
-    { id: 'clients', label: 'Clients', icon: UserCircle, roles: ['admin', 'teamLeader', 'gestionnaire'], path: '/clients' },
-    { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamLeader', 'gestionnaire'], path: '/transactions' },
-    { id: 'messagerie', label: 'Messagerie', icon: Mail, roles: ['admin', 'teamLeader', 'gestionnaire'], path: '/messagerie' },
+    { id: 'clients', label: 'Clients', icon: UserCircle, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/clients' },
+    { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/transactions' },
+    { id: 'messagerie', label: 'Messagerie', icon: Mail, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/messagerie' },
     { id: 'placements', label: 'Placements', icon: Package, roles: ['admin'], path: '/placements' },
   ];
 
   // Normalize user role for comparison
-  const normalizedUserRole = userRole?.toLowerCase()?.trim();
+  // Only accept: admin, teamleader, gestionnaire
+  const normalizedUserRole = userRole?.toLowerCase()?.trim() || '';
+  const validRoles = ['admin', 'teamleader', 'gestionnaire'];
+  const isValidRole = validRoles.includes(normalizedUserRole);
   
+  // Filter menu items based on role
   let visibleItems = menuItems.filter(item => {
-    if (!normalizedUserRole || normalizedUserRole === '0') return false;
+    if (!isValidRole) return false;
     return item.roles.some(role => role.toLowerCase() === normalizedUserRole);
   });
   
-  // Fallback: if no items match, show all items (for debugging)
-  // Remove this in production if you want strict role-based filtering
-  if (visibleItems.length === 0 && normalizedUserRole) {
+  // Fallback: if no items match and we have a valid role, show all items for debugging
+  // This helps identify role matching issues
+  if (visibleItems.length === 0 && isValidRole) {
     console.warn('Aucun élément de menu visible pour le rôle:', userRole);
-    // Temporary: show all items if role doesn't match (for debugging)
-    // visibleItems = menuItems;
+    console.warn('Affichage de tous les éléments pour débogage');
+    // Show all items if role doesn't match (for debugging)
+    visibleItems = menuItems;
   }
   
-  // If role is '0' or undefined, show all items as fallback
-  if (!normalizedUserRole || normalizedUserRole === '0') {
+  // If role is invalid or undefined, show all items as fallback
+  if (!isValidRole) {
     visibleItems = menuItems;
   }
 

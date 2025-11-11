@@ -9,12 +9,16 @@ urlpatterns = [
     # Clients endpoints
     path('clients/', api_views.ClientView.as_view(), name='client-list'),
     path('clients/create/', api_views.client_create, name='client-create'),
+    path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
     path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
     # Teams endpoints
     path('teams/', api_views.team_list, name='team-list'),
     path('teams/create/', api_views.team_create, name='team-create'),  # POST for create
     path('teams/<str:team_id>/', api_views.team_detail, name='team-detail'),
     path('teams/<str:team_id>/delete/', api_views.team_delete, name='team-delete'),
+    path('teams/<str:team_id>/add-member/', api_views.team_add_member, name='team-add-member'),
+    path('teams/<str:team_id>/remove-member/', api_views.team_remove_member, name='team-remove-member'),
+    path('teams/<str:team_id>/set-leader/', api_views.team_set_leader, name='team-set-leader'),
     # Users endpoints
     path('user/current/', api_views.get_current_user, name='get-current-user'),
     path('users/', api_views.user_list, name='user-list'),
@@ -25,5 +29,6 @@ urlpatterns = [
     # Events endpoints
     path('events/', api_views.event_list, name='event-list'),
     path('events/create/', api_views.event_create, name='event-create'),
+    path('events/<str:event_id>/update/', api_views.event_update, name='event-update'),
     path('events/<str:event_id>/', api_views.event_delete, name='event-delete'),
 ]

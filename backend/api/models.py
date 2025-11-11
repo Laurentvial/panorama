@@ -19,7 +19,6 @@ class Client(models.Model):
     phone = models.CharField(max_length=20, default="", blank=True)
     mobile = models.CharField(max_length=20, default="", blank=True)
     email = models.EmailField(max_length=100, default="", unique=True)
-    username = models.CharField(max_length=100, default="", blank=True)
     birth_date = models.DateField(null=True, blank=True)
     birth_place = models.CharField(max_length=100, default="", blank=True)
     address = models.CharField(max_length=200, default="", blank=True)
@@ -61,6 +60,7 @@ class Client(models.Model):
     
     # Relations
     managed_by = models.CharField(max_length=50, default="", blank=True)
+    team = models.ForeignKey('Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -81,7 +81,7 @@ class UserDetails(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     django_user = models.OneToOneField(DjangoUser, on_delete=models.CASCADE, related_name='user_details')
     role = models.CharField(max_length=12, default="0")
-    team = models.ForeignKey('Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='members')
+    phone = models.CharField(max_length=20, default="", blank=True)
     active = models.BooleanField(null=False, default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -105,6 +105,17 @@ class Team(models.Model):
     name = models.CharField(max_length=50, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+class TeamMember(models.Model):
+    """Table de relation entre UserDetails et Team avec date d'insertion"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    user = models.ForeignKey('UserDetails', on_delete=models.CASCADE, related_name='team_memberships')
+    team = models.ForeignKey('Team', on_delete=models.CASCADE, related_name='team_members')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['user', 'team']  # Un utilisateur ne peut être qu'une fois dans une équipe
 
 class Event(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)

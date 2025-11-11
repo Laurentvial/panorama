@@ -7,9 +7,10 @@ from .models import Note
 from .models import UserDetails
 from .models import Team
 from .models import Event
+from .models import TeamMember
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
-    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer
+    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
@@ -64,6 +65,10 @@ class ClientView(generics.ListAPIView):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated]  # Explicitly set permission
+    
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return Response({'clients': response.data})
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -91,7 +96,8 @@ def client_create(request):
         if value is None or value == '':
             return default
         try:
-            return float(value)
+            result = float(value)
+            return result if result >= 0 else default
         except (ValueError, TypeError):
             return default
     
@@ -100,6 +106,19 @@ def client_create(request):
         if not value or value == '':
             return None
         return value
+    
+    # Helper function to safely get list
+    def get_list(value, default=None):
+        if default is None:
+            default = []
+        if value is None:
+            return default
+        if isinstance(value, list):
+            return value
+        # Handle QueryDict (from FormData) - getlist returns a list
+        if hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+            return list(value)
+        return default
     
     # Map frontend field names to model field names
     # Informations personnelles
@@ -116,7 +135,6 @@ def client_create(request):
         'phone': request.data.get('phone', '') or '',
         'mobile': request.data.get('mobile', '') or '',
         'email': request.data.get('email', '') or '',
-        'username': request.data.get('username', '') or '',
         'birth_date': get_date(request.data.get('birthDate')),
         'birth_place': request.data.get('birthPlace', '') or '',
         'address': request.data.get('address', '') or '',
@@ -125,12 +143,31 @@ def client_create(request):
         'nationality': request.data.get('nationality', '') or '',
         'successor': request.data.get('successor', '') or '',
         'managed_by': request.data.get('managerId', '') or '',
+    }
+    
+    # Handle profile photo upload
+    if 'profilePhoto' in request.FILES:
+        client_data['profile_photo'] = request.FILES['profilePhoto']
+    
+    # Convert platformAccess and active from string to boolean if needed (FormData sends strings)
+    if isinstance(client_data.get('platform_access'), str):
+        client_data['platform_access'] = client_data['platform_access'].lower() == 'true'
+    if isinstance(client_data.get('active'), str):
+        client_data['active'] = client_data['active'].lower() == 'true'
+    
+    # Handle patrimonial data
+    # Use getlist for FormData, get for JSON
+    professions = request.data.getlist('professions') if hasattr(request.data, 'getlist') else get_list(request.data.get('professions'))
+    objectives = request.data.getlist('objectives') if hasattr(request.data, 'getlist') else get_list(request.data.get('objectives'))
+    experience = request.data.getlist('experience') if hasattr(request.data, 'getlist') else get_list(request.data.get('experience'))
+    
+    client_data.update({
         # Fiche patrimoniale
-        'professional_activity_status': request.data.get('professionalActivityStatus', '') or '',
-        'professional_activity_comment': request.data.get('professionalActivityComment', '') or '',
-        'professions': request.data.get('professions', []) or [],
-        'professions_comment': request.data.get('professionsComment', '') or '',
-        'bank_name': request.data.get('bankName', '') or '',
+        'professional_activity_status': request.data.get('professionalActivityStatus') or '',
+        'professional_activity_comment': request.data.get('professionalActivityComment') or '',
+        'professions': professions,
+        'professions_comment': request.data.get('professionsComment') or '',
+        'bank_name': request.data.get('bankName') or '',
         'current_account': to_decimal(request.data.get('currentAccount')),
         'livret_ab': to_decimal(request.data.get('livretAB')),
         'pea': to_decimal(request.data.get('pea')),
@@ -140,25 +177,205 @@ def client_create(request):
         'csl': to_decimal(request.data.get('csl')),
         'securities_account': to_decimal(request.data.get('securitiesAccount')),
         'life_insurance': to_decimal(request.data.get('lifeInsurance')),
-        'savings_comment': request.data.get('savingsComment', '') or '',
+        'savings_comment': request.data.get('savingsComment') or '',
         'total_wealth': to_decimal(request.data.get('totalWealth')),
-        'objectives': request.data.get('objectives', []) or [],
-        'objectives_comment': request.data.get('objectivesComment', '') or '',
-        'experience': request.data.get('experience', []) or [],
-        'experience_comment': request.data.get('experienceComment', '') or '',
-        'tax_optimization': request.data.get('taxOptimization', False),
-        'tax_optimization_comment': request.data.get('taxOptimizationComment', '') or '',
+        'objectives': objectives,
+        'objectives_comment': request.data.get('objectivesComment') or '',
+        'experience': experience,
+        'experience_comment': request.data.get('experienceComment') or '',
+        'tax_optimization': bool(request.data.get('taxOptimization', False)) if not isinstance(request.data.get('taxOptimization'), str) else request.data.get('taxOptimization', 'false').lower() == 'true',
+        'tax_optimization_comment': request.data.get('taxOptimizationComment') or '',
         'annual_household_income': to_decimal(request.data.get('annualHouseholdIncome')),
-    }
+    })
     
     try:
         client = Client.objects.create(**client_data)
-        return Response(ClientSerializer(client).data, status=status.HTTP_201_CREATED)
+        serializer = ClientSerializer(client, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
         print(f"Error creating client: {error_details}")
         return Response({'error': str(e), 'details': error_details}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def client_detail(request, client_id):
+    client = get_object_or_404(Client, id=client_id)
+    
+    if request.method == 'GET':
+        serializer = ClientSerializer(client, context={'request': request})
+        return Response({'client': serializer.data})
+    
+    if request.method == 'PATCH':
+        # Helper functions
+        def get_date(value):
+            if not value:
+                return None
+            try:
+                from datetime import datetime
+                # Handle both YYYY-MM-DD and DD/MM/YYYY formats
+                if '/' in str(value):
+                    parts = str(value).split('/')
+                    if len(parts) == 3:
+                        day, month, year = parts
+                        return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d").date()
+                return datetime.strptime(str(value), "%Y-%m-%d").date()
+            except:
+                return None
+        
+        # Update personal information fields
+        if 'civility' in request.data:
+            client.civility = request.data.get('civility', '') or ''
+        if 'firstName' in request.data:
+            client.fname = request.data.get('firstName', '') or ''
+        if 'lastName' in request.data:
+            client.lname = request.data.get('lastName', '') or ''
+        if 'template' in request.data:
+            client.template = request.data.get('template', '') or ''
+        if 'support' in request.data:
+            client.support = request.data.get('support', '') or ''
+        if 'password' in request.data:
+            client.password = request.data.get('password', '') or ''
+        if 'phone' in request.data:
+            client.phone = request.data.get('phone', '') or ''
+        if 'mobile' in request.data:
+            client.mobile = request.data.get('mobile', '') or ''
+        if 'email' in request.data:
+            client.email = request.data.get('email', '') or ''
+        if 'birthDate' in request.data:
+            client.birth_date = get_date(request.data.get('birthDate'))
+        if 'birthPlace' in request.data:
+            client.birth_place = request.data.get('birthPlace', '') or ''
+        if 'address' in request.data:
+            client.address = request.data.get('address', '') or ''
+        if 'postalCode' in request.data:
+            client.postal_code = request.data.get('postalCode', '') or ''
+        if 'city' in request.data:
+            client.city = request.data.get('city', '') or ''
+        if 'nationality' in request.data:
+            client.nationality = request.data.get('nationality', '') or ''
+        if 'successor' in request.data:
+            client.successor = request.data.get('successor', '') or ''
+        
+        # Handle profile photo upload or removal
+        if 'profilePhoto' in request.FILES:
+            client.profile_photo = request.FILES['profilePhoto']
+        elif 'removeProfilePhoto' in request.data:
+            # Handle both string and boolean values
+            remove_photo = request.data.get('removeProfilePhoto')
+            if isinstance(remove_photo, str):
+                remove_photo = remove_photo.lower() == 'true'
+            if remove_photo:
+                # Delete the file if it exists
+                if client.profile_photo:
+                    client.profile_photo.delete(save=False)
+                client.profile_photo = None
+        
+        # Update managed_by if provided
+        if 'managed_by' in request.data:
+            client.managed_by = request.data.get('managed_by', '') or ''
+        
+        # Update team if provided
+        if 'teamId' in request.data:
+            team_id = request.data.get('teamId')
+            if team_id and team_id != 'none':
+                try:
+                    team = Team.objects.get(id=team_id)
+                    client.team = team
+                except Team.DoesNotExist:
+                    return Response({'error': 'Team not found'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Si teamId est 'none' ou vide, supprimer l'équipe
+                client.team = None
+        
+        # Update platform_access if provided
+        if 'platformAccess' in request.data:
+            platform_access = request.data.get('platformAccess')
+            # Handle both boolean and string values
+            if isinstance(platform_access, str):
+                client.platform_access = platform_access.lower() == 'true'
+            else:
+                client.platform_access = bool(platform_access)
+        
+        # Helper functions for patrimonial data
+        def to_decimal(value, default=0):
+            if value is None or value == '':
+                return default
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return default
+        
+        def get_list(value, default=None):
+            if default is None:
+                default = []
+            if value is None:
+                return default
+            if isinstance(value, list):
+                return value
+            if hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+                return list(value)
+            return default
+        
+        # Update patrimonial fields
+        if 'professionalActivityStatus' in request.data:
+            client.professional_activity_status = request.data.get('professionalActivityStatus', '') or ''
+        if 'professionalActivityComment' in request.data:
+            client.professional_activity_comment = request.data.get('professionalActivityComment', '') or ''
+        if 'professions' in request.data:
+            professions = get_list(request.data.get('professions'))
+            client.professions = professions
+        if 'professionsComment' in request.data:
+            client.professions_comment = request.data.get('professionsComment', '') or ''
+        if 'bankName' in request.data:
+            client.bank_name = request.data.get('bankName', '') or ''
+        if 'currentAccount' in request.data:
+            client.current_account = to_decimal(request.data.get('currentAccount'))
+        if 'livretAB' in request.data:
+            client.livret_ab = to_decimal(request.data.get('livretAB'))
+        if 'pea' in request.data:
+            client.pea = to_decimal(request.data.get('pea'))
+        if 'pel' in request.data:
+            client.pel = to_decimal(request.data.get('pel'))
+        if 'ldd' in request.data:
+            client.ldd = to_decimal(request.data.get('ldd'))
+        if 'cel' in request.data:
+            client.cel = to_decimal(request.data.get('cel'))
+        if 'csl' in request.data:
+            client.csl = to_decimal(request.data.get('csl'))
+        if 'securitiesAccount' in request.data:
+            client.securities_account = to_decimal(request.data.get('securitiesAccount'))
+        if 'lifeInsurance' in request.data:
+            client.life_insurance = to_decimal(request.data.get('lifeInsurance'))
+        if 'savingsComment' in request.data:
+            client.savings_comment = request.data.get('savingsComment', '') or ''
+        if 'totalWealth' in request.data:
+            client.total_wealth = to_decimal(request.data.get('totalWealth'))
+        if 'objectives' in request.data:
+            objectives = get_list(request.data.get('objectives'))
+            client.objectives = objectives
+        if 'objectivesComment' in request.data:
+            client.objectives_comment = request.data.get('objectivesComment', '') or ''
+        if 'experience' in request.data:
+            experience = get_list(request.data.get('experience'))
+            client.experience = experience
+        if 'experienceComment' in request.data:
+            client.experience_comment = request.data.get('experienceComment', '') or ''
+        if 'taxOptimization' in request.data:
+            tax_opt = request.data.get('taxOptimization')
+            if isinstance(tax_opt, str):
+                client.tax_optimization = tax_opt.lower() == 'true'
+            else:
+                client.tax_optimization = bool(tax_opt)
+        if 'taxOptimizationComment' in request.data:
+            client.tax_optimization_comment = request.data.get('taxOptimizationComment', '') or ''
+        if 'annualHouseholdIncome' in request.data:
+            client.annual_household_income = to_decimal(request.data.get('annualHouseholdIncome'))
+        
+        client.save()
+        serializer = ClientSerializer(client, context={'request': request})
+        return Response({'client': serializer.data})
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -175,19 +392,21 @@ def get_current_user(request):
     try:
         # Try to get the user details profile
         user_details = UserDetails.objects.get(django_user=django_user)
-        return Response({
-            'id': user_details.id,
-            'username': django_user.username,
-            'email': django_user.email or '',
-            'role': user_details.role,
-        })
+        # Use UserDetailsSerializer to ensure consistent format with other endpoints
+        serializer = UserDetailsSerializer(user_details)
+        return Response(serializer.data)
     except UserDetails.DoesNotExist:
         # If custom user doesn't exist, return Django user data with default role
+        # Still include first_name and last_name from Django Auth
         return Response({
-            'id': django_user.id,
+            'id': str(django_user.id),
             'username': django_user.username,
             'email': django_user.email or '',
+            'firstName': django_user.first_name or '',
+            'lastName': django_user.last_name or '',
             'role': '0',  # Default role
+            'phone': '',
+            'active': True,
         })
 
 # Teams endpoints
@@ -218,13 +437,22 @@ def team_delete(request, team_id):
     team.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def team_detail(request, team_id):
     team = get_object_or_404(Team, id=team_id)
+    
+    if request.method == 'PATCH':
+        # Update team name
+        if 'name' in request.data:
+            team.name = request.data['name']
+            team.save()
+        serializer = TeamSerializer(team)
+        return Response(serializer.data)
+    
     serializer = TeamDetailSerializer({
         'team': team,
-        'members': team.members.all()
+        'team_members': team.team_members.all()
     })
     return Response(serializer.data)
 
@@ -277,16 +505,32 @@ def user_update(request, user_id):
     # Update UserDetails fields
     if 'role' in request.data:
         user_details.role = request.data['role']
+    if 'phone' in request.data:
+        user_details.phone = request.data['phone'] or ''
+    
+    # Update team membership using TeamMember table
     if 'teamId' in request.data:
         team_id = request.data['teamId']
+        # Remove user from all teams first (using TeamMember relationship)
+        TeamMember.objects.filter(user=user_details).delete()
+        
+        # If a team is specified, create a new TeamMember relationship
         if team_id:
             try:
                 team = Team.objects.get(id=team_id)
-                user_details.team = team
+                # Generate TeamMember ID
+                team_member_id = uuid.uuid4().hex[:12]
+                while TeamMember.objects.filter(id=team_member_id).exists():
+                    team_member_id = uuid.uuid4().hex[:12]
+                TeamMember.objects.create(
+                    id=team_member_id,
+                    user=user_details,
+                    team=team
+                )
             except Team.DoesNotExist:
                 return Response({'error': 'Team not found'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            user_details.team = None
+        # If team_id is None or empty, user is removed from all teams (already done above)
+    
     user_details.save()
     
     # Return updated user data
@@ -327,9 +571,125 @@ def event_create(request):
         return Response(EventSerializer(event).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def event_update(request, event_id):
+    event = get_object_or_404(Event, id=event_id, userId=request.user)
+    serializer = EventSerializer(event, data=request.data, partial=True)
+    if serializer.is_valid():
+        # Get client if clientId provided
+        client = None
+        if request.data.get('clientId'):
+            try:
+                client = Client.objects.get(id=request.data['clientId'])
+            except Client.DoesNotExist:
+                pass
+        elif request.data.get('clientId') == '' or request.data.get('clientId') is None:
+            client = None
+        
+        # Update event with new data
+        event = serializer.save(clientId=client)
+        return Response(EventSerializer(event).data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def event_delete(request, event_id):
     event = get_object_or_404(Event, id=event_id, userId=request.user)
     event.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def team_add_member(request, team_id):
+    team = get_object_or_404(Team, id=team_id)
+    user_id = request.data.get('userId')
+    
+    if not user_id:
+        return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user_details = UserDetails.objects.get(id=user_id)
+        
+        # Check if user is already in the team
+        if TeamMember.objects.filter(user=user_details, team=team).exists():
+            return Response({'error': 'User is already in this team'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Generate TeamMember ID
+        import uuid
+        team_member_id = uuid.uuid4().hex[:12]
+        while TeamMember.objects.filter(id=team_member_id).exists():
+            team_member_id = uuid.uuid4().hex[:12]
+        
+        # Create TeamMember relationship
+        team_member = TeamMember.objects.create(
+            id=team_member_id,
+            user=user_details,
+            team=team
+        )
+        
+        
+        serializer = TeamMemberSerializer(team_member)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except UserDetails.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def team_remove_member(request, team_id):
+    team = get_object_or_404(Team, id=team_id)
+    user_id = request.data.get('userId')
+    
+    if not user_id:
+        return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user_details = UserDetails.objects.get(id=user_id)
+        team_member = TeamMember.objects.get(user=user_details, team=team)
+        
+        # If user is teamleader, change role to something else (e.g., 'gestionnaire')
+        if user_details.role == 'teamleader':
+            user_details.role = 'gestionnaire'
+            user_details.save()
+        
+        # Remove TeamMember relationship
+        team_member.delete()
+        
+        
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except UserDetails.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    except TeamMember.DoesNotExist:
+        return Response({'error': 'User not found in this team'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def team_set_leader(request, team_id):
+    team = get_object_or_404(Team, id=team_id)
+    user_id = request.data.get('userId')
+    
+    if not user_id:
+        return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Get team members through TeamMember
+        team_members = TeamMember.objects.filter(team=team)
+        user_ids_in_team = [tm.user.id for tm in team_members]
+        
+        # Remove leader status from all team members (change role from teamleader to gestionnaire)
+        UserDetails.objects.filter(id__in=user_ids_in_team, role='teamleader').update(role='gestionnaire')
+        
+        # Set new leader (change role to teamleader)
+        user_details = UserDetails.objects.get(id=user_id)
+        
+        # Verify user is in the team
+        if not TeamMember.objects.filter(user=user_details, team=team).exists():
+            return Response({'error': 'User not found in this team'}, status=status.HTTP_404_NOT_FOUND)
+        
+        user_details.role = 'teamleader'
+        user_details.save()
+        
+        serializer = UserDetailsSerializer(user_details)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except UserDetails.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)

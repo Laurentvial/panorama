@@ -1,5 +1,4 @@
-import axios from "axios";
-import { ACCESS_TOKEN } from "./constants";
+import { ACCESS_TOKEN, REFRESH_TOKEN } from "./constants";
 
 // Use environment variable if set, otherwise use Choreo proxy path
 // For production on Choreo, this should be the Choreo proxy path
@@ -9,37 +8,79 @@ const getEnvVar = (key: string): string | undefined => {
   return import.meta.env[key];
 };
 
-const apiUrl = getEnvVar('VITE_API_URL');
+const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
 
-const api = axios.create({
-  baseURL: apiUrl,
-});
-
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem(ACCESS_TOKEN);
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
+// Helper function to refresh access token
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN);
+  if (!refreshToken) {
+    return null;
   }
-);
+
+  try {
+    const response = await fetch(`${apiUrl}/api/token/refresh/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh: refreshToken }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.access) {
+        localStorage.setItem(ACCESS_TOKEN, data.access);
+        return data.access;
+      }
+    }
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+  }
+
+  // If refresh fails, clear tokens
+  localStorage.removeItem(ACCESS_TOKEN);
+  localStorage.removeItem(REFRESH_TOKEN);
+  return null;
+}
 
 // Helper function for API calls that returns data directly
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
-  const token = localStorage.getItem(ACCESS_TOKEN);
+  let token = localStorage.getItem(ACCESS_TOKEN);
   
-  const response = await fetch(`${apiUrl}${endpoint}`, {
+  // Don't set Content-Type for FormData, let the browser set it with boundary
+  const isFormData = options.body instanceof FormData;
+  const headers: HeadersInit = {
+    'Authorization': token ? `Bearer ${token}` : '',
+    ...options.headers,
+  };
+  
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+  
+  let response = await fetch(`${apiUrl}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Bearer ${token}` : '',
-      ...options.headers,
-    },
+    headers,
   });
+
+  // If 401, try to refresh token and retry once
+  if (response.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      // Retry the request with the new token
+      const retryHeaders: HeadersInit = {
+        'Authorization': `Bearer ${newToken}`,
+        ...options.headers,
+      };
+      if (!isFormData) {
+        retryHeaders['Content-Type'] = 'application/json';
+      }
+      response = await fetch(`${apiUrl}${endpoint}`, {
+        ...options,
+        headers: retryHeaders,
+      });
+    }
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'API request failed' }));
@@ -50,7 +91,21 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     throw errorObj;
   }
 
-  return await response.json();
-}
+  // Handle 204 No Content responses
+  if (response.status === 204) {
+    return null;
+  }
 
-export default api;
+  // Check if response has content before parsing JSON
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    return null;
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  return JSON.parse(text);
+}

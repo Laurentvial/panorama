@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { 
@@ -9,9 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from './ui/dropdown-menu';
-import { Badge } from './ui/badge';
-import { Bell, User, LogOut, Building2 } from 'lucide-react';
-import api from '../utils/api';
+import { Bell, User, LogOut } from 'lucide-react';
 import React from 'react';
 import '../styles/Header.css';
 
@@ -22,28 +19,25 @@ interface HeaderProps {
 export function Header({ user }: HeaderProps) {
   const navigate = useNavigate();
 
-//   const [unreadMessages, setUnreadMessages] = useState(0);
-
-//   useEffect(() => {
-//     loadNotifications();
-//     const interval = setInterval(loadNotifications, 30000); // Check every 30s
-//     return () => clearInterval(interval);
-//   }, []);
-
-//   async function loadNotifications() {
-//     try {
-//       const response = await api.get('/messages');
-//       const messages = response.data?.messages || response.data || [];
-//       const unread = messages.filter((m: any) => !m.read && m.recipientId === user.id).length;
-//       setUnreadMessages(unread);
-//     } catch (error) {
-//       console.error('Error loading notifications:', error);
-//     }
-//   }
+  // Returns full name only if both firstName and lastName exist and are non-empty (after trimming)
+  function getFullName() {
+    const firstName = (user?.firstName || '').trim();
+    const lastName = (user?.lastName || '').trim();
+    // Show fullname only if at least one is non-empty
+    if (firstName || lastName) {
+      return `${firstName}${firstName && lastName ? ' ' : ''}${lastName}`.trim();
+    }
+    // If no names, fallback to empty string
+    return '';
+  }
 
   function handleLogout() {
     navigate('/logout');
   }
+
+  // Use full name if available, otherwise fallback to email/userId/'User' for User Menu label
+  const fullName = getFullName();
+  const mainUserDisplay = fullName || user?.email || user?.userId || 'User';
 
   return (
     <header className="header">
@@ -53,7 +47,7 @@ export function Header({ user }: HeaderProps) {
             <div className="header-logo">
             </div>
             <div className="header-title-section">
-              <img src="../static/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 240 }} />
+              <img src="../static/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
               <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>
             </div>
           </div>
@@ -64,25 +58,15 @@ export function Header({ user }: HeaderProps) {
               <DropdownMenuTrigger asChild>
                 <Button className="header-button header-button-notifications">
                   <Bell className="header-icon" />
-                  {/* {unreadMessages > 0 && (
-                    <Badge className="header-badge">
-                      {unreadMessages}
-                    </Badge>
-                  )} */}
+                  {/* Notifications badge logic could go here */}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="header-dropdown" align="end">
                 <DropdownMenuLabel>Notifications</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {/* {unreadMessages > 0 ? (
-                  <div className="header-notification-content">
-                    Vous avez {unreadMessages} message{unreadMessages > 1 ? 's' : ''} non lu{unreadMessages > 1 ? 's' : ''}
-                  </div>
-                ) : (
-                  <div className="header-notification-empty">
-                    Aucune notification
-                  </div>
-                )} */}
+                <div className="header-notification-empty">
+                  Aucune notification
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -92,21 +76,26 @@ export function Header({ user }: HeaderProps) {
                 <Button className="header-button header-button-user">
                   <User className="header-icon" />
                   <span className="header-user-name">
-                    {user?.username || user?.email || ''}
+                    {/* Show full name using Django Auth data (firstName/lastName from serializer) */}
+                    {mainUserDisplay}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="header-dropdown" align="end">
                 <DropdownMenuLabel>
                   <div className="header-user-info">
-                    <p className="header-user-name-full">{user?.username || `${user?.email || ''} ${user?.userId || ''}`.trim() || 'User'}</p>
-                    <p className="header-user-email">{user?.email}</p>
+                    <p className="header-user-name-full">
+                      {fullName || user?.email || 'Email introuvable'}
+                    </p>
+                    {/* Show email if full name is available, otherwise it's already shown above */}
+                    {fullName && user?.email && (
+                      <p className="header-user-email">{user?.email}</p>
+                    )}
                     {user?.role && <p className="header-user-role">{user?.role}</p>}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="header-logout">
-                  <LogOut className="header-icon" />
                   Déconnexion
                 </DropdownMenuItem>
               </DropdownMenuContent>

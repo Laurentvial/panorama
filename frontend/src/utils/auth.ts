@@ -1,4 +1,4 @@
-import api from './api';
+import { apiCall } from './api';
 import { ACCESS_TOKEN, REFRESH_TOKEN } from './constants';
 
 // Get API base URL from environment or use default
@@ -7,7 +7,7 @@ const getEnvVar = (key: string): string | undefined => {
   return import.meta.env[key];
 };
 
-const apiUrl = getEnvVar('VITE_API_URL') || 'http://127.0.0.1:8000';
+const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
 
 export async function signIn(username: string, password: string) {
   try {
@@ -57,10 +57,10 @@ export async function getSession() {
 
   try {
     // Verify token by getting current user
-    const response = await api.get('/api/user/current/');
+    const response = await apiCall('/api/user/current/');
     return {
       access_token: token,
-      user: response.data,
+      user: response,
     };
   } catch (error) {
     // Token is invalid, try to refresh

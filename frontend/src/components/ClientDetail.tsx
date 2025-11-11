@@ -5,12 +5,17 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, User, Wallet, FileText, Calendar, Mail, TrendingUp, Plus, Pencil, Trash2 } from 'lucide-react';
-import apiCall from '../utils/api';
+import { DateInput } from './ui/date-input';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { ArrowLeft, User, Wallet, TrendingUp, Plus, Pencil, Trash2, ChevronDown, Power, CheckCircle, XCircle, Calendar, FileText, Mail, X } from 'lucide-react';
+import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { toast } from 'sonner';
+import { EditPersonalInfoModal } from './EditPersonalInfoModal';
+import { EditPatrimonialInfoModal } from './EditPatrimonialInfoModal';
+import '../styles/Clients.css';
+import '../styles/PlanningCalendar.css';
 
 interface ClientDetailProps {
   clientId: string;
@@ -24,12 +29,12 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [notes, setNotes] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
   
   // Dialogs
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
-  const [isAppointmentDialogOpen, setIsAppointmentDialogOpen] = useState(false);
-  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
-  const [isMessageDialogOpen, setIsMessageDialogOpen] = useState(false);
+  const [isEditPersonalInfoOpen, setIsEditPersonalInfoOpen] = useState(false);
+  const [isEditPatrimonialInfoOpen, setIsEditPatrimonialInfoOpen] = useState(false);
   
   // Forms
   const [transactionForm, setTransactionForm] = useState({
@@ -39,17 +44,6 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     status: 'en attente'
   });
   
-  const [appointmentForm, setAppointmentForm] = useState({
-    date: '',
-    time: '',
-    comment: ''
-  });
-  
-  const [noteText, setNoteText] = useState('');
-  const [messageForm, setMessageForm] = useState({
-    subject: '',
-    message: ''
-  });
 
   useEffect(() => {
     loadClientData();
@@ -57,17 +51,25 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
   async function loadClientData() {
     try {
-      const [clientData, transactionsData, appointmentsData, notesData] = await Promise.all([
-        apiCall(`/clients/${clientId}`),
-        apiCall(`/clients/${clientId}/transactions`),
-        apiCall(`/clients/${clientId}/appointments`),
-        apiCall(`/clients/${clientId}/notes`)
+      const [clientData, notesData, eventsData] = await Promise.all([
+        apiCall(`/api/clients/${clientId}/`),
+        apiCall(`/api/notes/`),
+        apiCall(`/api/events/`)
       ]);
       
-      setClient(clientData.client);
-      setTransactions(transactionsData.transactions || []);
-      setAppointments(appointmentsData.appointments || []);
-      setNotes(notesData.notes || []);
+      setClient((clientData as any).client);
+      // Filter notes for this client - notes API returns array directly
+      const notesArray = Array.isArray(notesData) ? notesData : ((notesData as any).notes || notesData || []);
+      const clientNotes = notesArray.filter((note: any) => note.clientId === clientId);
+      setNotes(clientNotes);
+      
+      // Filter events (appointments) for this client - events API returns {events: [...]}
+      const eventsArray = (eventsData as any).events || [];
+      const clientAppointments = eventsArray.filter((event: any) => event.clientId === clientId);
+      setAppointments(clientAppointments);
+      
+      // Transactions endpoint doesn't exist yet, set empty array
+      setTransactions([]);
     } catch (error) {
       console.error('Error loading client data:', error);
     } finally {
@@ -75,19 +77,24 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     }
   }
 
+  function handleOpenEditModal() {
+    setIsEditPersonalInfoOpen(true);
+  }
+
+  function handlePersonalInfoUpdated(updatedClient: any) {
+    setClient(updatedClient);
+  }
+
+  function handlePatrimonialInfoUpdated(updatedClient: any) {
+    setClient(updatedClient);
+  }
+
   async function handleCreateTransaction(e: React.FormEvent) {
     e.preventDefault();
     
     try {
-      await apiCall('/transactions', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...transactionForm,
-          clientId,
-          amount: parseFloat(transactionForm.amount)
-        })
-      });
-      
+      // TODO: Implement transactions endpoint
+      console.warn('Transactions endpoint not yet implemented');
       setIsTransactionDialogOpen(false);
       setTransactionForm({ type: 'depot', amount: '', description: '', status: 'en attente' });
       loadClientData();
@@ -96,73 +103,32 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     }
   }
 
-  async function handleCreateAppointment(e: React.FormEvent) {
-    e.preventDefault();
-    
-    try {
-      await apiCall('/appointments', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...appointmentForm,
-          datetime: `${appointmentForm.date}T${appointmentForm.time}`,
-          clientId
-        })
-      });
-      
-      setIsAppointmentDialogOpen(false);
-      setAppointmentForm({ date: '', time: '', comment: '' });
-      loadClientData();
-    } catch (error) {
-      console.error('Error creating appointment:', error);
-    }
-  }
-
-  async function handleCreateNote(e: React.FormEvent) {
-    e.preventDefault();
-    
-    try {
-      await apiCall(`/clients/${clientId}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ text: noteText })
-      });
-      
-      setIsNoteDialogOpen(false);
-      setNoteText('');
-      loadClientData();
-    } catch (error) {
-      console.error('Error creating note:', error);
-    }
-  }
-
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    
-    try {
-      await apiCall('/messages', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...messageForm,
-          recipientId: client.authId
-        })
-      });
-      
-      setIsMessageDialogOpen(false);
-      setMessageForm({ subject: '', message: '' });
-      toast.success('Message envoyé avec succès');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      toast.error('Erreur lors de l\'envoi du message');
-    }
-  }
 
   async function handleDeleteNote(noteId: string) {
     if (!confirm('Supprimer cette note ?')) return;
     
     try {
-      await apiCall(`/clients/${clientId}/notes/${noteId}`, { method: 'DELETE' });
+      await apiCall(`/api/notes/delete/${noteId}/`, { method: 'DELETE' });
       loadClientData();
     } catch (error) {
       console.error('Error deleting note:', error);
+    }
+  }
+
+  function handlePlatformAccess() {
+    // TODO: Redirection vers la plateforme client (à implémenter plus tard)
+    toast.info('Redirection vers la plateforme client - Fonctionnalité à venir');
+    // window.location.href = `/platform/client/${clientId}`;
+  }
+
+  async function handleToggleActive() {
+    try {
+      await apiCall(`/api/clients/${clientId}/toggle-active/`, { method: 'POST' });
+      toast.success(client.active ? 'Client désactivé' : 'Client activé');
+      loadClientData();
+    } catch (error) {
+      console.error('Error toggling active status:', error);
+      toast.error('Erreur lors de la modification du statut');
     }
   }
 
@@ -189,134 +155,85 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     <div className="space-y-6">
       <div>
         <Button variant="ghost" onClick={onBack} className="mb-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
+          <ArrowLeft className="w-4 h-4 mr-2"/>
           Retour
         </Button>
-        
-        <h1 className="text-slate-900 mb-2">
-          {client.firstName} {client.lastName}
-        </h1>
-        <p className="text-slate-600">{client.email}</p>
+        <div className="mt-2 flex gap-4">
+          {client.profilePhoto ? (
+            <img 
+              src={client.profilePhoto} 
+              alt="Photo de profil" 
+              className="client-profile-photo-display"
+            />
+          ) : (
+            <div className="client-profile-photo-placeholder-display">
+              <User className="w-12 h-12" />
+            </div>
+          )}
+          <div>
+            <h1 className="text-slate-900 mb-1">
+              {client.firstName} {client.lastName}
+            </h1>
+            <p className="text-slate-600">{client.email}</p>
+          </div>
+          </div>
       </div>
 
       {/* Quick Actions */}
       <div className="flex gap-2 flex-wrap">
-        <Dialog open={isAppointmentDialogOpen} onOpenChange={setIsAppointmentDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Calendar className="w-4 h-4 mr-2" />
-              Placer RDV
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouveau rendez-vous</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreateAppointment} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={appointmentForm.date}
-                  onChange={(e) => setAppointmentForm({ ...appointmentForm, date: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Heure</Label>
-                <Input
-                  type="time"
-                  value={appointmentForm.time}
-                  onChange={(e) => setAppointmentForm({ ...appointmentForm, time: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Commentaire</Label>
-                <Textarea
-                  value={appointmentForm.comment}
-                  onChange={(e) => setAppointmentForm({ ...appointmentForm, comment: e.target.value })}
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsAppointmentDialogOpen(false)}>
-                  Annuler
-                </Button>
-                <Button type="submit">Créer</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button 
+          size="sm"
+          onClick={() => toast.info('Fonctionnalité à venir - Placer RDV')}
+        >
+          <Calendar className="w-4 h-4 mr-2" />
+          Placer RDV
+        </Button>
 
-        <Dialog open={isNoteDialogOpen} onOpenChange={setIsNoteDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" variant="outline">
-              <FileText className="w-4 h-4 mr-2" />
-              Ajouter une note
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouvelle note</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreateNote} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Note</Label>
-                <Textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  rows={5}
-                  required
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsNoteDialogOpen(false)}>
-                  Annuler
-                </Button>
-                <Button type="submit">Ajouter</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button 
+          size="sm" 
+          variant="outline"
+          onClick={() => toast.info('Fonctionnalité à venir - Ajouter une note')}
+        >
+          <FileText className="w-4 h-4 mr-2" />
+          Ajouter une note
+        </Button>
 
-        <Dialog open={isMessageDialogOpen} onOpenChange={setIsMessageDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" variant="outline">
-              <Mail className="w-4 h-4 mr-2" />
-              Envoyer un message
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouveau message</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSendMessage} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Sujet</Label>
-                <Input
-                  value={messageForm.subject}
-                  onChange={(e) => setMessageForm({ ...messageForm, subject: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Message</Label>
-                <Textarea
-                  value={messageForm.message}
-                  onChange={(e) => setMessageForm({ ...messageForm, message: e.target.value })}
-                  rows={5}
-                  required
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsMessageDialogOpen(false)}>
-                  Annuler
-                </Button>
-                <Button type="submit">Envoyer</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button 
+          size="sm" 
+          variant="outline"
+          onClick={() => toast.info('Fonctionnalité à venir - Envoyer un message')}
+        >
+          <Mail className="w-4 h-4 mr-2" />
+          Envoyer un message
+        </Button>
+
+        <Button 
+          size="sm" 
+          variant="outline"
+          onClick={handlePlatformAccess}
+        >
+          <Power className="w-4 h-4 mr-2" />
+          Connexion à la plateforme
+        </Button>
+
+        <Button 
+          size="sm" 
+          variant="outline"
+          onClick={handleToggleActive}
+          className={client.active ? 'client-action-button-deactivate' : 'client-action-button-activate'}
+        >
+          {client.active ? (
+            <>
+              <XCircle className="w-4 h-4 mr-2" />
+              Désactiver
+            </>
+          ) : (
+            <>
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Activer
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Client Details Tabs */}
@@ -331,22 +248,39 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         {/* Info Tab */}
         <TabsContent value="info" className="space-y-6">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Informations personnelles</CardTitle>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleOpenEditModal}
+              >
+                <Pencil className="w-4 h-4 mr-2" />
+                Éditer
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-4">
+
                 <div>
-                  <Label className="text-slate-600">Prénom</Label>
-                  <p>{client.firstName}</p>
+                  <Label className="text-slate-600">Civilité</Label>
+                  <p>{client.civility || '-'}</p>
                 </div>
                 <div>
-                  <Label className="text-slate-600">Nom</Label>
-                  <p>{client.lastName}</p>
+                  <Label className="text-slate-600">Prénom / Nom</Label>
+                  <p>{client.firstName} {client.lastName}</p>
                 </div>
                 <div>
-                  <Label className="text-slate-600">Email</Label>
-                  <p>{client.email}</p>
+                  <Label className="text-slate-600">Template</Label>
+                  <p>{client.template || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Support</Label>
+                  <p>{client.support || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Mot de passe</Label>
+                  <p className="font-mono text-sm">{client.password || '-'}</p>
                 </div>
                 <div>
                   <Label className="text-slate-600">Téléphone</Label>
@@ -357,30 +291,273 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                   <p>{client.mobile || '-'}</p>
                 </div>
                 <div>
+                  <Label className="text-slate-600">E-mail</Label>
+                  <p>{client.email || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Date de naissance</Label>
+                  <p>{(() => {
+                    if (!client.birthDate) return '-';
+                    const date = new Date(client.birthDate);
+                    if (isNaN(date.getTime())) return '-';
+                    return date.toLocaleDateString('fr-FR', { 
+                      day: '2-digit', 
+                      month: '2-digit', 
+                      year: 'numeric'
+                    });
+                  })()}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Lieu de naissance</Label>
+                  <p>{client.birthPlace || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Adresse</Label>
+                  <p>{client.address || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Code postal</Label>
+                  <p>{client.postalCode || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Ville</Label>
+                  <p>{client.city || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Nationalité</Label>
+                  <p>{client.nationality || '-'}</p>
+                </div>
+                <div>
+                  <Label className="text-slate-600">Successeur</Label>
+                  <p>{client.successor || '-'}</p>
+                </div>
+                <div>
                   <Label className="text-slate-600">Date d'inscription</Label>
-                  <p>{new Date(client.createdAt).toLocaleDateString('fr-FR')}</p>
+                  <p>{new Date(client.createdAt).toLocaleDateString('fr-FR', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric'
+                  })}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Fiche patrimoniale */}
+          <Collapsible open={isPatrimonialOpen} onOpenChange={setIsPatrimonialOpen}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="cursor-pointer hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center justify-between pb-6">
+                    <CardTitle>Fiche patrimoniale</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsEditPatrimonialInfoOpen(true);
+                        }}
+                      >
+                        <Pencil className="w-4 h-4 mr-2" />
+                        Éditer
+                      </Button>
+                      <ChevronDown className={`client-chevron ${isPatrimonialOpen ? 'open' : ''}`} />
+                    </div>
+                  </div>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="space-y-6">
+                  {/* Activité professionnelle */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Activité professionnelle</h3>
+                    <div>
+                      <Label className="text-slate-600">Statut</Label>
+                      <p>{client.professionalActivityStatus || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.professionalActivityComment || '-'}</p>
+                    </div>
+                  </div>
+
+                  {/* Métiers */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Métiers</h3>
+                    <div>
+                      <Label className="text-slate-600">Métier(s)</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {client.professions && client.professions.length > 0 ? (
+                          client.professions.map((profession: string, index: number) => (
+                            <div key={index} className="client-profession-badge">
+                              <span>{profession}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.professionsComment || '-'}</p>
+                    </div>
+                  </div>
+
+                  {/* Patrimoine */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Patrimoine</h3>
+                    <div>
+                      <Label className="text-slate-600">Banque</Label>
+                      <p>{client.bankName || '-'}</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-slate-600">Compte courant (€)</Label>
+                        <p>{(client.currentAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div>
+                        <Label className="text-slate-600">Livret A/B (€)</Label>
+                        <p>{(client.livretAB || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div>
+                        <Label className="text-slate-600">PEA (€)</Label>
+                        <p>{(client.pea || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div>
+                        <Label className="text-slate-600">PEL (€)</Label>
+                        <p>{(client.pel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div>
+                        <Label className="text-slate-600">LDD (€)</Label>
+                        <p>{(client.ldd || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="font-semibold">Épargne</Label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-slate-600">CEL (€)</Label>
+                          <p>{(client.cel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <Label className="text-slate-600">CSL (€)</Label>
+                          <p>{(client.csl || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <Label className="text-slate-600">Compte titre (€)</Label>
+                          <p>{(client.securitiesAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                        <div>
+                          <Label className="text-slate-600">Assurance-vie (€)</Label>
+                          <p>{(client.lifeInsurance || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.savingsComment || '-'}</p>
+                    </div>
+
+                    <div>
+                      <Label className="font-semibold">Total du patrimoine (€)</Label>
+                      <p className="text-lg font-bold">{(client.totalWealth || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+
+                  {/* Objectifs et expérience */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Objectifs et expérience</h3>
+                    <div>
+                      <Label className="text-slate-600">Objectifs</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {client.objectives && client.objectives.length > 0 ? (
+                          client.objectives.map((obj: string, index: number) => (
+                            <div key={index} className="client-badge">
+                              {obj}
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.objectivesComment || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Expérience</Label>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {client.experience && client.experience.length > 0 ? (
+                          client.experience.map((exp: string, index: number) => (
+                            <div key={index} className="client-badge">
+                              {exp}
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.experienceComment || '-'}</p>
+                    </div>
+                  </div>
+
+                  {/* Informations financières */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Informations financières</h3>
+                    <div>
+                      <Label className="text-slate-600">Défiscalisation</Label>
+                      <p>{client.taxOptimization !== undefined ? (client.taxOptimization ? 'Oui' : 'Non') : '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Commentaire</Label>
+                      <p>{client.taxOptimizationComment || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600">Revenu annuel du foyer (€)</Label>
+                      <p>{(client.annualHouseholdIncome || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
         </TabsContent>
 
         {/* Transactions Tab */}
         <TabsContent value="transactions" className="space-y-6">
           <div className="flex justify-end">
-            <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Ajouter une transaction
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Nouvelle transaction</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleCreateTransaction} className="space-y-4">
-                  <div className="space-y-2">
+            <Button onClick={() => setIsTransactionDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Ajouter une transaction
+            </Button>
+          </div>
+
+          {isTransactionDialogOpen && (
+            <div className="planning-modal-overlay" onClick={() => setIsTransactionDialogOpen(false)}>
+              <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
+                <div className="planning-modal-header">
+                  <h2 className="planning-modal-title">Nouvelle transaction</h2>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="planning-modal-close"
+                    onClick={() => setIsTransactionDialogOpen(false)}
+                  >
+                    <X className="planning-icon-md" />
+                  </Button>
+                </div>
+                <form onSubmit={handleCreateTransaction} className="planning-form">
+                  <div className="planning-form-field">
                     <Label>Type</Label>
                     <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
                       <SelectTrigger>
@@ -396,7 +573,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
+                  <div className="planning-form-field">
                     <Label>Montant (€)</Label>
                     <Input
                       type="number"
@@ -406,14 +583,14 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                       required
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="planning-form-field">
                     <Label>Description</Label>
                     <Textarea
                       value={transactionForm.description}
                       onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
                     />
                   </div>
-                  <div className="space-y-2">
+                  <div className="planning-form-field">
                     <Label>Statut</Label>
                     <Select value={transactionForm.status} onValueChange={(value) => setTransactionForm({ ...transactionForm, status: value })}>
                       <SelectTrigger>
@@ -427,16 +604,16 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex gap-2 justify-end">
+                  <div className="planning-form-actions">
                     <Button type="button" variant="outline" onClick={() => setIsTransactionDialogOpen(false)}>
                       Annuler
                     </Button>
                     <Button type="submit">Créer</Button>
                   </div>
                 </form>
-              </DialogContent>
-            </Dialog>
-          </div>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader>
@@ -458,7 +635,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                       {transactions.map((transaction) => (
                         <tr key={transaction.id} className="border-b border-slate-100">
                           <td className="py-2 px-3">
-                            {new Date(transaction.createdAt).toLocaleDateString('fr-FR')}
+                            {new Date(transaction.createdAt).toLocaleDateString('fr-FR', { 
+                            day: '2-digit', 
+                            month: '2-digit', 
+                            year: 'numeric'
+                          })}
                           </td>
                           <td className="py-2 px-3 capitalize">{transaction.type}</td>
                           <td className="py-2 px-3">{transaction.amount?.toLocaleString('fr-FR')} €</td>
@@ -494,9 +675,13 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                       <div key={apt.id} className="p-4 border border-slate-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <div>
-                            <p>{datetime.toLocaleDateString('fr-FR')}</p>
+                            <p>{datetime.toLocaleDateString('fr-FR', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric'
+                            })}</p>
                             <p className="text-sm text-slate-600">
-                              {datetime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                              {datetime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}
                             </p>
                           </div>
                         </div>
@@ -527,7 +712,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
                     <div key={note.id} className="p-4 border border-slate-200 rounded-lg">
                       <div className="flex items-start justify-between mb-2">
                         <p className="text-sm text-slate-600">
-                          {new Date(note.createdAt).toLocaleDateString('fr-FR')}
+                          {new Date(note.createdAt).toLocaleDateString('fr-FR', { 
+                            day: '2-digit', 
+                            month: '2-digit', 
+                            year: 'numeric'
+                          })}
                         </p>
                         <Button
                           variant="ghost"
@@ -549,6 +738,26 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Personal Info Modal */}
+      <EditPersonalInfoModal
+        isOpen={isEditPersonalInfoOpen}
+        onClose={() => setIsEditPersonalInfoOpen(false)}
+        client={client}
+        clientId={clientId}
+        onUpdate={handlePersonalInfoUpdated}
+      />
+
+      {/* Edit Patrimonial Info Modal */}
+      <EditPatrimonialInfoModal
+        isOpen={isEditPatrimonialInfoOpen}
+        onClose={() => setIsEditPatrimonialInfoOpen(false)}
+        client={client}
+        clientId={clientId}
+        onUpdate={handlePatrimonialInfoUpdated}
+      />
     </div>
   );
 }
+
+export default ClientDetail;

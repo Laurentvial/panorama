@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { X } from 'lucide-react';
-import api from '../utils/api';
+import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/PlanningCalendar.css';
 
@@ -24,15 +24,18 @@ export function CreateTeamDialog({ isOpen, onClose, onTeamCreated }: CreateTeamD
     setLoading(true);
     
     try {
-      await api.post('/api/teams/create/', teamFormData);
+      await apiCall('/api/teams/create/', {
+        method: 'POST',
+        body: JSON.stringify(teamFormData),
+      });
       toast.success('Équipe créée avec succès');
       setTeamFormData({ name: '' });
       onClose();
       onTeamCreated();
     } catch (err: any) {
       console.error('Error creating team:', err);
-      const data = err?.response?.data || {};
-      const message = data.detail || Object.values(data).flat().join(', ') || 'Une erreur est survenue lors de la création';
+      const data = err?.response || {};
+      const message = data.detail || data.error || err?.message || 'Une erreur est survenue lors de la création';
       setError(message);
       toast.error(message);
     } finally {

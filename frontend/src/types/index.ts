@@ -5,6 +5,7 @@ export interface User {
   lastName: string;
   username: string;
   email: string;
+  phone?: string;
   role: string;
   teamId: string | null;
   active: boolean;
@@ -29,6 +30,7 @@ export interface TeamMember {
   userId: string;
   userData: TeamMemberUserData;
   isLeader?: boolean;
+  createdAt?: string;
 }
 
 export interface TeamDetail {

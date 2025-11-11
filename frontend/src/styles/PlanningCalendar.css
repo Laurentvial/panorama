@@ -232,6 +232,13 @@
   margin-top: 0.5rem;
 }
 
+.planning-event-created-info {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
 .planning-event-actions {
   display: flex;
   gap: 0.5rem;
@@ -253,5 +260,30 @@
 /* Icon Colors */
 .planning-icon-slate {
   color: #64748b;
+}
+
+/* Force 24-hour format for time inputs */
+.time-input-24h::-webkit-datetime-edit-meridiem-field,
+input[type="time"]::-webkit-datetime-edit-meridiem-field {
+  display: none !important;
+}
+
+.time-input-24h::-webkit-datetime-edit-hour-field,
+.time-input-24h::-webkit-datetime-edit-minute-field,
+input[type="time"]::-webkit-datetime-edit-hour-field,
+input[type="time"]::-webkit-datetime-edit-minute-field {
+  padding: 0;
+}
+
+/* For Firefox */
+.time-input-24h,
+input[type="time"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.time-input-24h::-moz-datetime-edit-meridiem-field,
+input[type="time"]::-moz-datetime-edit-meridiem-field {
+  display: none !important;
 }
 

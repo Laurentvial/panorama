@@ -326,6 +326,7 @@
 
   ::-webkit-datetime-edit-meridiem-field {
     padding-block: 0;
+    display: none; /* Hide AM/PM field to force 24-hour format */
   }
 
   :-moz-ui-invalid {

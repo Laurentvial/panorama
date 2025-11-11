@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Eye, Trash2, Plus } from 'lucide-react';
 import { useTeams } from '../hooks/useTeams';
-import api from '../utils/api';
+import { apiCall } from '../utils/api';
 import { CreateTeamDialog } from './CreateTeamDialog';
 import { TeamDetailDialog } from './TeamDetailDialog';
 import { TeamDetail } from '../types';
@@ -17,8 +17,8 @@ export function TeamsTab() {
 
   async function viewTeamDetails(teamId: string) {
     try {
-      const response = await api.get(`/api/teams/${teamId}/`);
-      setSelectedTeam(response.data);
+      const response = await apiCall(`/api/teams/${teamId}/`);
+      setSelectedTeam(response);
       setIsTeamDetailOpen(true);
     } catch (error) {
       console.error('Error loading team details:', error);
@@ -29,7 +29,7 @@ export function TeamsTab() {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cette équipe ?')) return;
     
     try {
-      await api.delete(`/api/teams/${teamId}/delete/`);
+      await apiCall(`/api/teams/${teamId}/delete/`, { method: 'DELETE' });
       refetchTeams();
     } catch (error) {
       console.error('Error deleting team:', error);
@@ -88,12 +88,20 @@ export function TeamsTab() {
                     
                     return (
                       <tr key={team.id}>
-                        <td className="users-teams-table-id">{team.id.substring(0, 8)}...</td>
+                        <td className="users-teams-table-id">{team.id.substring(0, 8)}</td>
                         <td>{team.name}</td>
                         <td>{formattedDate}</td>
                       <td className="text-right">
                         <div className="users-teams-table-actions">
-
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => viewTeamDetails(team.id)}
+                            className="users-teams-view-button"
+                            title="Voir l'équipe"
+                          >
+                            <Eye className="users-teams-icon" />
+                          </Button>
                           <Button 
                             variant="ghost" 
                             size="sm"
@@ -120,6 +128,12 @@ export function TeamsTab() {
         team={selectedTeam}
         isOpen={isTeamDetailOpen}
         onOpenChange={setIsTeamDetailOpen}
+        onTeamUpdated={() => {
+          refetchTeams();
+          if (selectedTeam?.team?.id) {
+            viewTeamDetails(selectedTeam.team.id);
+          }
+        }}
       />
     </>
   );

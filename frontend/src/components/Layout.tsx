@@ -46,7 +46,7 @@ export function Layout({ children }: LayoutProps) {
         <Sidebar 
           currentPage={getCurrentPage()} 
           onNavigate={handleNavigate} 
-          userRole={currentUser?.role || 'administrateur'} 
+          userRole={currentUser?.role || 'admin'} 
         />
         <div style={{ width: '100%', padding: '30px' }}>
           {children}

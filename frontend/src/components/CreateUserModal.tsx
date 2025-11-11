@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { X } from "lucide-react";
-import api from "../utils/api";
+import { apiCall } from "../utils/api";
 import { toast } from "sonner";
 import { useTeams } from "../hooks/useTeams";
 import LoadingIndicator from "./LoadingIndicator";
@@ -34,11 +34,11 @@ export function CreateUserModal({
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    username: "",
     email: "",
+    phone: "",
     password: "",
     confirmPassword: "",
-    role: "administrateur",
+    role: "admin",
     teamId: "",
   });
 
@@ -61,16 +61,27 @@ export function CreateUserModal({
       return;
     }
 
+    // Validate email is provided
+    if (!formData.email) {
+      setError("L'email est requis");
+      setLoading(false);
+      return;
+    }
+
     try {
       // Map form data to Django API format
-      await api.post("/api/users/create/", {
-        username: formData.username,
-        password: formData.password,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        email: formData.email || "",
-        role: formData.role,
-        teamId: formData.teamId || null,
+      // Use email as username - backend will handle this automatically
+      await apiCall("/api/users/create/", {
+        method: 'POST',
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          phone: formData.phone,
+          role: formData.role,
+          teamId: formData.teamId || null,
+        }),
       });
 
       toast.success("Utilisateur créé avec succès");
@@ -78,11 +89,11 @@ export function CreateUserModal({
       setFormData({
         firstName: "",
         lastName: "",
-        username: "",
         email: "",
+        phone: "",
         password: "",
         confirmPassword: "",
-        role: "administrateur",
+        role: "admin",
         teamId: "",
       });
       onClose();
@@ -144,19 +155,6 @@ export function CreateUserModal({
           </div>
 
           <div className="planning-form-field">
-            <Label htmlFor="create-username">Username</Label>
-            <Input
-              id="create-username"
-              type="text"
-              value={formData.username}
-              onChange={(e) =>
-                setFormData({ ...formData, username: e.target.value })
-              }
-              required
-            />
-          </div>
-
-          <div className="planning-form-field">
             <Label htmlFor="create-email">Email</Label>
             <Input
               id="create-email"
@@ -165,6 +163,21 @@ export function CreateUserModal({
               onChange={(e) =>
                 setFormData({ ...formData, email: e.target.value })
               }
+              required
+              placeholder="email@example.com"
+            />
+          </div>
+
+          <div className="planning-form-field">
+            <Label htmlFor="create-phone">Téléphone</Label>
+            <Input
+              id="create-phone"
+              type="tel"
+              value={formData.phone}
+              onChange={(e) =>
+                setFormData({ ...formData, phone: e.target.value })
+              }
+              placeholder="+33 6 12 34 56 78"
             />
           </div>
 
@@ -211,10 +224,10 @@ export function CreateUserModal({
                 <SelectValue placeholder="Sélectionner un rôle" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="administrateur">
+                <SelectItem value="admin">
                   Administrateur
                 </SelectItem>
-                <SelectItem value="chef d'équipe">Chef d'équipe</SelectItem>
+                <SelectItem value="teamleader">Chef d'équipe</SelectItem>
                 <SelectItem value="gestionnaire">Gestionnaire</SelectItem>
               </SelectContent>
             </Select>

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Plus, Mail, Send, Trash2, Eye } from 'lucide-react';
-import apiCall from '../utils/api';
+import { apiCall } from '../utils/api';
 
 interface MessagerieProps {
   user: any;
@@ -237,7 +237,7 @@ export function Messagerie({ user }: MessagerieProps) {
                           </p>
                           <p className="text-sm text-slate-500 mt-1">
                             {new Date(message.createdAt).toLocaleDateString('fr-FR')} à{' '}
-                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}
                           </p>
                         </div>
                         <Button variant="ghost" size="sm">
@@ -280,7 +280,7 @@ export function Messagerie({ user }: MessagerieProps) {
                           </p>
                           <p className="text-sm text-slate-500 mt-1">
                             {new Date(message.createdAt).toLocaleDateString('fr-FR')} à{' '}
-                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}
                           </p>
                         </div>
                         <Button variant="ghost" size="sm">

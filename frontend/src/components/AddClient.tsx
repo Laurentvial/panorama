@@ -6,26 +6,30 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
-import { ArrowLeft, Save, Key, Upload, FileText } from 'lucide-react';
+import { DateInput } from './ui/date-input';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUsers } from '../hooks/useUsers';
 import { useTeams } from '../hooks/useTeams';
 import { toast } from 'sonner';
-import { PatrimonialFormModal } from './PatrimonialFormModal';
+import '../styles/Clients.css';
 
 export function AddClient() {
   const navigate = useNavigate();
   const { users, loading: usersLoading } = useUsers();
   const { teams, loading: teamsLoading } = useTeams();
   const [loading, setLoading] = useState(false);
-  const [isPatrimonialModalOpen, setIsPatrimonialModalOpen] = useState(false);
+  const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
+  const [newProfession, setNewProfession] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     // Informations personnelles
     civility: '',
     firstName: '',
     lastName: '',
     email: '',
-    username: '',
     password: '',
     phone: '',
     mobile: '',
@@ -102,12 +106,73 @@ export function AddClient() {
     toast.success('Mot de passe généré');
   }
 
-  function handlePatrimonialSave(patrimonialData: any) {
+  function addProfession() {
+    if (newProfession.trim()) {
+      setFormData({
+        ...formData,
+        professions: [...formData.professions, newProfession.trim()]
+      });
+      setNewProfession('');
+    }
+  }
+
+  function removeProfession(index: number) {
     setFormData({
       ...formData,
-      ...patrimonialData
+      professions: formData.professions.filter((_, i) => i !== index)
     });
-    toast.success('Fiche patrimoniale enregistrée');
+  }
+
+  function toggleObjective(objective: string) {
+    const objectives = formData.objectives.includes(objective)
+      ? formData.objectives.filter(o => o !== objective)
+      : [...formData.objectives, objective];
+    setFormData({ ...formData, objectives });
+  }
+
+  function toggleExperience(exp: string) {
+    const experience = formData.experience.includes(exp)
+      ? formData.experience.filter(e => e !== exp)
+      : [...formData.experience, exp];
+    setFormData({ ...formData, experience });
+  }
+
+  function calculateTotalWealth() {
+    const total = 
+      (parseFloat(formData.currentAccount.toString()) || 0) +
+      (parseFloat(formData.livretAB.toString()) || 0) +
+      (parseFloat(formData.pea.toString()) || 0) +
+      (parseFloat(formData.pel.toString()) || 0) +
+      (parseFloat(formData.ldd.toString()) || 0) +
+      (parseFloat(formData.cel.toString()) || 0) +
+      (parseFloat(formData.csl.toString()) || 0) +
+      (parseFloat(formData.securitiesAccount.toString()) || 0) +
+      (parseFloat(formData.lifeInsurance.toString()) || 0);
+    
+    setFormData({ ...formData, totalWealth: total });
+  }
+
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner un fichier image');
+        return;
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('L\'image ne doit pas dépasser 5MB');
+        return;
+      }
+      setProfilePhoto(file);
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePhotoPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -121,10 +186,115 @@ export function AddClient() {
     }
 
     try {
-      await apiCall('/api/clients/create/', {
-        method: 'POST',
-        body: JSON.stringify(formData)
-      });
+      // Use FormData if photo is uploaded, otherwise use JSON
+      if (profilePhoto) {
+        const formDataToSend = new FormData();
+        formDataToSend.append('profilePhoto', profilePhoto);
+        formDataToSend.append('civility', formData.civility || '');
+        formDataToSend.append('firstName', formData.firstName);
+        formDataToSend.append('lastName', formData.lastName);
+        formDataToSend.append('email', formData.email);
+        formDataToSend.append('password', formData.password);
+        formDataToSend.append('phone', formData.phone || '');
+        formDataToSend.append('mobile', formData.mobile || '');
+        formDataToSend.append('platformAccess', formData.platformAccess.toString());
+        formDataToSend.append('active', formData.active.toString());
+        formDataToSend.append('template', formData.template || '');
+        formDataToSend.append('support', formData.support || '');
+        formDataToSend.append('birthDate', formData.birthDate || '');
+        formDataToSend.append('birthPlace', formData.birthPlace || '');
+        formDataToSend.append('address', formData.address || '');
+        formDataToSend.append('postalCode', formData.postalCode || '');
+        formDataToSend.append('city', formData.city || '');
+        formDataToSend.append('nationality', formData.nationality || '');
+        formDataToSend.append('successor', formData.successor || '');
+        formDataToSend.append('managerId', formData.managerId || '');
+        formDataToSend.append('teamId', formData.teamId || '');
+        // Fiche patrimoniale
+        formDataToSend.append('professionalActivityStatus', formData.professionalActivityStatus || '');
+        formDataToSend.append('professionalActivityComment', formData.professionalActivityComment || '');
+        formData.professions.forEach(prof => formDataToSend.append('professions', prof));
+        formDataToSend.append('professionsComment', formData.professionsComment || '');
+        formDataToSend.append('bankName', formData.bankName || '');
+        formDataToSend.append('currentAccount', formData.currentAccount.toString());
+        formDataToSend.append('livretAB', formData.livretAB.toString());
+        formDataToSend.append('pea', formData.pea.toString());
+        formDataToSend.append('pel', formData.pel.toString());
+        formDataToSend.append('ldd', formData.ldd.toString());
+        formDataToSend.append('cel', formData.cel.toString());
+        formDataToSend.append('csl', formData.csl.toString());
+        formDataToSend.append('securitiesAccount', formData.securitiesAccount.toString());
+        formDataToSend.append('lifeInsurance', formData.lifeInsurance.toString());
+        formDataToSend.append('savingsComment', formData.savingsComment || '');
+        formDataToSend.append('totalWealth', formData.totalWealth.toString());
+        formData.objectives.forEach(obj => formDataToSend.append('objectives', obj));
+        formDataToSend.append('objectivesComment', formData.objectivesComment || '');
+        formData.experience.forEach(exp => formDataToSend.append('experience', exp));
+        formDataToSend.append('experienceComment', formData.experienceComment || '');
+        formDataToSend.append('taxOptimization', formData.taxOptimization.toString());
+        formDataToSend.append('taxOptimizationComment', formData.taxOptimizationComment || '');
+        formDataToSend.append('annualHouseholdIncome', formData.annualHouseholdIncome.toString());
+
+        const response = await apiCall('/api/clients/create/', {
+          method: 'POST',
+          body: formDataToSend
+        });
+      } else {
+        // Ensure all fields are included in the payload
+        const payload = {
+          // Informations personnelles
+          civility: formData.civility || '',
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          password: formData.password,
+          phone: formData.phone || '',
+          mobile: formData.mobile || '',
+          platformAccess: formData.platformAccess,
+          active: formData.active,
+          template: formData.template || '',
+          support: formData.support || '',
+          birthDate: formData.birthDate || '',
+          birthPlace: formData.birthPlace || '',
+          address: formData.address || '',
+          postalCode: formData.postalCode || '',
+          city: formData.city || '',
+          nationality: formData.nationality || '',
+          successor: formData.successor || '',
+          managerId: formData.managerId || '',
+          teamId: formData.teamId || '',
+          // Fiche patrimoniale
+          professionalActivityStatus: formData.professionalActivityStatus || '',
+          professionalActivityComment: formData.professionalActivityComment || '',
+          professions: formData.professions || [],
+          professionsComment: formData.professionsComment || '',
+          bankName: formData.bankName || '',
+          currentAccount: formData.currentAccount || 0,
+          livretAB: formData.livretAB || 0,
+          pea: formData.pea || 0,
+          pel: formData.pel || 0,
+          ldd: formData.ldd || 0,
+          cel: formData.cel || 0,
+          csl: formData.csl || 0,
+          securitiesAccount: formData.securitiesAccount || 0,
+          lifeInsurance: formData.lifeInsurance || 0,
+          savingsComment: formData.savingsComment || '',
+          totalWealth: formData.totalWealth || 0,
+          objectives: formData.objectives || [],
+          objectivesComment: formData.objectivesComment || '',
+          experience: formData.experience || [],
+          experienceComment: formData.experienceComment || '',
+          taxOptimization: formData.taxOptimization || false,
+          taxOptimizationComment: formData.taxOptimizationComment || '',
+          annualHouseholdIncome: formData.annualHouseholdIncome || 0,
+        };
+
+        // Utilise apiCall (fetch-based) et non axios
+        const response = await apiCall('/api/clients/create/', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
 
       toast.success('Client créé avec succès');
       navigate('/clients');
@@ -132,8 +302,9 @@ export function AddClient() {
       console.error('Error creating client:', error);
       let errorMessage = 'Erreur lors de la création du client';
       
+      // apiCall throws Error with response property attached
       if (error.response) {
-        // Backend error response
+        // Backend error response from serializer
         if (error.response.error) {
           errorMessage = error.response.error;
         } else if (error.response.detail) {
@@ -142,7 +313,7 @@ export function AddClient() {
           errorMessage = error.response.message;
         }
         
-        // Check for validation errors
+        // Check for validation errors from serializer
         if (error.response.email) {
           errorMessage = `Email: ${Array.isArray(error.response.email) ? error.response.email[0] : error.response.email}`;
         } else if (error.response.fname) {
@@ -151,6 +322,7 @@ export function AddClient() {
           errorMessage = `Nom: ${Array.isArray(error.response.lname) ? error.response.lname[0] : error.response.lname}`;
         }
       } else if (error.message) {
+        // Error message from apiCall utility
         errorMessage = error.message;
       }
       
@@ -188,17 +360,51 @@ export function AddClient() {
             <div className="space-y-2">
               <Label>Photo de profil</Label>
               <div className="flex items-center gap-4">
-                <div className="w-24 h-24 bg-slate-200 rounded-full flex items-center justify-center">
-                  <Upload className="w-8 h-8 text-slate-400" />
+                <div className="flex items-center gap-4">
+                  {profilePhotoPreview ? (
+                    <div className="client-profile-photo-container">
+                      <img 
+                        src={profilePhotoPreview} 
+                        alt="Preview" 
+                        className="client-profile-photo-preview"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfilePhoto(null);
+                          setProfilePhotoPreview(null);
+                        }}
+                        className="client-profile-photo-remove-btn"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
+                
                 </div>
-                <Button type="button" variant="outline" size="sm">
-                  <Upload className="w-4 h-4 mr-2" />
-                  Télécharger une photo
-                </Button>
+                
               </div>
+              <div>
+                    <input
+                      type="file"
+                      id="profilePhoto"
+                      accept="image/*"
+                      onChange={handlePhotoChange}
+                      className="hidden"
+                    />
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => document.getElementById('profilePhoto')?.click()}
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      {profilePhoto ? 'Changer la photo' : 'Télécharger une photo'}
+                    </Button>
+                  </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="civility">Civilité</Label>
                 <Select
@@ -238,37 +444,17 @@ export function AddClient() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="username">Nom d'utilisateur</Label>
-                <Input
-                  id="username"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  placeholder="Nom d'utilisateur"
-                />
-              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email *</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                required
-                placeholder="client@example.com"
-              />
-            </div>
+
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="birthDate">Date de naissance</Label>
-                <Input
+                <DateInput
                   id="birthDate"
-                  type="date"
                   value={formData.birthDate}
-                  onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, birthDate: value })}
                 />
               </div>
 
@@ -283,36 +469,10 @@ export function AddClient() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="address">Adresse</Label>
-              <Input
-                id="address"
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                placeholder="Adresse complète"
-              />
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="postalCode">Code postal</Label>
-                <Input
-                  id="postalCode"
-                  value={formData.postalCode}
-                  onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
-                  placeholder="75001"
-                />
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="city">Ville</Label>
-                <Input
-                  id="city"
-                  value={formData.city}
-                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                  placeholder="Paris"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
 
               <div className="space-y-2">
                 <Label htmlFor="nationality">Nationalité</Label>
@@ -323,17 +483,19 @@ export function AddClient() {
                   placeholder="Française"
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="successor">Successeur</Label>
+                <Input
+                  id="successor"
+                  value={formData.successor}
+                  onChange={(e) => setFormData({ ...formData, successor: e.target.value })}
+                  placeholder="Nom du successeur"
+                />
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="successor">Successeur</Label>
-              <Input
-                id="successor"
-                value={formData.successor}
-                onChange={(e) => setFormData({ ...formData, successor: e.target.value })}
-                placeholder="Nom du successeur"
-              />
-            </div>
+
           </CardContent>
         </Card>
 
@@ -343,7 +505,18 @@ export function AddClient() {
             <CardTitle>Informations de contact</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email *</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                  placeholder="client@example.com"
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Téléphone</Label>
                 <Input
@@ -363,6 +536,36 @@ export function AddClient() {
                   value={formData.mobile}
                   onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
                   placeholder="06 12 34 56 78"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="address">Adresse</Label>
+                <Input
+                  id="address"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Adresse complète"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="postalCode">Code postal</Label>
+                <Input
+                  id="postalCode"
+                  value={formData.postalCode}
+                  onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
+                  placeholder="75001"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="city">Ville</Label>
+                <Input
+                  id="city"
+                  value={formData.city}
+                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  placeholder="Paris"
                 />
               </div>
             </div>
@@ -477,7 +680,7 @@ export function AddClient() {
                 id="platformAccess"
                 checked={formData.platformAccess}
                 onChange={(e) => setFormData({ ...formData, platformAccess: e.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                className="client-checkbox"
               />
               <Label htmlFor="platformAccess" className="cursor-pointer">
                 Connexion à la plateforme
@@ -490,10 +693,10 @@ export function AddClient() {
                 id="active"
                 checked={formData.active}
                 onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                className="client-checkbox"
               />
               <Label htmlFor="active" className="cursor-pointer">
-                Activer / Désactiver
+                Actif
               </Label>
             </div>
 
@@ -522,27 +725,312 @@ export function AddClient() {
         </Card>
 
         {/* Fiche patrimoniale */}
+        <Collapsible open={isPatrimonialOpen} onOpenChange={setIsPatrimonialOpen}>
         <Card>
-          <CardHeader>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-slate-50 transition-colors">
+                <div className="flex items-center justify-between pb-6">
             <CardTitle>Fiche patrimoniale</CardTitle>
+                    <ChevronDown className={`client-chevron ${isPatrimonialOpen ? 'open' : ''}`} />
+                </div>
           </CardHeader>
-          <CardContent>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsPatrimonialModalOpen(true)}
-              className="w-full"
-            >
-              <FileText className="w-4 h-4 mr-2" />
-              {formData.professionalActivityStatus ? 'Modifier la fiche patrimoniale' : 'Remplir la fiche patrimoniale'}
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="space-y-6">
+                {/* Activité professionnelle */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Activité professionnelle</h3>
+                  <div className="space-y-2">
+                    <Label>Statut</Label>
+                    <Select
+                      value={formData.professionalActivityStatus}
+                      onValueChange={(value) => setFormData({ ...formData, professionalActivityStatus: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Sélectionner un statut" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Aucune">Aucune</SelectItem>
+                        <SelectItem value="En activité">En activité</SelectItem>
+                        <SelectItem value="Salarié(e)">Salarié(e)</SelectItem>
+                        <SelectItem value="Entrepreneur">Entrepreneur</SelectItem>
+                        <SelectItem value="Profession libérale">Profession libérale</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.professionalActivityComment}
+                      onChange={(e) => setFormData({ ...formData, professionalActivityComment: e.target.value })}
+                      placeholder="Commentaire sur l'activité professionnelle"
+                    />
+                  </div>
+                </div>
+
+                {/* Métiers */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Métiers</h3>
+                  <div className="space-y-2">
+                    <Label>Métier(s)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newProfession}
+                        onChange={(e) => setNewProfession(e.target.value)}
+                        placeholder="Ajouter un métier"
+                        onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addProfession())}
+                      />
+                      <Button type="button" onClick={addProfession} size="icon">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {formData.professions.map((profession, index) => (
+                        <div key={index} className="client-profession-badge">
+                          <span>{profession}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeProfession(index)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.professionsComment}
+                      onChange={(e) => setFormData({ ...formData, professionsComment: e.target.value })}
+                      placeholder="Commentaire sur les métiers"
+                    />
+                  </div>
+                </div>
+
+                {/* Patrimoine */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Patrimoine</h3>
+                  <div className="space-y-2">
+                    <Label>Banque</Label>
+                    <Input
+                      value={formData.bankName}
+                      onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
+                      placeholder="Nom de la banque"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Compte courant (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.currentAccount}
+                        onChange={(e) => setFormData({ ...formData, currentAccount: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Livret A/B (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.livretAB}
+                        onChange={(e) => setFormData({ ...formData, livretAB: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>PEA (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.pea}
+                        onChange={(e) => setFormData({ ...formData, pea: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>PEL (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.pel}
+                        onChange={(e) => setFormData({ ...formData, pel: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>LDD (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.ldd}
+                        onChange={(e) => setFormData({ ...formData, ldd: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="font-semibold">Épargne</Label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>CEL (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={formData.cel}
+                          onChange={(e) => setFormData({ ...formData, cel: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>CSL (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={formData.csl}
+                          onChange={(e) => setFormData({ ...formData, csl: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Compte titre (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={formData.securitiesAccount}
+                          onChange={(e) => setFormData({ ...formData, securitiesAccount: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Assurance-vie (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={formData.lifeInsurance}
+                          onChange={(e) => setFormData({ ...formData, lifeInsurance: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.savingsComment}
+                      onChange={(e) => setFormData({ ...formData, savingsComment: e.target.value })}
+                      placeholder="Commentaire sur l'épargne"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="font-semibold">Total du patrimoine (€)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={formData.totalWealth}
+                      onChange={(e) => setFormData({ ...formData, totalWealth: parseFloat(e.target.value) || 0 })}
+                      readOnly
+                      className="bg-slate-50"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={calculateTotalWealth}>
+                      Calculer automatiquement
             </Button>
-            {formData.professionalActivityStatus && (
-              <p className="text-sm text-slate-500 mt-2">
-                Fiche patrimoniale remplie ({formData.professions.length} métier(s), Patrimoine: {formData.totalWealth.toFixed(2)} €)
-              </p>
-            )}
+                  </div>
+                </div>
+
+                {/* Objectifs et expérience */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Objectifs et expérience</h3>
+                  <div className="space-y-2">
+                    <Label>Objectifs</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Epargne', 'Fructifier', 'Succession'].map((obj) => (
+                        <button
+                          key={obj}
+                          type="button"
+                          onClick={() => toggleObjective(obj)}
+                          className={`client-badge ${
+                            formData.objectives.includes(obj) ? 'active' : ''
+                          }`}
+                        >
+                          {obj}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.objectivesComment}
+                      onChange={(e) => setFormData({ ...formData, objectivesComment: e.target.value })}
+                      placeholder="Commentaire sur les objectifs"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Expérience</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Bourse', 'Livrets', 'Placements', 'Risque'].map((exp) => (
+                        <button
+                          key={exp}
+                          type="button"
+                          onClick={() => toggleExperience(exp)}
+                          className={`client-badge ${
+                            formData.experience.includes(exp) ? 'active' : ''
+                          }`}
+                        >
+                          {exp}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.experienceComment}
+                      onChange={(e) => setFormData({ ...formData, experienceComment: e.target.value })}
+                      placeholder="Commentaire sur l'expérience"
+                    />
+                  </div>
+                </div>
+
+                {/* Informations financières */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Informations financières</h3>
+                  <div className="space-y-2">
+                    <Label>Défiscalisation</Label>
+                    <Select
+                      value={formData.taxOptimization ? 'Oui' : 'Non'}
+                      onValueChange={(value) => setFormData({ ...formData, taxOptimization: value === 'Oui' })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Non">Non</SelectItem>
+                        <SelectItem value="Oui">Oui</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Commentaire</Label>
+                    <Textarea
+                      value={formData.taxOptimizationComment}
+                      onChange={(e) => setFormData({ ...formData, taxOptimizationComment: e.target.value })}
+                      placeholder="Commentaire sur la défiscalisation"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Revenu annuel du foyer (€)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={formData.annualHouseholdIncome}
+                      onChange={(e) => setFormData({ ...formData, annualHouseholdIncome: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
           </CardContent>
+            </CollapsibleContent>
         </Card>
+        </Collapsible>
 
         {/* Actions */}
         <div className="flex justify-end gap-4 pt-4">
@@ -566,14 +1054,6 @@ export function AddClient() {
           </Button>
         </div>
       </form>
-
-      {/* Modal Fiche patrimoniale */}
-      <PatrimonialFormModal
-        isOpen={isPatrimonialModalOpen}
-        onClose={() => setIsPatrimonialModalOpen(false)}
-        onSave={handlePatrimonialSave}
-        initialData={formData}
-      />
     </div>
   );
 }
