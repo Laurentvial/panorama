@@ -8,6 +8,9 @@ import Planning from './components/PlanningCalendar';
 import Clients from './components/Clients';
 import AddClient from './components/AddClient';
 import { ClientDetail } from './components/ClientDetail';
+import { ManageRibs } from './components/ManageRibs';
+import { ManageAssets } from './components/ManageAssets';
+import { ManageUsefulLinks } from './components/ManageUsefulLinks';
 import { UserProvider } from './contexts/UserContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
@@ -83,6 +86,27 @@ function App() {
                         <ProtectedRoute>
                             <Layout>
                                 <ClientDetailWrapper />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/manage/ribs" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <ManageRibs />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/manage/assets" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <ManageAssets />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/manage/useful-links" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <ManageUsefulLinks />
                             </Layout>
                         </ProtectedRoute>
                     } />

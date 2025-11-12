@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink
 import uuid
 
 class UserSerializer(serializers.ModelSerializer):
@@ -12,7 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = DjangoUser
-        fields = ['id', 'username', 'email', 'password', 'first_name', 'last_name', 'role', 'teamId']
+        fields = ['id', 'username', 'email', 'password', 'first_name', 'last_name', 'role', 'phone', 'teamId']
         extra_kwargs = {
             'password': {'write_only': True},
             'email': {'required': False, 'allow_blank': True},
@@ -381,4 +381,151 @@ class EventSerializer(serializers.ModelSerializer):
             local_dt = utc_dt.astimezone(local_tz)
             # Retourner le datetime en format ISO sans timezone pour que le frontend le traite comme local
             ret['datetime'] = local_dt.replace(tzinfo=None).isoformat()
+        return ret
+
+class LogSerializer(serializers.ModelSerializer):
+    userId = serializers.SerializerMethodField()
+    eventType = serializers.CharField(source='event_type', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    oldValue = serializers.JSONField(source='old_value', read_only=True)
+    newValue = serializers.JSONField(source='new_value', read_only=True)
+    
+    class Meta:
+        model = Log
+        fields = ['id', 'eventType', 'userId', 'createdAt', 'details', 'oldValue', 'newValue']
+        read_only_fields = ['id', 'createdAt']
+    
+    def get_userId(self, obj):
+        return obj.user_id.id if obj.user_id else None
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['eventType'] = instance.event_type
+        ret['userId'] = instance.user_id.id if instance.user_id else None
+        ret['createdAt'] = instance.created_at
+        ret['details'] = instance.details if instance.details else {}
+        ret['oldValue'] = instance.old_value if instance.old_value else {}
+        ret['newValue'] = instance.new_value if instance.new_value else {}
+        return ret
+
+class AssetSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = Asset
+        fields = ['id', 'type', 'name', 'reference', 'category', 'subcategory', 'default', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['default'] = bool(instance.default)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class ClientAssetSerializer(serializers.ModelSerializer):
+    asset = AssetSerializer(read_only=True)
+    assetId = serializers.CharField(write_only=True, required=False)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    featured = serializers.BooleanField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientAsset
+        fields = ['id', 'clientId', 'asset', 'assetId', 'featured', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
+        ret['asset'] = AssetSerializer(instance.asset).data
+        ret['featured'] = bool(instance.featured)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class RIBSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    bankName = serializers.CharField(source='bank_name', read_only=True)
+    accountHolder = serializers.CharField(source='account_holder', read_only=True)
+    bankCode = serializers.CharField(source='bank_code', read_only=True)
+    branchCode = serializers.CharField(source='branch_code', read_only=True)
+    accountNumber = serializers.CharField(source='account_number', read_only=True)
+    ribKey = serializers.CharField(source='rib_key', read_only=True)
+    
+    class Meta:
+        model = RIB
+        fields = ['id', 'name', 'iban', 'bic', 'bankName', 'accountHolder', 'bankCode', 'branchCode', 'accountNumber', 'ribKey', 'domiciliation', 'default', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['bankName'] = instance.bank_name
+        ret['accountHolder'] = instance.account_holder
+        ret['bankCode'] = instance.bank_code
+        ret['branchCode'] = instance.branch_code
+        ret['accountNumber'] = instance.account_number
+        ret['ribKey'] = instance.rib_key
+        ret['default'] = bool(instance.default)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class ClientRIBSerializer(serializers.ModelSerializer):
+    rib = RIBSerializer(read_only=True)
+    ribId = serializers.CharField(write_only=True, required=False)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientRIB
+        fields = ['id', 'clientId', 'rib', 'ribId', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
+        ret['rib'] = RIBSerializer(instance.rib).data
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class UsefulLinkSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = UsefulLink
+        fields = ['id', 'name', 'url', 'description', 'category', 'default', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['default'] = bool(instance.default)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class ClientUsefulLinkSerializer(serializers.ModelSerializer):
+    usefulLink = UsefulLinkSerializer(source='useful_link', read_only=True)
+    usefulLinkId = serializers.CharField(write_only=True, required=False)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientUsefulLink
+        fields = ['id', 'clientId', 'usefulLink', 'usefulLinkId', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
+        ret['usefulLink'] = UsefulLinkSerializer(instance.useful_link).data
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
         return ret

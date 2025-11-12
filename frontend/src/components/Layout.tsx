@@ -23,6 +23,9 @@ export function Layout({ children }: LayoutProps) {
     if (path === '/transactions') return 'transactions';
     if (path === '/messagerie') return 'messagerie';
     if (path === '/placements') return 'placements';
+    if (path === '/manage/ribs') return 'manage-ribs';
+    if (path === '/manage/assets') return 'manage-assets';
+    if (path === '/manage/useful-links') return 'manage-links';
     return 'dashboard';
   };
 

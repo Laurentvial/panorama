@@ -8,21 +8,210 @@ from .models import UserDetails
 from .models import Team
 from .models import Event
 from .models import TeamMember
+from .models import Log
+from .models import Asset
+from .models import ClientAsset
+from .models import RIB
+from .models import ClientRIB
+from .models import UsefulLink
+from .models import ClientUsefulLink
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
-    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer
+    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
+    AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 import uuid
+import json
+
+
+def get_client_ip(request):
+    """Extract client IP address from request, checking multiple headers"""
+    # Check various headers that might contain the real client IP
+    # X-Forwarded-For can contain multiple IPs (client, proxy1, proxy2)
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        # Get the first IP (original client) and strip whitespace
+        ip = x_forwarded_for.split(',')[0].strip()
+        if ip:
+            return ip
+    
+    # Check X-Real-IP header (used by some proxies)
+    x_real_ip = request.META.get('HTTP_X_REAL_IP')
+    if x_real_ip:
+        ip = x_real_ip.strip()
+        if ip:
+            return ip
+    
+    # Check CF-Connecting-IP (Cloudflare)
+    cf_connecting_ip = request.META.get('HTTP_CF_CONNECTING_IP')
+    if cf_connecting_ip:
+        ip = cf_connecting_ip.strip()
+        if ip:
+            return ip
+    
+    # Fallback to REMOTE_ADDR
+    ip = request.META.get('REMOTE_ADDR', '')
+    return ip.strip() if ip else 'Unknown'
+
+
+def get_browser_info(request):
+    """Extract browser information from request headers"""
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    
+    # Parse browser info from user agent
+    browser_info = {
+        'user_agent': user_agent,
+    }
+    
+    # Try to extract browser name and version
+    if user_agent:
+        user_agent_lower = user_agent.lower()
+        
+        # Detect browser
+        if 'chrome' in user_agent_lower and 'edg' not in user_agent_lower:
+            browser_info['browser'] = 'Chrome'
+            # Extract Chrome version
+            try:
+                chrome_index = user_agent_lower.find('chrome/')
+                if chrome_index != -1:
+                    version_part = user_agent[chrome_index + 7:chrome_index + 20]
+                    version = version_part.split()[0].split('.')[0]
+                    browser_info['browser_version'] = version
+            except:
+                pass
+        elif 'firefox' in user_agent_lower:
+            browser_info['browser'] = 'Firefox'
+            try:
+                firefox_index = user_agent_lower.find('firefox/')
+                if firefox_index != -1:
+                    version_part = user_agent[firefox_index + 8:firefox_index + 20]
+                    version = version_part.split()[0].split('.')[0]
+                    browser_info['browser_version'] = version
+            except:
+                pass
+        elif 'safari' in user_agent_lower and 'chrome' not in user_agent_lower:
+            browser_info['browser'] = 'Safari'
+        elif 'edg' in user_agent_lower:
+            browser_info['browser'] = 'Edge'
+        elif 'opera' in user_agent_lower or 'opr' in user_agent_lower:
+            browser_info['browser'] = 'Opera'
+        
+        # Detect OS
+        if 'windows' in user_agent_lower:
+            browser_info['os'] = 'Windows'
+            if 'windows nt 10.0' in user_agent_lower:
+                browser_info['os_version'] = '10'
+            elif 'windows nt 11.0' in user_agent_lower:
+                browser_info['os_version'] = '11'
+        elif 'mac' in user_agent_lower or 'macintosh' in user_agent_lower:
+            browser_info['os'] = 'macOS'
+        elif 'linux' in user_agent_lower:
+            browser_info['os'] = 'Linux'
+        elif 'android' in user_agent_lower:
+            browser_info['os'] = 'Android'
+        elif 'ios' in user_agent_lower or 'iphone' in user_agent_lower or 'ipad' in user_agent_lower:
+            browser_info['os'] = 'iOS'
+    
+    return browser_info
+
+
+def get_user_data_for_log(django_user, user_details=None):
+    """Helper function to extract user data for logging"""
+    user_data = {
+        'id': str(django_user.id),
+        'username': django_user.username,
+        'email': django_user.email or '',
+        'first_name': django_user.first_name or '',
+        'last_name': django_user.last_name or '',
+    }
+    
+    # Get UserDetails if not provided
+    if user_details is None:
+        try:
+            user_details = UserDetails.objects.get(django_user=django_user)
+        except UserDetails.DoesNotExist:
+            return user_data
+    
+    if user_details:
+        user_data['user_details_id'] = user_details.id
+        user_data['role'] = user_details.role
+        if user_details.phone:
+            user_data['phone'] = user_details.phone
+        
+        # Get team ID if user is in a team
+        team_member = user_details.team_memberships.first()
+        if team_member:
+            user_data['teamId'] = team_member.team.id
+    
+    return user_data
+
+
+def get_team_data_for_log(team):
+    """Helper function to extract team data for logging"""
+    team_data = {
+        'id': team.id,
+        'name': team.name,
+    }
+    
+    # Get team members count
+    team_members_count = team.team_members.count()
+    if team_members_count > 0:
+        team_data['members_count'] = team_members_count
+    
+    return team_data
+
+
+def create_log_entry(event_type, user_id, request, old_value=None, new_value=None):
+    """Create a log entry for an activity"""
+    # Generate log ID
+    log_id = uuid.uuid4().hex[:12]
+    while Log.objects.filter(id=log_id).exists():
+        log_id = uuid.uuid4().hex[:12]
+    
+    # Extract details from request
+    details = {
+        'ip_address': get_client_ip(request),
+        'browser': get_browser_info(request),
+    }
+    
+    # Create log entry
+    Log.objects.create(
+        id=log_id,
+        event_type=event_type,
+        user_id=user_id if user_id else None,
+        details=details,
+        old_value=old_value if old_value else {},
+        new_value=new_value if new_value else {}
+    )
 
 
 class UserCreateView(generics.CreateAPIView):
     queryset = DjangoUser.objects.all()
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
+    
+    def perform_create(self, serializer):
+        # Save the user (this will trigger the serializer's create method)
+        user = serializer.save()
+        
+        # Get the user who created this (if authenticated, otherwise None)
+        created_by_user = self.request.user if self.request.user.is_authenticated else None
+        
+        # Prepare new_value with user data using helper function
+        new_value = get_user_data_for_log(user)
+        
+        # Create log entry
+        create_log_entry(
+            event_type='createUser',
+            user_id=created_by_user,
+            request=self.request,
+            old_value={},  # No old value for creation
+            new_value=new_value
+        )
 
 class NoteListCreateView(generics.ListCreateAPIView):
     serializer_class = NoteSerializer
@@ -427,6 +616,17 @@ def team_create(request):
         while Team.objects.filter(id=team_id).exists():
             team_id = uuid.uuid4().hex[:12]
         team = serializer.save(id=team_id)
+        
+        # Create log entry
+        new_value = get_team_data_for_log(team)
+        create_log_entry(
+            event_type='createTeam',
+            user_id=request.user,
+            request=request,
+            old_value={},  # No old value for creation
+            new_value=new_value
+        )
+        
         return Response(TeamSerializer(team).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -434,7 +634,22 @@ def team_create(request):
 @permission_classes([IsAuthenticated])
 def team_delete(request, team_id):
     team = get_object_or_404(Team, id=team_id)
+    
+    # Get old value before deletion for logging
+    old_value = get_team_data_for_log(team)
+    
+    # Delete the team
     team.delete()
+    
+    # Create log entry
+    create_log_entry(
+        event_type='deleteTeam',
+        user_id=request.user,
+        request=request,
+        old_value=old_value,
+        new_value={}  # No new value for deletion
+    )
+    
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['GET', 'PATCH'])
@@ -443,10 +658,29 @@ def team_detail(request, team_id):
     team = get_object_or_404(Team, id=team_id)
     
     if request.method == 'PATCH':
+        # Get old value before update for logging
+        old_value = get_team_data_for_log(team)
+        
         # Update team name
         if 'name' in request.data:
             team.name = request.data['name']
             team.save()
+        
+        # Refresh team to get updated timestamp
+        team.refresh_from_db()
+        
+        # Get new value after update for logging
+        new_value = get_team_data_for_log(team)
+        
+        # Create log entry
+        create_log_entry(
+            event_type='editTeam',
+            user_id=request.user,
+            request=request,
+            old_value=old_value,
+            new_value=new_value
+        )
+        
         serializer = TeamSerializer(team)
         return Response(serializer.data)
     
@@ -469,8 +703,25 @@ def user_list(request):
 @permission_classes([IsAuthenticated])
 def user_delete(request, user_id):
     user_details = get_object_or_404(UserDetails, id=user_id)
+    
+    # Get old value before deletion for logging
+    old_value = {}
+    if user_details.django_user:
+        old_value = get_user_data_for_log(user_details.django_user, user_details)
+    
+    # Delete the user
     if user_details.django_user:
         user_details.django_user.delete()
+    
+    # Create log entry
+    create_log_entry(
+        event_type='deleteUser',
+        user_id=request.user,
+        request=request,
+        old_value=old_value,
+        new_value={}  # No new value for deletion
+    )
+    
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['POST'])
@@ -482,6 +733,46 @@ def user_toggle_active(request, user_id):
     user_details.save()
     return Response({'active': user_details.active})
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_reset_password(request, user_id):
+    """Reset password for a user"""
+    user_details = get_object_or_404(UserDetails, id=user_id)
+    django_user = user_details.django_user
+    
+    if not django_user:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get new password from request, or use default
+    new_password = request.data.get('password', 'Access@123')
+    
+    # Validate password length
+    if len(new_password) < 6:
+        return Response({'error': 'Password must be at least 6 characters long'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get old value for logging (without password for security)
+    old_value = get_user_data_for_log(django_user, user_details)
+    
+    # Reset password using Django's set_password which properly hashes it
+    django_user.set_password(new_password)
+    django_user.save()
+    
+    # Get new value for logging (password is not included in user data)
+    new_value = get_user_data_for_log(django_user, user_details)
+    # Add indicator that password was reset
+    new_value['password_reset'] = True
+    
+    # Create log entry
+    create_log_entry(
+        event_type='resetPassword',
+        user_id=request.user,
+        request=request,
+        old_value=old_value,
+        new_value=new_value
+    )
+    
+    return Response({'message': 'Password reset successfully'}, status=status.HTTP_200_OK)
+
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def user_update(request, user_id):
@@ -490,6 +781,9 @@ def user_update(request, user_id):
     
     if not django_user:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get old value before update for logging
+    old_value = get_user_data_for_log(django_user, user_details)
     
     # Update Django User fields
     if 'first_name' in request.data:
@@ -532,6 +826,21 @@ def user_update(request, user_id):
         # If team_id is None or empty, user is removed from all teams (already done above)
     
     user_details.save()
+    
+    # Refresh user_details to get updated team membership
+    user_details.refresh_from_db()
+    
+    # Get new value after update for logging
+    new_value = get_user_data_for_log(django_user, user_details)
+    
+    # Create log entry
+    create_log_entry(
+        event_type='editUser',
+        user_id=request.user,
+        request=request,
+        old_value=old_value,
+        new_value=new_value
+    )
     
     # Return updated user data
     serializer = UserDetailsSerializer(user_details)
@@ -693,3 +1002,359 @@ def team_set_leader(request, team_id):
         return Response(serializer.data, status=status.HTTP_200_OK)
     except UserDetails.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+# Assets endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def asset_list(request):
+    """Liste tous les assets disponibles"""
+    assets = Asset.objects.all().order_by('type', 'name')
+    serializer = AssetSerializer(assets, many=True)
+    return Response({'assets': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def asset_create(request):
+    """Créer un nouvel asset"""
+    serializer = AssetSerializer(data=request.data)
+    if serializer.is_valid():
+        # Generate asset ID
+        asset_id = uuid.uuid4().hex[:12]
+        while Asset.objects.filter(id=asset_id).exists():
+            asset_id = uuid.uuid4().hex[:12]
+        asset = serializer.save(id=asset_id)
+        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def asset_update(request, asset_id):
+    """Modifier un asset"""
+    asset = get_object_or_404(Asset, id=asset_id)
+    serializer = AssetSerializer(asset, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def asset_delete(request, asset_id):
+    """Supprimer un asset"""
+    asset = get_object_or_404(Asset, id=asset_id)
+    asset.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_assets(request, client_id):
+    """Liste les assets d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
+    serializer = ClientAssetSerializer(client_assets, many=True)
+    return Response({'assets': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_asset_add(request, client_id):
+    """Ajouter un asset à un client"""
+    client = get_object_or_404(Client, id=client_id)
+    asset_id = request.data.get('assetId')
+    
+    if not asset_id:
+        return Response({'error': 'assetId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        asset = Asset.objects.get(id=asset_id)
+        
+        # Check if client already has this asset
+        if ClientAsset.objects.filter(client=client, asset=asset).exists():
+            return Response({'error': 'Client already has this asset'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Generate ClientAsset ID
+        client_asset_id = uuid.uuid4().hex[:12]
+        while ClientAsset.objects.filter(id=client_asset_id).exists():
+            client_asset_id = uuid.uuid4().hex[:12]
+        
+        # Create ClientAsset relationship
+        client_asset = ClientAsset.objects.create(
+            id=client_asset_id,
+            client=client,
+            asset=asset
+        )
+        
+        serializer = ClientAssetSerializer(client_asset)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Asset.DoesNotExist:
+        return Response({'error': 'Asset not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_asset_remove(request, client_id, asset_id):
+    """Retirer un asset d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    try:
+        client_asset = ClientAsset.objects.get(client=client, asset=asset)
+        client_asset.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except ClientAsset.DoesNotExist:
+        return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def client_asset_toggle_featured(request, client_id, asset_id):
+    """Basculer le statut 'mis en avant' d'un asset pour un client"""
+    client = get_object_or_404(Client, id=client_id)
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    try:
+        client_asset = ClientAsset.objects.get(client=client, asset=asset)
+        client_asset.featured = not client_asset.featured
+        client_asset.save()
+        serializer = ClientAssetSerializer(client_asset)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except ClientAsset.DoesNotExist:
+        return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_assets_reset(request, client_id):
+    """Réinitialiser les assets d'un client : retirer ceux qui ne sont pas default=True, ajouter ceux qui sont default=True"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Get all current client assets (convert to list to avoid query issues after deletion)
+    current_client_assets = list(ClientAsset.objects.filter(client=client).select_related('asset'))
+    current_asset_ids = {ca.asset.id for ca in current_client_assets}
+    
+    # Get all default assets
+    default_assets = Asset.objects.filter(default=True)
+    
+    # Remove assets that are not default=True
+    removed_count = 0
+    for client_asset in current_client_assets:
+        if not client_asset.asset.default:
+            client_asset.delete()
+            removed_count += 1
+    
+    # Add assets that are default=True and not already assigned
+    added_count = 0
+    for asset in default_assets:
+        if asset.id not in current_asset_ids:
+            # Generate ClientAsset ID
+            client_asset_id = uuid.uuid4().hex[:12]
+            while ClientAsset.objects.filter(id=client_asset_id).exists():
+                client_asset_id = uuid.uuid4().hex[:12]
+            
+            # Create ClientAsset relationship
+            ClientAsset.objects.create(
+                id=client_asset_id,
+                client=client,
+                asset=asset
+            )
+            added_count += 1
+    
+    return Response({
+        'message': 'Assets réinitialisés avec succès',
+        'removed': removed_count,
+        'added': added_count
+    }, status=status.HTTP_200_OK)
+
+# RIBs endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def rib_list(request):
+    """Liste tous les RIBs disponibles"""
+    ribs = RIB.objects.all().order_by('name')
+    serializer = RIBSerializer(ribs, many=True)
+    return Response({'ribs': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def rib_create(request):
+    """Créer un nouveau RIB"""
+    serializer = RIBSerializer(data=request.data)
+    if serializer.is_valid():
+        # Generate RIB ID
+        rib_id = uuid.uuid4().hex[:12]
+        while RIB.objects.filter(id=rib_id).exists():
+            rib_id = uuid.uuid4().hex[:12]
+        rib = serializer.save(id=rib_id)
+        return Response(RIBSerializer(rib).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def rib_update(request, rib_id):
+    """Modifier un RIB"""
+    rib = get_object_or_404(RIB, id=rib_id)
+    serializer = RIBSerializer(rib, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(RIBSerializer(rib).data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def rib_delete(request, rib_id):
+    """Supprimer un RIB"""
+    rib = get_object_or_404(RIB, id=rib_id)
+    rib.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_ribs(request, client_id):
+    """Liste les RIBs d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    client_ribs = ClientRIB.objects.filter(client=client).select_related('rib')
+    serializer = ClientRIBSerializer(client_ribs, many=True)
+    return Response({'ribs': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_rib_add(request, client_id):
+    """Ajouter un RIB à un client"""
+    client = get_object_or_404(Client, id=client_id)
+    rib_id = request.data.get('ribId')
+    
+    if not rib_id:
+        return Response({'error': 'ribId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        rib = RIB.objects.get(id=rib_id)
+        
+        # Check if client already has this RIB
+        if ClientRIB.objects.filter(client=client, rib=rib).exists():
+            return Response({'error': 'Client already has this RIB'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Generate ClientRIB ID
+        client_rib_id = uuid.uuid4().hex[:12]
+        while ClientRIB.objects.filter(id=client_rib_id).exists():
+            client_rib_id = uuid.uuid4().hex[:12]
+        
+        # Create ClientRIB relationship
+        client_rib = ClientRIB.objects.create(
+            id=client_rib_id,
+            client=client,
+            rib=rib
+        )
+        
+        serializer = ClientRIBSerializer(client_rib)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except RIB.DoesNotExist:
+        return Response({'error': 'RIB not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_rib_remove(request, client_id, rib_id):
+    """Retirer un RIB d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    rib = get_object_or_404(RIB, id=rib_id)
+    
+    try:
+        client_rib = ClientRIB.objects.get(client=client, rib=rib)
+        client_rib.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except ClientRIB.DoesNotExist:
+        return Response({'error': 'Client RIB relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+# Useful Links endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def useful_link_list(request):
+    """Liste tous les liens utiles disponibles"""
+    useful_links = UsefulLink.objects.all().order_by('name')
+    serializer = UsefulLinkSerializer(useful_links, many=True)
+    return Response({'usefulLinks': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def useful_link_create(request):
+    """Créer un nouveau lien utile"""
+    serializer = UsefulLinkSerializer(data=request.data)
+    if serializer.is_valid():
+        # Generate UsefulLink ID
+        useful_link_id = uuid.uuid4().hex[:12]
+        while UsefulLink.objects.filter(id=useful_link_id).exists():
+            useful_link_id = uuid.uuid4().hex[:12]
+        useful_link = serializer.save(id=useful_link_id)
+        return Response(UsefulLinkSerializer(useful_link).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def useful_link_update(request, useful_link_id):
+    """Modifier un lien utile"""
+    useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
+    serializer = UsefulLinkSerializer(useful_link, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(UsefulLinkSerializer(useful_link).data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def useful_link_delete(request, useful_link_id):
+    """Supprimer un lien utile"""
+    useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
+    useful_link.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_useful_links(request, client_id):
+    """Liste les liens utiles d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    client_useful_links = ClientUsefulLink.objects.filter(client=client).select_related('useful_link')
+    serializer = ClientUsefulLinkSerializer(client_useful_links, many=True)
+    return Response({'usefulLinks': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_useful_link_add(request, client_id):
+    """Ajouter un lien utile à un client"""
+    client = get_object_or_404(Client, id=client_id)
+    useful_link_id = request.data.get('usefulLinkId')
+    
+    if not useful_link_id:
+        return Response({'error': 'usefulLinkId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        useful_link = UsefulLink.objects.get(id=useful_link_id)
+        
+        # Check if client already has this useful link
+        if ClientUsefulLink.objects.filter(client=client, useful_link=useful_link).exists():
+            return Response({'error': 'Client already has this useful link'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Generate ClientUsefulLink ID
+        client_useful_link_id = uuid.uuid4().hex[:12]
+        while ClientUsefulLink.objects.filter(id=client_useful_link_id).exists():
+            client_useful_link_id = uuid.uuid4().hex[:12]
+        
+        # Create ClientUsefulLink relationship
+        client_useful_link = ClientUsefulLink.objects.create(
+            id=client_useful_link_id,
+            client=client,
+            useful_link=useful_link
+        )
+        
+        serializer = ClientUsefulLinkSerializer(client_useful_link)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except UsefulLink.DoesNotExist:
+        return Response({'error': 'Useful link not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_useful_link_remove(request, client_id, useful_link_id):
+    """Retirer un lien utile d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
+    
+    try:
+        client_useful_link = ClientUsefulLink.objects.get(client=client, useful_link=useful_link)
+        client_useful_link.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except ClientUsefulLink.DoesNotExist:
+        return Response({'error': 'Client useful link relationship not found'}, status=status.HTTP_404_NOT_FOUND)

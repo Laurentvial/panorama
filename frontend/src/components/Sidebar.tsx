@@ -9,7 +9,9 @@ import {
   CreditCard, 
   Mail, 
   TrendingUp,
-  Package
+  Package,
+  Wallet,
+  Link as LinkIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,7 +31,10 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
     { id: 'clients', label: 'Clients', icon: UserCircle, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/clients' },
     { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/transactions' },
     { id: 'messagerie', label: 'Messagerie', icon: Mail, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/messagerie' },
+    { id: 'manage-assets', label: 'Gestion Actifs', icon: TrendingUp, roles: ['admin'], path: '/manage/assets' },
     { id: 'placements', label: 'Placements', icon: Package, roles: ['admin'], path: '/placements' },
+    { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin'], path: '/manage/ribs' },
+    { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin'], path: '/manage/useful-links' },
   ];
 
   // Normalize user role for comparison

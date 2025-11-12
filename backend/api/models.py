@@ -128,3 +128,108 @@ class Event(models.Model):
 
     def __str__(self):
         return f"Event {self.id} - {self.datetime}"
+
+class Log(models.Model):
+    """Table for tracking all CRM activity logs"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    event_type = models.CharField(max_length=100, default="")  # createUser, editUser, createClient, etc.
+    user_id = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='activity_logs')
+    created_at = models.DateTimeField(auto_now_add=True)
+    details = models.JSONField(default=dict, blank=True)  # IP, browser info, and other metadata
+    old_value = models.JSONField(default=dict, null=True, blank=True)  # Previous state
+    new_value = models.JSONField(default=dict, null=True, blank=True)  # New state
+
+    def __str__(self):
+        return f"Log {self.id} - {self.event_type} - {self.created_at}"
+
+class Asset(models.Model):
+    """Table des actifs disponibles (bourse, cryptos, etc.)"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    type = models.CharField(max_length=50, default="")  # Bourse, Crypto, etc.
+    name = models.CharField(max_length=200, default="")  # Nom de l'actif
+    reference = models.CharField(max_length=100, default="", blank=True)  # Référence (ex: ISIN, ticker)
+    category = models.CharField(max_length=100, default="", blank=True, null=True)  # Catégorie
+    subcategory = models.CharField(max_length=100, default="", blank=True, null=True)  # Sous-catégorie
+    default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.type})"
+
+class ClientAsset(models.Model):
+    """Table relationnelle entre Client et Asset"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_assets')
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='client_assets')
+    featured = models.BooleanField(default=False)  # Si True, l'actif est mis en avant pour ce client
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['client', 'asset']  # Un client ne peut avoir qu'une fois le même actif
+
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.asset.name}"
+
+class RIB(models.Model):
+    """Table des RIBs disponibles"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    name = models.CharField(max_length=200, default="")  # Nom du RIB
+    iban = models.CharField(max_length=34, default="", blank=True)  # IBAN
+    bic = models.CharField(max_length=11, default="", blank=True)  # BIC
+    bank_name = models.CharField(max_length=200, default="", blank=True)  # Nom de la banque
+    account_holder = models.CharField(max_length=200, default="", blank=True)  # Titulaire du compte
+    bank_code = models.CharField(max_length=5, default="", blank=True)  # Code banque (5 chiffres)
+    branch_code = models.CharField(max_length=5, default="", blank=True)  # Code guichet (5 chiffres)
+    account_number = models.CharField(max_length=11, default="", blank=True)  # Numéro de compte (11 caractères)
+    rib_key = models.CharField(max_length=2, default="", blank=True)  # Clé RIB (2 chiffres)
+    domiciliation = models.CharField(max_length=200, default="", blank=True)  # Domiciliation
+    default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.iban}"
+
+class ClientRIB(models.Model):
+    """Table relationnelle entre Client et RIB"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_ribs')
+    rib = models.ForeignKey(RIB, on_delete=models.CASCADE, related_name='client_ribs')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['client', 'rib']  # Un client ne peut avoir qu'une fois le même RIB
+
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.rib.name}"
+
+class UsefulLink(models.Model):
+    """Table des liens utiles disponibles"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    name = models.CharField(max_length=200, default="")  # Nom du lien
+    url = models.URLField(max_length=500, default="")  # URL du lien
+    description = models.TextField(default="", blank=True)  # Description du lien
+    category = models.CharField(max_length=100, default="", blank=True)  # Catégorie du lien
+    default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.url}"
+
+class ClientUsefulLink(models.Model):
+    """Table relationnelle entre Client et UsefulLink"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_useful_links')
+    useful_link = models.ForeignKey(UsefulLink, on_delete=models.CASCADE, related_name='client_useful_links')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['client', 'useful_link']  # Un client ne peut avoir qu'une fois le même lien
+
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.useful_link.name}"

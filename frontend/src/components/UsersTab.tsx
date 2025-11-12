@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Key } from 'lucide-react';
 import { useUsers } from '../hooks/useUsers';
 import { useTeams } from '../hooks/useTeams';
 import { CreateUserModal } from './CreateUserModal';
 import { EditUserModal } from './EditUserModal';
+import { ResetPasswordModal } from './ResetPasswordModal';
 import { User } from '../types';
 import LoadingIndicator from './LoadingIndicator';
 
@@ -15,6 +16,7 @@ export function UsersTab() {
   const { teams, loading: teamsLoading } = useTeams();
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   async function handleDelete(userId: string) {
@@ -49,6 +51,17 @@ export function UsersTab() {
     refetch();
   }
 
+  function handleResetPasswordClick(user: User) {
+    setSelectedUser(user);
+    setIsResetPasswordModalOpen(true);
+  }
+
+  function handlePasswordReset() {
+    setIsResetPasswordModalOpen(false);
+    setSelectedUser(null);
+    refetch();
+  }
+
   return (
     <>
       <div className="users-teams-action-bar">
@@ -72,6 +85,16 @@ export function UsersTab() {
         }}
         user={selectedUser}
         onUserUpdated={handleUserUpdated}
+      />
+
+      <ResetPasswordModal
+        isOpen={isResetPasswordModalOpen}
+        onClose={() => {
+          setIsResetPasswordModalOpen(false);
+          setSelectedUser(null);
+        }}
+        user={selectedUser}
+        onPasswordReset={handlePasswordReset}
       />
 
       <Card>
@@ -135,14 +158,24 @@ export function UsersTab() {
                               variant="ghost" 
                               size="sm"
                               onClick={() => handleEditClick(user)}
+                              title="Modifier"
                             >
                               <Pencil className="users-teams-icon" />
                             </Button>
                             <Button 
                               variant="ghost" 
                               size="sm"
+                              onClick={() => handleResetPasswordClick(user)}
+                              title="Réinitialiser le mot de passe"
+                            >
+                              <Key className="users-teams-icon" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
                               onClick={() => handleDelete(user.id)}
                               className="users-teams-delete-button"
+                              title="Supprimer"
                             >
                               <Trash2 className="users-teams-icon" />
                             </Button>
