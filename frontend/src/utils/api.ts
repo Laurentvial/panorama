@@ -50,9 +50,13 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   // Don't set Content-Type for FormData, let the browser set it with boundary
   const isFormData = options.body instanceof FormData;
   const headers: HeadersInit = {
-    'Authorization': token ? `Bearer ${token}` : '',
     ...options.headers,
   };
+  
+  // Only add Authorization header if we have a token
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   
   if (!isFormData) {
     headers['Content-Type'] = 'application/json';

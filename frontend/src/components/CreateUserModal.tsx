@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { useTeams } from "../hooks/useTeams";
 import LoadingIndicator from "./LoadingIndicator";
 import { Team } from "../types";
-import "../styles/PlanningCalendar.css";
+import "../styles/Modal.css";
 
 interface CreateUserModalProps {
   isOpen: boolean;
@@ -115,22 +115,22 @@ export function CreateUserModal({
   if (!isOpen) return null;
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Créer un utilisateur</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Créer un utilisateur</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
-        <form onSubmit={handleSubmit} className="planning-form">
-          <div className="planning-form-field">
+        <form onSubmit={handleSubmit} className="modal-form">
+          <div className="modal-form-field">
             <Label htmlFor="create-firstName">Prénom</Label>
             <Input
               id="create-firstName"
@@ -142,7 +142,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-lastName">Nom</Label>
             <Input
               id="create-lastName"
@@ -154,7 +154,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-email">Email</Label>
             <Input
               id="create-email"
@@ -168,7 +168,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-phone">Téléphone</Label>
             <Input
               id="create-phone"
@@ -181,7 +181,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-password">Mot de passe</Label>
             <Input
               id="create-password"
@@ -195,7 +195,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-confirmPassword">Confirmer le mot de passe</Label>
             <Input
               id="create-confirmPassword"
@@ -212,7 +212,7 @@ export function CreateUserModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-role">Rôle</Label>
             <Select
               value={formData.role}
@@ -233,7 +233,7 @@ export function CreateUserModal({
             </Select>
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="create-teamId">Équipe (optionnel)</Label>
             <Select
               value={formData.teamId || "none"}
@@ -268,7 +268,7 @@ export function CreateUserModal({
 
           {loading && <LoadingIndicator />}
 
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button
               type="button"
               variant="outline"

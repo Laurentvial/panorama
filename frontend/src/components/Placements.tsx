@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Plus, Pencil, Trash2, Package, Folder } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import '../styles/PageHeader.css';
 
 interface PlacementsProps {
   user: any;
@@ -152,9 +153,9 @@ export function Placements({ user }: PlacementsProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-slate-900 mb-2">Placements</h1>
-        <p className="text-slate-600">Gestion des produits financiers et catégories</p>
+      <div className="page-header-section">
+        <h1 className="page-title">Placements</h1>
+        <p className="page-subtitle">Gestion des produits financiers et catégories</p>
       </div>
 
       <Tabs defaultValue="products" className="space-y-6">

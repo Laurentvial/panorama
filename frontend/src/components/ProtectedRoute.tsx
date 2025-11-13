@@ -56,13 +56,14 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
     }
     
     if (isAuthenticated === null) {
-        return 
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-            <div>Chargement...</div>
-        </div>
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+                <div>Chargement...</div>
+            </div>
+        );
     }
 
-    return isAuthenticated ? children : <Navigate to="/login" />
+    return isAuthenticated ? <>{children}</> : <Navigate to="/login" />
 }
 
 export default ProtectedRoute;

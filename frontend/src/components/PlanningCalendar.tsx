@@ -10,6 +10,8 @@ import { Calendar as CalendarIcon, Plus, Clock, User, Pencil, Trash2, X } from '
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
+import '../styles/PageHeader.css';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 
@@ -168,10 +170,10 @@ export function PlanningCalendar() {
   if (loading) {
     return (
       <div className="planning-container">
-        <div className="planning-header">
-          <div className="planning-title-section">
-            <h1 className="planning-title">Planning</h1>
-            <p className="planning-subtitle">Gestion des rendez-vous</p>
+        <div className="page-header-section">
+          <div className="page-title-section">
+            <h1 className="page-title">Planning</h1>
+            <p className="page-subtitle">Gestion des rendez-vous</p>
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
@@ -183,10 +185,10 @@ export function PlanningCalendar() {
 
   return (
     <div className="planning-container">
-      <div className="planning-header">
-        <div className="planning-title-section">
-          <h1 className="planning-title">Planning</h1>
-          <p className="planning-subtitle">Gestion des rendez-vous</p>
+      <div className="page-header">
+        <div className="page-title-section">
+          <h1 className="page-title">Planning</h1>
+          <p className="page-subtitle">Gestion des rendez-vous</p>
         </div>
         
         <Button type="button" onClick={() => setIsModalOpen(true)}>
@@ -195,22 +197,22 @@ export function PlanningCalendar() {
         </Button>
         
         {isModalOpen && (
-          <div className="planning-modal-overlay" onClick={() => setIsModalOpen(false)}>
-            <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="planning-modal-header">
-                <h2 className="planning-modal-title">Nouveau rendez-vous</h2>
+          <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2 className="modal-title">Nouveau rendez-vous</h2>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="planning-modal-close"
+                  className="modal-close"
                   onClick={() => setIsModalOpen(false)}
                 >
                   <X className="planning-icon-md" />
                 </Button>
               </div>
-              <form onSubmit={handleCreateEvent} className="planning-form">
-                <div className="planning-form-field">
+              <form onSubmit={handleCreateEvent} className="modal-form">
+                <div className="modal-form-field">
                   <Label>Date</Label>
                   <DateInput
                     value={formData.date}
@@ -219,7 +221,7 @@ export function PlanningCalendar() {
                   />
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Heure</Label>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <Select
@@ -262,7 +264,7 @@ export function PlanningCalendar() {
                   </div>
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Client (optionnel)</Label>
                   <Select value={formData.clientId || "none"} onValueChange={(value) => setFormData({ ...formData, clientId: value === "none" ? "" : value })}>
                     <SelectTrigger>
@@ -279,7 +281,7 @@ export function PlanningCalendar() {
                   </Select>
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Commentaire (optionnel)</Label>
                   <Textarea
                     value={formData.comment}
@@ -288,7 +290,7 @@ export function PlanningCalendar() {
                   />
                 </div>
                 
-                <div className="planning-form-actions">
+                <div className="modal-form-actions">
                   <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                     Annuler
                   </Button>
@@ -302,18 +304,18 @@ export function PlanningCalendar() {
         )}
 
         {isEditModalOpen && editingEvent && (
-          <div className="planning-modal-overlay" onClick={() => {
+          <div className="modal-overlay" onClick={() => {
             setIsEditModalOpen(false);
             setEditingEvent(null);
           }}>
-            <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="planning-modal-header">
-                <h2 className="planning-modal-title">Modifier le rendez-vous</h2>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2 className="modal-title">Modifier le rendez-vous</h2>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="planning-modal-close"
+                  className="modal-close"
                   onClick={() => {
                     setIsEditModalOpen(false);
                     setEditingEvent(null);
@@ -322,8 +324,8 @@ export function PlanningCalendar() {
                   <X className="planning-icon-md" />
                 </Button>
               </div>
-              <form onSubmit={handleUpdateEvent} className="planning-form">
-                <div className="planning-form-field">
+              <form onSubmit={handleUpdateEvent} className="modal-form">
+                <div className="modal-form-field">
                   <Label>Date</Label>
                   <DateInput
                     value={editFormData.date}
@@ -332,7 +334,7 @@ export function PlanningCalendar() {
                   />
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Heure</Label>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <Select
@@ -375,7 +377,7 @@ export function PlanningCalendar() {
                   </div>
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Client (optionnel)</Label>
                   <Select value={editFormData.clientId || "none"} onValueChange={(value) => setEditFormData({ ...editFormData, clientId: value === "none" ? "" : value })}>
                     <SelectTrigger>
@@ -392,7 +394,7 @@ export function PlanningCalendar() {
                   </Select>
                 </div>
                 
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Commentaire (optionnel)</Label>
                   <Textarea
                     value={editFormData.comment}
@@ -401,7 +403,7 @@ export function PlanningCalendar() {
                   />
                 </div>
                 
-                <div className="planning-form-actions">
+                <div className="modal-form-actions">
                   <Button type="button" variant="outline" onClick={() => {
                     setIsEditModalOpen(false);
                     setEditingEvent(null);

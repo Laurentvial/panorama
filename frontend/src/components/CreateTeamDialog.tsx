@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface CreateTeamDialogProps {
   isOpen: boolean;
@@ -46,22 +46,22 @@ export function CreateTeamDialog({ isOpen, onClose, onTeamCreated }: CreateTeamD
   if (!isOpen) return null;
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Nouvelle équipe</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Nouvelle équipe</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
-        <form onSubmit={handleCreateTeam} className="planning-form">
-          <div className="planning-form-field">
+        <form onSubmit={handleCreateTeam} className="modal-form">
+          <div className="modal-form-field">
             <Label htmlFor="team-name">Nom de l'équipe</Label>
             <Input
               id="team-name"
@@ -78,7 +78,7 @@ export function CreateTeamDialog({ isOpen, onClose, onTeamCreated }: CreateTeamD
             </div>
           )}
           
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button 
               type="button" 
               variant="outline" 

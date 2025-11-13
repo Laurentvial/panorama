@@ -15,6 +15,7 @@ import { apiCall } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
 import '../styles/Clients.css';
+import '../styles/PageHeader.css';
 
 interface ClientsProps {
   onSelectClient: (clientId: string) => void;
@@ -138,18 +139,12 @@ export function Clients({ onSelectClient }: ClientsProps) {
     if (!managerId) return;
     
     try {
-      let managerName = '';
-      if (managerId !== 'none') {
-        const manager = users.find(u => u.id === managerId);
-        if (manager) {
-          managerName = `${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.username || manager.email || '';
-        }
-      }
+      const managerIdValue = managerId !== 'none' ? managerId : '';
       
       const promises = Array.from(selectedClients).map(clientId =>
         apiCall(`/api/clients/${clientId}/`, {
           method: 'PATCH',
-          body: JSON.stringify({ managed_by: managerName })
+          body: JSON.stringify({ managed_by: managerIdValue })
         })
       );
       await Promise.all(promises);
@@ -175,6 +170,22 @@ export function Clients({ onSelectClient }: ClientsProps) {
     } catch (error) {
       console.error('Error toggling active status:', error);
       alert('Erreur lors de la modification du statut');
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer ${selectedClients.size} client(s) ? Cette action est irréversible.`)) return;
+    
+    try {
+      const promises = Array.from(selectedClients).map(clientId =>
+        apiCall(`/api/clients/${clientId}/delete/`, { method: 'DELETE' })
+      );
+      await Promise.all(promises);
+      loadData();
+      handleClearSelection();
+    } catch (error) {
+      console.error('Error deleting clients:', error);
+      alert('Erreur lors de la suppression des clients');
     }
   }
 
@@ -208,10 +219,10 @@ export function Clients({ onSelectClient }: ClientsProps) {
 
   return (
     <div className="clients-container">
-      <div className="clients-header">
-        <div>
-          <h1 className="clients-title">Clients</h1>
-          <p className="clients-subtitle">Gestion de vos clients</p>
+      <div className="clients-header page-header">
+        <div className="page-title-section">
+          <h1 className="page-title">Clients</h1>
+          <p className="page-subtitle">Gestion de vos clients</p>
         </div>
         
         <Button onClick={() => navigate('/clients/add')}>
@@ -335,6 +346,11 @@ export function Clients({ onSelectClient }: ClientsProps) {
                 <Button variant="outline" size="sm" onClick={handleBulkToggleActive}>
                   Activer/Désactiver
                 </Button>
+
+                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Supprimer
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -412,7 +428,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                         }
                       </td>
                       <td>{client.support || '-'}</td>
-                      <td>{client.manager || '-'}</td>
+                      <td>{client.managerName || client.manager || '-'}</td>
                       <td>{client.source || '-'}</td>
                       <td>
                         {client.capital 

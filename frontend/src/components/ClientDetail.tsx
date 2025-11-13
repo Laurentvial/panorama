@@ -102,8 +102,15 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       const availableUsefulLinksArray = (availableUsefulLinksData as any).usefulLinks || [];
       setAvailableUsefulLinks(availableUsefulLinksArray);
       
-      // Transactions endpoint doesn't exist yet, set empty array
-      setTransactions([]);
+      // Load transactions
+      try {
+        const transactionsData = await apiCall(`/api/clients/${clientId}/transactions/`);
+        const transactionsArray = (transactionsData as any).transactions || [];
+        setTransactions(transactionsArray);
+      } catch (error) {
+        console.error('Error loading transactions:', error);
+        setTransactions([]);
+      }
     } catch (error) {
       console.error('Error loading client data:', error);
     } finally {
@@ -245,6 +252,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         </Button>
       </div>
 
+
       {/* Client Details Tabs */}
       <Tabs defaultValue="info" className="space-y-6">
         <TabsList>
@@ -262,6 +270,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             client={client}
             onOpenEditPersonalInfo={handleOpenEditModal}
             onOpenEditPatrimonialInfo={() => setIsEditPatrimonialInfoOpen(true)}
+            onClientUpdated={loadClientData}
           />
         </TabsContent>
 
@@ -270,6 +279,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <ClientTransactionsTab 
             transactions={transactions}
             onRefresh={loadClientData}
+            clientId={clientId}
           />
         </TabsContent>
 
@@ -327,6 +337,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         clientId={clientId}
         onUpdate={handlePatrimonialInfoUpdated}
       />
+
     </div>
   );
 }

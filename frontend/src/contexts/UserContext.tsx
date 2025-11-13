@@ -8,7 +8,14 @@ interface UserContextType {
   refreshUser: () => Promise<void>;
 }
 
-const UserContext = createContext<UserContextType | undefined>(undefined);
+// Provide a default value to avoid undefined context
+const defaultContextValue: UserContextType = {
+  currentUser: null,
+  loading: true,
+  refreshUser: async () => {},
+};
+
+const UserContext = createContext<UserContextType>(defaultContextValue);
 
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -95,9 +102,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export function useUser() {
   const context = useContext(UserContext);
-  if (context === undefined) {
-    throw new Error('useUser must be used within a UserProvider');
-  }
+  // Context now always has a value, no need to check for undefined
   return context;
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -6,6 +6,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Filter, Eye } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import '../styles/PageHeader.css';
 
 interface TransactionsProps {
   user: any;
@@ -54,9 +55,9 @@ export function Transactions({ user }: TransactionsProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-slate-900 mb-2">Transactions</h1>
-        <p className="text-slate-600">Gestion de toutes les transactions</p>
+      <div className="page-header-section">
+        <h1 className="page-title">Transactions</h1>
+        <p className="page-subtitle">Gestion de toutes les transactions</p>
       </div>
 
       {/* Filters */}

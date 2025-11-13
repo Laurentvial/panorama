@@ -11,6 +11,7 @@ urlpatterns = [
     path('clients/create/', api_views.client_create, name='client-create'),
     path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
     path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
+    path('clients/<str:client_id>/delete/', api_views.client_delete, name='client-delete'),
     # Teams endpoints
     path('teams/', api_views.team_list, name='team-list'),
     path('teams/create/', api_views.team_create, name='team-create'),  # POST for create
@@ -58,4 +59,9 @@ urlpatterns = [
     path('clients/<str:client_id>/useful-links/', api_views.client_useful_links, name='client-useful-links'),
     path('clients/<str:client_id>/useful-links/add/', api_views.client_useful_link_add, name='client-useful-link-add'),
     path('clients/<str:client_id>/useful-links/<str:useful_link_id>/', api_views.client_useful_link_remove, name='client-useful-link-remove'),
+    # Transactions endpoints
+    path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
+    path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
 ]

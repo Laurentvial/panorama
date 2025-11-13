@@ -10,7 +10,7 @@ import { useUsers } from '../hooks/useUsers';
 import { Crown, UserMinus, Save, X } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface TeamDetailDialogProps {
   team: TeamDetail | null;
@@ -171,15 +171,15 @@ export function TeamDetailDialog({ team, isOpen, onOpenChange, onTeamUpdated }: 
   if (!isOpen) return null;
 
   return (
-    <div className="planning-modal-overlay" onClick={() => onOpenChange(false)}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Détails de l'équipe</h2>
+    <div className="modal-overlay" onClick={() => onOpenChange(false)}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-header">
+          <h2 className="modal-title">Détails de l'équipe</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={() => onOpenChange(false)}
           >
             <X className="planning-icon-md" />
@@ -191,9 +191,9 @@ export function TeamDetailDialog({ team, isOpen, onOpenChange, onTeamUpdated }: 
             <LoadingIndicator />
           </div>
         ) : teamData ? (
-          <div className="planning-form" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="modal-form" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Edit team name section */}
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="team-name">Nom de l'équipe</Label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <Input
@@ -215,7 +215,7 @@ export function TeamDetailDialog({ team, isOpen, onOpenChange, onTeamUpdated }: 
             </div>
 
             {/* Add member section */}
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="add-member">Ajouter un utilisateur à l'équipe</Label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <Select value={selectedUserId} onValueChange={setSelectedUserId}>
@@ -318,7 +318,7 @@ export function TeamDetailDialog({ team, isOpen, onOpenChange, onTeamUpdated }: 
 
             {saving && <LoadingIndicator />}
 
-            <div className="planning-form-actions">
+            <div className="modal-form-actions">
               <Button
                 type="button"
                 variant="outline"

@@ -7,7 +7,7 @@ import { DateInput } from './ui/date-input';
 import { Upload, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 import '../styles/Clients.css';
 
 interface EditPersonalInfoModalProps {
@@ -171,23 +171,23 @@ export function EditPersonalInfoModal({
   if (!isOpen) return null;
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh', overflowY: 'auto' }}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Modifier les informations personnelles</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-header">
+          <h2 className="modal-title">Modifier les informations personnelles</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
-        <form onSubmit={handleUpdatePersonalInfo} className="planning-form">
+        <form onSubmit={handleUpdatePersonalInfo} className="modal-form">
           {/* Photo de profil */}
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label>Photo de profil</Label>
             <div className="flex items-center gap-4">
               {(editPersonalInfoForm.profilePhotoPreview || (client?.profilePhoto && !editPersonalInfoForm.removeProfilePhoto)) ? (
@@ -235,7 +235,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editCivility">Civilité</Label>
               <Select
                 value={editPersonalInfoForm.civility}
@@ -252,7 +252,7 @@ export function EditPersonalInfoModal({
               </Select>
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editFirstName">Prénom</Label>
               <Input
                 id="editFirstName"
@@ -262,7 +262,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editLastName">Nom</Label>
               <Input
                 id="editLastName"
@@ -274,7 +274,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editTemplate">Template</Label>
               <Input
                 id="editTemplate"
@@ -284,7 +284,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editSupport">Support</Label>
               <Input
                 id="editSupport"
@@ -295,7 +295,7 @@ export function EditPersonalInfoModal({
             </div>
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="editPassword">Mot de passe</Label>
             <Input
               id="editPassword"
@@ -306,7 +306,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editPhone">Téléphone</Label>
               <Input
                 id="editPhone"
@@ -316,7 +316,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editMobile">Portable</Label>
               <Input
                 id="editMobile"
@@ -327,7 +327,7 @@ export function EditPersonalInfoModal({
             </div>
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="editEmail">E-mail</Label>
             <Input
               id="editEmail"
@@ -339,7 +339,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editBirthDate">Date de naissance</Label>
               <DateInput
                 id="editBirthDate"
@@ -348,7 +348,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editBirthPlace">Lieu de naissance</Label>
               <Input
                 id="editBirthPlace"
@@ -359,7 +359,7 @@ export function EditPersonalInfoModal({
             </div>
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="editAddress">Adresse</Label>
             <Input
               id="editAddress"
@@ -370,7 +370,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editPostalCode">Code postal</Label>
               <Input
                 id="editPostalCode"
@@ -380,7 +380,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editCity">Ville</Label>
               <Input
                 id="editCity"
@@ -392,7 +392,7 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editNationality">Nationalité</Label>
               <Input
                 id="editNationality"
@@ -402,7 +402,7 @@ export function EditPersonalInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label htmlFor="editSuccessor">Successeur</Label>
               <Input
                 id="editSuccessor"
@@ -413,7 +413,7 @@ export function EditPersonalInfoModal({
             </div>
           </div>
 
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button type="button" variant="outline" onClick={onClose}>
               Annuler
             </Button>

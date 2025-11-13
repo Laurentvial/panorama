@@ -5,20 +5,7 @@
   gap: 1.5rem;
 }
 
-.dashboard-header-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.dashboard-title {
-  margin-bottom: 0.5rem;
-  color: var(--primary);
-  font-size: 2rem;
-}
-
-.dashboard-subtitle {
-  color: #475569;
-}
+/* Header styles moved to PageHeader.css */
 
 /* Loading State */
 .dashboard-loading {

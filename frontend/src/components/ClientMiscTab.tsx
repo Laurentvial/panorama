@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Plus, Trash2, X, CreditCard, Link as LinkIcon } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface ClientMiscTabProps {
   clientId: string;
@@ -187,16 +187,25 @@ export function ClientMiscTab({
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left p-2 font-medium text-slate-700">Nom</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Image</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Titre</th>
                     <th className="text-left p-2 font-medium text-slate-700">URL</th>
                     <th className="text-left p-2 font-medium text-slate-700">Description</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Catégorie</th>
                     <th className="text-right p-2 font-medium text-slate-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {clientUsefulLinks.map((clientLink) => (
                     <tr key={clientLink.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2">
+                        {clientLink.usefulLink.imageUrl ? (
+                          <img src={clientLink.usefulLink.imageUrl} alt={clientLink.usefulLink.name} className="w-12 h-12 object-cover rounded" />
+                        ) : (
+                          <div className="w-12 h-12 bg-slate-200 rounded flex items-center justify-center text-slate-400 text-xs">
+                            Pas d'image
+                          </div>
+                        )}
+                      </td>
                       <td className="p-2 font-medium">{clientLink.usefulLink.name}</td>
                       <td className="p-2">
                         <a
@@ -209,13 +218,6 @@ export function ClientMiscTab({
                         </a>
                       </td>
                       <td className="p-2 text-slate-600">{clientLink.usefulLink.description}</td>
-                      <td className="p-2">
-                        {clientLink.usefulLink.category && (
-                          <span className="px-2 py-1 bg-slate-100 rounded text-sm">
-                            {clientLink.usefulLink.category}
-                          </span>
-                        )}
-                      </td>
                       <td className="p-2 text-right">
                         <Button
                           variant="ghost"
@@ -237,20 +239,22 @@ export function ClientMiscTab({
 
       {/* Add RIB Dialog */}
       {isAddRibDialogOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Ajouter un RIB</h3>
+        <div className="modal-overlay" onClick={() => setIsAddRibDialogOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Ajouter un RIB</h2>
               <Button
+                type="button"
                 variant="ghost"
-                size="sm"
+                size="icon"
+                className="modal-close"
                 onClick={() => setIsAddRibDialogOpen(false)}
               >
-                <X className="w-4 h-4" />
+                <X className="planning-icon-md" />
               </Button>
             </div>
-            <div className="space-y-4">
-              <div>
+            <div className="modal-form">
+              <div className="modal-form-field">
                 <Label>Sélectionner un RIB</Label>
                 <Select onValueChange={handleAddRib}>
                   <SelectTrigger>
@@ -265,8 +269,9 @@ export function ClientMiscTab({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="modal-form-actions">
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={() => setIsAddRibDialogOpen(false)}
                 >
@@ -280,20 +285,22 @@ export function ClientMiscTab({
 
       {/* Add Useful Link Dialog */}
       {isAddLinkDialogOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Ajouter un lien utile</h3>
+        <div className="modal-overlay" onClick={() => setIsAddLinkDialogOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Ajouter un lien utile</h2>
               <Button
+                type="button"
                 variant="ghost"
-                size="sm"
+                size="icon"
+                className="modal-close"
                 onClick={() => setIsAddLinkDialogOpen(false)}
               >
-                <X className="w-4 h-4" />
+                <X className="planning-icon-md" />
               </Button>
             </div>
-            <div className="space-y-4">
-              <div>
+            <div className="modal-form">
+              <div className="modal-form-field">
                 <Label>Sélectionner un lien utile</Label>
                 <Select onValueChange={handleAddUsefulLink}>
                   <SelectTrigger>
@@ -308,8 +315,9 @@ export function ClientMiscTab({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="modal-form-actions">
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={() => setIsAddLinkDialogOpen(false)}
                 >

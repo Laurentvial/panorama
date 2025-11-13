@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Plus, Trash2, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 import '../styles/Clients.css';
 
 interface EditPatrimonialInfoModalProps {
@@ -190,25 +190,25 @@ export function EditPatrimonialInfoModal({
   const experienceOptions = ['Bourse', 'Livrets', 'Placements', 'Risque'];
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '90vh', overflowY: 'auto' }}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Modifier la fiche patrimoniale</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-header">
+          <h2 className="modal-title">Modifier la fiche patrimoniale</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
-        <form onSubmit={handleUpdatePatrimonialInfo} className="planning-form">
+        <form onSubmit={handleUpdatePatrimonialInfo} className="modal-form">
           {/* Activité professionnelle */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Activité professionnelle</h3>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Statut</Label>
               <Select
                 value={formData.professionalActivityStatus}
@@ -226,7 +226,7 @@ export function EditPatrimonialInfoModal({
                 </SelectContent>
               </Select>
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.professionalActivityComment}
@@ -239,7 +239,7 @@ export function EditPatrimonialInfoModal({
           {/* Métiers */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Métiers</h3>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Métier(s)</Label>
               <div className="flex gap-2">
                 <Input
@@ -267,7 +267,7 @@ export function EditPatrimonialInfoModal({
                 ))}
               </div>
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.professionsComment}
@@ -280,7 +280,7 @@ export function EditPatrimonialInfoModal({
           {/* Patrimoine */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Patrimoine</h3>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Banque</Label>
               <Input
                 value={formData.bankName}
@@ -290,7 +290,7 @@ export function EditPatrimonialInfoModal({
             </div>
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label>Compte courant (€)</Label>
                 <Input
                   type="number"
@@ -299,7 +299,7 @@ export function EditPatrimonialInfoModal({
                   onChange={(e) => setFormData({ ...formData, currentAccount: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label>Livret A/B (€)</Label>
                 <Input
                   type="number"
@@ -308,7 +308,7 @@ export function EditPatrimonialInfoModal({
                   onChange={(e) => setFormData({ ...formData, livretAB: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label>PEA (€)</Label>
                 <Input
                   type="number"
@@ -317,7 +317,7 @@ export function EditPatrimonialInfoModal({
                   onChange={(e) => setFormData({ ...formData, pea: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label>PEL (€)</Label>
                 <Input
                   type="number"
@@ -326,7 +326,7 @@ export function EditPatrimonialInfoModal({
                   onChange={(e) => setFormData({ ...formData, pel: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label>LDD (€)</Label>
                 <Input
                   type="number"
@@ -340,7 +340,7 @@ export function EditPatrimonialInfoModal({
             <div className="space-y-2">
               <Label className="font-semibold">Épargne</Label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>CEL (€)</Label>
                   <Input
                     type="number"
@@ -349,7 +349,7 @@ export function EditPatrimonialInfoModal({
                     onChange={(e) => setFormData({ ...formData, cel: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>CSL (€)</Label>
                   <Input
                     type="number"
@@ -358,7 +358,7 @@ export function EditPatrimonialInfoModal({
                     onChange={(e) => setFormData({ ...formData, csl: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Compte titre (€)</Label>
                   <Input
                     type="number"
@@ -367,7 +367,7 @@ export function EditPatrimonialInfoModal({
                     onChange={(e) => setFormData({ ...formData, securitiesAccount: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
-                <div className="planning-form-field">
+                <div className="modal-form-field">
                   <Label>Assurance-vie (€)</Label>
                   <Input
                     type="number"
@@ -379,7 +379,7 @@ export function EditPatrimonialInfoModal({
               </div>
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.savingsComment}
@@ -388,7 +388,7 @@ export function EditPatrimonialInfoModal({
               />
             </div>
 
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label className="font-semibold">Total du patrimoine (€)</Label>
               <Input
                 type="number"
@@ -405,7 +405,7 @@ export function EditPatrimonialInfoModal({
           {/* Objectifs et expérience */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Objectifs et expérience</h3>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Objectifs</Label>
               <div className="flex flex-wrap gap-2 mt-2">
                 {objectiveOptions.map((obj) => (
@@ -420,7 +420,7 @@ export function EditPatrimonialInfoModal({
                 ))}
               </div>
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.objectivesComment}
@@ -428,7 +428,7 @@ export function EditPatrimonialInfoModal({
                 placeholder="Commentaire sur les objectifs"
               />
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Expérience</Label>
               <div className="flex flex-wrap gap-2 mt-2">
                 {experienceOptions.map((exp) => (
@@ -443,7 +443,7 @@ export function EditPatrimonialInfoModal({
                 ))}
               </div>
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.experienceComment}
@@ -456,7 +456,7 @@ export function EditPatrimonialInfoModal({
           {/* Informations financières */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Informations financières</h3>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Défiscalisation</Label>
               <Select
                 value={formData.taxOptimization ? 'Oui' : 'Non'}
@@ -471,7 +471,7 @@ export function EditPatrimonialInfoModal({
                 </SelectContent>
               </Select>
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Commentaire</Label>
               <Textarea
                 value={formData.taxOptimizationComment}
@@ -479,7 +479,7 @@ export function EditPatrimonialInfoModal({
                 placeholder="Commentaire sur la défiscalisation"
               />
             </div>
-            <div className="planning-form-field">
+            <div className="modal-form-field">
               <Label>Revenu annuel du foyer (€)</Label>
               <Input
                 type="number"
@@ -491,7 +491,7 @@ export function EditPatrimonialInfoModal({
             </div>
           </div>
 
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button type="button" variant="outline" onClick={onClose}>
               Annuler
             </Button>

@@ -6,7 +6,7 @@ import { X, Key } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { User } from '../types';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface ResetPasswordModalProps {
   isOpen: boolean;
@@ -78,26 +78,26 @@ export function ResetPasswordModal({
   }
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="planning-modal-header">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Key className="planning-icon-md" />
-            <h2 className="planning-modal-title">Réinitialiser le mot de passe</h2>
+            <h2 className="modal-title">Réinitialiser le mot de passe</h2>
           </div>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
 
-        <form onSubmit={handleSubmit} className="planning-form">
-          <div className="planning-form-field">
+        <form onSubmit={handleSubmit} className="modal-form">
+          <div className="modal-form-field">
             <p style={{ fontSize: '0.875rem', color: '#64748b', marginBottom: '0.5rem' }}>
               Réinitialisation du mot de passe pour{' '}
               <strong>
@@ -121,7 +121,7 @@ export function ResetPasswordModal({
             </div>
           )}
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="password">Nouveau mot de passe</Label>
             <Input
               id="password"
@@ -135,7 +135,7 @@ export function ResetPasswordModal({
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="confirmPassword">Confirmer le mot de passe</Label>
             <Input
               id="confirmPassword"
@@ -149,7 +149,7 @@ export function ResetPasswordModal({
             />
           </div>
 
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Annuler
             </Button>

@@ -16,7 +16,7 @@ import { User } from '../types';
 import { useTeams } from '../hooks/useTeams';
 import LoadingIndicator from './LoadingIndicator';
 import { Team } from '../types';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface EditUserModalProps {
   isOpen: boolean;
@@ -91,22 +91,22 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
   }
 
   return (
-    <div className="planning-modal-overlay" onClick={onClose}>
-      <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="planning-modal-header">
-          <h2 className="planning-modal-title">Modifier l'utilisateur</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Modifier l'utilisateur</h2>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="planning-modal-close"
+            className="modal-close"
             onClick={onClose}
           >
             <X className="planning-icon-md" />
           </Button>
         </div>
-        <form onSubmit={handleSubmit} className="planning-form">
-          <div className="planning-form-field">
+        <form onSubmit={handleSubmit} className="modal-form">
+          <div className="modal-form-field">
             <Label htmlFor="edit-firstName">Prénom</Label>
             <Input
               id="edit-firstName"
@@ -118,7 +118,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="edit-lastName">Nom</Label>
             <Input
               id="edit-lastName"
@@ -130,7 +130,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="edit-email">Email</Label>
             <Input
               id="edit-email"
@@ -144,7 +144,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="edit-phone">Téléphone</Label>
             <Input
               id="edit-phone"
@@ -157,7 +157,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
             />
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="edit-role">Rôle</Label>
             <Select
               value={formData.role}
@@ -178,7 +178,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
             </Select>
           </div>
 
-          <div className="planning-form-field">
+          <div className="modal-form-field">
             <Label htmlFor="edit-teamId">Équipe (optionnel)</Label>
             <Select
               value={formData.teamId || "none"}
@@ -213,7 +213,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
 
           {loading && <LoadingIndicator />}
 
-          <div className="planning-form-actions">
+          <div className="modal-form-actions">
             <Button
               type="button"
               variant="outline"

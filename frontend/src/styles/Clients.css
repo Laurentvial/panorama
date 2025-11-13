@@ -10,9 +10,6 @@
 }
 
 .clients-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   position: sticky;
   top: 0;
   background-color: white;
@@ -22,15 +19,7 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
-.clients-title {
-    margin-bottom: 0.5rem;
-    color: var(--primary);
-    font-size: 2rem;
-}
-
-.clients-subtitle {
-  color: #475569;
-}
+/* Header title/subtitle styles moved to PageHeader.css */
 
 .clients-filters-card {
   position: sticky;

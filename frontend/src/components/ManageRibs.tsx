@@ -7,7 +7,8 @@ import { Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
+import '../styles/PageHeader.css';
 
 export function ManageRibs() {
   const [ribs, setRibs] = useState<any[]>([]);
@@ -163,10 +164,10 @@ export function ManageRibs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Gestion des RIBs</h1>
-          <p className="text-slate-600 mt-1">Gérer les RIBs disponibles pour les clients</p>
+      <div className="page-header">
+        <div className="page-title-section">
+          <h1 className="page-title">Gestion des RIBs</h1>
+          <p className="page-subtitle">Gérer les RIBs disponibles pour les clients</p>
         </div>
         <Button onClick={() => handleOpenDialog()}>
           <Plus className="w-4 h-4 mr-2" />
@@ -258,24 +259,24 @@ export function ManageRibs() {
 
       {/* Create/Edit Dialog */}
       {isDialogOpen && (
-        <div className="planning-modal-overlay" onClick={handleCloseDialog}>
-          <div className="planning-modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
-            <div className="planning-modal-header">
-              <h2 className="planning-modal-title">
+        <div className="modal-overlay" onClick={handleCloseDialog}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">
                 {editingRib ? 'Modifier le RIB' : 'Créer un nouveau RIB'}
               </h2>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="planning-modal-close"
+                className="modal-close"
                 onClick={handleCloseDialog}
               >
                 <X className="planning-icon-md" />
               </Button>
             </div>
-            <form onSubmit={handleSubmit} className="planning-form">
-              <div className="planning-form-field">
+            <form onSubmit={handleSubmit} className="modal-form">
+              <div className="modal-form-field">
                 <Label htmlFor="name">Nom *</Label>
                 <Input
                   id="name"
@@ -284,7 +285,7 @@ export function ManageRibs() {
                   required
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="bankCode">Code banque *</Label>
                 <Input
                   id="bankCode"
@@ -295,7 +296,7 @@ export function ManageRibs() {
                   required
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="branchCode">Code guichet *</Label>
                 <Input
                   id="branchCode"
@@ -306,7 +307,7 @@ export function ManageRibs() {
                   required
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="accountNumber">Numéro de compte *</Label>
                 <Input
                   id="accountNumber"
@@ -317,7 +318,7 @@ export function ManageRibs() {
                   required
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="ribKey">Clé RIB *</Label>
                 <Input
                   id="ribKey"
@@ -328,7 +329,7 @@ export function ManageRibs() {
                   required
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="domiciliation">Domiciliation</Label>
                 <Input
                   id="domiciliation"
@@ -337,7 +338,7 @@ export function ManageRibs() {
                   placeholder="Adresse de la banque"
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="iban">IBAN (optionnel)</Label>
                 <Input
                   id="iban"
@@ -346,7 +347,7 @@ export function ManageRibs() {
                   placeholder="FR76..."
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="bic">BIC (optionnel)</Label>
                 <Input
                   id="bic"
@@ -355,7 +356,7 @@ export function ManageRibs() {
                   placeholder="Code BIC"
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="bankName">Nom de la banque (optionnel)</Label>
                 <Input
                   id="bankName"
@@ -363,7 +364,7 @@ export function ManageRibs() {
                   onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <Label htmlFor="accountHolder">Titulaire du compte (optionnel)</Label>
                 <Input
                   id="accountHolder"
@@ -371,7 +372,7 @@ export function ManageRibs() {
                   onChange={(e) => setFormData({ ...formData, accountHolder: e.target.value })}
                 />
               </div>
-              <div className="planning-form-field">
+              <div className="modal-form-field">
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -383,7 +384,7 @@ export function ManageRibs() {
                   <Label htmlFor="default">Disponible par défaut pour tous les clients</Label>
                 </div>
               </div>
-              <div className="planning-form-actions">
+              <div className="modal-form-actions">
                 <Button type="button" variant="outline" onClick={handleCloseDialog}>
                   Annuler
                 </Button>

@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { TrendingUp, Plus, Trash2, X, Star } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import '../styles/PlanningCalendar.css';
+import '../styles/Modal.css';
 
 interface ClientAssetsTabProps {
   clientId: string;
@@ -137,22 +137,22 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, onRef
       </div>
 
       {isAddAssetDialogOpen && (
-        <div className="planning-modal-overlay" onClick={() => setIsAddAssetDialogOpen(false)}>
-          <div className="planning-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="planning-modal-header">
-              <h2 className="planning-modal-title">Ajouter un actif</h2>
+        <div className="modal-overlay" onClick={() => setIsAddAssetDialogOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Ajouter un actif</h2>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="planning-modal-close"
+                className="modal-close"
                 onClick={() => setIsAddAssetDialogOpen(false)}
               >
                 <X className="planning-icon-md" />
               </Button>
             </div>
-            <div className="planning-form">
-              <div className="planning-form-field">
+            <div className="modal-form">
+              <div className="modal-form-field">
                 <Label>Actif</Label>
                 <Select onValueChange={(value) => handleAddAsset(value)}>
                   <SelectTrigger>
@@ -169,7 +169,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, onRef
                   </SelectContent>
                 </Select>
               </div>
-              <div className="planning-form-actions">
+              <div className="modal-form-actions">
                 <Button type="button" variant="outline" onClick={() => setIsAddAssetDialogOpen(false)}>
                   Annuler
                 </Button>

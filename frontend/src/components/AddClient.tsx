@@ -11,14 +11,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collap
 import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUsers } from '../hooks/useUsers';
-import { useTeams } from '../hooks/useTeams';
 import { toast } from 'sonner';
 import '../styles/Clients.css';
+import '../styles/PageHeader.css';
 
 export function AddClient() {
   const navigate = useNavigate();
   const { users, loading: usersLoading } = useUsers();
-  const { teams, loading: teamsLoading } = useTeams();
   const [loading, setLoading] = useState(false);
   const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
   const [newProfession, setNewProfession] = useState('');
@@ -45,7 +44,6 @@ export function AddClient() {
     nationality: '',
     successor: '',
     managerId: '',
-    teamId: '',
     // Fiche patrimoniale (sera remplie via le modal)
     professionalActivityStatus: '',
     professionalActivityComment: '',
@@ -209,7 +207,6 @@ export function AddClient() {
         formDataToSend.append('nationality', formData.nationality || '');
         formDataToSend.append('successor', formData.successor || '');
         formDataToSend.append('managerId', formData.managerId || '');
-        formDataToSend.append('teamId', formData.teamId || '');
         // Fiche patrimoniale
         formDataToSend.append('professionalActivityStatus', formData.professionalActivityStatus || '');
         formDataToSend.append('professionalActivityComment', formData.professionalActivityComment || '');
@@ -262,7 +259,6 @@ export function AddClient() {
           nationality: formData.nationality || '',
           successor: formData.successor || '',
           managerId: formData.managerId || '',
-          teamId: formData.teamId || '',
           // Fiche patrimoniale
           professionalActivityStatus: formData.professionalActivityStatus || '',
           professionalActivityComment: formData.professionalActivityComment || '',
@@ -343,9 +339,9 @@ export function AddClient() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Nouveau client</h1>
-          <p className="text-slate-600 mt-1">Remplissez le formulaire pour créer un nouveau client</p>
+        <div className="page-title-section">
+          <h1 className="page-title">Nouveau client</h1>
+          <p className="page-subtitle">Remplissez le formulaire pour créer un nouveau client</p>
         </div>
       </div>
 
@@ -612,33 +608,7 @@ export function AddClient() {
             <CardTitle>Organisation</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="teamId">Équipe</Label>
-                <Select
-                  value={formData.teamId || 'none'}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, teamId: value === 'none' ? '' : value })
-                  }
-                >
-                  <SelectTrigger id="teamId">
-                    <SelectValue placeholder="Sélectionner une équipe" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Aucune équipe</SelectItem>
-                    {teamsLoading ? (
-                      <SelectItem value="loading" disabled>Chargement...</SelectItem>
-                    ) : (
-                      teams?.map((team) => (
-                        <SelectItem key={team.id} value={team.id}>
-                          {team.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="managerId">Gestionnaire</Label>
                 <Select

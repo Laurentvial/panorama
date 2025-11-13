@@ -4,20 +4,28 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Pencil, ChevronDown } from 'lucide-react';
+import { ClientWallet } from './ClientWallet';
+import { ClientManagementInfo } from './ClientManagementInfo';
+import { EditClientManagementModal } from './EditClientManagementModal';
+
 import '../styles/Clients.css';
 
 interface ClientInfoTabProps {
   client: any;
   onOpenEditPersonalInfo: () => void;
   onOpenEditPatrimonialInfo: () => void;
+  onClientUpdated?: () => void;
 }
 
-export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrimonialInfo }: ClientInfoTabProps) {
+export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrimonialInfo, onClientUpdated }: ClientInfoTabProps) {
   const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
+  const [isEditManagementOpen, setIsEditManagementOpen] = useState(false);
 
   return (
     <div className="space-y-6">
-      <Card>
+      {/* Two column layout: Personal Info on left, Wallet on right */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Informations personnelles</CardTitle>
           <Button
@@ -111,6 +119,19 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           </div>
         </CardContent>
       </Card>
+
+        {/* Wallet Container */}
+        <ClientWallet client={client} />
+      </div>
+
+      
+      {/* Client Management Info */}
+      {client && (
+        <ClientManagementInfo 
+          client={client}
+          onEdit={() => setIsEditManagementOpen(true)}
+        />
+      )}
 
       {/* Fiche patrimoniale */}
       <Collapsible open={isPatrimonialOpen} onOpenChange={setIsPatrimonialOpen}>
@@ -299,7 +320,21 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           </CollapsibleContent>
         </Card>
       </Collapsible>
+      
+      {/* Edit Management Modal */}
+      <EditClientManagementModal
+        isOpen={isEditManagementOpen}
+        onClose={() => setIsEditManagementOpen(false)}
+        client={client}
+        onClientUpdated={() => {
+          setIsEditManagementOpen(false);
+          if (onClientUpdated) {
+            onClientUpdated();
+          }
+        }}
+      />
     </div>
+    
   );
 }
 

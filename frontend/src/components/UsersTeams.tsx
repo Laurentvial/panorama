@@ -1,15 +1,16 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import '../styles/UsersTeam.css';
+import '../styles/PageHeader.css';
 import { UsersTab } from './UsersTab';
 import { TeamsTab } from './TeamsTab';
 
 export function UsersTeams() {
   return (
     <div className="users-teams-container">
-      <div className="users-teams-header-section">
-        <h1 className="h1 users-teams-title">Utilisateurs / Équipes</h1>
-        <p className="users-teams-subtitle">Gestion des utilisateurs et des équipes</p>
+      <div className="page-header-section">
+        <h1 className="page-title">Utilisateurs / Équipes</h1>
+        <p className="page-subtitle">Gestion des utilisateurs et des équipes</p>
       </div>
 
       <Tabs defaultValue="users" className="users-teams-tabs">

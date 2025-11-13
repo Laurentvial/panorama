@@ -18,6 +18,7 @@ import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
 import '../styles/Dashboard.css';
+import '../styles/PageHeader.css';
 
 interface DashboardProps {
   user?: any;
@@ -108,9 +109,9 @@ export function Dashboard({ user: userProp }: DashboardProps) {
 
   return (
     <div className="dashboard-container">
-      <div className="dashboard-header-section">
-        <h1 className="dashboard-title">Dashboard</h1>
-        <p className="dashboard-subtitle">Vue d'ensemble de votre activité</p>
+      <div className="page-header-section">
+        <h1 className="page-title">Dashboard</h1>
+        <p className="page-subtitle">Vue d'ensemble de votre activité</p>
       </div>
 
       {/* Filters */}

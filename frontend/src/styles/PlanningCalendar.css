@@ -5,27 +5,7 @@
   gap: 1.5rem;
 }
 
-/* Header Section */
-.planning-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.planning-title-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.planning-title {
-    margin-bottom: 0.5rem;
-    color: var(--primary);
-    font-size: 2rem;
-}
-
-.planning-subtitle {
-  color: #475569;
-}
+/* Header styles moved to PageHeader.css */
 
 .planning-icon {
   width: 1rem;
@@ -46,66 +26,6 @@
   margin-right: 0.5rem;
 }
 
-/* Modal Overlay */
-.planning-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.5);
-}
-
-/* Modal Content */
-.planning-modal-content {
-  background-color: white;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  padding: 1.5rem;
-  max-width: 28rem;
-  width: 100%;
-  margin: 0 1rem;
-}
-
-/* Modal Header */
-.planning-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.planning-modal-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  line-height: 1.75rem;
-}
-
-/* Modal Close Button */
-.planning-modal-close {
-  height: 2rem;
-  width: 2rem;
-  padding: 0;
-}
-
-/* Form Styles */
-.planning-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.planning-form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.planning-form-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
 
 /* Calendar Header */
 .planning-calendar-header {

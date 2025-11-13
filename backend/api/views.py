@@ -15,10 +15,12 @@ from .models import RIB
 from .models import ClientRIB
 from .models import UsefulLink
 from .models import ClientUsefulLink
+from .models import Transaction
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
-    AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer
+    AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
+    TransactionSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
@@ -331,7 +333,7 @@ def client_create(request):
         'city': request.data.get('city', '') or '',
         'nationality': request.data.get('nationality', '') or '',
         'successor': request.data.get('successor', '') or '',
-        'managed_by': request.data.get('managerId', '') or '',
+        # managed_by will be set separately to ensure it's a valid user ID
     }
     
     # Handle profile photo upload
@@ -349,6 +351,38 @@ def client_create(request):
     professions = request.data.getlist('professions') if hasattr(request.data, 'getlist') else get_list(request.data.get('professions'))
     objectives = request.data.getlist('objectives') if hasattr(request.data, 'getlist') else get_list(request.data.get('objectives'))
     experience = request.data.getlist('experience') if hasattr(request.data, 'getlist') else get_list(request.data.get('experience'))
+    
+    # Handle managed_by separately to ensure it's a valid user ID
+    # The frontend sends UserDetails.id (string), we need to convert it to DjangoUser.id
+    managed_by_value = request.data.get('managerId', '') or request.data.get('managed_by', '') or ''
+    if managed_by_value:
+        try:
+            # First try to find UserDetails by ID (this is what the frontend sends)
+            user_details = UserDetails.objects.filter(id=managed_by_value).first()
+            if user_details and user_details.django_user:
+                # Use DjangoUser.id for managed_by
+                client_data['managed_by'] = str(user_details.django_user.id)
+            else:
+                # Fallback: try to find DjangoUser directly by ID (for backward compatibility)
+                try:
+                    user_id = int(managed_by_value)
+                    from django.contrib.auth.models import User as DjangoUser
+                    if DjangoUser.objects.filter(id=user_id).exists():
+                        client_data['managed_by'] = str(user_id)
+                    else:
+                        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+                except (ValueError, TypeError):
+                    # Try to find by username
+                    from django.contrib.auth.models import User as DjangoUser
+                    user = DjangoUser.objects.filter(username=managed_by_value).first()
+                    if user:
+                        client_data['managed_by'] = str(user.id)
+                    else:
+                        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Error finding user: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        client_data['managed_by'] = ''
     
     client_data.update({
         # Fiche patrimoniale
@@ -379,6 +413,50 @@ def client_create(request):
     
     try:
         client = Client.objects.create(**client_data)
+        
+        # Automatically assign default assets, RIBs, and useful links
+        # Assign default assets
+        default_assets = Asset.objects.filter(default=True)
+        for asset in default_assets:
+            # Check if client already has this asset (shouldn't happen for new client, but safety check)
+            if not ClientAsset.objects.filter(client=client, asset=asset).exists():
+                client_asset_id = uuid.uuid4().hex[:12]
+                while ClientAsset.objects.filter(id=client_asset_id).exists():
+                    client_asset_id = uuid.uuid4().hex[:12]
+                ClientAsset.objects.create(
+                    id=client_asset_id,
+                    client=client,
+                    asset=asset
+                )
+        
+        # Assign default RIBs
+        default_ribs = RIB.objects.filter(default=True)
+        for rib in default_ribs:
+            # Check if client already has this RIB (shouldn't happen for new client, but safety check)
+            if not ClientRIB.objects.filter(client=client, rib=rib).exists():
+                client_rib_id = uuid.uuid4().hex[:12]
+                while ClientRIB.objects.filter(id=client_rib_id).exists():
+                    client_rib_id = uuid.uuid4().hex[:12]
+                ClientRIB.objects.create(
+                    id=client_rib_id,
+                    client=client,
+                    rib=rib
+                )
+        
+        # Assign default useful links
+        default_useful_links = UsefulLink.objects.filter(default=True)
+        for useful_link in default_useful_links:
+            # Check if client already has this useful link (shouldn't happen for new client, but safety check)
+            if not ClientUsefulLink.objects.filter(client=client, useful_link=useful_link).exists():
+                client_useful_link_id = uuid.uuid4().hex[:12]
+                while ClientUsefulLink.objects.filter(id=client_useful_link_id).exists():
+                    client_useful_link_id = uuid.uuid4().hex[:12]
+                ClientUsefulLink.objects.create(
+                    id=client_useful_link_id,
+                    client=client,
+                    useful_link=useful_link
+                )
+        
         serializer = ClientSerializer(client, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except Exception as e:
@@ -461,12 +539,53 @@ def client_detail(request, client_id):
                     client.profile_photo.delete(save=False)
                 client.profile_photo = None
         
-        # Update managed_by if provided
+        # Update managed_by if provided (should be user ID)
+        # The frontend may send UserDetails.id (string) or DjangoUser.id
         if 'managed_by' in request.data:
-            client.managed_by = request.data.get('managed_by', '') or ''
+            managed_by_value = request.data.get('managed_by', '') or ''
+            if managed_by_value:
+                # First try to find UserDetails by ID (this is what the frontend sends)
+                user_details = UserDetails.objects.filter(id=managed_by_value).first()
+                if user_details and user_details.django_user:
+                    # Use DjangoUser.id for managed_by
+                    client.managed_by = str(user_details.django_user.id)
+                else:
+                    # Fallback: try to find DjangoUser directly by ID (for backward compatibility)
+                    try:
+                        user_id = int(managed_by_value)
+                        from django.contrib.auth.models import User as DjangoUser
+                        if DjangoUser.objects.filter(id=user_id).exists():
+                            client.managed_by = str(user_id)
+                        else:
+                            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+                    except (ValueError, TypeError):
+                        # Try to find by username
+                        from django.contrib.auth.models import User as DjangoUser
+                        user = DjangoUser.objects.filter(username=managed_by_value).first()
+                        if user:
+                            client.managed_by = str(user.id)
+                        else:
+                            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                client.managed_by = ''
+        
+        # Update source if provided
+        if 'source' in request.data:
+            client.source = request.data.get('source', '') or ''
         
         # Update team if provided
-        if 'teamId' in request.data:
+        if 'team' in request.data:
+            team_id = request.data.get('team')
+            if team_id and team_id != 'none' and team_id != '':
+                try:
+                    team = Team.objects.get(id=team_id)
+                    client.team = team
+                except Team.DoesNotExist:
+                    return Response({'error': 'Team not found'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Si team est 'none' ou vide, supprimer l'équipe
+                client.team = None
+        elif 'teamId' in request.data:
             team_id = request.data.get('teamId')
             if team_id and team_id != 'none':
                 try:
@@ -573,6 +692,13 @@ def client_toggle_active(request, client_id):
     client.active = not client.active
     client.save()
     return Response({'active': client.active})
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_delete(request, client_id):
+    client = get_object_or_404(Client, id=client_id)
+    client.delete()
+    return Response({'message': 'Client supprimé avec succès'}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1266,21 +1392,21 @@ def client_rib_remove(request, client_id, rib_id):
 def useful_link_list(request):
     """Liste tous les liens utiles disponibles"""
     useful_links = UsefulLink.objects.all().order_by('name')
-    serializer = UsefulLinkSerializer(useful_links, many=True)
+    serializer = UsefulLinkSerializer(useful_links, many=True, context={'request': request})
     return Response({'usefulLinks': serializer.data})
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def useful_link_create(request):
     """Créer un nouveau lien utile"""
-    serializer = UsefulLinkSerializer(data=request.data)
+    serializer = UsefulLinkSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         # Generate UsefulLink ID
         useful_link_id = uuid.uuid4().hex[:12]
         while UsefulLink.objects.filter(id=useful_link_id).exists():
             useful_link_id = uuid.uuid4().hex[:12]
         useful_link = serializer.save(id=useful_link_id)
-        return Response(UsefulLinkSerializer(useful_link).data, status=status.HTTP_201_CREATED)
+        return Response(UsefulLinkSerializer(useful_link, context={'request': request}).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['PUT', 'PATCH'])
@@ -1288,10 +1414,20 @@ def useful_link_create(request):
 def useful_link_update(request, useful_link_id):
     """Modifier un lien utile"""
     useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
-    serializer = UsefulLinkSerializer(useful_link, data=request.data, partial=True)
+    
+    # Check if image should be removed
+    remove_image = request.data.get('removeImage', '').lower() == 'true'
+    if remove_image and useful_link.image:
+        useful_link.image.delete(save=False)
+    
+    serializer = UsefulLinkSerializer(useful_link, data=request.data, partial=True, context={'request': request})
     if serializer.is_valid():
-        serializer.save()
-        return Response(UsefulLinkSerializer(useful_link).data, status=status.HTTP_200_OK)
+        useful_link = serializer.save()
+        # If removeImage flag was set, ensure image is None
+        if remove_image:
+            useful_link.image = None
+            useful_link.save()
+        return Response(UsefulLinkSerializer(useful_link, context={'request': request}).data, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['DELETE'])
@@ -1308,7 +1444,7 @@ def client_useful_links(request, client_id):
     """Liste les liens utiles d'un client"""
     client = get_object_or_404(Client, id=client_id)
     client_useful_links = ClientUsefulLink.objects.filter(client=client).select_related('useful_link')
-    serializer = ClientUsefulLinkSerializer(client_useful_links, many=True)
+    serializer = ClientUsefulLinkSerializer(client_useful_links, many=True, context={'request': request})
     return Response({'usefulLinks': serializer.data})
 
 @api_view(['POST'])
@@ -1340,7 +1476,7 @@ def client_useful_link_add(request, client_id):
             useful_link=useful_link
         )
         
-        serializer = ClientUsefulLinkSerializer(client_useful_link)
+        serializer = ClientUsefulLinkSerializer(client_useful_link, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except UsefulLink.DoesNotExist:
         return Response({'error': 'Useful link not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -1358,3 +1494,89 @@ def client_useful_link_remove(request, client_id, useful_link_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
     except ClientUsefulLink.DoesNotExist:
         return Response({'error': 'Client useful link relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+# Transaction endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_transactions(request, client_id):
+    """Liste les transactions d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    transactions = Transaction.objects.filter(client=client).order_by('-datetime', '-created_at')
+    serializer = TransactionSerializer(transactions, many=True)
+    return Response({'transactions': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_transaction_create(request, client_id):
+    """Créer une transaction pour un client"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Validate required fields
+    if not request.data.get('type'):
+        return Response({'error': 'Le type de transaction est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not request.data.get('amount'):
+        return Response({'error': 'Le montant est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not request.data.get('datetime'):
+        return Response({'error': 'La date et heure sont requises'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Generate transaction ID
+    transaction_id = uuid.uuid4().hex[:12]
+    while Transaction.objects.filter(id=transaction_id).exists():
+        transaction_id = uuid.uuid4().hex[:12]
+    
+    # Parse datetime
+    from django.utils.dateparse import parse_datetime
+    datetime_str = request.data.get('datetime')
+    transaction_datetime = parse_datetime(datetime_str)
+    if not transaction_datetime:
+        return Response({'error': 'Format de date invalide'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Create transaction
+    transaction = Transaction.objects.create(
+        id=transaction_id,
+        client=client,
+        type=request.data.get('type'),
+        amount=request.data.get('amount'),
+        description=request.data.get('description', ''),
+        status=request.data.get('status', 'en_cours'),
+        datetime=transaction_datetime
+    )
+    
+    serializer = TransactionSerializer(transaction)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def client_transaction_update(request, client_id, transaction_id):
+    """Mettre à jour une transaction"""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Update fields
+    if 'type' in request.data:
+        transaction.type = request.data.get('type')
+    if 'amount' in request.data:
+        transaction.amount = request.data.get('amount')
+    if 'description' in request.data:
+        transaction.description = request.data.get('description', '')
+    if 'status' in request.data:
+        transaction.status = request.data.get('status')
+    if 'datetime' in request.data:
+        from django.utils.dateparse import parse_datetime
+        datetime_str = request.data.get('datetime')
+        transaction_datetime = parse_datetime(datetime_str)
+        if transaction_datetime:
+            transaction.datetime = transaction_datetime
+    
+    transaction.save()
+    serializer = TransactionSerializer(transaction)
+    return Response(serializer.data)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_transaction_delete(request, client_id, transaction_id):
+    """Supprimer une transaction"""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    transaction.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

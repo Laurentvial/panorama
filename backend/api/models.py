@@ -58,8 +58,16 @@ class Client(models.Model):
     tax_optimization_comment = models.TextField(default="", blank=True)
     annual_household_income = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)
     
+    # Wallet (fonds du client - distinct du portefeuille d'actifs)
+    invested_capital = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)  # Capital investi
+    trading_portfolio = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)  # Wallet trading (fonds utilisés pour le trading)
+    bonus = models.DecimalField(max_digits=15, decimal_places=2, default=0, null=True, blank=True)  # Bonus
+    # Note: available_funds is calculated on frontend (invested_capital - trading_portfolio - bonus)
+    # Note: Le "portefeuille" d'actifs est géré via ClientAsset, pas ici
+    
     # Relations
-    managed_by = models.CharField(max_length=50, default="", blank=True)
+    managed_by = models.CharField(max_length=50, default="", blank=True)  # ID ou username du gestionnaire
+    source = models.CharField(max_length=100, default="", blank=True)  # Source du client
     team = models.ForeignKey('Team', on_delete=models.SET_NULL, null=True, blank=True, related_name='clients')
     
     # Timestamps
@@ -209,10 +217,11 @@ class ClientRIB(models.Model):
 class UsefulLink(models.Model):
     """Table des liens utiles disponibles"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
-    name = models.CharField(max_length=200, default="")  # Nom du lien
+    name = models.CharField(max_length=200, default="")  # Nom du lien (Titre)
     url = models.URLField(max_length=500, default="")  # URL du lien
     description = models.TextField(default="", blank=True)  # Description du lien
-    category = models.CharField(max_length=100, default="", blank=True)  # Catégorie du lien
+    image = models.ImageField(upload_to='useful_links/', null=True, blank=True)  # Image du lien
+    category = models.CharField(max_length=100, default="", blank=True)  # Catégorie du lien (déprécié)
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -233,3 +242,37 @@ class ClientUsefulLink(models.Model):
 
     def __str__(self):
         return f"{self.client.fname} {self.client.lname} - {self.useful_link.name}"
+
+class Transaction(models.Model):
+    """Table des transactions clients"""
+    TRANSACTION_TYPES = [
+        ('depot', 'Dépôt'),
+        ('retrait', 'Retrait'),
+        ('bonus', 'Bonus'),
+        ('achat', 'Achat'),
+        ('vente', 'Vente'),
+        ('interets', 'Intérêts'),
+        ('frais', 'Frais'),
+        ('investissement', 'Investissement'),
+        ('perte', 'Perte'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('en_attente_paiement', 'En attente de paiement'),
+        ('en_cours', 'En cours'),
+        ('termine', 'Terminé'),
+        ('conteste', 'Contesté'),
+    ]
+    
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='transactions')
+    type = models.CharField(max_length=50, choices=TRANSACTION_TYPES, default='depot')
+    amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    description = models.TextField(default="", blank=True)
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='en_cours')
+    datetime = models.DateTimeField()  # Date et heure de la transaction
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.get_type_display()} - {self.amount} € - {self.client.fname} {self.client.lname}"

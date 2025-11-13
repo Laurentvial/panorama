@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction
 import uuid
 
 class UserSerializer(serializers.ModelSerializer):
@@ -180,9 +180,57 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['fullName'] = f"{instance.fname} {instance.lname}".strip()
         ret['createdAt'] = instance.created_at
         ret['capital'] = float(instance.total_wealth) if instance.total_wealth else 0
-        ret['manager'] = instance.managed_by or ''
-        ret['source'] = ''  # À définir si nécessaire
+        ret['source'] = instance.source or ''
         ret['teamId'] = instance.team.id if instance.team else None
+        ret['teamName'] = instance.team.name if instance.team else ''
+        
+        # Get manager user details if managed_by is set
+        # managed_by should always contain the user ID
+        manager_user = None
+        manager_id = None
+        if instance.managed_by:
+            try:
+                # Try to find user by ID first (managed_by should be an ID)
+                try:
+                    # Check if managed_by is a numeric ID
+                    manager_id = int(instance.managed_by)
+                    manager_user = DjangoUser.objects.filter(id=manager_id).first()
+                except (ValueError, TypeError):
+                    # If not numeric, try as username (for backward compatibility)
+                    manager_user = DjangoUser.objects.filter(username=instance.managed_by).first()
+                    if manager_user:
+                        manager_id = manager_user.id
+            except Exception:
+                pass
+        
+        if manager_user:
+            ret['managerId'] = str(manager_user.id)  # DjangoUser.id
+            ret['manager'] = str(manager_user.id)  # Always return the ID, not the username
+            ret['managerName'] = f"{manager_user.first_name} {manager_user.last_name}".strip() or manager_user.username
+            ret['managerEmail'] = manager_user.email or ''
+            # Get manager's team and UserDetails ID for frontend compatibility
+            try:
+                manager_user_details = manager_user.user_details
+                ret['managerUserDetailsId'] = manager_user_details.id  # UserDetails.id for Select component
+                manager_team_member = manager_user_details.team_memberships.first()
+                if manager_team_member:
+                    ret['managerTeamId'] = manager_team_member.team.id
+                    ret['managerTeamName'] = manager_team_member.team.name
+                else:
+                    ret['managerTeamId'] = None
+                    ret['managerTeamName'] = ''
+            except:
+                ret['managerUserDetailsId'] = None
+                ret['managerTeamId'] = None
+                ret['managerTeamName'] = ''
+        else:
+            ret['managerId'] = None
+            ret['manager'] = instance.managed_by or ''  # Keep original value if user not found
+            ret['managerName'] = ''
+            ret['managerEmail'] = ''
+            ret['managerUserDetailsId'] = None
+            ret['managerTeamId'] = None
+            ret['managerTeamName'] = ''
         
         # Convertir les champs personnels de snake_case à camelCase
         if instance.profile_photo:
@@ -231,6 +279,12 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['taxOptimization'] = bool(ret.get('tax_optimization', False))
         ret['taxOptimizationComment'] = ret.get('tax_optimization_comment', '') or ''
         ret['annualHouseholdIncome'] = float(ret.get('annual_household_income', 0) or 0)
+        
+        # Convertir les champs wallet de snake_case à camelCase
+        ret['investedCapital'] = float(ret.get('invested_capital', 0) or 0)
+        ret['tradingPortfolio'] = float(ret.get('trading_portfolio', 0) or 0)
+        ret['bonus'] = float(ret.get('bonus', 0) or 0)
+        # availableFunds is calculated on frontend
         
         return ret
 
@@ -449,12 +503,12 @@ class ClientAssetSerializer(serializers.ModelSerializer):
 class RIBSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
-    bankName = serializers.CharField(source='bank_name', read_only=True)
-    accountHolder = serializers.CharField(source='account_holder', read_only=True)
-    bankCode = serializers.CharField(source='bank_code', read_only=True)
-    branchCode = serializers.CharField(source='branch_code', read_only=True)
-    accountNumber = serializers.CharField(source='account_number', read_only=True)
-    ribKey = serializers.CharField(source='rib_key', read_only=True)
+    bankName = serializers.CharField(source='bank_name', required=False, allow_blank=True)
+    accountHolder = serializers.CharField(source='account_holder', required=False, allow_blank=True)
+    bankCode = serializers.CharField(source='bank_code', required=False, allow_blank=True)
+    branchCode = serializers.CharField(source='branch_code', required=False, allow_blank=True)
+    accountNumber = serializers.CharField(source='account_number', required=False, allow_blank=True)
+    ribKey = serializers.CharField(source='rib_key', required=False, allow_blank=True)
     
     class Meta:
         model = RIB
@@ -497,17 +551,34 @@ class ClientRIBSerializer(serializers.ModelSerializer):
 class UsefulLinkSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    imageUrl = serializers.SerializerMethodField()
     
     class Meta:
         model = UsefulLink
-        fields = ['id', 'name', 'url', 'description', 'category', 'default', 'createdAt', 'updatedAt']
-        read_only_fields = ['id', 'createdAt', 'updatedAt']
+        fields = ['id', 'name', 'url', 'description', 'image', 'imageUrl', 'default', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
+    
+    def get_imageUrl(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['default'] = bool(instance.default)
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        if instance.image:
+            request = self.context.get('request')
+            if request:
+                ret['imageUrl'] = request.build_absolute_uri(instance.image.url)
+            else:
+                ret['imageUrl'] = instance.image.url
+        else:
+            ret['imageUrl'] = None
         return ret
 
 class ClientUsefulLinkSerializer(serializers.ModelSerializer):
@@ -525,7 +596,26 @@ class ClientUsefulLinkSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['clientId'] = instance.client.id
-        ret['usefulLink'] = UsefulLinkSerializer(instance.useful_link).data
+        # Pass the request context to UsefulLinkSerializer so it can build absolute URLs
+        request = self.context.get('request')
+        ret['usefulLink'] = UsefulLinkSerializer(instance.useful_link, context={'request': request}).data
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class TransactionSerializer(serializers.ModelSerializer):
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = Transaction
+        fields = ['id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret

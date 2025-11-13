@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Plus, Mail, Send, Trash2, Eye } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import '../styles/PageHeader.css';
 
 interface MessagerieProps {
   user: any;
@@ -117,10 +118,10 @@ export function Messagerie({ user }: MessagerieProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-slate-900 mb-2">Messagerie</h1>
-          <p className="text-slate-600">Boîte de réception et messages envoyés</p>
+      <div className="page-header">
+        <div className="page-title-section">
+          <h1 className="page-title">Messagerie</h1>
+          <p className="page-subtitle">Boîte de réception et messages envoyés</p>
         </div>
         
         <Dialog open={isNewMessageOpen} onOpenChange={setIsNewMessageOpen}>
