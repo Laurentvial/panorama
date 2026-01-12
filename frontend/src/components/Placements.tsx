@@ -5,13 +5,13 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { Plus, Pencil, Trash2, Package, Folder } from 'lucide-react';
+import { Plus, Pencil, Trash2, Package, Folder, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/PageHeader.css';
+import '../styles/Modal.css';
 
 interface PlacementsProps {
   user?: any;
@@ -181,42 +181,52 @@ export function Placements({ user }: PlacementsProps) {
         {/* Products Tab */}
         <TabsContent value="products" className="space-y-6">
           <div className="flex justify-end">
-            <Dialog open={isProductDialogOpen} onOpenChange={setIsProductDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Créer un produit
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Nouveau produit financier</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleCreateProduct} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Nom du produit</Label>
-                      <Input
-                        value={productForm.name}
-                        onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                        required
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>Référence</Label>
-                      <Input
-                        value={productForm.reference}
-                        onChange={(e) => setProductForm({ ...productForm, reference: e.target.value })}
-                        required
-                      />
-                    </div>
+            <Button onClick={() => setIsProductDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Créer un produit
+            </Button>
+          </div>
+
+          {isProductDialogOpen && (
+            <div className="modal-overlay" onClick={() => setIsProductDialogOpen(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh', overflowY: 'auto' }}>
+                <div className="modal-header">
+                  <h2 className="modal-title">Nouveau produit financier</h2>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="modal-close"
+                    onClick={() => setIsProductDialogOpen(false)}
+                  >
+                    <X className="planning-icon-md" />
+                  </Button>
+                </div>
+                <form onSubmit={handleCreateProduct} className="modal-form">
+                  <div className="modal-form-field">
+                    <Label htmlFor="product-name">Nom du produit *</Label>
+                    <Input
+                      id="product-name"
+                      value={productForm.name}
+                      onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                      required
+                    />
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label>Catégorie (optionnel)</Label>
+                  <div className="modal-form-field">
+                    <Label htmlFor="product-reference">Référence *</Label>
+                    <Input
+                      id="product-reference"
+                      value={productForm.reference}
+                      onChange={(e) => setProductForm({ ...productForm, reference: e.target.value })}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="modal-form-field">
+                    <Label htmlFor="product-category">Catégorie (optionnel)</Label>
                     <Select value={productForm.categoryId || 'none'} onValueChange={(value) => setProductForm({ ...productForm, categoryId: value === 'none' ? '' : value })}>
-                      <SelectTrigger>
+                      <SelectTrigger id="product-category">
                         <SelectValue placeholder="Sélectionner une catégorie" />
                       </SelectTrigger>
                       <SelectContent>
@@ -231,9 +241,10 @@ export function Placements({ user }: PlacementsProps) {
                   </div>
                   
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label>Prix (€)</Label>
+                    <div className="modal-form-field">
+                      <Label htmlFor="product-price">Prix (€) *</Label>
                       <Input
+                        id="product-price"
                         type="number"
                         step="0.01"
                         value={productForm.price}
@@ -242,9 +253,10 @@ export function Placements({ user }: PlacementsProps) {
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <Label>Rentabilité (%)</Label>
+                    <div className="modal-form-field">
+                      <Label htmlFor="product-profitability">Rentabilité (%) *</Label>
                       <Input
+                        id="product-profitability"
                         type="number"
                         step="0.01"
                         value={productForm.profitability}
@@ -253,9 +265,10 @@ export function Placements({ user }: PlacementsProps) {
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <Label>Durée</Label>
+                    <div className="modal-form-field">
+                      <Label htmlFor="product-duration">Durée</Label>
                       <Input
+                        id="product-duration"
                         value={productForm.duration}
                         onChange={(e) => setProductForm({ ...productForm, duration: e.target.value })}
                         placeholder="Ex: 12 mois"
@@ -263,25 +276,26 @@ export function Placements({ user }: PlacementsProps) {
                     </div>
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label>Description</Label>
+                  <div className="modal-form-field">
+                    <Label htmlFor="product-description">Description</Label>
                     <Textarea
+                      id="product-description"
                       value={productForm.description}
                       onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
                       rows={4}
                     />
                   </div>
                   
-                  <div className="flex gap-2 justify-end">
+                  <div className="modal-form-actions">
                     <Button type="button" variant="outline" onClick={() => setIsProductDialogOpen(false)}>
                       Annuler
                     </Button>
                     <Button type="submit">Créer</Button>
                   </div>
                 </form>
-              </DialogContent>
-            </Dialog>
-          </div>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader>
@@ -362,30 +376,42 @@ export function Placements({ user }: PlacementsProps) {
         {/* Categories Tab */}
         <TabsContent value="categories" className="space-y-6">
           <div className="flex justify-end">
-            <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Créer une catégorie
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Nouvelle catégorie</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleCreateCategory} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Titre</Label>
+            <Button onClick={() => setIsCategoryDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Créer une catégorie
+            </Button>
+          </div>
+
+          {isCategoryDialogOpen && (
+            <div className="modal-overlay" onClick={() => setIsCategoryDialogOpen(false)}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+                <div className="modal-header">
+                  <h2 className="modal-title">Nouvelle catégorie</h2>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="modal-close"
+                    onClick={() => setIsCategoryDialogOpen(false)}
+                  >
+                    <X className="planning-icon-md" />
+                  </Button>
+                </div>
+                <form onSubmit={handleCreateCategory} className="modal-form">
+                  <div className="modal-form-field">
+                    <Label htmlFor="category-title">Titre *</Label>
                     <Input
+                      id="category-title"
                       value={categoryForm.title}
                       onChange={(e) => setCategoryForm({ ...categoryForm, title: e.target.value })}
                       required
                     />
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label>URL</Label>
+                  <div className="modal-form-field">
+                    <Label htmlFor="category-url">URL *</Label>
                     <Input
+                      id="category-url"
                       value={categoryForm.url}
                       onChange={(e) => setCategoryForm({ ...categoryForm, url: e.target.value })}
                       placeholder="Ex: actions-francaises"
@@ -393,8 +419,8 @@ export function Placements({ user }: PlacementsProps) {
                     />
                   </div>
                   
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                  <div className="modal-form-field">
+                    <div className="flex items-center justify-between mb-2">
                       <Label>Sous-catégories</Label>
                       <Button type="button" size="sm" variant="outline" onClick={addSubcategory}>
                         <Plus className="w-4 h-4 mr-2" />
@@ -425,16 +451,16 @@ export function Placements({ user }: PlacementsProps) {
                     )}
                   </div>
                   
-                  <div className="flex gap-2 justify-end">
+                  <div className="modal-form-actions">
                     <Button type="button" variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
                       Annuler
                     </Button>
                     <Button type="submit">Créer</Button>
                   </div>
                 </form>
-              </DialogContent>
-            </Dialog>
-          </div>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader>
