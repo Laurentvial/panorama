@@ -121,5 +121,11 @@ export default defineConfig(({ mode }) => ({
         secure: false,
       },
     },
+    // Serve static files from static directory
+    fs: {
+      allow: ['..'],
+    },
   },
+  // Copy static assets to dist
+  publicDir: 'static',
 }));

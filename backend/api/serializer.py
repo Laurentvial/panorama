@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product
 import uuid
 
 class UserSerializer(serializers.ModelSerializer):
@@ -555,7 +555,7 @@ class UsefulLinkSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = UsefulLink
-        fields = ['id', 'name', 'url', 'description', 'image', 'imageUrl', 'default', 'createdAt', 'updatedAt']
+        fields = ['id', 'name', 'url', 'description', 'image', 'imageUrl', 'button', 'default', 'createdAt', 'updatedAt']
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
     
     def get_imageUrl(self, obj):
@@ -616,6 +616,38 @@ class TransactionSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['clientId'] = instance.client.id
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class ProductCategorySerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ProductCategory
+        fields = ['id', 'title', 'url', 'subcategories', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+class ProductSerializer(serializers.ModelSerializer):
+    categoryId = serializers.CharField(source='category.id', read_only=True, allow_null=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = Product
+        fields = ['id', 'name', 'reference', 'categoryId', 'price', 'profitability', 'duration', 'description', 'active', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['categoryId'] = instance.category.id if instance.category else None
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret

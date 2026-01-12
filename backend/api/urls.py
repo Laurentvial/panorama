@@ -62,9 +62,23 @@ urlpatterns = [
     path('clients/<str:client_id>/useful-links/', api_views.client_useful_links, name='client-useful-links'),
     path('clients/<str:client_id>/useful-links/add/', api_views.client_useful_link_add, name='client-useful-link-add'),
     path('clients/<str:client_id>/useful-links/<str:useful_link_id>/', api_views.client_useful_link_remove, name='client-useful-link-remove'),
+    # Stats endpoint
+    path('stats/', api_views.stats, name='stats'),
     # Transactions endpoints
+    path('transactions/', api_views.all_transactions, name='all-transactions'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
+    # Product Categories endpoints
+    path('categories/', api_views.category_list, name='category-list'),
+    path('categories/create/', api_views.category_create, name='category-create'),
+    path('categories/<str:category_id>/update/', api_views.category_update, name='category-update'),
+    path('categories/<str:category_id>/delete/', api_views.category_delete, name='category-delete'),
+    # Products endpoints
+    path('products/', api_views.product_list, name='product-list'),
+    path('products/create/', api_views.product_create, name='product-create'),
+    path('products/<str:product_id>/update/', api_views.product_update, name='product-update'),
+    path('products/<str:product_id>/delete/', api_views.product_delete, name='product-delete'),
+    path('products/<str:product_id>/toggle-active/', api_views.product_toggle_active, name='product-toggle-active'),
 ]

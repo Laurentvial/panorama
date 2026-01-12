@@ -34,6 +34,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       // Check if it's a client or admin user
+      // If userType is not set or is 'admin', treat as admin (Django JWT)
       if (userType === 'client' || token.startsWith('client_')) {
         // Client user
         const clientData = localStorage.getItem('clientData');
@@ -66,9 +67,17 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           throw new Error('Failed to get client data');
         }
       } else {
-        // Admin user (Django JWT)
-        const response = await apiCall("/api/user/current/");
-        setCurrentUser(response);
+        // Admin user (Django JWT) - userType is 'admin' or not set
+        try {
+          const response = await apiCall("/api/user/current/");
+          setCurrentUser({
+            ...response,
+            userType: 'admin'
+          });
+        } catch (apiError: any) {
+          // If API call fails, it might be because token is invalid
+          throw apiError;
+        }
       }
     } catch (error: any) {
       console.error("Erreur lors de la récupération de l'utilisateur", error);

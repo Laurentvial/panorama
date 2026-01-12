@@ -48,22 +48,27 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 
         // Check if it's a client trying to access admin routes
         if (userType === 'client' || token.startsWith('client_')) {
+            console.log('Blocked: Client token detected in admin route');
             setIsAuthenticated(false);
             return;
         }
 
         try {
+            // Try to decode JWT token
             const decoded = jwtDecode(token);
             const tokenExpiry = decoded.exp;
             const currentTime = Date.now() / 1000;
 
             if (tokenExpiry && tokenExpiry < currentTime) {
+                console.log('Token expired, attempting refresh');
                 await refreshToken();
             } else {
+                console.log('Token valid, authenticated');
                 setIsAuthenticated(true);
             }
         } catch (error) {
-            // Invalid JWT token (might be client token)
+            // Invalid JWT token (might be client token or malformed)
+            console.error('JWT decode error:', error);
             setIsAuthenticated(false);
         }
     }

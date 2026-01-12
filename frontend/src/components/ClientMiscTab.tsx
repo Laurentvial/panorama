@@ -214,7 +214,7 @@ export function ClientMiscTab({
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline"
                         >
-                          {clientLink.usefulLink.url}
+                          {clientLink.usefulLink.button || clientLink.usefulLink.url}
                         </a>
                       </td>
                       <td className="p-2 text-slate-600">{clientLink.usefulLink.description}</td>

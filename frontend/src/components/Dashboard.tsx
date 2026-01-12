@@ -236,10 +236,16 @@ export function Dashboard({ user: userProp }: DashboardProps) {
                   {stats.recentTransactions.slice(0, 10).map((transaction: any) => (
                     <tr key={transaction.id}>
                       <td>
-                        {new Date(transaction.createdAt).toLocaleDateString('fr-FR')}
+                        {new Date(transaction.datetime || transaction.createdAt).toLocaleDateString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
                       </td>
                       <td className="dashboard-table-type">{transaction.type}</td>
-                      <td>{transaction.amount?.toLocaleString('fr-FR')} €</td>
+                      <td>{parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
                       <td>
                         <span className="dashboard-table-badge">
                           {transaction.status}

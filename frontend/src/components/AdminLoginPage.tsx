@@ -6,6 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { signIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
+import { ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
 
@@ -23,8 +24,39 @@ export function AdminLoginPage() {
     setLoading(true);
 
     try {
-      await signIn(username, password);
+      console.log('Admin login attempt for:', username);
+      const result = await signIn(username, password);
+      console.log('Login successful, result:', result);
+      
+      // Wait a bit for localStorage to be set
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify token is stored
+      const token = localStorage.getItem(ACCESS_TOKEN);
+      const userType = localStorage.getItem('userType');
+      console.log('Token stored:', !!token, 'UserType:', userType);
+      
+      if (!token) {
+        throw new Error('Erreur: Token non reçu après connexion');
+      }
+      
+      if (userType === 'client') {
+        // Clear everything and try again
+        localStorage.clear();
+        throw new Error('Erreur: Connexion client détectée. Veuillez utiliser /login pour les clients.');
+      }
+      
       await refreshUser();
+      
+      // Double check userType after refresh
+      const finalUserType = localStorage.getItem('userType');
+      console.log('Final UserType after refresh:', finalUserType);
+      
+      if (finalUserType === 'client') {
+        localStorage.clear();
+        throw new Error('Erreur: Type d\'utilisateur incorrect après connexion');
+      }
+      
       navigate('/admin');
     } catch (err: any) {
       console.error('Login error:', err);
@@ -36,11 +68,17 @@ export function AdminLoginPage() {
         errorMessage = err.message;
       } else if (err?.response?.data) {
         const data = err.response.data;
-        errorMessage = data.detail || Object.values(data).flat().join(', ') || errorMessage;
+        errorMessage = data.detail || data.error || Object.values(data).flat().join(', ') || errorMessage;
       }
       
       setError(errorMessage);
       toast.error(errorMessage);
+      
+      // Clear any partial login data
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem('refresh');
+      localStorage.removeItem('userType');
+      localStorage.removeItem('clientData');
     } finally {
       setLoading(false);
     }

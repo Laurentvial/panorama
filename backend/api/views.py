@@ -16,11 +16,13 @@ from .models import ClientRIB
 from .models import UsefulLink
 from .models import ClientUsefulLink
 from .models import Transaction
+from .models import ProductCategory
+from .models import Product
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
@@ -165,6 +167,23 @@ def get_team_data_for_log(team):
         team_data['members_count'] = team_members_count
     
     return team_data
+
+def get_useful_link_data_for_log(useful_link):
+    """Helper function to extract useful link data for logging"""
+    useful_link_data = {
+        'id': useful_link.id,
+        'name': useful_link.name,
+        'url': useful_link.url,
+        'description': useful_link.description or '',
+        'button': useful_link.button or '',
+        'default': useful_link.default,
+    }
+    
+    # Include image URL if available
+    if useful_link.image:
+        useful_link_data['has_image'] = True
+    
+    return useful_link_data
 
 
 def create_log_entry(event_type, user_id, request, old_value=None, new_value=None):
@@ -1480,6 +1499,17 @@ def useful_link_create(request):
         while UsefulLink.objects.filter(id=useful_link_id).exists():
             useful_link_id = uuid.uuid4().hex[:12]
         useful_link = serializer.save(id=useful_link_id)
+        
+        # Create log entry
+        new_value = get_useful_link_data_for_log(useful_link)
+        create_log_entry(
+            event_type='createUsefulLink',
+            user_id=request.user,
+            request=request,
+            old_value={},  # No old value for creation
+            new_value=new_value
+        )
+        
         return Response(UsefulLinkSerializer(useful_link, context={'request': request}).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1488,6 +1518,9 @@ def useful_link_create(request):
 def useful_link_update(request, useful_link_id):
     """Modifier un lien utile"""
     useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
+    
+    # Get old value before update for logging
+    old_value = get_useful_link_data_for_log(useful_link)
     
     # Check if image should be removed
     remove_image = request.data.get('removeImage', '').lower() == 'true'
@@ -1501,6 +1534,22 @@ def useful_link_update(request, useful_link_id):
         if remove_image:
             useful_link.image = None
             useful_link.save()
+        
+        # Refresh useful_link to get updated timestamp
+        useful_link.refresh_from_db()
+        
+        # Get new value after update for logging
+        new_value = get_useful_link_data_for_log(useful_link)
+        
+        # Create log entry
+        create_log_entry(
+            event_type='editUsefulLink',
+            user_id=request.user,
+            request=request,
+            old_value=old_value,
+            new_value=new_value
+        )
+        
         return Response(UsefulLinkSerializer(useful_link, context={'request': request}).data, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1509,7 +1558,22 @@ def useful_link_update(request, useful_link_id):
 def useful_link_delete(request, useful_link_id):
     """Supprimer un lien utile"""
     useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
+    
+    # Get old value before deletion for logging
+    old_value = get_useful_link_data_for_log(useful_link)
+    
+    # Delete the useful link
     useful_link.delete()
+    
+    # Create log entry
+    create_log_entry(
+        event_type='deleteUsefulLink',
+        user_id=request.user,
+        request=request,
+        old_value=old_value,
+        new_value={}  # No new value for deletion
+    )
+    
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['GET'])
@@ -1569,7 +1633,51 @@ def client_useful_link_remove(request, client_id, useful_link_id):
     except ClientUsefulLink.DoesNotExist:
         return Response({'error': 'Client useful link relationship not found'}, status=status.HTTP_404_NOT_FOUND)
 
+# Stats endpoint
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def stats(request):
+    """Retourne les statistiques pour le dashboard admin"""
+    from django.db.models import Sum, Q
+    
+    # Calculate total revenue (sum of all deposits and sales)
+    total_revenue = Transaction.objects.filter(
+        Q(type='depot') | Q(type='vente')
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Calculate pending revenue (transactions with status 'en_attente_paiement' or 'en_cours')
+    pending_revenue = Transaction.objects.filter(
+        Q(type='depot') | Q(type='vente'),
+        Q(status='en_attente_paiement') | Q(status='en_cours')
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Count total clients
+    total_clients = Client.objects.count()
+    
+    # Count total appointments (events)
+    total_appointments = Event.objects.count()
+    
+    # Get recent transactions (last 10)
+    recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')[:10]
+    transaction_serializer = TransactionSerializer(recent_transactions, many=True)
+    
+    return Response({
+        'totalRevenue': float(total_revenue),
+        'pendingRevenue': float(pending_revenue),
+        'totalClients': total_clients,
+        'totalAppointments': total_appointments,
+        'recentTransactions': transaction_serializer.data
+    })
+
 # Transaction endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def all_transactions(request):
+    """Liste toutes les transactions de tous les clients"""
+    transactions = Transaction.objects.all().order_by('-datetime', '-created_at')
+    serializer = TransactionSerializer(transactions, many=True)
+    return Response({'transactions': serializer.data})
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def client_transactions(request, client_id):
@@ -1663,5 +1771,152 @@ def client_transaction_delete(request, client_id, transaction_id):
     """Supprimer une transaction"""
     client = get_object_or_404(Client, id=client_id)
     transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    transaction.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+# Product Categories endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def category_list(request):
+    """Liste toutes les catégories de produits"""
+    categories = ProductCategory.objects.all().order_by('title')
+    serializer = ProductCategorySerializer(categories, many=True)
+    return Response({'categories': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def category_create(request):
+    """Créer une nouvelle catégorie"""
+    # Generate category ID
+    category_id = uuid.uuid4().hex[:12]
+    while ProductCategory.objects.filter(id=category_id).exists():
+        category_id = uuid.uuid4().hex[:12]
+    
+    category = ProductCategory.objects.create(
+        id=category_id,
+        title=request.data.get('title', ''),
+        url=request.data.get('url', ''),
+        subcategories=request.data.get('subcategories', [])
+    )
+    
+    serializer = ProductCategorySerializer(category)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def category_update(request, category_id):
+    """Mettre à jour une catégorie"""
+    category = get_object_or_404(ProductCategory, id=category_id)
+    
+    if 'title' in request.data:
+        category.title = request.data['title']
+    if 'url' in request.data:
+        category.url = request.data['url']
+    if 'subcategories' in request.data:
+        category.subcategories = request.data['subcategories']
+    
+    category.save()
+    serializer = ProductCategorySerializer(category)
+    return Response(serializer.data)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def category_delete(request, category_id):
+    """Supprimer une catégorie"""
+    category = get_object_or_404(ProductCategory, id=category_id)
+    category.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+# Products endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def product_list(request):
+    """Liste tous les produits financiers"""
+    products = Product.objects.all().order_by('-created_at')
+    serializer = ProductSerializer(products, many=True)
+    return Response({'products': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def product_create(request):
+    """Créer un nouveau produit financier"""
+    # Generate product ID
+    product_id = uuid.uuid4().hex[:12]
+    while Product.objects.filter(id=product_id).exists():
+        product_id = uuid.uuid4().hex[:12]
+    
+    # Get category if provided
+    category = None
+    if request.data.get('categoryId'):
+        try:
+            category = ProductCategory.objects.get(id=request.data['categoryId'])
+        except ProductCategory.DoesNotExist:
+            return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    product = Product.objects.create(
+        id=product_id,
+        name=request.data.get('name', ''),
+        reference=request.data.get('reference', ''),
+        category=category,
+        price=request.data.get('price', 0),
+        profitability=request.data.get('profitability', 0),
+        duration=request.data.get('duration', ''),
+        description=request.data.get('description', ''),
+        active=request.data.get('active', True)
+    )
+    
+    serializer = ProductSerializer(product)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def product_update(request, product_id):
+    """Mettre à jour un produit"""
+    product = get_object_or_404(Product, id=product_id)
+    
+    if 'name' in request.data:
+        product.name = request.data['name']
+    if 'reference' in request.data:
+        product.reference = request.data['reference']
+    if 'categoryId' in request.data:
+        if request.data['categoryId']:
+            try:
+                product.category = ProductCategory.objects.get(id=request.data['categoryId'])
+            except ProductCategory.DoesNotExist:
+                return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            product.category = None
+    if 'price' in request.data:
+        product.price = request.data['price']
+    if 'profitability' in request.data:
+        product.profitability = request.data['profitability']
+    if 'duration' in request.data:
+        product.duration = request.data['duration']
+    if 'description' in request.data:
+        product.description = request.data['description']
+    if 'active' in request.data:
+        product.active = request.data['active']
+    
+    product.save()
+    serializer = ProductSerializer(product)
+    return Response(serializer.data)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def product_delete(request, product_id):
+    """Supprimer un produit"""
+    product = get_object_or_404(Product, id=product_id)
+    product.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def product_toggle_active(request, product_id):
+    """Activer/Désactiver un produit"""
+    product = get_object_or_404(Product, id=product_id)
+    product.active = not product.active
+    product.save()
+    serializer = ProductSerializer(product)
+    return Response(serializer.data)
     transaction.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)

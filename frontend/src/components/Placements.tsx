@@ -10,10 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Plus, Pencil, Trash2, Package, Folder } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { toast } from 'sonner';
 import '../styles/PageHeader.css';
 
 interface PlacementsProps {
-  user: any;
+  user?: any;
 }
 
 export function Placements({ user }: PlacementsProps) {
@@ -45,14 +46,17 @@ export function Placements({ user }: PlacementsProps) {
   async function loadData() {
     try {
       const [productsData, categoriesData] = await Promise.all([
-        apiCall('/products'),
-        apiCall('/categories')
+        apiCall('/api/products/').catch(() => ({ products: [] })),
+        apiCall('/api/categories/').catch(() => ({ categories: [] }))
       ]);
       
-      setProducts(productsData.products || []);
-      setCategories(categoriesData.categories || []);
+      setProducts(productsData?.products || productsData || []);
+      setCategories(categoriesData?.categories || categoriesData || []);
     } catch (error) {
       console.error('Error loading placements:', error);
+      // Set empty arrays on error
+      setProducts([]);
+      setCategories([]);
     }
   }
 
@@ -60,16 +64,18 @@ export function Placements({ user }: PlacementsProps) {
     e.preventDefault();
     
     try {
-      await apiCall('/categories', {
+      await apiCall('/api/categories/create/', {
         method: 'POST',
         body: JSON.stringify(categoryForm)
       });
       
+      toast.success('Catégorie créée avec succès');
       setIsCategoryDialogOpen(false);
       setCategoryForm({ title: '', url: '', subcategories: [] });
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating category:', error);
+      toast.error(error?.message || 'Erreur lors de la création de la catégorie');
     }
   }
 
@@ -77,7 +83,7 @@ export function Placements({ user }: PlacementsProps) {
     e.preventDefault();
     
     try {
-      await apiCall('/products', {
+      await apiCall('/api/products/', {
         method: 'POST',
         body: JSON.stringify({
           ...productForm,
@@ -86,6 +92,7 @@ export function Placements({ user }: PlacementsProps) {
         })
       });
       
+      toast.success('Produit créé avec succès');
       setIsProductDialogOpen(false);
       setProductForm({
         name: '',
@@ -97,17 +104,20 @@ export function Placements({ user }: PlacementsProps) {
         description: ''
       });
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating product:', error);
+      toast.error(error?.message || 'Erreur lors de la création du produit');
     }
   }
 
   async function handleToggleProductActive(productId: string) {
     try {
-      await apiCall(`/products/${productId}/toggle-active`, { method: 'POST' });
+      await apiCall(`/api/products/${productId}/toggle-active/`, { method: 'POST' });
+      toast.success('Statut du produit mis à jour');
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error toggling product status:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour du statut');
     }
   }
 
@@ -115,10 +125,12 @@ export function Placements({ user }: PlacementsProps) {
     if (!confirm('Supprimer cette catégorie ?')) return;
     
     try {
-      await apiCall(`/categories/${categoryId}`, { method: 'DELETE' });
+      await apiCall(`/api/categories/${categoryId}/delete/`, { method: 'DELETE' });
+      toast.success('Catégorie supprimée avec succès');
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting category:', error);
+      toast.error(error?.message || 'Erreur lors de la suppression de la catégorie');
     }
   }
 
@@ -126,10 +138,12 @@ export function Placements({ user }: PlacementsProps) {
     if (!confirm('Supprimer ce produit ?')) return;
     
     try {
-      await apiCall(`/products/${productId}`, { method: 'DELETE' });
+      await apiCall(`/api/products/${productId}/delete/`, { method: 'DELETE' });
+      toast.success('Produit supprimé avec succès');
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting product:', error);
+      toast.error(error?.message || 'Erreur lors de la suppression du produit');
     }
   }
 
@@ -200,12 +214,13 @@ export function Placements({ user }: PlacementsProps) {
                   </div>
                   
                   <div className="space-y-2">
-                    <Label>Catégorie</Label>
-                    <Select value={productForm.categoryId} onValueChange={(value) => setProductForm({ ...productForm, categoryId: value })}>
+                    <Label>Catégorie (optionnel)</Label>
+                    <Select value={productForm.categoryId || 'none'} onValueChange={(value) => setProductForm({ ...productForm, categoryId: value === 'none' ? '' : value })}>
                       <SelectTrigger>
                         <SelectValue placeholder="Sélectionner une catégorie" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="none">Aucune catégorie</SelectItem>
                         {categories.map((category) => (
                           <SelectItem key={category.id} value={category.id}>
                             {category.title}

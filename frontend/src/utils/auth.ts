@@ -11,26 +11,40 @@ const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
 
 export async function signIn(username: string, password: string) {
   try {
+    console.log('Attempting admin login for username:', username);
     const response = await fetch(`${apiUrl}/api/token/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        username: username, // Django REST Framework JWT uses 'username' field
+        username: username.trim(), // Django REST Framework JWT uses 'username' field
         password: password,
       }),
     });
 
+    console.log('Login response status:', response.status);
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Invalid credentials' }));
-      throw new Error(error.detail || 'Invalid credentials');
+      const errorData = await response.json().catch(() => ({ detail: 'Invalid credentials' }));
+      console.error('Login error response:', errorData);
+      const errorMessage = errorData.detail || errorData.error || Object.values(errorData).flat().join(', ') || 'Invalid credentials';
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
+    console.log('Login successful, received data:', { hasAccess: !!data.access, hasRefresh: !!data.refresh });
     
     if (data.access) {
       localStorage.setItem(ACCESS_TOKEN, data.access);
+      // Clear client-related data when admin logs in
+      localStorage.removeItem('userType');
+      localStorage.removeItem('clientData');
+      // Set userType to admin to distinguish from client
+      localStorage.setItem('userType', 'admin');
+      console.log('Token stored, userType set to admin');
+    } else {
+      throw new Error('No access token received from server');
     }
     
     if (data.refresh) {
@@ -39,6 +53,7 @@ export async function signIn(username: string, password: string) {
     
     return data;
   } catch (error: any) {
+    console.error('SignIn error:', error);
     throw error;
   }
 }

@@ -34,16 +34,25 @@ export function ClientManagementInfo({ client, onEdit }: ClientManagementInfoPro
               <User className="w-4 h-4 text-slate-500" />
               <Label className="text-slate-600 font-semibold">Gestionnaire</Label>
             </div>
-            <p className="text-slate-900">
-              {client?.managerName || client?.manager || '-'}
-            </p>
-            {client?.managerEmail && (
-              <p className="text-sm text-slate-500">{client.managerEmail}</p>
-            )}
-            {client?.managerTeamName && (
-              <p className="text-sm text-slate-500">
-                {client.managerTeamName}
-              </p>
+            {client?.managerName || client?.manager ? (
+              <>
+                <p className="text-slate-900 font-medium">
+                  {client.managerName || client.manager}
+                </p>
+                {client?.managerEmail && (
+                  <p className="text-sm text-slate-500">{client.managerEmail}</p>
+                )}
+                {client?.managerTeamName && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Users className="w-4 h-4 text-slate-400" />
+                    <p className="text-sm text-slate-600 font-medium">
+                      Équipe: <span className="text-slate-700">{client.managerTeamName}</span>
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-slate-500">Aucun gestionnaire assigné</p>
             )}
           </div>
 

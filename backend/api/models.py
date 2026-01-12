@@ -222,6 +222,7 @@ class UsefulLink(models.Model):
     description = models.TextField(default="", blank=True)  # Description du lien
     image = models.ImageField(upload_to='useful_links/', null=True, blank=True)  # Image du lien
     category = models.CharField(max_length=100, default="", blank=True)  # Catégorie du lien (déprécié)
+    button = models.CharField(max_length=200, default="", blank=True)  # Texte du bouton pour ouvrir le lien ou télécharger le fichier
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -276,3 +277,32 @@ class Transaction(models.Model):
     
     def __str__(self):
         return f"{self.get_type_display()} - {self.amount} € - {self.client.fname} {self.client.lname}"
+
+class ProductCategory(models.Model):
+    """Table des catégories de produits financiers"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    title = models.CharField(max_length=200, default="")  # Titre de la catégorie
+    url = models.CharField(max_length=200, default="", blank=True)  # URL slug
+    subcategories = models.JSONField(default=list, blank=True)  # Liste des sous-catégories
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+class Product(models.Model):
+    """Table des produits financiers"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    name = models.CharField(max_length=200, default="")  # Nom du produit
+    reference = models.CharField(max_length=100, default="", blank=True)  # Référence du produit
+    category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
+    price = models.DecimalField(max_digits=15, decimal_places=2, default=0)  # Prix du produit
+    profitability = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # Rentabilité en %
+    duration = models.CharField(max_length=100, default="", blank=True)  # Durée (ex: "12 mois")
+    description = models.TextField(default="", blank=True)  # Description du produit
+    active = models.BooleanField(default=True)  # Si le produit est actif
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.reference})"

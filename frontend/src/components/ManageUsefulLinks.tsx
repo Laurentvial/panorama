@@ -22,6 +22,7 @@ export function ManageUsefulLinks() {
     url: '',
     description: '',
     image: null as File | null,
+    button: '',
     default: false
   });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -79,6 +80,7 @@ export function ManageUsefulLinks() {
       url: '',
       description: '',
       image: null,
+      button: '',
       default: false
     });
     setImagePreview(null);
@@ -92,6 +94,7 @@ export function ManageUsefulLinks() {
       formDataToSend.append('name', formData.name);
       formDataToSend.append('url', formData.url);
       formDataToSend.append('description', formData.description);
+      formDataToSend.append('button', formData.button);
       formDataToSend.append('default', formData.default.toString());
       if (formData.image) {
         formDataToSend.append('image', formData.image);
@@ -215,6 +218,7 @@ export function ManageUsefulLinks() {
                     <th className="text-left p-2 font-medium text-slate-700">Image</th>
                     <th className="text-left p-2 font-medium text-slate-700">Titre</th>
                     <th className="text-left p-2 font-medium text-slate-700">URL</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Bouton</th>
                     <th className="text-left p-2 font-medium text-slate-700">Description</th>
                     <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
                     <th className="text-right p-2 font-medium text-slate-700">Actions</th>
@@ -244,6 +248,7 @@ export function ManageUsefulLinks() {
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </td>
+                      <td className="p-2 font-medium">{link.button || '-'}</td>
                       <td className="p-2 text-slate-600 max-w-md truncate">{link.description}</td>
                       <td className="p-2">
                         {link.default ? (
@@ -326,6 +331,15 @@ export function ManageUsefulLinks() {
                   onChange={(e) => setFormData({ ...formData, url: e.target.value })}
                   placeholder="https://..."
                   required
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="button">Texte du bouton</Label>
+                <Input
+                  id="button"
+                  value={formData.button}
+                  onChange={(e) => setFormData({ ...formData, button: e.target.value })}
+                  placeholder="Ex: Ouvrir le lien, Télécharger le fichier"
                 />
               </div>
               <div className="modal-form-field">

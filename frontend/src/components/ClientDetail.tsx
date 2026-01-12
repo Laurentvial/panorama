@@ -9,6 +9,7 @@ import { EditPersonalInfoModal } from './EditPersonalInfoModal';
 import { EditPatrimonialInfoModal } from './EditPatrimonialInfoModal';
 import { ClientInfoTab } from './ClientInfoTab';
 import { ClientAssetsTab } from './ClientAssetsTab';
+import { ClientPortfolioTab } from './ClientPortfolioTab';
 import { ClientTransactionsTab } from './ClientTransactionsTab';
 import { ClientAppointmentsTab } from './ClientAppointmentsTab';
 import { ClientNotesTab } from './ClientNotesTab';
@@ -257,7 +258,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       <Tabs defaultValue="info" className="space-y-6">
         <TabsList>
           <TabsTrigger value="info">Informations</TabsTrigger>
-          <TabsTrigger value="assets">Actifs</TabsTrigger>
+          <TabsTrigger value="assets">Actifs visibles</TabsTrigger>
+          <TabsTrigger value="portfolio">Portefeuille</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="appointments">RDV</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -296,6 +298,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             availableAssets={availableAssets}
             onRefresh={loadClientData}
           />
+        </TabsContent>
+
+        {/* Portfolio Tab */}
+        <TabsContent value="portfolio">
+          <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Notes Tab */}

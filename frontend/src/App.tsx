@@ -12,6 +12,8 @@ import { ClientDetail } from './components/ClientDetail';
 import { ManageRibs } from './components/ManageRibs';
 import { ManageAssets } from './components/ManageAssets';
 import { ManageUsefulLinks } from './components/ManageUsefulLinks';
+import { Transactions } from './components/Transactions';
+import { Placements } from './components/Placements';
 import { PlatformDashboard } from './components/PlatformDashboard';
 import { PlatformPortfolio } from './components/PlatformPortfolio';
 import { PlatformTrading } from './components/PlatformTrading';
@@ -48,6 +50,10 @@ function ClientDetailWrapper() {
     }
     
     return <ClientDetail clientId={id} onBack={() => navigate('/admin/clients')} />;
+}
+
+function PlacementsWrapper() {
+    return <Placements user={null} />;
 }
 
 function App() {
@@ -129,6 +135,20 @@ function App() {
                         <ProtectedRoute>
                             <Layout>
                                 <ManageUsefulLinks />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/transactions" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Transactions />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/placements" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <PlacementsWrapper />
                             </Layout>
                         </ProtectedRoute>
                     } />
