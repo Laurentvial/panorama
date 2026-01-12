@@ -39,19 +39,32 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 
     const authenticate = async () => {
         const token = localStorage.getItem(ACCESS_TOKEN);
+        const userType = localStorage.getItem('userType');
+        
         if (!token) {
             setIsAuthenticated(false);
             return;
         }
 
-        const decoded = jwtDecode(token);
-        const tokenExpiry = decoded.exp;
-        const currentTime = Date.now() / 1000;
+        // Check if it's a client trying to access admin routes
+        if (userType === 'client' || token.startsWith('client_')) {
+            setIsAuthenticated(false);
+            return;
+        }
 
-        if (tokenExpiry && tokenExpiry < currentTime) {
-            await refreshToken();
-        } else {
-            setIsAuthenticated(true);
+        try {
+            const decoded = jwtDecode(token);
+            const tokenExpiry = decoded.exp;
+            const currentTime = Date.now() / 1000;
+
+            if (tokenExpiry && tokenExpiry < currentTime) {
+                await refreshToken();
+            } else {
+                setIsAuthenticated(true);
+            }
+        } catch (error) {
+            // Invalid JWT token (might be client token)
+            setIsAuthenticated(false);
         }
     }
     
@@ -63,7 +76,7 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
         );
     }
 
-    return isAuthenticated ? <>{children}</> : <Navigate to="/login" />
+    return isAuthenticated ? <>{children}</> : <Navigate to="/admin/login" />
 }
 
 export default ProtectedRoute;

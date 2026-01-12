@@ -22,6 +22,9 @@ urlpatterns = [
     path('teams/<str:team_id>/set-leader/', api_views.team_set_leader, name='team-set-leader'),
     # Users endpoints
     path('user/current/', api_views.get_current_user, name='get-current-user'),
+    # Client authentication endpoints
+    path('client/login/', api_views.client_login, name='client-login'),
+    path('client/current/', api_views.get_current_client, name='get-current-client'),
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),

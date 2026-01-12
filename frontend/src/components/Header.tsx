@@ -32,7 +32,8 @@ export function Header({ user }: HeaderProps) {
   }
 
   function handleLogout() {
-    navigate('/logout');
+    localStorage.clear();
+    navigate('/admin/login');
   }
 
   // Use full name if available, otherwise fallback to email/userId/'User' for User Menu label

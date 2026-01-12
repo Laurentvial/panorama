@@ -293,7 +293,7 @@ export function AddClient() {
       }
 
       toast.success('Client créé avec succès');
-      navigate('/clients');
+      navigate('/admin/clients');
     } catch (error: any) {
       console.error('Error creating client:', error);
       let errorMessage = 'Erreur lors de la création du client';
@@ -334,7 +334,7 @@ export function AddClient() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate('/clients')}
+          onClick={() => navigate('/admin/clients')}
           className="h-10 w-10"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -1007,7 +1007,7 @@ export function AddClient() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => navigate('/clients')}
+            onClick={() => navigate('/admin/clients')}
             disabled={loading}
           >
             Annuler

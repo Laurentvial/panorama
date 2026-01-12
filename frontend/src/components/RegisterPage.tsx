@@ -60,7 +60,7 @@ export function RegisterPage() {
       // Auto-login after signup
       await signIn(signupData.username, signupData.password);
       await refreshUser();
-      navigate('/');
+      navigate('/admin');
     } catch (err: any) {
       console.error('Signup error:', err);
       setSignupError('Erreur lors de la création du compte. Veuillez réessayer.');

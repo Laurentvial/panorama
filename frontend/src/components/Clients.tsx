@@ -225,7 +225,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
           <p className="page-subtitle">Gestion de vos clients</p>
         </div>
         
-        <Button onClick={() => navigate('/clients/add')}>
+        <Button onClick={() => navigate('/admin/clients/add')}>
           <Plus className="w-4 h-4 mr-2" />
           Ajouter un client
         </Button>
@@ -410,7 +410,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                       </td>
                       <td>
                         <button
-                          onClick={() => navigate(`/clients/${client.id}`)}
+                          onClick={() => navigate(`/admin/clients/${client.id}`)}
                           className="clients-name-link"
                         >
                           {client.fullName || `${client.firstName || ''} ${client.lastName || ''}`.trim() || '-'}

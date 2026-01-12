@@ -23,6 +23,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const getCurrentUser = async () => {
     const token = localStorage.getItem(ACCESS_TOKEN);
+    const userType = localStorage.getItem('userType');
     
     // Only make API call if we have a token
     if (!token) {
@@ -32,13 +33,48 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     try {
-      const response = await apiCall("/api/user/current/");
-      setCurrentUser(response);
+      // Check if it's a client or admin user
+      if (userType === 'client' || token.startsWith('client_')) {
+        // Client user
+        const clientData = localStorage.getItem('clientData');
+        if (clientData) {
+          setCurrentUser({
+            ...JSON.parse(clientData),
+            userType: 'client'
+          });
+          setLoading(false);
+          return;
+        }
+        
+        // Fetch client data from API
+        // @ts-ignore - Vite environment variables
+        const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+        const response = await fetch(`${apiUrl}/api/client/current/?token=${token}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setCurrentUser({
+            ...data.client,
+            userType: 'client'
+          });
+          localStorage.setItem('clientData', JSON.stringify(data.client));
+        } else {
+          throw new Error('Failed to get client data');
+        }
+      } else {
+        // Admin user (Django JWT)
+        const response = await apiCall("/api/user/current/");
+        setCurrentUser(response);
+      }
     } catch (error: any) {
       console.error("Erreur lors de la récupération de l'utilisateur", error);
       
-      // If token is invalid (401), try to refresh it
-      if (error?.status === 401 || error?.message?.includes('token')) {
+      // If token is invalid (401) and it's an admin user, try to refresh it
+      if ((error?.status === 401 || error?.message?.includes('token')) && userType !== 'client') {
         const refreshToken = localStorage.getItem(REFRESH_TOKEN);
         if (refreshToken) {
           try {
@@ -77,6 +113,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // If refresh failed or no refresh token, clear tokens
         localStorage.removeItem(ACCESS_TOKEN);
         localStorage.removeItem(REFRESH_TOKEN);
+        localStorage.removeItem('userType');
+        localStorage.removeItem('clientData');
       }
       
       setCurrentUser(null);

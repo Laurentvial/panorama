@@ -1,19 +1,18 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { clientSignIn } from '../utils/auth';
+import { signIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
-import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
 
-export function LoginPage() {
+export function AdminLoginPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,21 +23,20 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      // Client login only
-      await clientSignIn(email, password);
+      await signIn(username, password);
       await refreshUser();
-      navigate('/platform');
+      navigate('/admin');
     } catch (err: any) {
       console.error('Login error:', err);
       
       // Extract error message
-      let errorMessage = 'Email ou mot de passe incorrect.';
+      let errorMessage = 'Username ou mot de passe incorrect.';
       
       if (err?.message) {
         errorMessage = err.message;
       } else if (err?.response?.data) {
         const data = err.response.data;
-        errorMessage = data.detail || data.error || Object.values(data).flat().join(', ') || errorMessage;
+        errorMessage = data.detail || Object.values(data).flat().join(', ') || errorMessage;
       }
       
       setError(errorMessage);
@@ -52,21 +50,21 @@ export function LoginPage() {
     <div className="login-page-container">
       <Card className="login-card">
         <CardHeader className="login-card-header">
-          <CardTitle>Panorama</CardTitle>
+          <CardTitle>Panorama - Administration</CardTitle>
           <CardDescription>
-            Connectez-vous à votre compte client
+            Connectez-vous à votre compte administrateur
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="login-form">
             <div className="login-form-field">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="votre@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                placeholder="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
               />
             </div>
@@ -99,4 +97,4 @@ export function LoginPage() {
   );
 }
 
-export default LoginPage;
+export default AdminLoginPage;

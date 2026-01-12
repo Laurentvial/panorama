@@ -700,6 +700,64 @@ def client_delete(request, client_id):
     client.delete()
     return Response({'message': 'Client supprimé avec succès'}, status=status.HTTP_200_OK)
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def client_login(request):
+    """Client login endpoint - authenticates clients using email/password"""
+    email = request.data.get('email', '').strip()
+    password = request.data.get('password', '')
+    
+    if not email or not password:
+        return Response({'error': 'Email et mot de passe requis'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        client = Client.objects.get(email=email)
+    except Client.DoesNotExist:
+        return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Check if client has platform access
+    if not client.platform_access:
+        return Response({'error': 'Accès à la plateforme désactivé'}, status=status.HTTP_403_FORBIDDEN)
+    
+    # Check if client is active
+    if not client.active:
+        return Response({'error': 'Compte désactivé'}, status=status.HTTP_403_FORBIDDEN)
+    
+    # Verify password (simple string comparison for now - in production, use hashing)
+    if client.password != password:
+        return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Return client data (in production, generate a proper token)
+    serializer = ClientSerializer(client, context={'request': request})
+    return Response({
+        'client': serializer.data,
+        'token': f'client_{client.id}',  # Simple token for now
+        'userType': 'client'
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_current_client(request):
+    """Get current client from token"""
+    # Get token from Authorization header or query param
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = ClientSerializer(client, context={'request': request})
+        return Response({
+            'client': serializer.data,
+            'userType': 'client'
+        })
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_current_user(request):
@@ -709,7 +767,10 @@ def get_current_user(request):
         user_details = UserDetails.objects.get(django_user=django_user)
         # Use UserDetailsSerializer to ensure consistent format with other endpoints
         serializer = UserDetailsSerializer(user_details)
-        return Response(serializer.data)
+        return Response({
+            **serializer.data,
+            'userType': 'admin'  # admin, teamleader, or gestionnaire
+        })
     except UserDetails.DoesNotExist:
         # If custom user doesn't exist, return Django user data with default role
         # Still include first_name and last_name from Django Auth
@@ -722,6 +783,7 @@ def get_current_user(request):
             'role': '0',  # Default role
             'phone': '',
             'active': True,
+            'userType': 'admin'
         })
 
 # Teams endpoints
@@ -1172,10 +1234,22 @@ def asset_delete(request, asset_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def client_assets(request, client_id):
     """Liste les assets d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    
+    # Check if it's a client accessing their own data
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if token and token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
     client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
     serializer = ClientAssetSerializer(client_assets, many=True)
     return Response({'assets': serializer.data})
@@ -1506,10 +1580,21 @@ def client_transactions(request, client_id):
     return Response({'transactions': serializer.data})
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def client_transaction_create(request, client_id):
     """Créer une transaction pour un client"""
     client = get_object_or_404(Client, id=client_id)
+    
+    # Check if it's a client accessing their own data
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if token and token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Validate required fields
     if not request.data.get('type'):

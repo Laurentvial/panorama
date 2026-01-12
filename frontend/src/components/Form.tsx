@@ -38,7 +38,7 @@ function Form({ route, method, onSuccess }: FormProps) {
       } else {
         localStorage.setItem(ACCESS_TOKEN, response.access);
         localStorage.setItem(REFRESH_TOKEN, response.refresh);
-        navigate('/');
+        navigate('/admin');
       }
     } catch (error: any) {
       const data = error?.response || {};

@@ -15,17 +15,16 @@ export function Layout({ children }: LayoutProps) {
   // Map route paths to sidebar page IDs
   const getCurrentPage = () => {
     const path = location.pathname;
-    if (path === '/') return 'dashboard';
-    if (path === '/dashboard') return 'dashboard';
-    if (path === '/users') return 'users-teams';
-    if (path === '/clients') return 'clients';
-    if (path === '/planning') return 'planning';
-    if (path === '/transactions') return 'transactions';
-    if (path === '/messagerie') return 'messagerie';
-    if (path === '/placements') return 'placements';
-    if (path === '/manage/ribs') return 'manage-ribs';
-    if (path === '/manage/assets') return 'manage-assets';
-    if (path === '/manage/useful-links') return 'manage-links';
+    if (path === '/admin' || path === '/admin/dashboard') return 'dashboard';
+    if (path === '/admin/users') return 'users-teams';
+    if (path === '/admin/clients') return 'clients';
+    if (path === '/admin/planning') return 'planning';
+    if (path === '/admin/transactions') return 'transactions';
+    if (path === '/admin/messagerie') return 'messagerie';
+    if (path === '/admin/placements') return 'placements';
+    if (path === '/admin/manage/ribs') return 'manage-ribs';
+    if (path === '/admin/manage/assets') return 'manage-assets';
+    if (path === '/admin/manage/useful-links') return 'manage-links';
     return 'dashboard';
   };
 

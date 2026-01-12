@@ -43,9 +43,43 @@ export async function signIn(username: string, password: string) {
   }
 }
 
+export async function clientSignIn(email: string, password: string) {
+  try {
+    const response = await fetch(`${apiUrl}/api/client/login/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: email,
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Invalid credentials' }));
+      throw new Error(error.error || 'Email ou mot de passe incorrect');
+    }
+
+    const data = await response.json();
+    
+    if (data.token) {
+      localStorage.setItem(ACCESS_TOKEN, data.token);
+      localStorage.setItem('userType', 'client');
+      localStorage.setItem('clientData', JSON.stringify(data.client));
+    }
+    
+    return data;
+  } catch (error: any) {
+    throw error;
+  }
+}
+
 export async function signOut() {
   localStorage.removeItem(ACCESS_TOKEN);
   localStorage.removeItem(REFRESH_TOKEN);
+  localStorage.removeItem('userType');
+  localStorage.removeItem('clientData');
 }
 
 export async function getSession() {
