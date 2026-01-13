@@ -32,7 +32,7 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
     { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/transactions' },
     { id: 'messagerie', label: 'Messagerie', icon: Mail, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/messagerie' },
     { id: 'manage-assets', label: 'Gestion Actifs', icon: TrendingUp, roles: ['admin'], path: '/admin/manage/assets' },
-    { id: 'placements', label: 'Placements', icon: Package, roles: ['admin'], path: '/admin/placements' },
+    { id: 'placements', label: 'Produits d\'investissements', icon: Package, roles: ['admin'], path: '/admin/produits-investissements' },
     { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin'], path: '/admin/manage/ribs' },
     { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin'], path: '/admin/manage/useful-links' },
   ];

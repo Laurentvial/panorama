@@ -292,15 +292,44 @@ class ProductCategory(models.Model):
 
 class Product(models.Model):
     """Table des produits financiers"""
+    STATUS_CHOICES = [
+        ('Actif', 'Actif'),
+        ('Brouillon', 'Brouillon'),
+        ('Inactif', 'Inactif'),
+    ]
+    
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     name = models.CharField(max_length=200, default="")  # Nom du produit
     reference = models.CharField(max_length=100, default="", blank=True)  # Référence du produit
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
+    subcategory = models.CharField(max_length=200, default="", blank=True)  # Sous-catégorie
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Brouillon')  # Statut du produit
     price = models.DecimalField(max_digits=15, decimal_places=2, default=0)  # Prix du produit
-    profitability = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # Rentabilité en %
+    profitability = models.DecimalField(max_digits=10, decimal_places=2, default=0, null=True, blank=True)  # Rentabilité en %
     duration = models.CharField(max_length=100, default="", blank=True)  # Durée (ex: "12 mois")
     description = models.TextField(default="", blank=True)  # Description du produit
+    cgv = models.TextField(default="", blank=True)  # Conditions Générales de Vente
     active = models.BooleanField(default=True)  # Si le produit est actif
+    
+    # Gestion de la rentabilité
+    no_profitability = models.CharField(max_length=10, default='Oui')  # Produit sans rentabilité (Oui/Non)
+    is_variable_profitability = models.CharField(max_length=10, default='Non')  # Rentabilité variable (Oui/Non)
+    variable_profitability = models.CharField(max_length=100, default="", blank=True)  # Taux maximum si variable, sinon vide
+    profitability_period = models.CharField(max_length=50, default="", blank=True)  # Période de rentabilité
+    show_min_profitability = models.CharField(max_length=10, default='Non')  # Afficher rentabilité minimum (Oui/Non)
+    interest_period = models.CharField(max_length=50, default="", blank=True)  # Période d'intérêt disponible
+    capitalisation_fonds = models.CharField(max_length=10, default='Non')  # Capitalisation des fonds (Oui/Non)
+    
+    # Gestion du produit
+    show_on_launch = models.CharField(max_length=10, default='Non')  # Afficher au lancement (Oui/Non)
+    availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité
+    availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité
+    is_savings = models.BooleanField(default=False)  # Ce produit est une épargne
+    link_to_assets = models.CharField(max_length=10, default='Non')  # Lie le produit à des actifs (Oui/Non)
+    
+    # Gestion des prix
+    enable_price_variation = models.CharField(max_length=10, default='Non')  # Activer variation du prix (Oui/Non)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

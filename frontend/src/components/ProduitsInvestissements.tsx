@@ -1,42 +1,33 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { Plus, Pencil, Trash2, Package, Folder, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Folder, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
 
-interface PlacementsProps {
+interface ProduitsInvestissementsProps {
   user?: any;
 }
 
-export function Placements({ user }: PlacementsProps) {
+export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) {
+  const navigate = useNavigate();
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
-  const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
+  const [isEditCategoryDialogOpen, setIsEditCategoryDialogOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   
   const [categoryForm, setCategoryForm] = useState({
     title: '',
     url: '',
     subcategories: [] as string[]
-  });
-  
-  const [productForm, setProductForm] = useState({
-    name: '',
-    reference: '',
-    categoryId: '',
-    price: '',
-    profitability: '',
-    duration: '',
-    description: ''
   });
 
   useEffect(() => {
@@ -79,36 +70,38 @@ export function Placements({ user }: PlacementsProps) {
     }
   }
 
-  async function handleCreateProduct(e: React.FormEvent) {
+  function handleEditCategory(category: any) {
+    setEditingCategoryId(category.id);
+    setCategoryForm({
+      title: category.title || '',
+      url: category.url || '',
+      subcategories: category.subcategories || []
+    });
+    setIsEditCategoryDialogOpen(true);
+  }
+
+  async function handleUpdateCategory(e: React.FormEvent) {
     e.preventDefault();
     
+    if (!editingCategoryId) return;
+    
     try {
-      await apiCall('/api/products/', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...productForm,
-          price: parseFloat(productForm.price),
-          profitability: parseFloat(productForm.profitability)
-        })
+      await apiCall(`/api/categories/${editingCategoryId}/update/`, {
+        method: 'PUT',
+        body: JSON.stringify(categoryForm)
       });
       
-      toast.success('Produit créé avec succès');
-      setIsProductDialogOpen(false);
-      setProductForm({
-        name: '',
-        reference: '',
-        categoryId: '',
-        price: '',
-        profitability: '',
-        duration: '',
-        description: ''
-      });
+      toast.success('Catégorie mise à jour avec succès');
+      setIsEditCategoryDialogOpen(false);
+      setEditingCategoryId(null);
+      setCategoryForm({ title: '', url: '', subcategories: [] });
       loadData();
     } catch (error: any) {
-      console.error('Error creating product:', error);
-      toast.error(error?.message || 'Erreur lors de la création du produit');
+      console.error('Error updating category:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour de la catégorie');
     }
   }
+
 
   async function handleToggleProductActive(productId: string) {
     try {
@@ -168,7 +161,7 @@ export function Placements({ user }: PlacementsProps) {
   return (
     <div className="space-y-6">
       <div className="page-header-section">
-        <h1 className="page-title">Placements</h1>
+        <h1 className="page-title">Produits d'investissements</h1>
         <p className="page-subtitle">Gestion des produits financiers et catégories</p>
       </div>
 
@@ -181,121 +174,11 @@ export function Placements({ user }: PlacementsProps) {
         {/* Products Tab */}
         <TabsContent value="products" className="space-y-6">
           <div className="flex justify-end">
-            <Button onClick={() => setIsProductDialogOpen(true)}>
+            <Button onClick={() => navigate('/admin/produits-investissements/add')}>
               <Plus className="w-4 h-4 mr-2" />
               Créer un produit
             </Button>
           </div>
-
-          {isProductDialogOpen && (
-            <div className="modal-overlay" onClick={() => setIsProductDialogOpen(false)}>
-              <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh', overflowY: 'auto' }}>
-                <div className="modal-header">
-                  <h2 className="modal-title">Nouveau produit financier</h2>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="modal-close"
-                    onClick={() => setIsProductDialogOpen(false)}
-                  >
-                    <X className="planning-icon-md" />
-                  </Button>
-                </div>
-                <form onSubmit={handleCreateProduct} className="modal-form">
-                  <div className="modal-form-field">
-                    <Label htmlFor="product-name">Nom du produit *</Label>
-                    <Input
-                      id="product-name"
-                      value={productForm.name}
-                      onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="modal-form-field">
-                    <Label htmlFor="product-reference">Référence *</Label>
-                    <Input
-                      id="product-reference"
-                      value={productForm.reference}
-                      onChange={(e) => setProductForm({ ...productForm, reference: e.target.value })}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="modal-form-field">
-                    <Label htmlFor="product-category">Catégorie (optionnel)</Label>
-                    <Select value={productForm.categoryId || 'none'} onValueChange={(value) => setProductForm({ ...productForm, categoryId: value === 'none' ? '' : value })}>
-                      <SelectTrigger id="product-category">
-                        <SelectValue placeholder="Sélectionner une catégorie" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Aucune catégorie</SelectItem>
-                        {categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="modal-form-field">
-                      <Label htmlFor="product-price">Prix (€) *</Label>
-                      <Input
-                        id="product-price"
-                        type="number"
-                        step="0.01"
-                        value={productForm.price}
-                        onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-                        required
-                      />
-                    </div>
-                    
-                    <div className="modal-form-field">
-                      <Label htmlFor="product-profitability">Rentabilité (%) *</Label>
-                      <Input
-                        id="product-profitability"
-                        type="number"
-                        step="0.01"
-                        value={productForm.profitability}
-                        onChange={(e) => setProductForm({ ...productForm, profitability: e.target.value })}
-                        required
-                      />
-                    </div>
-                    
-                    <div className="modal-form-field">
-                      <Label htmlFor="product-duration">Durée</Label>
-                      <Input
-                        id="product-duration"
-                        value={productForm.duration}
-                        onChange={(e) => setProductForm({ ...productForm, duration: e.target.value })}
-                        placeholder="Ex: 12 mois"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="modal-form-field">
-                    <Label htmlFor="product-description">Description</Label>
-                    <Textarea
-                      id="product-description"
-                      value={productForm.description}
-                      onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
-                      rows={4}
-                    />
-                  </div>
-                  
-                  <div className="modal-form-actions">
-                    <Button type="button" variant="outline" onClick={() => setIsProductDialogOpen(false)}>
-                      Annuler
-                    </Button>
-                    <Button type="submit">Créer</Button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
 
           <Card>
             <CardHeader>
@@ -347,7 +230,12 @@ export function Placements({ user }: PlacementsProps) {
                             </td>
                             <td className="py-3 px-4">
                               <div className="flex gap-2 justify-end">
-                                <Button variant="ghost" size="sm">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => navigate(`/admin/produits-investissements/edit/${product.id}`)}
+                                  title="Modifier le produit"
+                                >
                                   <Pencil className="w-4 h-4" />
                                 </Button>
                                 <Button 
@@ -355,6 +243,7 @@ export function Placements({ user }: PlacementsProps) {
                                   size="sm"
                                   onClick={() => handleDeleteProduct(product.id)}
                                   className="text-red-600 hover:text-red-700"
+                                  title="Supprimer le produit"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -462,6 +351,102 @@ export function Placements({ user }: PlacementsProps) {
             </div>
           )}
 
+          {isEditCategoryDialogOpen && (
+            <div className="modal-overlay" onClick={() => {
+              setIsEditCategoryDialogOpen(false);
+              setEditingCategoryId(null);
+              setCategoryForm({ title: '', url: '', subcategories: [] });
+            }}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+                <div className="modal-header">
+                  <h2 className="modal-title">Modifier la catégorie</h2>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="modal-close"
+                    onClick={() => {
+                      setIsEditCategoryDialogOpen(false);
+                      setEditingCategoryId(null);
+                      setCategoryForm({ title: '', url: '', subcategories: [] });
+                    }}
+                  >
+                    <X className="planning-icon-md" />
+                  </Button>
+                </div>
+                <form onSubmit={handleUpdateCategory} className="modal-form">
+                  <div className="modal-form-field">
+                    <Label htmlFor="edit-category-title">Titre *</Label>
+                    <Input
+                      id="edit-category-title"
+                      value={categoryForm.title}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, title: e.target.value })}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="modal-form-field">
+                    <Label htmlFor="edit-category-url">URL *</Label>
+                    <Input
+                      id="edit-category-url"
+                      value={categoryForm.url}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, url: e.target.value })}
+                      placeholder="Ex: actions-francaises"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="modal-form-field">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label>Sous-catégories</Label>
+                      <Button type="button" size="sm" variant="outline" onClick={addSubcategory}>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Ajouter
+                      </Button>
+                    </div>
+                    
+                    {categoryForm.subcategories.length > 0 && (
+                      <div className="space-y-2">
+                        {categoryForm.subcategories.map((sub, index) => (
+                          <div key={index} className="flex gap-2">
+                            <Input
+                              value={sub}
+                              onChange={(e) => updateSubcategory(index, e.target.value)}
+                              placeholder="Nom de la sous-catégorie"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => removeSubcategory(index)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="modal-form-actions">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsEditCategoryDialogOpen(false);
+                        setEditingCategoryId(null);
+                        setCategoryForm({ title: '', url: '', subcategories: [] });
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                    <Button type="submit">Enregistrer</Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>Liste des catégories</CardTitle>
@@ -505,7 +490,11 @@ export function Placements({ user }: PlacementsProps) {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex gap-2 justify-end">
-                              <Button variant="ghost" size="sm">
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => handleEditCategory(category)}
+                              >
                                 <Pencil className="w-4 h-4" />
                               </Button>
                               <Button 
@@ -533,4 +522,4 @@ export function Placements({ user }: PlacementsProps) {
     </div>
   );
 }
-export default Placements;
+export default ProduitsInvestissements;

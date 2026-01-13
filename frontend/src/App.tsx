@@ -13,7 +13,9 @@ import { ManageRibs } from './components/ManageRibs';
 import { ManageAssets } from './components/ManageAssets';
 import { ManageUsefulLinks } from './components/ManageUsefulLinks';
 import { Transactions } from './components/Transactions';
-import { Placements } from './components/Placements';
+import { ProduitsInvestissements } from './components/ProduitsInvestissements';
+import { AddProduct } from './components/AddProduct';
+import { EditProduct } from './components/EditProduct';
 import { PlatformDashboard } from './components/PlatformDashboard';
 import { PlatformPortfolio } from './components/PlatformPortfolio';
 import { PlatformTrading } from './components/PlatformTrading';
@@ -53,7 +55,7 @@ function ClientDetailWrapper() {
 }
 
 function PlacementsWrapper() {
-    return <Placements user={null} />;
+    return <ProduitsInvestissements user={null} />;
 }
 
 function App() {
@@ -145,13 +147,31 @@ function App() {
                             </Layout>
                         </ProtectedRoute>
                     } />
-                    <Route path="/admin/placements" element={
+                    <Route path="/admin/produits-investissements" element={
                         <ProtectedRoute>
                             <Layout>
                                 <PlacementsWrapper />
                             </Layout>
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/produits-investissements/add" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <AddProduct />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/produits-investissements/edit/:id" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <EditProduct />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    {/* Legacy route redirect */}
+                    <Route path="/admin/placements" element={<Navigate to="/admin/produits-investissements" replace />} />
+                    <Route path="/admin/placements/add" element={<Navigate to="/admin/produits-investissements/add" replace />} />
+                    <Route path="/admin/placements/edit/:id" element={<Navigate to="/admin/produits-investissements/edit/:id" replace />} />
                     
                     {/* Trading Platform Routes - For Clients */}
                     <Route path="/platform" element={
@@ -195,7 +215,7 @@ function App() {
                     <Route path="/manage/useful-links" element={<Navigate to="/admin/manage/useful-links" replace />} />
                     <Route path="/transactions" element={<Navigate to="/admin/transactions" replace />} />
                     <Route path="/messagerie" element={<Navigate to="/admin/messagerie" replace />} />
-                    <Route path="/placements" element={<Navigate to="/admin/placements" replace />} />
+                    <Route path="/placements" element={<Navigate to="/admin/produits-investissements" replace />} />
                     
                     {/* Root redirect based on user type */}
                     <Route path="/" element={<Navigate to="/login" replace />} />

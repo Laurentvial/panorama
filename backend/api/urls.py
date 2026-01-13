@@ -81,4 +81,7 @@ urlpatterns = [
     path('products/<str:product_id>/update/', api_views.product_update, name='product-update'),
     path('products/<str:product_id>/delete/', api_views.product_delete, name='product-delete'),
     path('products/<str:product_id>/toggle-active/', api_views.product_toggle_active, name='product-toggle-active'),
+    # AI Generation endpoints
+    path('products/generate-description/', api_views.product_generate_description, name='product-generate-description'),
+    path('products/generate-cgv/', api_views.product_generate_cgv, name='product-generate-cgv'),
 ]

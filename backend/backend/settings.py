@@ -188,3 +188,6 @@ CORS_ALLOW_HEADERS = [
 
 # Allow preflight requests
 CORS_PREFLIGHT_MAX_AGE = 86400
+
+# Gemini AI Configuration
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')

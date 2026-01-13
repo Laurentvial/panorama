@@ -642,12 +642,63 @@ class ProductSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Product
-        fields = ['id', 'name', 'reference', 'categoryId', 'price', 'profitability', 'duration', 'description', 'active', 'createdAt', 'updatedAt']
+        fields = [
+            'id', 'name', 'reference', 'categoryId', 'subcategory', 'status', 
+            'price', 'profitability', 'duration', 'description', 'cgv', 'active',
+            'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
+            'show_min_profitability', 'interest_period', 'capitalisation_fonds',
+            'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
+            'link_to_assets', 'enable_price_variation',
+            'createdAt', 'updatedAt'
+        ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_internal_value(self, data):
+        # Convert camelCase to snake_case for backend compatibility
+        camel_to_snake = {
+            'categoryId': 'category_id',
+            'noProfitability': 'no_profitability',
+            'isVariableProfitability': 'is_variable_profitability',
+            'variableProfitability': 'variable_profitability',
+            'profitabilityPeriod': 'profitability_period',
+            'showMinProfitability': 'show_min_profitability',
+            'interestPeriod': 'interest_period',
+            'capitalisationFonds': 'capitalisation_fonds',
+            'showOnLaunch': 'show_on_launch',
+            'availabilityStart': 'availability_start',
+            'availabilityEnd': 'availability_end',
+            'isSavings': 'is_savings',
+            'linkToAssets': 'link_to_assets',
+            'enablePriceVariation': 'enable_price_variation',
+        }
+        
+        # Create a copy to avoid modifying the original
+        internal_data = {}
+        for key, value in data.items():
+            if key in camel_to_snake:
+                internal_data[camel_to_snake[key]] = value
+            else:
+                internal_data[key] = value
+        
+        return super().to_internal_value(internal_data)
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['categoryId'] = instance.category.id if instance.category else None
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        # Convert snake_case to camelCase for frontend compatibility
+        ret['noProfitability'] = ret.pop('no_profitability', 'Oui')
+        ret['isVariableProfitability'] = ret.pop('is_variable_profitability', 'Non')
+        ret['variableProfitability'] = ret.pop('variable_profitability', '')
+        ret['profitabilityPeriod'] = ret.pop('profitability_period', '')
+        ret['showMinProfitability'] = ret.pop('show_min_profitability', 'Non')
+        ret['interestPeriod'] = ret.pop('interest_period', '')
+        ret['capitalisationFonds'] = ret.pop('capitalisation_fonds', 'Non')
+        ret['showOnLaunch'] = ret.pop('show_on_launch', 'Non')
+        ret['availabilityStart'] = ret.pop('availability_start', None)
+        ret['availabilityEnd'] = ret.pop('availability_end', None)
+        ret['isSavings'] = ret.pop('is_savings', False)
+        ret['linkToAssets'] = ret.pop('link_to_assets', 'Non')
+        ret['enablePriceVariation'] = ret.pop('enable_price_variation', 'Non')
         return ret

@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.contrib.auth.models import User as DjangoUser
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 from rest_framework import generics, status
 from .models import Client
 from .models import Note
@@ -1840,6 +1841,8 @@ def product_list(request):
 @permission_classes([IsAuthenticated])
 def product_create(request):
     """Créer un nouveau produit financier"""
+    from datetime import datetime
+    
     # Generate product ID
     product_id = uuid.uuid4().hex[:12]
     while Product.objects.filter(id=product_id).exists():
@@ -1853,16 +1856,57 @@ def product_create(request):
         except ProductCategory.DoesNotExist:
             return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
     
+    # Parse dates if provided
+    availability_start = None
+    availability_end = None
+    if request.data.get('availabilityStart'):
+        try:
+            availability_start = datetime.strptime(request.data['availabilityStart'], '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            pass
+    if request.data.get('availabilityEnd'):
+        try:
+            availability_end = datetime.strptime(request.data['availabilityEnd'], '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            pass
+    
+    # Handle profitability - can be None if noProfitability is 'Oui'
+    profitability = request.data.get('profitability')
+    if profitability is not None:
+        try:
+            profitability = float(profitability)
+        except (ValueError, TypeError):
+            profitability = None
+    
     product = Product.objects.create(
         id=product_id,
         name=request.data.get('name', ''),
         reference=request.data.get('reference', ''),
         category=category,
+        subcategory=request.data.get('subcategory', ''),
+        status=request.data.get('status', 'Brouillon'),
         price=request.data.get('price', 0),
-        profitability=request.data.get('profitability', 0),
+        profitability=profitability,
         duration=request.data.get('duration', ''),
         description=request.data.get('description', ''),
-        active=request.data.get('active', True)
+        cgv=request.data.get('cgv', ''),
+        active=request.data.get('active', True),
+        # Gestion de la rentabilité
+        no_profitability=request.data.get('noProfitability', 'Oui'),
+        is_variable_profitability=request.data.get('isVariableProfitability', 'Non'),
+        variable_profitability=request.data.get('variableProfitability', ''),
+        profitability_period=request.data.get('profitabilityPeriod', ''),
+        show_min_profitability=request.data.get('showMinProfitability', 'Non'),
+        interest_period=request.data.get('interestPeriod', ''),
+        capitalisation_fonds=request.data.get('capitalisationFonds', 'Non'),
+        # Gestion du produit
+        show_on_launch=request.data.get('showOnLaunch', 'Non'),
+        availability_start=availability_start,
+        availability_end=availability_end,
+        is_savings=request.data.get('isSavings', False),
+        link_to_assets=request.data.get('linkToAssets', 'Non'),
+        # Gestion des prix
+        enable_price_variation=request.data.get('enablePriceVariation', 'Non')
     )
     
     serializer = ProductSerializer(product)
@@ -1872,12 +1916,18 @@ def product_create(request):
 @permission_classes([IsAuthenticated])
 def product_update(request, product_id):
     """Mettre à jour un produit"""
+    from datetime import datetime
+    
     product = get_object_or_404(Product, id=product_id)
     
     if 'name' in request.data:
         product.name = request.data['name']
     if 'reference' in request.data:
         product.reference = request.data['reference']
+    if 'subcategory' in request.data:
+        product.subcategory = request.data['subcategory']
+    if 'status' in request.data:
+        product.status = request.data['status']
     if 'categoryId' in request.data:
         if request.data['categoryId']:
             try:
@@ -1889,13 +1939,60 @@ def product_update(request, product_id):
     if 'price' in request.data:
         product.price = request.data['price']
     if 'profitability' in request.data:
-        product.profitability = request.data['profitability']
+        profitability = request.data['profitability']
+        product.profitability = float(profitability) if profitability is not None else None
     if 'duration' in request.data:
         product.duration = request.data['duration']
     if 'description' in request.data:
         product.description = request.data['description']
+    if 'cgv' in request.data:
+        product.cgv = request.data['cgv']
     if 'active' in request.data:
         product.active = request.data['active']
+    
+    # Gestion de la rentabilité
+    if 'noProfitability' in request.data:
+        product.no_profitability = request.data['noProfitability']
+    if 'isVariableProfitability' in request.data:
+        product.is_variable_profitability = request.data['isVariableProfitability']
+    if 'variableProfitability' in request.data:
+        product.variable_profitability = request.data['variableProfitability']
+    if 'profitabilityPeriod' in request.data:
+        product.profitability_period = request.data['profitabilityPeriod']
+    if 'showMinProfitability' in request.data:
+        product.show_min_profitability = request.data['showMinProfitability']
+    if 'interestPeriod' in request.data:
+        product.interest_period = request.data['interestPeriod']
+    if 'capitalisationFonds' in request.data:
+        product.capitalisation_fonds = request.data['capitalisationFonds']
+    
+    # Gestion du produit
+    if 'showOnLaunch' in request.data:
+        product.show_on_launch = request.data['showOnLaunch']
+    if 'availabilityStart' in request.data:
+        if request.data['availabilityStart']:
+            try:
+                product.availability_start = datetime.strptime(request.data['availabilityStart'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                pass
+        else:
+            product.availability_start = None
+    if 'availabilityEnd' in request.data:
+        if request.data['availabilityEnd']:
+            try:
+                product.availability_end = datetime.strptime(request.data['availabilityEnd'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                pass
+        else:
+            product.availability_end = None
+    if 'isSavings' in request.data:
+        product.is_savings = request.data['isSavings']
+    if 'linkToAssets' in request.data:
+        product.link_to_assets = request.data['linkToAssets']
+    
+    # Gestion des prix
+    if 'enablePriceVariation' in request.data:
+        product.enable_price_variation = request.data['enablePriceVariation']
     
     product.save()
     serializer = ProductSerializer(product)
@@ -1918,5 +2015,129 @@ def product_toggle_active(request, product_id):
     product.save()
     serializer = ProductSerializer(product)
     return Response(serializer.data)
+
+# AI Generation endpoints
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def product_generate_description(request):
+    """Générer une description de produit avec l'IA Gemini"""
+    try:
+        import google.generativeai as genai
+        
+        if not settings.GEMINI_API_KEY:
+            return Response(
+                {'error': 'GEMINI_API_KEY not configured'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+        
+        name = request.data.get('name', '')
+        category_id = request.data.get('categoryId', '')
+        price = request.data.get('price', '')
+        profitability = request.data.get('profitability', '')
+        
+        # Get category name if available
+        category_name = ''
+        if category_id:
+            try:
+                category = ProductCategory.objects.get(id=category_id)
+                category_name = category.title
+            except ProductCategory.DoesNotExist:
+                pass
+        
+        prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
+- Nom: {name or 'Non spécifié'}
+- Catégorie: {category_name or 'Non spécifiée'}
+- Prix: {price or 'Non spécifié'}€
+- Rentabilité: {profitability or 'Non spécifiée'}%
+
+La description doit être:
+- Professionnelle et rassurante
+- Mise en avant des avantages pour l'investisseur
+- Environ 3-4 phrases
+- En français
+- Sans caractères spéciaux de formatage (pas de markdown)
+
+Description:"""
+        
+        response = model.generate_content(prompt)
+        description = response.text.strip()
+        
+        return Response({'description': description, 'text': description})
+    
+    except ImportError:
+        return Response(
+            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error generating description: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def product_generate_cgv(request):
+    """Générer des CGV (Conditions Générales de Vente) avec l'IA Gemini"""
+    try:
+        import google.generativeai as genai
+        
+        if not settings.GEMINI_API_KEY:
+            return Response(
+                {'error': 'GEMINI_API_KEY not configured'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+        
+        name = request.data.get('name', '')
+        category_id = request.data.get('categoryId', '')
+        
+        # Get category name if available
+        category_name = ''
+        if category_id:
+            try:
+                category = ProductCategory.objects.get(id=category_id)
+                category_name = category.title
+            except ProductCategory.DoesNotExist:
+                pass
+        
+        prompt = f"""Génère des Conditions Générales de Vente (CGV) complètes et professionnelles en français pour un produit d'investissement financier avec les caractéristiques suivantes:
+- Nom du produit: {name or 'Non spécifié'}
+- Catégorie: {category_name or 'Non spécifiée'}
+
+Les CGV doivent inclure les sections suivantes:
+1. OBJET - Description du produit et des présentes conditions
+2. CARACTÉRISTIQUES DU PRODUIT - Détails du produit
+3. CONDITIONS D'ACQUISITION - Modalités d'achat
+4. DROIT DE RÉTRACTATION - Délai et modalités
+5. RESPONSABILITÉ - Limites de responsabilité
+6. PROTECTION DES DONNÉES - Confidentialité
+
+Format: Utilise des listes à puces (•) et numérotées (1., 2., etc.) pour structurer le texte.
+Langue: Français
+Style: Professionnel et conforme à la réglementation financière française
+
+CGV:"""
+        
+        response = model.generate_content(prompt)
+        cgv = response.text.strip()
+        
+        return Response({'cgv': cgv, 'text': cgv})
+    
+    except ImportError:
+        return Response(
+            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error generating CGV: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
     transaction.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
