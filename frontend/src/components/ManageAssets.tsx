@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Search, Trash2, Pencil, X } from '../utils/iconMapping';
+import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
@@ -23,8 +23,16 @@ export function ManageAssets() {
     reference: '',
     category: '',
     subcategory: '',
-    default: false
+    default: false,
+    alphaVantageSymbol: ''
   });
+  
+  // Alpha Vantage search state
+  const [alphaVantageSearch, setAlphaVantageSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<any>(null);
+  const [searching, setSearching] = useState(false);
+  const [isAlphaVantageDialogOpen, setIsAlphaVantageDialogOpen] = useState(false);
+  const [updatingPrices, setUpdatingPrices] = useState(false);
 
   useEffect(() => {
     loadAssets();
@@ -52,7 +60,8 @@ export function ManageAssets() {
         reference: asset.reference || '',
         category: asset.category || '',
         subcategory: asset.subcategory || '',
-        default: asset.default || false
+        default: asset.default || false,
+        alphaVantageSymbol: asset.alphaVantageSymbol || ''
       });
     } else {
       setEditingAsset(null);
@@ -62,7 +71,8 @@ export function ManageAssets() {
         reference: '',
         category: '',
         subcategory: '',
-        default: false
+        default: false,
+        alphaVantageSymbol: ''
       });
     }
     setIsDialogOpen(true);
@@ -77,7 +87,8 @@ export function ManageAssets() {
       reference: '',
       category: '',
       subcategory: '',
-      default: false
+      default: false,
+      alphaVantageSymbol: ''
     });
   }
 
@@ -91,17 +102,22 @@ export function ManageAssets() {
     }
     
     try {
+      const payload = {
+        ...formData,
+        alphaVantageSymbol: formData.alphaVantageSymbol || undefined
+      };
+      
       if (editingAsset) {
         await apiCall(`/api/assets/${editingAsset.id}/`, {
           method: 'PATCH',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
         toast.success('Actif modifié avec succès');
       } else {
         await apiCall('/api/assets/create/', {
           method: 'POST',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
         toast.success('Actif créé avec succès');
@@ -124,6 +140,96 @@ export function ManageAssets() {
     } catch (error) {
       console.error('Error deleting asset:', error);
       toast.error('Erreur lors de la suppression');
+    }
+  }
+
+  async function handleAlphaVantageSearch() {
+    const symbol = alphaVantageSearch.trim().toUpperCase();
+    if (!symbol) {
+      toast.error('Veuillez entrer un symbole');
+      return;
+    }
+
+    try {
+      setSearching(true);
+      const result = await apiCall(`/api/alpha-vantage/search/?symbol=${symbol}`);
+      setSearchResults(result);
+      setIsAlphaVantageDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error searching symbol:', error);
+      toast.error(error?.message || 'Erreur lors de la recherche du symbole');
+      setSearchResults(null);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleCreateFromAlphaVantage() {
+    if (!searchResults) return;
+
+    try {
+      const assetData = {
+        symbol: searchResults.symbol,
+        name: searchResults.name || searchResults.symbol,
+        type: formData.type || 'Action',
+        category: formData.category,
+        subcategory: formData.subcategory,
+        exchange: '',
+        currency: 'USD',
+        region: '',
+        default: formData.default
+      };
+
+      await apiCall('/api/assets/create-from-alpha-vantage/', {
+        method: 'POST',
+        body: JSON.stringify(assetData),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      toast.success('Actif créé avec succès depuis Alpha Vantage');
+      setIsAlphaVantageDialogOpen(false);
+      setAlphaVantageSearch('');
+      setSearchResults(null);
+      loadAssets();
+    } catch (error: any) {
+      console.error('Error creating asset:', error);
+      toast.error(error?.message || 'Erreur lors de la création de l\'actif');
+    }
+  }
+
+  async function handleUpdatePrice(assetId: string) {
+    try {
+      await apiCall(`/api/assets/${assetId}/update-price/`, { method: 'POST' });
+      toast.success('Prix mis à jour avec succès');
+      loadAssets();
+    } catch (error: any) {
+      console.error('Error updating price:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour du prix');
+    }
+  }
+
+  async function handleBulkUpdatePrices() {
+    const assetsWithSymbols = assets.filter(a => a.alphaVantageSymbol);
+    if (assetsWithSymbols.length === 0) {
+      toast.error('Aucun actif avec symbole Alpha Vantage trouvé');
+      return;
+    }
+
+    try {
+      setUpdatingPrices(true);
+      const assetIds = assetsWithSymbols.map(a => a.id);
+      await apiCall('/api/assets/bulk-update-prices/', {
+        method: 'POST',
+        body: JSON.stringify({ assetIds }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success(`${assetsWithSymbols.length} prix mis à jour`);
+      loadAssets();
+    } catch (error: any) {
+      console.error('Error updating prices:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour des prix');
+    } finally {
+      setUpdatingPrices(false);
     }
   }
 
@@ -153,11 +259,55 @@ export function ManageAssets() {
           <h1 className="page-title">Actifs externes</h1>
           <p className="page-subtitle">Gérer les actifs externes du marché (actions, crypto, ETF, etc.)</p>
         </div>
-        <Button onClick={() => handleOpenDialog()}>
-          <Plus className="w-4 h-4 mr-2" />
-          Ajouter un actif
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleBulkUpdatePrices}
+            disabled={updatingPrices || assets.filter(a => a.alphaVantageSymbol).length === 0}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${updatingPrices ? 'animate-spin' : ''}`} />
+            Mettre à jour les prix
+          </Button>
+          <Button onClick={() => handleOpenDialog()}>
+            <Plus className="w-4 h-4 mr-2" />
+            Ajouter un actif
+          </Button>
+        </div>
       </div>
+
+      {/* Alpha Vantage Search */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recherche Alpha Vantage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <Input
+                className="pl-10"
+                placeholder="Rechercher un symbole (ex: AAPL, MSFT, TSLA...)"
+                value={alphaVantageSearch}
+                onChange={(e) => setAlphaVantageSearch(e.target.value.toUpperCase())}
+                onKeyPress={(e) => e.key === 'Enter' && handleAlphaVantageSearch()}
+              />
+            </div>
+            <Button onClick={handleAlphaVantageSearch} disabled={searching || !alphaVantageSearch.trim()}>
+              {searching ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Recherche...
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4 mr-2" />
+                  Rechercher
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Search */}
       <Card>
@@ -190,6 +340,9 @@ export function ManageAssets() {
                     <th className="text-left p-2 font-medium text-slate-700">Type</th>
                     <th className="text-left p-2 font-medium text-slate-700">Nom</th>
                     <th className="text-left p-2 font-medium text-slate-700">Référence</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Symbole</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Prix</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Variation</th>
                     <th className="text-left p-2 font-medium text-slate-700">Catégorie</th>
                     <th className="text-left p-2 font-medium text-slate-700">Sous-catégorie</th>
                     <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
@@ -202,6 +355,37 @@ export function ManageAssets() {
                       <td className="p-2">{asset.type}</td>
                       <td className="p-2 font-medium">{asset.name}</td>
                       <td className="p-2 font-mono text-sm">{asset.reference}</td>
+                      <td className="p-2 font-mono text-sm font-semibold">
+                        {asset.alphaVantageSymbol || '-'}
+                      </td>
+                      <td className="p-2">
+                        {asset.lastPrice ? (
+                          <span className="font-semibold">${parseFloat(asset.lastPrice).toFixed(2)}</span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {asset.priceChange !== null && asset.priceChange !== undefined ? (
+                          <div className="flex items-center gap-1">
+                            {parseFloat(asset.priceChange) >= 0 ? (
+                              <TrendingUp className="w-4 h-4 text-green-600" />
+                            ) : (
+                              <TrendingDown className="w-4 h-4 text-red-600" />
+                            )}
+                            <span className={parseFloat(asset.priceChange) >= 0 ? 'text-green-600' : 'text-red-600'}>
+                              {parseFloat(asset.priceChange) >= 0 ? '+' : ''}{parseFloat(asset.priceChange).toFixed(2)}
+                              {asset.priceChangePercent !== null && asset.priceChangePercent !== undefined && (
+                                <span className="ml-1">
+                                  ({parseFloat(asset.priceChangePercent) >= 0 ? '+' : ''}{parseFloat(asset.priceChangePercent).toFixed(2)}%)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
                       <td className="p-2">{asset.category}</td>
                       <td className="p-2">{asset.subcategory}</td>
                       <td className="p-2">
@@ -213,6 +397,16 @@ export function ManageAssets() {
                       </td>
                       <td className="p-2 text-right">
                         <div className="flex justify-end gap-2">
+                          {asset.alphaVantageSymbol && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleUpdatePrice(asset.id)}
+                              title="Mettre à jour le prix"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -337,6 +531,16 @@ export function ManageAssets() {
                 />
               </div>
               <div className="modal-form-field">
+                <Label htmlFor="alphaVantageSymbol">Symbole Alpha Vantage</Label>
+                <Input
+                  id="alphaVantageSymbol"
+                  value={formData.alphaVantageSymbol}
+                  onChange={(e) => setFormData({ ...formData, alphaVantageSymbol: e.target.value.toUpperCase() })}
+                  placeholder="Ex: AAPL, MSFT, TSLA..."
+                />
+                <p className="text-xs text-slate-500 mt-1">Symbole utilisé pour récupérer les prix en temps réel</p>
+              </div>
+              <div className="modal-form-field">
                 <Label htmlFor="category">Catégorie</Label>
                 <Input
                   id="category"
@@ -373,6 +577,147 @@ export function ManageAssets() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Alpha Vantage Search Results Dialog */}
+      {isAlphaVantageDialogOpen && searchResults && (
+        <div className="modal-overlay" onClick={() => {
+          setIsAlphaVantageDialogOpen(false);
+          setSearchResults(null);
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Résultat de la recherche</h2>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="modal-close"
+                onClick={() => {
+                  setIsAlphaVantageDialogOpen(false);
+                  setSearchResults(null);
+                }}
+              >
+                <X className="planning-icon-md" />
+              </Button>
+            </div>
+            <div className="modal-form">
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-sm font-semibold">Symbole</Label>
+                  <p className="text-lg font-mono font-bold">{searchResults.symbol}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-semibold">Prix actuel</Label>
+                  <p className="text-2xl font-bold">${parseFloat(searchResults.price).toFixed(2)}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm text-slate-600">Ouverture</Label>
+                    <p className="font-semibold">${parseFloat(searchResults.open).toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-slate-600">Clôture précédente</Label>
+                    <p className="font-semibold">${parseFloat(searchResults.previous_close).toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-slate-600">Plus haut</Label>
+                    <p className="font-semibold">${parseFloat(searchResults.high).toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-slate-600">Plus bas</Label>
+                    <p className="font-semibold">${parseFloat(searchResults.low).toFixed(2)}</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-600">Variation</Label>
+                  <div className="flex items-center gap-2">
+                    {parseFloat(searchResults.change) >= 0 ? (
+                      <TrendingUp className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <TrendingDown className="w-5 h-5 text-red-600" />
+                    )}
+                    <span className={`text-lg font-semibold ${parseFloat(searchResults.change) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {parseFloat(searchResults.change) >= 0 ? '+' : ''}{parseFloat(searchResults.change).toFixed(2)}
+                      ({parseFloat(searchResults.change_percent) >= 0 ? '+' : ''}{parseFloat(searchResults.change_percent)}%)
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-600">Volume</Label>
+                  <p className="font-semibold">{parseInt(searchResults.volume).toLocaleString()}</p>
+                </div>
+                <div className="border-t pt-4">
+                  <Label htmlFor="av-type" className="mb-2">Type *</Label>
+                  <Select
+                    value={formData.type}
+                    onValueChange={(value) => setFormData({ ...formData, type: value })}
+                    required
+                  >
+                    <SelectTrigger id="av-type">
+                      <SelectValue placeholder="Sélectionner un type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Action">Action</SelectItem>
+                      <SelectItem value="ETF">ETF</SelectItem>
+                      <SelectItem value="Cryptomonnaie">Cryptomonnaie</SelectItem>
+                      <SelectItem value="Obligation">Obligation</SelectItem>
+                      <SelectItem value="Autre">Autre</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="modal-form-field">
+                  <Label htmlFor="av-category">Catégorie</Label>
+                  <Input
+                    id="av-category"
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <Label htmlFor="av-subcategory">Sous-catégorie</Label>
+                  <Input
+                    id="av-subcategory"
+                    value={formData.subcategory}
+                    onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="av-default"
+                      checked={formData.default}
+                      onChange={(e) => setFormData({ ...formData, default: e.target.checked })}
+                      className="w-4 h-4"
+                    />
+                    <Label htmlFor="av-default">Disponible par défaut pour tous les clients</Label>
+                  </div>
+                </div>
+              </div>
+              <div className="modal-form-actions mt-6">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsAlphaVantageDialogOpen(false);
+                    setSearchResults(null);
+                  }}
+                >
+                  Annuler
+                </Button>
+                <Button 
+                  type="button"
+                  onClick={handleCreateFromAlphaVantage}
+                  disabled={!formData.type}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Ajouter l'actif
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}

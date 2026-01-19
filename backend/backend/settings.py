@@ -3,10 +3,11 @@ from datetime import timedelta
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file in the backend directory
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'storages',  # For cloud storage support
     'api.apps.ApiConfig',
     'rest_framework',
     'corsheaders',
@@ -141,8 +143,27 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files (user uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / "media"
+# Cloudinary configuration
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME', ''),
+    'API_KEY': os.getenv('CLOUDINARY_API_KEY', ''),
+    'API_SECRET': os.getenv('CLOUDINARY_API_SECRET', ''),
+}
+
+# Validate Cloudinary credentials - REQUIRED (no local storage fallback)
+if not CLOUDINARY_STORAGE['CLOUD_NAME'] or not CLOUDINARY_STORAGE['API_KEY'] or not CLOUDINARY_STORAGE['API_SECRET']:
+    raise ValueError(
+        "Cloudinary credentials are REQUIRED. "
+        "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
+        "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+    )
+
+# Use Cloudinary storage for ALL media files - no local storage fallback
+DEFAULT_FILE_STORAGE = 'api.storage.CloudinaryMediaStorage'
+# Set MEDIA_URL and MEDIA_ROOT for compatibility (even though Cloudinary handles URLs differently)
+# Cloudinary URLs are generated dynamically, but we need these for urlpatterns
+MEDIA_URL = '/media/'  # Not used by Cloudinary, but needed for compatibility
+MEDIA_ROOT = BASE_DIR / "media"  # Not used by Cloudinary, but needed for compatibility
 
 # Only include frontend directories if they exist (for local development)
 # On Choreo, frontend is deployed separately, so these directories won't exist

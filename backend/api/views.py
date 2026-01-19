@@ -35,6 +35,10 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 import uuid
 import json
+import os
+from datetime import datetime
+from django.utils import timezone
+from .alpha_vantage_service import get_alpha_vantage_service
 
 
 def get_client_ip(request):
@@ -360,9 +364,10 @@ def client_create(request):
         # managed_by will be set separately to ensure it's a valid user ID
     }
     
-    # Handle profile photo upload
+    # Don't include profile_photo in client_data - handle it separately after client creation
+    profile_photo_file = None
     if 'profilePhoto' in request.FILES:
-        client_data['profile_photo'] = request.FILES['profilePhoto']
+        profile_photo_file = request.FILES['profilePhoto']
     
     # Convert platformAccess and active from string to boolean if needed (FormData sends strings)
     if isinstance(client_data.get('platform_access'), str):
@@ -437,6 +442,41 @@ def client_create(request):
     
     try:
         client = Client.objects.create(**client_data)
+        
+        # Handle profile photo upload explicitly for Cloudinary
+        if profile_photo_file:
+            try:
+                # Get file extension
+                original_filename = profile_photo_file.name
+                _, ext = os.path.splitext(original_filename)
+                # Create filename with client ID: {client_id}.{ext}
+                custom_filename = f'{client_id}{ext}'
+                
+                print(f"Uploading client profile photo: {original_filename} as {custom_filename}")
+                
+                # Save with custom filename - this will upload to cloud storage
+                client.profile_photo.save(custom_filename, profile_photo_file, save=True)
+                
+                # Verify the photo was saved and uploaded to Cloudinary
+                if not client.profile_photo:
+                    print("Warning: Profile photo upload failed - file was not saved")
+                else:
+                    # Verify Cloudinary upload
+                    try:
+                        storage = client.profile_photo.storage
+                        from api.storage import CloudinaryMediaStorage
+                        if isinstance(storage, CloudinaryMediaStorage):
+                            photo_url = client.profile_photo.url
+                            if photo_url and (photo_url.startswith('http://') or photo_url.startswith('https://')):
+                                print(f"Profile photo successfully uploaded to Cloudinary: {client.profile_photo.name}")
+                                print(f"Cloudinary URL: {photo_url[:100]}...")
+                    except Exception as verify_error:
+                        print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+            except Exception as upload_error:
+                print(f"Error uploading profile photo: {str(upload_error)}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail client creation if photo upload fails, just log it
         
         # Automatically assign default assets, RIBs, and useful links
         # Assign default assets
@@ -551,7 +591,50 @@ def client_detail(request, client_id):
         
         # Handle profile photo upload or removal
         if 'profilePhoto' in request.FILES:
-            client.profile_photo = request.FILES['profilePhoto']
+            try:
+                profile_photo_file = request.FILES['profilePhoto']
+                # Get file extension
+                original_filename = profile_photo_file.name
+                _, ext = os.path.splitext(original_filename)
+                # Create filename with client ID: {client_id}.{ext}
+                custom_filename = f'{client_id}{ext}'
+                
+                print(f"Uploading client profile photo: {original_filename} as {custom_filename}")
+                
+                # Delete old photo if it exists
+                if client.profile_photo:
+                    print(f"Deleting old profile photo: {client.profile_photo.name}")
+                    old_photo_name = client.profile_photo.name
+                    client.profile_photo.delete(save=False)
+                    # Clear the field reference
+                    client.profile_photo = None
+                    # Save to clear the database field
+                    client.save(update_fields=['profile_photo'])
+                    print(f"Cleared old profile photo from database: {old_photo_name}")
+                
+                # Save with custom filename - this will upload to cloud storage
+                client.profile_photo.save(custom_filename, profile_photo_file, save=True)
+                
+                # Verify the photo was saved and uploaded to Cloudinary
+                if not client.profile_photo:
+                    return Response({'error': 'Profile photo upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+                # Verify Cloudinary upload
+                try:
+                    storage = client.profile_photo.storage
+                    from api.storage import CloudinaryMediaStorage
+                    if isinstance(storage, CloudinaryMediaStorage):
+                        photo_url = client.profile_photo.url
+                        if photo_url and (photo_url.startswith('http://') or photo_url.startswith('https://')):
+                            print(f"Profile photo successfully uploaded to Cloudinary: {client.profile_photo.name}")
+                            print(f"Cloudinary URL: {photo_url[:100]}...")
+                except Exception as verify_error:
+                    print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+            except Exception as upload_error:
+                print(f"Error uploading profile photo: {str(upload_error)}")
+                import traceback
+                traceback.print_exc()
+                return Response({'error': f'Profile photo upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         elif 'removeProfilePhoto' in request.data:
             # Handle both string and boolean values
             remove_photo = request.data.get('removeProfilePhoto')
@@ -1385,6 +1468,209 @@ def client_assets_reset(request, client_id):
         'added': added_count
     }, status=status.HTTP_200_OK)
 
+# Alpha Vantage endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def alpha_vantage_search(request):
+    """
+    Search/validate a symbol using Alpha Vantage
+    This endpoint validates if a symbol exists and returns quote data
+    """
+    symbol = request.GET.get('symbol', '').strip().upper()
+    
+    if not symbol:
+        return Response({'error': 'Symbol parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    av_service = get_alpha_vantage_service()
+    if not av_service:
+        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    try:
+        quote = av_service.get_quote(symbol)
+        
+        if not quote:
+            return Response({'error': f'Symbol {symbol} not found or invalid'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            'symbol': quote['symbol'],
+            'name': quote['symbol'],  # Alpha Vantage doesn't provide company name in quote endpoint
+            'price': quote['price'],
+            'open': quote['open'],
+            'high': quote['high'],
+            'low': quote['low'],
+            'volume': quote['volume'],
+            'previous_close': quote['previous_close'],
+            'change': quote['change'],
+            'change_percent': quote['change_percent'],
+            'latest_trading_day': quote['latest_trading_day']
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': f'Error fetching data: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def alpha_vantage_quote(request, symbol):
+    """
+    Get live quote for a symbol
+    """
+    symbol = symbol.strip().upper()
+    
+    av_service = get_alpha_vantage_service()
+    if not av_service:
+        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    try:
+        quote = av_service.get_quote(symbol)
+        
+        if not quote:
+            return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response(quote, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def asset_create_from_alpha_vantage(request):
+    """
+    Create an asset from Alpha Vantage symbol data
+    """
+    symbol = request.data.get('symbol', '').strip().upper()
+    asset_type = request.data.get('type', 'Action')
+    category = request.data.get('category', '')
+    subcategory = request.data.get('subcategory', '')
+    exchange = request.data.get('exchange', '')
+    currency = request.data.get('currency', 'USD')
+    region = request.data.get('region', '')
+    default = request.data.get('default', False)
+    
+    if not symbol:
+        return Response({'error': 'Symbol is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check if asset with this symbol already exists
+    existing_asset = Asset.objects.filter(alpha_vantage_symbol=symbol).first()
+    if existing_asset:
+        return Response({
+            'error': f'Asset with symbol {symbol} already exists',
+            'asset': AssetSerializer(existing_asset).data
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    av_service = get_alpha_vantage_service()
+    if not av_service:
+        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    try:
+        # Fetch quote to get current price and validate symbol
+        quote = av_service.get_quote(symbol)
+        
+        if not quote:
+            return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Generate asset ID
+        asset_id = uuid.uuid4().hex[:12]
+        while Asset.objects.filter(id=asset_id).exists():
+            asset_id = uuid.uuid4().hex[:12]
+        
+        # Create asset
+        asset = Asset.objects.create(
+            id=asset_id,
+            type=asset_type,
+            name=request.data.get('name', symbol),
+            reference=symbol,
+            category=category,
+            subcategory=subcategory,
+            default=default,
+            alpha_vantage_symbol=symbol,
+            exchange=exchange,
+            currency=currency,
+            region=region,
+            last_price=quote['price'],
+            last_price_update=timezone.now(),
+            price_change=quote['change'],
+            price_change_percent=float(quote['change_percent']) if quote['change_percent'] else None
+        )
+        
+        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        return Response({'error': f'Error creating asset: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def asset_update_price(request, asset_id):
+    """
+    Update asset price from Alpha Vantage
+    """
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    if not asset.alpha_vantage_symbol:
+        return Response({'error': 'Asset does not have an Alpha Vantage symbol'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    av_service = get_alpha_vantage_service()
+    if not av_service:
+        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    try:
+        quote = av_service.get_quote(asset.alpha_vantage_symbol)
+        
+        if not quote:
+            return Response({'error': f'Symbol {asset.alpha_vantage_symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Update asset price data
+        asset.last_price = quote['price']
+        asset.last_price_update = timezone.now()
+        asset.price_change = quote['change']
+        asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+        asset.save()
+        
+        return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': f'Error updating price: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def assets_bulk_update_prices(request):
+    """
+    Update prices for multiple assets at once
+    """
+    asset_ids = request.data.get('assetIds', [])
+    
+    if not asset_ids:
+        return Response({'error': 'assetIds array is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    assets = Asset.objects.filter(id__in=asset_ids, alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol='')
+    
+    if not assets.exists():
+        return Response({'error': 'No valid assets found with Alpha Vantage symbols'}, status=status.HTTP_404_NOT_FOUND)
+    
+    av_service = get_alpha_vantage_service()
+    if not av_service:
+        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    updated_count = 0
+    errors = []
+    
+    for asset in assets:
+        try:
+            quote = av_service.get_quote(asset.alpha_vantage_symbol)
+            
+            if quote:
+                asset.last_price = quote['price']
+                asset.last_price_update = timezone.now()
+                asset.price_change = quote['change']
+                asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                asset.save()
+                updated_count += 1
+            else:
+                errors.append(f'{asset.alpha_vantage_symbol}: Symbol not found')
+        except Exception as e:
+            errors.append(f'{asset.alpha_vantage_symbol}: {str(e)}')
+    
+    return Response({
+        'updated': updated_count,
+        'total': len(assets),
+        'errors': errors
+    }, status=status.HTTP_200_OK)
+
 # RIBs endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1505,6 +1791,42 @@ def useful_link_create(request):
             useful_link_id = uuid.uuid4().hex[:12]
         useful_link = serializer.save(id=useful_link_id)
         
+        # Handle image upload explicitly for Cloudinary
+        if 'image' in request.FILES:
+            try:
+                image_file = request.FILES['image']
+                # Get file extension
+                original_filename = image_file.name
+                _, ext = os.path.splitext(original_filename)
+                # Create filename with useful link ID: {useful_link_id}.{ext}
+                custom_filename = f'{useful_link_id}{ext}'
+                
+                print(f"Uploading useful link image: {original_filename} as {custom_filename}")
+                
+                # Save with custom filename - this will upload to cloud storage
+                useful_link.image.save(custom_filename, image_file, save=True)
+                
+                # Verify the image was saved and uploaded to Cloudinary
+                if not useful_link.image:
+                    return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+                # Verify Cloudinary upload
+                try:
+                    storage = useful_link.image.storage
+                    from api.storage import CloudinaryMediaStorage
+                    if isinstance(storage, CloudinaryMediaStorage):
+                        image_url = useful_link.image.url
+                        if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                            print(f"Image successfully uploaded to Cloudinary: {useful_link.image.name}")
+                            print(f"Cloudinary URL: {image_url[:100]}...")
+                except Exception as verify_error:
+                    print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+            except Exception as upload_error:
+                print(f"Error uploading image: {str(upload_error)}")
+                import traceback
+                traceback.print_exc()
+                return Response({'error': f'Image upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
         # Create log entry
         new_value = get_useful_link_data_for_log(useful_link)
         create_log_entry(
@@ -1531,6 +1853,54 @@ def useful_link_update(request, useful_link_id):
     remove_image = request.data.get('removeImage', '').lower() == 'true'
     if remove_image and useful_link.image:
         useful_link.image.delete(save=False)
+        useful_link.image = None
+    
+    # Handle image upload explicitly for Cloudinary
+    if 'image' in request.FILES:
+        try:
+            image_file = request.FILES['image']
+            # Get file extension
+            original_filename = image_file.name
+            _, ext = os.path.splitext(original_filename)
+            # Create filename with useful link ID: {useful_link_id}.{ext}
+            custom_filename = f'{useful_link_id}{ext}'
+            
+            print(f"Uploading useful link image: {original_filename} as {custom_filename}")
+            
+            # Delete old image if it exists
+            if useful_link.image:
+                print(f"Deleting old image: {useful_link.image.name}")
+                old_image_name = useful_link.image.name
+                useful_link.image.delete(save=False)
+                # Clear the field reference
+                useful_link.image = None
+                # Save to clear the database field
+                useful_link.save(update_fields=['image'])
+                print(f"Cleared old image from database: {old_image_name}")
+            
+            # Save with custom filename - this will upload to cloud storage
+            useful_link.image.save(custom_filename, image_file, save=True)
+            
+            # Verify the image was saved and uploaded to Cloudinary
+            if not useful_link.image:
+                return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Verify Cloudinary upload
+            try:
+                storage = useful_link.image.storage
+                from api.storage import CloudinaryMediaStorage
+                if isinstance(storage, CloudinaryMediaStorage):
+                    image_url = useful_link.image.url
+                    if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                        print(f"Image successfully uploaded to Cloudinary: {useful_link.image.name}")
+                        print(f"Cloudinary URL: {image_url[:100]}...")
+            except Exception as verify_error:
+                print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+        except Exception as upload_error:
+            print(f"Error uploading image: {str(upload_error)}")
+            import traceback
+            traceback.print_exc()
+            return Response({'error': f'Image upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     serializer = UsefulLinkSerializer(useful_link, data=request.data, partial=True, context={'request': request})
     if serializer.is_valid():
@@ -1838,7 +2208,7 @@ def category_delete(request, category_id):
 def product_list(request):
     """Liste tous les produits financiers"""
     products = Product.objects.all().order_by('-created_at')
-    serializer = ProductSerializer(products, many=True)
+    serializer = ProductSerializer(products, many=True, context={'request': request})
     return Response({'products': serializer.data})
 
 @api_view(['POST'])
@@ -1882,19 +2252,35 @@ def product_create(request):
         except (ValueError, TypeError):
             profitability = None
     
+    # Handle boolean conversion from FormData (FormData sends strings)
+    active_value = request.data.get('active', True)
+    if isinstance(active_value, str):
+        active_value = active_value.lower() == 'true'
+    else:
+        active_value = bool(active_value)
+    
+    is_savings_value = request.data.get('isSavings', False)
+    if isinstance(is_savings_value, str):
+        is_savings_value = is_savings_value.lower() == 'true'
+    else:
+        is_savings_value = bool(is_savings_value)
+    
+    # Handle subcategory: use subcategory if provided, otherwise fallback to type
+    subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
+    
     product = Product.objects.create(
         id=product_id,
         name=request.data.get('name', ''),
         reference=request.data.get('reference', ''),
         category=category,
-        subcategory=request.data.get('subcategory', ''),
+        subcategory=subcategory_value,
         status=request.data.get('status', 'Brouillon'),
         price=request.data.get('price', 0),
         profitability=profitability,
         duration=request.data.get('duration', ''),
         description=request.data.get('description', ''),
         cgv=request.data.get('cgv', ''),
-        active=request.data.get('active', True),
+        active=active_value,
         # Gestion de la rentabilité
         no_profitability=request.data.get('noProfitability', 'Oui'),
         is_variable_profitability=request.data.get('isVariableProfitability', 'Non'),
@@ -1907,7 +2293,7 @@ def product_create(request):
         show_on_launch=request.data.get('showOnLaunch', 'Non'),
         availability_start=availability_start,
         availability_end=availability_end,
-        is_savings=request.data.get('isSavings', False),
+        is_savings=is_savings_value,
         link_to_assets=request.data.get('linkToAssets', 'Non'),
         # Gestion des prix
         enable_price_variation=request.data.get('enablePriceVariation', 'Non'),
@@ -1918,7 +2304,70 @@ def product_create(request):
         current_price_variation=request.data.get('currentPriceVariation')
     )
     
-    serializer = ProductSerializer(product)
+    # Handle image upload
+    if 'image' in request.FILES:
+        try:
+            image_file = request.FILES['image']
+            # Get file extension
+            original_filename = image_file.name
+            _, ext = os.path.splitext(original_filename)
+            # Create filename with product ID: {product_id}.{ext}
+            # Note: upload_to='products/' in model will add the 'products/' prefix automatically
+            custom_filename = f'{product_id}{ext}'
+            
+            print(f"Uploading image: {original_filename} as {custom_filename} for product {product_id}")
+            
+            # Delete old image if it exists
+            if product.image:
+                print(f"Deleting old image: {product.image.name}")
+                product.image.delete(save=False)
+            
+            # Save with custom filename - this will upload to cloud storage
+            product.image.save(custom_filename, image_file, save=True)
+            
+            # Verify the image was saved and uploaded to Cloudinary
+            if not product.image:
+                return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Verify the file exists in Cloudinary storage
+            try:
+                storage = product.image.storage
+                
+                # Check if storage is Cloudinary storage
+                from api.storage import CloudinaryMediaStorage
+                if isinstance(storage, CloudinaryMediaStorage):
+                    # Cloudinary handles uploads automatically and provides URLs
+                    # Verify the image URL is accessible
+                    try:
+                        image_url = product.image.url
+                        if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                            print(f"Image successfully uploaded to Cloudinary: {product.image.name}")
+                            print(f"Cloudinary URL: {image_url[:100]}...")
+                        else:
+                            print(f"WARNING: Image URL not generated properly: {image_url}")
+                    except Exception as url_error:
+                        print(f"WARNING: Could not verify Cloudinary URL: {str(url_error)}")
+                else:
+                    print(f"INFO: Storage backend is {type(storage).__name__}")
+                    print(f"Image path: {product.image.name}")
+                    if product.image:
+                        print(f"Image URL: {product.image.url}")
+            except Exception as verify_error:
+                import traceback
+                print(f"Warning: Could not verify image in Cloudinary: {str(verify_error)}")
+                print(traceback.format_exc())
+            
+            # Refresh the image field to ensure the URL is updated
+            product.refresh_from_db(fields=['image'])
+            
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            print(f"Error uploading image: {error_msg}")
+            print(traceback.format_exc())
+            return Response({'error': f'Error uploading image: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'PATCH'])
@@ -1935,6 +2384,9 @@ def product_update(request, product_id):
         product.reference = request.data['reference']
     if 'subcategory' in request.data:
         product.subcategory = request.data['subcategory']
+    elif 'type' in request.data:
+        # Use type as fallback for subcategory if subcategory is not provided
+        product.subcategory = request.data['type']
     if 'status' in request.data:
         product.status = request.data['status']
     if 'categoryId' in request.data:
@@ -1949,7 +2401,19 @@ def product_update(request, product_id):
         product.price = request.data['price']
     if 'profitability' in request.data:
         profitability = request.data['profitability']
-        product.profitability = float(profitability) if profitability is not None else None
+        # Sauvegarder profitability si une valeur valide est fournie
+        # Ne pas écraser avec None sauf si explicitement demandé
+        if profitability is not None and profitability != '':
+            try:
+                profit_float = float(profitability)
+                # Sauvegarder même si c'est 0, pour préserver la valeur
+                product.profitability = profit_float
+            except (ValueError, TypeError):
+                # Si la conversion échoue, ne pas modifier la valeur existante
+                pass
+        # Si profitability est explicitement null/undefined et noProfitability est 'Oui', mettre à None
+        elif profitability is None and request.data.get('noProfitability') == 'Oui':
+            product.profitability = None
     if 'duration' in request.data:
         product.duration = request.data['duration']
     if 'description' in request.data:
@@ -1957,21 +2421,151 @@ def product_update(request, product_id):
     if 'cgv' in request.data:
         product.cgv = request.data['cgv']
     if 'active' in request.data:
-        product.active = request.data['active']
+        active_value = request.data['active']
+        # Handle both string and boolean values (FormData sends strings)
+        if isinstance(active_value, str):
+            product.active = active_value.lower() == 'true'
+        else:
+            product.active = bool(active_value)
+    
+    # Handle image upload or removal
+    if 'image' in request.FILES:
+        try:
+            image_file = request.FILES['image']
+            # Get file extension
+            original_filename = image_file.name
+            _, ext = os.path.splitext(original_filename)
+            # Create filename with product ID: {product_id}.{ext}
+            # Note: upload_to='products/' in model will add the 'products/' prefix automatically
+            custom_filename = f'{product_id}{ext}'
+            
+            print(f"Uploading image: {original_filename} as {custom_filename} for product {product_id}")
+            
+            # Delete old image if it exists (this clears the field in memory)
+            if product.image:
+                print(f"Deleting old image: {product.image.name}")
+                old_image_name = product.image.name
+                product.image.delete(save=False)
+                # Clear the field reference
+                product.image = None
+                # Save to clear the database field
+                product.save(update_fields=['image'])
+                print(f"Cleared old image from database: {old_image_name}")
+            
+            # Now save the new image with custom filename - file is uploaded to cloud storage immediately
+            # Use save=True to immediately update the database with the new image filename
+            # This ensures the image field in the database has the correct filename with extension
+            product.image.save(custom_filename, image_file, save=True)
+            
+            # Log the actual filename stored in the database after save
+            print(f"Image saved. Database filename: {product.image.name}")
+            print(f"Expected filename: products/{custom_filename}")
+            
+            # Verify the image was saved and uploaded to Cloudinary
+            if not product.image:
+                return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Verify the filename matches what we expect
+            expected_path = f'products/{custom_filename}'
+            if product.image.name != expected_path:
+                print(f"ERROR: Image filename mismatch!")
+                print(f"Expected: {expected_path}")
+                print(f"Got: {product.image.name}")
+                # Refresh from database to get the actual stored value
+                product.refresh_from_db(fields=['image'])
+                print(f"After refresh from DB: {product.image.name if product.image else 'None'}")
+                
+                if product.image and product.image.name != expected_path:
+                    # Force update the database directly
+                    print(f"Force updating database with correct filename...")
+                    from django.db import connection
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE api_product SET image = %s WHERE id = %s",
+                            [expected_path, product_id]
+                        )
+                    # Refresh again to verify
+                    product.refresh_from_db(fields=['image'])
+                    print(f"After force update: {product.image.name if product.image else 'None'}")
+                    
+                    if product.image.name != expected_path:
+                        return Response({
+                            'error': 'Image filename mismatch - file may have been saved with wrong extension',
+                            'expected': expected_path,
+                            'actual': product.image.name
+                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Verify the file exists in Cloudinary storage
+            try:
+                storage = product.image.storage
+                
+                # Check if storage is Cloudinary storage
+                from api.storage import CloudinaryMediaStorage
+                if isinstance(storage, CloudinaryMediaStorage):
+                    # Cloudinary handles uploads automatically and provides URLs
+                    # Verify the image URL is accessible
+                    try:
+                        image_url = product.image.url
+                        if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                            print(f"Image successfully uploaded to Cloudinary: {product.image.name}")
+                            print(f"Cloudinary URL: {image_url[:100]}...")
+                        else:
+                            print(f"WARNING: Image URL not generated properly: {image_url}")
+                    except Exception as url_error:
+                        print(f"WARNING: Could not verify Cloudinary URL: {str(url_error)}")
+                else:
+                    print(f"INFO: Storage backend is {type(storage).__name__}")
+                    print(f"Image path: {product.image.name}")
+                    if product.image:
+                        print(f"Image URL: {product.image.url}")
+            except Exception as verify_error:
+                import traceback
+                print(f"Warning: Could not verify image in Cloudinary: {str(verify_error)}")
+                print(traceback.format_exc())
+            
+            # Refresh the image field to ensure the URL is updated
+            product.refresh_from_db(fields=['image'])
+            
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            print(f"Error uploading image: {error_msg}")
+            print(traceback.format_exc())
+            return Response({'error': f'Error uploading image: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    elif 'removeImage' in request.data:
+        # Handle both string and boolean values
+        remove_image = request.data.get('removeImage')
+        if isinstance(remove_image, str):
+            remove_image = remove_image.lower() == 'true'
+        if remove_image:
+            # Delete the file if it exists
+            if product.image:
+                product.image.delete(save=False)
+            product.image = None
     
     # Gestion de la rentabilité
     if 'noProfitability' in request.data:
         product.no_profitability = request.data['noProfitability']
     if 'isVariableProfitability' in request.data:
-        product.is_variable_profitability = request.data['isVariableProfitability']
+        is_var_prof = request.data['isVariableProfitability']
+        # Ensure it's always 'Oui' or 'Non', default to 'Non' if empty or invalid
+        if is_var_prof and is_var_prof.strip() in ['Oui', 'Non']:
+            product.is_variable_profitability = is_var_prof.strip()
+        else:
+            product.is_variable_profitability = 'Non'
     if 'variableProfitability' in request.data:
         product.variable_profitability = request.data['variableProfitability']
     if 'profitabilityPeriod' in request.data:
-        product.profitability_period = request.data['profitabilityPeriod']
+        product.profitability_period = request.data['profitabilityPeriod'] if request.data['profitabilityPeriod'] else ''
     if 'showMinProfitability' in request.data:
         product.show_min_profitability = request.data['showMinProfitability']
     if 'interestPeriod' in request.data:
-        product.interest_period = request.data['interestPeriod']
+        interest_period_value = request.data['interestPeriod']
+        # Trim whitespace and save, or empty string if None/empty
+        if interest_period_value:
+            product.interest_period = str(interest_period_value).strip()
+        else:
+            product.interest_period = ''
     if 'capitalisationFonds' in request.data:
         product.capitalisation_fonds = request.data['capitalisationFonds']
     
@@ -1995,7 +2589,12 @@ def product_update(request, product_id):
         else:
             product.availability_end = None
     if 'isSavings' in request.data:
-        product.is_savings = request.data['isSavings']
+        is_savings_value = request.data['isSavings']
+        # Handle both string and boolean values (FormData sends strings)
+        if isinstance(is_savings_value, str):
+            product.is_savings = is_savings_value.lower() == 'true'
+        else:
+            product.is_savings = bool(is_savings_value)
     if 'linkToAssets' in request.data:
         product.link_to_assets = request.data['linkToAssets']
     
@@ -2018,8 +2617,37 @@ def product_update(request, product_id):
         current_var = request.data['currentPriceVariation']
         product.current_price_variation = float(current_var) if current_var is not None and current_var != '' else None
     
+    # Save the product
+    # Note: If image was uploaded, it was already saved with save=True above
+    # We need to preserve the image field value to avoid overwriting it
+    image_field_before_save = product.image.name if product.image else None
+    
+    # Refresh to get latest from database (including any image updates)
+    product.refresh_from_db()
+    
+    # If image was uploaded, make sure we preserve it
+    if image_field_before_save and product.image:
+        # Ensure the image field value is preserved
+        if product.image.name != image_field_before_save:
+            print(f"WARNING: Image field changed during refresh!")
+            print(f"Before refresh: {image_field_before_save}")
+            print(f"After refresh: {product.image.name}")
+    
+    # Now save the product
+    # Use update_fields to avoid overwriting image if it was just updated
+    # But we need to save all fields, so we'll save everything
     product.save()
-    serializer = ProductSerializer(product)
+    
+    # Final refresh to ensure we have the latest data including image
+    product.refresh_from_db()
+    
+    # Log the final image filename for debugging
+    if product.image:
+        print(f"Final product image filename after all saves: {product.image.name}")
+    else:
+        print(f"Final product has no image")
+    
+    serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data)
 
 @api_view(['DELETE'])
@@ -2191,14 +2819,50 @@ def app_settings(request):
             # Handle logo removal
             if data.get('remove_logo') == 'true':
                 if settings_obj.logo:
-                    settings_obj.logo.delete()
+                    settings_obj.logo.delete(save=False)
                 settings_obj.logo = None
                 settings_obj.save()
             
             # Handle logo file upload
             if 'logo' in request.FILES:
-                settings_obj.logo = request.FILES['logo']
-                settings_obj.save()
+                try:
+                    logo_file = request.FILES['logo']
+                    # Get file extension
+                    original_filename = logo_file.name
+                    _, ext = os.path.splitext(original_filename)
+                    # Create filename: logo{ext}
+                    custom_filename = f'logo{ext}'
+                    
+                    print(f"Uploading logo: {original_filename} as {custom_filename}")
+                    
+                    # Delete old logo if it exists
+                    if settings_obj.logo:
+                        print(f"Deleting old logo: {settings_obj.logo.name}")
+                        settings_obj.logo.delete(save=False)
+                    
+                    # Save with custom filename - this will upload to cloud storage
+                    settings_obj.logo.save(custom_filename, logo_file, save=True)
+                    
+                    # Verify the logo was saved and uploaded to Cloudinary
+                    if not settings_obj.logo:
+                        return Response({'error': 'Logo upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    
+                    # Verify Cloudinary upload
+                    try:
+                        storage = settings_obj.logo.storage
+                        from api.storage import CloudinaryMediaStorage
+                        if isinstance(storage, CloudinaryMediaStorage):
+                            logo_url = settings_obj.logo.url
+                            if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                                print(f"Logo successfully uploaded to Cloudinary: {settings_obj.logo.name}")
+                                print(f"Cloudinary URL: {logo_url[:100]}...")
+                    except Exception as verify_error:
+                        print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                except Exception as upload_error:
+                    print(f"Error uploading logo: {str(upload_error)}")
+                    import traceback
+                    traceback.print_exc()
+                    return Response({'error': f'Logo upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Update colors from request data
             if 'primary_color' in data:
@@ -2252,3 +2916,132 @@ class CustomTokenRefreshView(TokenRefreshView):
     in the token no longer exists in the database.
     """
     serializer_class = CustomTokenRefreshSerializer
+
+
+@api_view(['GET', 'HEAD', 'OPTIONS'])
+@permission_classes([AllowAny])
+def media_proxy(request, file_path):
+    """
+    Proxy endpoint to serve media files from Cloudinary with proper CORS headers.
+    Note: Cloudinary URLs are public by default, but this proxy ensures CORS headers are set.
+    """
+    from .storage import CloudinaryMediaStorage
+    import requests
+    from django.http import HttpResponse
+    from django.core.exceptions import SuspiciousOperation
+
+    # Handle OPTIONS request for CORS preflight
+    if request.method == 'OPTIONS':
+        response = Response()
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response['Access-Control-Allow-Headers'] = '*'
+        return response
+
+    try:
+        # Strip trailing slash if present
+        file_path = file_path.rstrip('/')
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Media proxy requested for file: {file_path}")
+        
+        # Create storage instance
+        storage = CloudinaryMediaStorage()
+
+        # Generate the actual URL for the file
+        try:
+            file_url = storage.url(file_path)
+            logger.info(f"Generated storage URL: {file_url[:150] if file_url else 'None'}...")
+        except Exception as url_error:
+            logger.error(f"Error generating storage URL for {file_path}: {str(url_error)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'error': f'Failed to generate storage URL: {str(url_error)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        if not file_url:
+            logger.warning(f"Storage returned empty URL for file: {file_path}")
+            return Response(
+                {'error': 'File not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Cloudinary URLs are already complete and public, no need to modify them
+
+        # Fetch the file from Impossible Cloud (HEAD for HEAD requests, GET otherwise)
+        try:
+            if request.method == 'HEAD':
+                response = requests.head(file_url, timeout=30)
+            else:
+                response = requests.get(file_url, timeout=30)
+        except Exception as fetch_error:
+            logger.error(f"Error fetching file from {file_url[:150]}: {str(fetch_error)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+        if response.status_code != 200:
+            return Response(
+                {'error': 'Failed to fetch file from storage'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Create Django response
+        content_type = response.headers.get('content-type', 'application/octet-stream')
+        if request.method == 'HEAD':
+            # HEAD request - return headers only, no body
+            django_response = HttpResponse()
+            django_response['Content-Type'] = content_type
+        else:
+            # GET request - return file content
+            django_response = HttpResponse(
+                response.content,
+                content_type=content_type
+            )
+
+        # Add CORS headers to allow the frontend to access the image
+        django_response['Access-Control-Allow-Origin'] = '*'
+        django_response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        django_response['Access-Control-Allow-Headers'] = '*'
+
+        # Copy other relevant headers
+        if 'content-disposition' in response.headers:
+            django_response['Content-Disposition'] = response.headers['content-disposition']
+        if 'cache-control' in response.headers:
+            django_response['Cache-Control'] = response.headers['cache-control']
+        if 'etag' in response.headers:
+            django_response['ETag'] = response.headers['etag']
+
+        return django_response
+
+    except requests.exceptions.Timeout:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Timeout fetching media file: {file_path}")
+        return Response(
+            {'error': 'Request timeout'},
+            status=status.HTTP_408_REQUEST_TIMEOUT
+        )
+    except requests.exceptions.RequestException as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Request exception fetching media file {file_path}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return Response(
+            {'error': f'Failed to fetch media: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in media_proxy for {file_path}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return Response(
+            {'error': f'Unexpected error: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

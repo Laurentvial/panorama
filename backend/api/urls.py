@@ -39,13 +39,19 @@ urlpatterns = [
     # Assets endpoints
     path('assets/', api_views.asset_list, name='asset-list'),
     path('assets/create/', api_views.asset_create, name='asset-create'),
+    path('assets/create-from-alpha-vantage/', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage'),
     path('assets/<str:asset_id>/', api_views.asset_update, name='asset-update'),
     path('assets/<str:asset_id>/delete/', api_views.asset_delete, name='asset-delete'),
+    path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),
+    path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
     path('clients/<str:client_id>/assets/', api_views.client_assets, name='client-assets'),
     path('clients/<str:client_id>/assets/add/', api_views.client_asset_add, name='client-asset-add'),
     path('clients/<str:client_id>/assets/reset/', api_views.client_assets_reset, name='client-assets-reset'),
     path('clients/<str:client_id>/assets/<str:asset_id>/toggle-featured/', api_views.client_asset_toggle_featured, name='client-asset-toggle-featured'),
     path('clients/<str:client_id>/assets/<str:asset_id>/', api_views.client_asset_remove, name='client-asset-remove'),
+    # Alpha Vantage endpoints
+    path('alpha-vantage/search/', api_views.alpha_vantage_search, name='alpha-vantage-search'),
+    path('alpha-vantage/quote/<str:symbol>/', api_views.alpha_vantage_quote, name='alpha-vantage-quote'),
     # RIBs endpoints
     path('ribs/', api_views.rib_list, name='rib-list'),
     path('ribs/create/', api_views.rib_create, name='rib-create'),
@@ -86,4 +92,6 @@ urlpatterns = [
     path('products/generate-cgv/', api_views.product_generate_cgv, name='product-generate-cgv'),
     # App Settings endpoints
     path('settings/', api_views.app_settings, name='app-settings'),
+    # Media proxy endpoint for CORS-compliant image serving
+    path('media/<path:file_path>/', api_views.media_proxy, name='media-proxy'),
 ]

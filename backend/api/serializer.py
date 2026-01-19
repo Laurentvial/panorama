@@ -2,6 +2,7 @@ from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
 from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, AppSettings
 import uuid
+from urllib.parse import urlparse, unquote
 
 class UserSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -234,11 +235,17 @@ class ClientSerializer(serializers.ModelSerializer):
         
         # Convertir les champs personnels de snake_case à camelCase
         if instance.profile_photo:
-            request = self.context.get('request')
-            if request:
-                ret['profilePhoto'] = request.build_absolute_uri(instance.profile_photo.url)
+            profile_url = instance.profile_photo.url
+            # Cloudinary URLs are public by default, return them directly
+            if profile_url and (profile_url.startswith('http://') or profile_url.startswith('https://')):
+                ret['profilePhoto'] = profile_url
             else:
-                ret['profilePhoto'] = instance.profile_photo.url if instance.profile_photo else ''
+                # Local path - build absolute URI
+                request = self.context.get('request')
+                if request:
+                    ret['profilePhoto'] = request.build_absolute_uri(profile_url) if profile_url else ''
+                else:
+                    ret['profilePhoto'] = profile_url if profile_url else ''
         else:
             ret['profilePhoto'] = ''
         ret['civility'] = ret.get('civility', '') or ''
@@ -465,17 +472,33 @@ class LogSerializer(serializers.ModelSerializer):
 class AssetSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    alphaVantageSymbol = serializers.CharField(source='alpha_vantage_symbol', required=False, allow_blank=True)
+    lastPrice = serializers.DecimalField(source='last_price', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
+    lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
+    priceChange = serializers.DecimalField(source='price_change', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
+    priceChangePercent = serializers.DecimalField(source='price_change_percent', max_digits=10, decimal_places=4, read_only=True, allow_null=True)
     
     class Meta:
         model = Asset
-        fields = ['id', 'type', 'name', 'reference', 'category', 'subcategory', 'default', 'createdAt', 'updatedAt']
-        read_only_fields = ['id', 'createdAt', 'updatedAt']
+        fields = [
+            'id', 'type', 'name', 'reference', 'category', 'subcategory', 'default',
+            'alphaVantageSymbol', 'exchange', 'currency', 'region',
+            'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent',
+            'createdAt', 'updatedAt'
+        ]
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent']
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['default'] = bool(instance.default)
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        if instance.last_price:
+            ret['lastPrice'] = float(instance.last_price)
+        if instance.price_change:
+            ret['priceChange'] = float(instance.price_change)
+        if instance.price_change_percent:
+            ret['priceChangePercent'] = float(instance.price_change_percent)
         return ret
 
 class ClientAssetSerializer(serializers.ModelSerializer):
@@ -560,10 +583,15 @@ class UsefulLinkSerializer(serializers.ModelSerializer):
     
     def get_imageUrl(self, obj):
         if obj.image:
+            image_url = obj.image.url
+            # Cloudinary URLs are public by default, return them directly
+            if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                return image_url
+            # Local path - build absolute URI
             request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
+            if request and image_url:
+                return request.build_absolute_uri(image_url)
+            return image_url
         return None
     
     def to_representation(self, instance):
@@ -571,14 +599,7 @@ class UsefulLinkSerializer(serializers.ModelSerializer):
         ret['default'] = bool(instance.default)
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
-        if instance.image:
-            request = self.context.get('request')
-            if request:
-                ret['imageUrl'] = request.build_absolute_uri(instance.image.url)
-            else:
-                ret['imageUrl'] = instance.image.url
-        else:
-            ret['imageUrl'] = None
+        # Note: imageUrl is handled by get_imageUrl method, no need to override here
         return ret
 
 class ClientUsefulLinkSerializer(serializers.ModelSerializer):
@@ -639,12 +660,13 @@ class ProductSerializer(serializers.ModelSerializer):
     categoryId = serializers.CharField(source='category.id', read_only=True, allow_null=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    imageUrl = serializers.SerializerMethodField()
     
     class Meta:
         model = Product
         fields = [
             'id', 'name', 'reference', 'categoryId', 'subcategory', 'status', 
-            'price', 'profitability', 'duration', 'description', 'cgv', 'active',
+            'price', 'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl', 'active',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
             'show_min_profitability', 'interest_period', 'capitalisation_fonds',
             'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
@@ -652,7 +674,34 @@ class ProductSerializer(serializers.ModelSerializer):
             'min_price_variation', 'max_price_variation', 'current_price_variation',
             'createdAt', 'updatedAt'
         ]
-        read_only_fields = ['id', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
+    
+    def get_imageUrl(self, obj):
+        if obj.image:
+            try:
+                # First, try to get the URL using the stored filename
+                image_url = obj.image.url
+                
+                # Cloudinary URLs are public by default, so we can return them directly
+                # If URL is already absolute (Cloudinary URL), return as-is
+                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                    return image_url
+                
+                # If URL is a local path, build absolute URI from request
+                request = self.context.get('request')
+                if request and image_url:
+                    return request.build_absolute_uri(image_url)
+                # If we still don't have a valid URL, return None
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Could not generate valid image URL for product {obj.id}: {image_url}")
+                return None
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting image URL for product {obj.id}: {str(e)}")
+                return None
+        return None
     
     def to_internal_value(self, data):
         # Convert camelCase to snake_case for backend compatibility
@@ -712,6 +761,15 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['minPriceVariation'] = ret.pop('min_price_variation', None)
         ret['maxPriceVariation'] = ret.pop('max_price_variation', None)
         ret['currentPriceVariation'] = ret.pop('current_price_variation', None)
+        # Add type field that maps to subcategory (for frontend compatibility)
+        # The Product model doesn't have a type field, so we use subcategory as type
+        ret['type'] = ret.get('subcategory', '')
+        # Handle image URL - get_imageUrl already handles proxy URL conversion
+        # Just ensure None values are handled correctly
+        if not instance.image:
+            ret['imageUrl'] = None
+        elif ret.get('imageUrl') == '':
+            ret['imageUrl'] = None
         return ret
 
 class AppSettingsSerializer(serializers.ModelSerializer):
@@ -724,8 +782,13 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     
     def get_logo_url(self, obj):
         if obj.logo:
+            logo_url = obj.logo.url
+            # Cloudinary URLs are public by default, return them directly
+            if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                return logo_url
+            # Local path - build absolute URI
             request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.logo.url)
-            return obj.logo.url
+            if request and logo_url:
+                return request.build_absolute_uri(logo_url)
+            return logo_url
         return None

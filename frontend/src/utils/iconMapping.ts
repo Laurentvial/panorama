@@ -12,6 +12,7 @@ export {
   HiOutlineCreditCard as CreditCard,
   HiOutlineMail as Mail,
   HiOutlineTrendingUp as TrendingUp,
+  HiOutlineTrendingDown as TrendingDown,
   HiOutlineCube as Package,
   // HiOutlineWallet as Wallet, // HiOutlineWallet does not exist in react-icons/hi
   HiOutlineLink as LinkIcon,

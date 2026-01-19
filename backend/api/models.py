@@ -1,5 +1,35 @@
 from django.db import models
 from django.contrib.auth.models import User as DjangoUser
+from django.conf import settings
+
+# Import storage - Cloudinary is REQUIRED (no local storage fallback)
+try:
+    from api.storage import CloudinaryMediaStorage
+    # Check if Cloudinary credentials are configured
+    cloudinary_config = getattr(settings, 'CLOUDINARY_STORAGE', {})
+    cloudinary_configured = (
+        cloudinary_config.get('CLOUD_NAME') and 
+        cloudinary_config.get('API_KEY') and 
+        cloudinary_config.get('API_SECRET')
+    )
+    # Cloudinary is REQUIRED - raise error if not configured
+    if not cloudinary_configured:
+        raise ValueError(
+            "Cloudinary credentials are REQUIRED. "
+            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
+            "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+        )
+    # All image fields MUST use Cloudinary storage
+    product_storage = CloudinaryMediaStorage
+    app_settings_storage = CloudinaryMediaStorage
+    useful_link_storage = CloudinaryMediaStorage
+    client_profile_storage = CloudinaryMediaStorage
+except ImportError:
+    # CloudinaryMediaStorage must be available
+    raise ImportError(
+        "CloudinaryMediaStorage is required but not available. "
+        "Please install django-cloudinary-storage: pip install django-cloudinary-storage"
+    )
 
 # Create your models here.
 class Client(models.Model):
@@ -7,7 +37,7 @@ class Client(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     
     # Informations personnelles
-    profile_photo = models.ImageField(upload_to='client_profiles/', null=True, blank=True)
+    profile_photo = models.ImageField(upload_to='client_profiles/', storage=client_profile_storage, null=True, blank=True)
     civility = models.CharField(max_length=10, default="", blank=True)  # Monsieur, Madame, etc.
     fname = models.CharField(max_length=50, default="")
     lname = models.CharField(max_length=50, default="")
@@ -159,6 +189,17 @@ class Asset(models.Model):
     category = models.CharField(max_length=100, default="", blank=True, null=True)  # Catégorie
     subcategory = models.CharField(max_length=100, default="", blank=True, null=True)  # Sous-catégorie
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    
+    # Alpha Vantage integration fields
+    alpha_vantage_symbol = models.CharField(max_length=50, default="", blank=True)  # Symbol for Alpha Vantage API (e.g., "AAPL", "MSFT")
+    exchange = models.CharField(max_length=50, default="", blank=True)  # Stock exchange (e.g., "NASDAQ", "NYSE", "EURONEXT")
+    currency = models.CharField(max_length=10, default="USD", blank=True)  # Currency code (USD, EUR, etc.)
+    region = models.CharField(max_length=50, default="", blank=True)  # Region (United States, France, etc.)
+    last_price = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Last trading price
+    last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last price update
+    price_change = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Price change from previous close
+    price_change_percent = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)  # Percentage change
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -220,7 +261,7 @@ class UsefulLink(models.Model):
     name = models.CharField(max_length=200, default="")  # Nom du lien (Titre)
     url = models.URLField(max_length=500, default="")  # URL du lien
     description = models.TextField(default="", blank=True)  # Description du lien
-    image = models.ImageField(upload_to='useful_links/', null=True, blank=True)  # Image du lien
+    image = models.ImageField(upload_to='useful_links/', storage=useful_link_storage, null=True, blank=True)  # Image du lien
     category = models.CharField(max_length=100, default="", blank=True)  # Catégorie du lien (déprécié)
     button = models.CharField(max_length=200, default="", blank=True)  # Texte du bouton pour ouvrir le lien ou télécharger le fichier
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
@@ -309,6 +350,7 @@ class Product(models.Model):
     duration = models.CharField(max_length=100, default="", blank=True)  # Durée (ex: "12 mois")
     description = models.TextField(default="", blank=True)  # Description du produit
     cgv = models.TextField(default="", blank=True)  # Conditions Générales de Vente
+    image = models.ImageField(upload_to='products/', storage=product_storage, null=True, blank=True)  # Image du produit
     active = models.BooleanField(default=True)  # Si le produit est actif
     
     # Gestion de la rentabilité
@@ -344,7 +386,7 @@ class Product(models.Model):
 class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
-    logo = models.ImageField(upload_to='app_settings/', null=True, blank=True)
+    logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
     secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)
     accent_color = models.CharField(max_length=7, default='', blank=True)  # Couleur d'accent (hex)

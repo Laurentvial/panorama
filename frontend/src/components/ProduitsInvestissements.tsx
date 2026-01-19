@@ -190,6 +190,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-200">
+                        <th className="text-left py-3 px-4">Image</th>
                         <th className="text-left py-3 px-4">Référence</th>
                         <th className="text-left py-3 px-4">Nom</th>
                         <th className="text-left py-3 px-4">Catégorie</th>
@@ -206,6 +207,28 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                         
                         return (
                           <tr key={product.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="py-3 px-4">
+                              {product.imageUrl ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
+                                  <img 
+                                    src={product.imageUrl} 
+                                    alt={product.name || 'Product image'}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      const parent = e.currentTarget.parentElement;
+                                      if (parent) {
+                                        parent.innerHTML = '<div class="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400 text-xs">No image</div>';
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
+                                  No image
+                                </div>
+                              )}
+                            </td>
                             <td className="py-3 px-4 text-slate-600">{product.reference}</td>
                             <td className="py-3 px-4">{product.name}</td>
                             <td className="py-3 px-4">

@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Search, TrendingUp, Coins, BarChart3, Building2, Wallet, DollarSign, Package, ChevronLeft, ChevronRight, Sparkles, CircleDollarSign, MoreHorizontal, Plus } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
+import { MdPadding } from 'react-icons/md';
 
 export function PlatformDiscover() {
   const { currentUser } = useUser();
@@ -606,7 +607,7 @@ export function PlatformDiscover() {
                         </p>
                         
                         {/* Return */}
-                        <div style={{ marginBottom: '16px' }}>
+                        <div style={{ marginBottom: '16px'}}>
                           <div style={{
                             fontSize: '20px',
                             fontWeight: '700',
@@ -622,6 +623,7 @@ export function PlatformDiscover() {
                           alignItems: 'center',
                           gap: '8px',
                           marginBottom: '16px',
+                          
                         }}>
                           <div style={{
                             display: 'flex',
@@ -919,30 +921,79 @@ export function PlatformDiscover() {
                   >
                     <WaveformPattern color={typeColor.text} />
                     
-                    <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
-                      {/* Large Icon */}
+                    {/* Product Image */}
+                    {product.imageUrl && (
                       <div style={{
-                        marginBottom: '20px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '64px',
-                        height: '64px',
-                        borderRadius: '16px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                        color: typeColor.text,
-                      }}>
-                        <div style={{ 
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '150px',
+                        backgroundImage: `url(${product.imageUrl})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        opacity: 0.2,
+                        zIndex: 0,
+                      }} />
+                    )}
+                    
+                    <CardContent style={{ padding: '0', position: 'relative', zIndex: 1 }}>
+                      {/* Product Image Preview */}
+                      {product.imageUrl && (
+                        <div style={{
+                          marginBottom: '16px',
+                          width: '100%',
+                          height: '150px',
+                          borderRadius: '12px 12px 0px 0px',
+                          overflow: 'hidden',
+                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                        }}>
+                          <img 
+                            src={product.imageUrl} 
+                            alt={product.name || 'Product image'}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                            }}
+                            onError={(e) => {
+                              // Hide image on error and show placeholder
+                              const img = e.currentTarget;
+                              img.style.display = 'none';
+                              const parent = img.parentElement;
+                              if (parent) {
+                                parent.innerHTML = '<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 12px;">No image</div>';
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                      
+                      {/* Large Icon */}
+                      {!product.imageUrl && (
+                        <div style={{
+                          marginBottom: '20px',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
+                          width: '64px',
+                          height: '64px',
+                          borderRadius: '16px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                          color: typeColor.text,
                         }}>
-                          {React.cloneElement(getProductTypeIcon(productType), {
-                            className: 'h-10 w-10',
-                            style: { color: typeColor.text }
-                          })}
+                          <div style={{ 
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}>
+                            {React.cloneElement(getProductTypeIcon(productType), {
+                              className: 'h-10 w-10',
+                              style: { color: typeColor.text }
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      )}
                       
                       {/* Name */}
                       <div style={{ marginBottom: '12px' }}>
@@ -1037,12 +1088,13 @@ export function PlatformDiscover() {
                         onClick={() => handleAddProduct(product.id)}
                         style={{
                           width: '100%',
+                          height: '60px',
                           backgroundColor: 'white',
                           color: typeColor.text,
                           border: 'none',
                           fontWeight: '600',
-                          padding: '10px 16px',
-                          borderRadius: '8px',
+                          padding: '16px 20px',
+                          borderRadius: '0px 0px 8px 8px',
                           cursor: 'pointer',
                         }}
                       >

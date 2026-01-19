@@ -2,8 +2,6 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.conf import settings
-from django.conf.urls.static import static
 from api.views import UserCreateView, CustomTokenRefreshView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -30,6 +28,6 @@ urlpatterns = [
     path('api/', include('api.urls')),
 ]
 
-# Serve media files in development
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Media files are served directly from Cloudinary - no local file serving
+# Local file storage is no longer supported - all media files must be uploaded to Cloudinary
+# All media files are accessed via Cloudinary URLs, no local serving needed

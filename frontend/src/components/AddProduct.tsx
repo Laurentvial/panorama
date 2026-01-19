@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, Save, RefreshCw } from '../utils/iconMapping';
+import { ArrowLeft, Save, RefreshCw, Trash2 } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
@@ -17,6 +17,8 @@ export function AddProduct() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
+  const [productImage, setProductImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -91,6 +93,33 @@ export function AddProduct() {
 
   function handleGenerateReference() {
     setFormData({ ...formData, reference: generateRandomReference() });
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner un fichier image');
+        return;
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('L\'image ne doit pas dépasser 5MB');
+        return;
+      }
+      setProductImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function handleRemoveImage() {
+    setProductImage(null);
+    setImagePreview(null);
   }
 
   async function generateAIDescription(): Promise<string> {
@@ -207,48 +236,97 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         if (formData.isVariableProfitability === 'Non') {
           // Rentabilité fixe : utiliser profitabilityRate
           profitabilityValue = parseFloat(formData.profitabilityRate);
+          if (isNaN(profitabilityValue)) profitabilityValue = undefined;
         } else {
           // Rentabilité variable : utiliser profitabilityMin pour profitability et profitabilityMax pour variableProfitability
           profitabilityValue = parseFloat(formData.profitabilityMin);
+          if (isNaN(profitabilityValue)) profitabilityValue = undefined;
           variableProfitabilityValue = formData.profitabilityMax;
         }
       }
 
-      await apiCall('/api/products/create/', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...formData,
-          type: formData.type || undefined,
-          price: parseFloat(formData.price),
-          profitability: profitabilityValue,
-          duration: formData.noProfitability === 'Non' ? formData.duration : undefined,
-          categoryId: formData.categoryId || undefined,
-          // Use type as subcategory if subcategory is not provided (for Smart Portfolio and other types)
-          subcategory: formData.subcategory || formData.type || undefined,
-          status: formData.status,
-          cgv: formData.cgv || undefined,
-          active: formData.status === 'Actif',
-          noProfitability: formData.noProfitability,
-          variableProfitability: variableProfitabilityValue,
-          profitabilityPeriod: formData.noProfitability === 'Non' ? formData.profitabilityPeriod || undefined : undefined,
-          showMinProfitability: formData.noProfitability === 'Non' ? formData.showMinProfitability : undefined,
-          interestPeriod: formData.noProfitability === 'Non' ? formData.interestPeriod : undefined,
-          capitalisationFonds: formData.noProfitability === 'Non' ? formData.capitalisationFonds : undefined,
-          // Gestion du produit
-          showOnLaunch: formData.showOnLaunch,
-          availabilityStart: formData.availabilityStart || undefined,
-          availabilityEnd: formData.availabilityEnd || undefined,
-          isSavings: formData.isSavings,
-          linkToAssets: formData.linkToAssets,
-          // Gestion des prix
-          enablePriceVariation: formData.enablePriceVariation,
-          minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
-          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined,
-          minPriceVariation: formData.enablePriceVariation === 'Oui' && formData.minPriceVariation ? parseFloat(formData.minPriceVariation) : undefined,
-          maxPriceVariation: formData.enablePriceVariation === 'Oui' && formData.maxPriceVariation ? parseFloat(formData.maxPriceVariation) : undefined,
-          currentPriceVariation: formData.enablePriceVariation === 'Oui' && formData.currentPriceVariation ? parseFloat(formData.currentPriceVariation) : undefined
-        })
-      });
+      // Use FormData if image is uploaded, otherwise use JSON
+      if (productImage) {
+        const formDataToSend = new FormData();
+        formDataToSend.append('name', formData.name);
+        formDataToSend.append('reference', formData.reference);
+        if (formData.type) formDataToSend.append('type', formData.type);
+        if (formData.categoryId) formDataToSend.append('categoryId', formData.categoryId);
+        if (formData.subcategory || formData.type) formDataToSend.append('subcategory', formData.subcategory || formData.type || '');
+        formDataToSend.append('status', formData.status);
+        formDataToSend.append('price', formData.price);
+        if (profitabilityValue !== undefined && !isNaN(profitabilityValue)) {
+          formDataToSend.append('profitability', profitabilityValue.toString());
+        }
+        if (formData.noProfitability === 'Non' && formData.duration) formDataToSend.append('duration', formData.duration);
+        if (formData.description) formDataToSend.append('description', formData.description);
+        if (formData.cgv) formDataToSend.append('cgv', formData.cgv);
+        formDataToSend.append('active', (formData.status === 'Actif').toString());
+        formDataToSend.append('noProfitability', formData.noProfitability);
+        formDataToSend.append('isVariableProfitability', formData.isVariableProfitability);
+        if (variableProfitabilityValue) formDataToSend.append('variableProfitability', variableProfitabilityValue);
+        if (formData.noProfitability === 'Non') {
+          if (formData.profitabilityPeriod) formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod);
+          formDataToSend.append('showMinProfitability', formData.showMinProfitability);
+          formDataToSend.append('interestPeriod', formData.interestPeriod);
+          formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
+        }
+        formDataToSend.append('showOnLaunch', formData.showOnLaunch);
+        if (formData.availabilityStart) formDataToSend.append('availabilityStart', formData.availabilityStart);
+        if (formData.availabilityEnd) formDataToSend.append('availabilityEnd', formData.availabilityEnd);
+        formDataToSend.append('isSavings', formData.isSavings.toString());
+        formDataToSend.append('linkToAssets', formData.linkToAssets);
+        formDataToSend.append('enablePriceVariation', formData.enablePriceVariation);
+        if (formData.minEntryValue) formDataToSend.append('minEntryValue', formData.minEntryValue);
+        if (formData.maxEntryValue) formDataToSend.append('maxEntryValue', formData.maxEntryValue);
+        if (formData.enablePriceVariation === 'Oui') {
+          if (formData.minPriceVariation) formDataToSend.append('minPriceVariation', formData.minPriceVariation);
+          if (formData.maxPriceVariation) formDataToSend.append('maxPriceVariation', formData.maxPriceVariation);
+          if (formData.currentPriceVariation) formDataToSend.append('currentPriceVariation', formData.currentPriceVariation);
+        }
+        formDataToSend.append('image', productImage);
+        
+        await apiCall('/api/products/create/', {
+          method: 'POST',
+          body: formDataToSend
+        });
+      } else {
+        await apiCall('/api/products/create/', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...formData,
+            type: formData.type || undefined,
+            price: parseFloat(formData.price),
+            profitability: profitabilityValue,
+            duration: formData.noProfitability === 'Non' ? formData.duration : undefined,
+            categoryId: formData.categoryId || undefined,
+            // Use type as subcategory if subcategory is not provided (for Smart Portfolio and other types)
+            subcategory: formData.subcategory || formData.type || undefined,
+            status: formData.status,
+            cgv: formData.cgv || undefined,
+            active: formData.status === 'Actif',
+            noProfitability: formData.noProfitability,
+            variableProfitability: variableProfitabilityValue,
+            profitabilityPeriod: formData.noProfitability === 'Non' ? formData.profitabilityPeriod || undefined : undefined,
+            showMinProfitability: formData.noProfitability === 'Non' ? formData.showMinProfitability : undefined,
+            interestPeriod: formData.noProfitability === 'Non' ? formData.interestPeriod : undefined,
+            capitalisationFonds: formData.noProfitability === 'Non' ? formData.capitalisationFonds : undefined,
+            // Gestion du produit
+            showOnLaunch: formData.showOnLaunch,
+            availabilityStart: formData.availabilityStart || undefined,
+            availabilityEnd: formData.availabilityEnd || undefined,
+            isSavings: formData.isSavings,
+            linkToAssets: formData.linkToAssets,
+            // Gestion des prix
+            enablePriceVariation: formData.enablePriceVariation,
+            minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
+            maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined,
+            minPriceVariation: formData.enablePriceVariation === 'Oui' && formData.minPriceVariation ? parseFloat(formData.minPriceVariation) : undefined,
+            maxPriceVariation: formData.enablePriceVariation === 'Oui' && formData.maxPriceVariation ? parseFloat(formData.maxPriceVariation) : undefined,
+            currentPriceVariation: formData.enablePriceVariation === 'Oui' && formData.currentPriceVariation ? parseFloat(formData.currentPriceVariation) : undefined
+          })
+        });
+      }
 
       toast.success('Produit créé avec succès');
       navigate('/admin/produits-investissements');
@@ -421,6 +499,40 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   <SelectItem value="Inactif">Inactif</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="product-image">Image du produit</Label>
+              {imagePreview ? (
+                <div className="space-y-2">
+                  <div className="inline-block w-80">
+                    <img
+                      src={imagePreview}
+                      alt="Aperçu"
+                      className="h-80 w-80 max-w-80 object-cover rounded-lg border border-gray-300"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleRemoveImage}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Supprimer
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4">
+                  <Input
+                    id="product-image"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="cursor-pointer max-w-xs"
+                  />
+                </div>
+              )}
+              <p className="text-sm text-gray-500">Formats acceptés: JPG, PNG, GIF (max 5MB)</p>
             </div>
 
             <RichTextEditor
