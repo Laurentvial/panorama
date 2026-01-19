@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, AppSettings
 import uuid
 
 class UserSerializer(serializers.ModelSerializer):
@@ -648,7 +648,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
             'show_min_profitability', 'interest_period', 'capitalisation_fonds',
             'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
-            'link_to_assets', 'enable_price_variation',
+            'link_to_assets', 'enable_price_variation', 'min_entry_value', 'max_entry_value',
+            'min_price_variation', 'max_price_variation', 'current_price_variation',
             'createdAt', 'updatedAt'
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
@@ -670,6 +671,11 @@ class ProductSerializer(serializers.ModelSerializer):
             'isSavings': 'is_savings',
             'linkToAssets': 'link_to_assets',
             'enablePriceVariation': 'enable_price_variation',
+            'minEntryValue': 'min_entry_value',
+            'maxEntryValue': 'max_entry_value',
+            'minPriceVariation': 'min_price_variation',
+            'maxPriceVariation': 'max_price_variation',
+            'currentPriceVariation': 'current_price_variation',
         }
         
         # Create a copy to avoid modifying the original
@@ -701,4 +707,25 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['isSavings'] = ret.pop('is_savings', False)
         ret['linkToAssets'] = ret.pop('link_to_assets', 'Non')
         ret['enablePriceVariation'] = ret.pop('enable_price_variation', 'Non')
+        ret['minEntryValue'] = ret.pop('min_entry_value', None)
+        ret['maxEntryValue'] = ret.pop('max_entry_value', None)
+        ret['minPriceVariation'] = ret.pop('min_price_variation', None)
+        ret['maxPriceVariation'] = ret.pop('max_price_variation', None)
+        ret['currentPriceVariation'] = ret.pop('current_price_variation', None)
         return ret
+
+class AppSettingsSerializer(serializers.ModelSerializer):
+    logo_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = AppSettings
+        fields = ['id', 'logo', 'logo_url', 'primary_color', 'secondary_color', 'accent_color', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None

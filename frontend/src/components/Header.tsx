@@ -8,8 +8,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from './ui/dropdown-menu';
-import { Bell, User, LogOut } from 'lucide-react';
+import { HiOutlineBell, HiOutlineUser, HiOutlineLogout } from 'react-icons/hi';
 import React from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 import '../styles/Header.css';
 
 interface HeaderProps {
@@ -18,6 +19,7 @@ interface HeaderProps {
 
 export function Header({ user }: HeaderProps) {
   const navigate = useNavigate();
+  const { settings } = useTheme();
 
   // Returns full name only if both firstName and lastName exist and are non-empty (after trimming)
   function getFullName() {
@@ -48,7 +50,11 @@ export function Header({ user }: HeaderProps) {
             <div className="header-logo">
             </div>
             <div className="header-title-section">
-              <img src="/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
+              {settings?.logo_url ? (
+                <img src={settings.logo_url} alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
+              ) : (
+                <img src="/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
+              )}
               <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>
             </div>
           </div>
@@ -58,7 +64,7 @@ export function Header({ user }: HeaderProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button className="header-button header-button-notifications">
-                  <Bell className="header-icon" />
+                  <HiOutlineBell className="header-icon" />
                   {/* Notifications badge logic could go here */}
                 </Button>
               </DropdownMenuTrigger>
@@ -75,7 +81,7 @@ export function Header({ user }: HeaderProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button className="header-button header-button-user">
-                  <User className="header-icon" />
+                  <HiOutlineUser className="header-icon" />
                   <span className="header-user-name">
                     {/* Show full name using Django Auth data (firstName/lastName from serializer) */}
                     {mainUserDisplay}

@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { signOut } from '../utils/auth';
-import { Home, Wallet, TrendingUp, LogOut, User, Compass } from 'lucide-react';
+import { Home, Wallet, TrendingUp, LogOut, User, Compass } from '../utils/iconMapping';
 import { Button } from './ui/button';
 
 interface PlatformLayoutProps {

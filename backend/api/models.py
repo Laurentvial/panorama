@@ -329,9 +329,31 @@ class Product(models.Model):
     
     # Gestion des prix
     enable_price_variation = models.CharField(max_length=10, default='Non')  # Activer variation du prix (Oui/Non)
+    min_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur minimum d'entrée
+    max_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur maximum d'entrée
+    min_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation minimum
+    max_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation maximum
+    current_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation actuelle
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.name} ({self.reference})"
+
+class AppSettings(models.Model):
+    """Table pour stocker les paramètres de personnalisation de l'application"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    logo = models.ImageField(upload_to='app_settings/', null=True, blank=True)
+    primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
+    secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)
+    accent_color = models.CharField(max_length=7, default='', blank=True)  # Couleur d'accent (hex)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "App Settings"
+        verbose_name_plural = "App Settings"
+    
+    def __str__(self):
+        return f"App Settings - {self.updated_at}"

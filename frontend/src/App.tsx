@@ -22,10 +22,13 @@ import { PlatformTrading } from './components/PlatformTrading';
 import { PlatformDiscover } from './components/PlatformDiscover';
 import { PlatformLayout } from './components/PlatformLayout';
 import { UserProvider } from './contexts/UserContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
+import { Settings } from './components/Settings';
+import './styles/Card.css';
 
 function Logout() {
     const userType = localStorage.getItem('userType');
@@ -62,7 +65,8 @@ function App() {
     return (
         <Router>
             <UserProvider>
-                <Toaster />
+                <ThemeProvider>
+                    <Toaster />
                 <Routes>
                     {/* Public Routes */}
                     <Route path="/login" element={<Login />} />
@@ -168,6 +172,13 @@ function App() {
                             </Layout>
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/settings" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Settings />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
                     {/* Legacy route redirect */}
                     <Route path="/admin/placements" element={<Navigate to="/admin/produits-investissements" replace />} />
                     <Route path="/admin/placements/add" element={<Navigate to="/admin/produits-investissements/add" replace />} />
@@ -223,6 +234,7 @@ function App() {
                     {/* 404 */}
                     <Route path="*" element={<NotFound />} />
                 </Routes>
+                </ThemeProvider>
             </UserProvider>
         </Router>
     );

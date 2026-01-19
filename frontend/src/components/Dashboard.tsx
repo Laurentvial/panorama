@@ -6,14 +6,14 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { 
-  TrendingUp, 
-  Clock, 
-  FileText, 
-  Calendar, 
-  Users as UsersIcon, 
-  DollarSign,
-  Mail
-} from 'lucide-react';
+  HiOutlineTrendingUp as TrendingUp,
+  HiOutlineClock as Clock,
+  HiOutlineDocumentText as FileText,
+  HiOutlineCalendar as Calendar,
+  HiOutlineUserGroup as UsersIcon,
+  HiOutlineCurrencyDollar as DollarSign,
+  HiOutlineMail as Mail
+} from 'react-icons/hi';
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';

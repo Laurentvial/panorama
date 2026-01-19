@@ -1,0 +1,11 @@
+.settings-page {
+  /* Add any page-specific styles here */
+}
+
+.settings-tabs {
+  width: 100%;
+}
+
+.settings-tabs-content {
+  margin-top: 1.5rem; /* mt-6 */
+}

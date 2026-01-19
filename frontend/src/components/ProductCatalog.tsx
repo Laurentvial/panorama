@@ -6,7 +6,8 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
-import { TrendingUp, TrendingDown, Search } from 'lucide-react';
+import { TrendingUp, Search } from '../utils/iconMapping';
+import { HiOutlineTrendingDown as TrendingDown } from 'react-icons/hi';
 
 const mockProducts = [
   { 

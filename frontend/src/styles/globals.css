@@ -2,25 +2,25 @@
 
 :root {
   --font-size: 16px;
-  --background: #ffffff;
+  --background: #faf9f6; /* Cream instead of white */
   --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
+  --card: #fefefe; /* Off-white for cards */
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
+  --popover: #fefefe;
   --popover-foreground: oklch(0.145 0 0);
   --primary: #030213;
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.95 0.0058 264.53);
   --secondary-foreground: #030213;
-  --muted: #ececf0;
+  --muted: #f5f3f0; /* Beige light for muted backgrounds */
   --muted-foreground: #717182;
-  --accent: #e9ebef;
+  --accent: #e5dfd5; /* Beige medium for accent */
   --accent-foreground: #030213;
   --destructive: #d4183d;
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
+  --border: rgba(0, 0, 0, 0.08); /* Softer border */
   --input: transparent;
-  --input-background: #f3f3f5;
+  --input-background: #f5f3f0; /* Beige light for inputs */
   --switch-background: #cbced4;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
@@ -31,14 +31,24 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: #f8f6f0; /* Pearl for sidebar */
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: #030213;
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: #ede8e0; /* Beige for sidebar accent */
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: rgba(0, 0, 0, 0.08);
   --sidebar-ring: oklch(0.708 0 0);
+  /* White/Beige background nuances */
+  --bg-white: #ffffff;
+  --bg-cream: #faf9f6;
+  --bg-beige-light: #f5f3f0;
+  --bg-beige: #ede8e0;
+  --bg-beige-medium: #e5dfd5;
+  --bg-beige-dark: #d4ccc0;
+  --bg-off-white: #fefefe;
+  --bg-ivory: #fffff0;
+  --bg-pearl: #f8f6f0;
 }
 
 .dark {
@@ -117,6 +127,16 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* White/Beige background colors */
+  --color-bg-white: var(--bg-white);
+  --color-bg-cream: var(--bg-cream);
+  --color-bg-beige-light: var(--bg-beige-light);
+  --color-bg-beige: var(--bg-beige);
+  --color-bg-beige-medium: var(--bg-beige-medium);
+  --color-bg-beige-dark: var(--bg-beige-dark);
+  --color-bg-off-white: var(--bg-off-white);
+  --color-bg-ivory: var(--bg-ivory);
+  --color-bg-pearl: var(--bg-pearl);
 }
 
 @layer base {
@@ -126,6 +146,16 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Notebook paper texture effect */
+    background-image: 
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 1px,
+        rgba(0, 0, 0, 0.02) 1px,
+        rgba(0, 0, 0, 0.02) 2px
+      );
+    background-size: 100% 24px;
   }
 }
 

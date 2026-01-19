@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Plus, Search, Trash2, Pencil, X } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Plus, Search, Trash2, Pencil, X } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
@@ -82,6 +83,13 @@ export function ManageAssets() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    
+    // Validation
+    if (!formData.type || !formData.name) {
+      toast.error('Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+    
     try {
       if (editingAsset) {
         await apiCall(`/api/assets/${editingAsset.id}/`, {
@@ -142,8 +150,8 @@ export function ManageAssets() {
     <div className="space-y-6">
       <div className="page-header">
         <div className="page-title-section">
-          <h1 className="page-title">Actifs</h1>
-          <p className="page-subtitle">Gérer les actifs disponibles pour les clients</p>
+          <h1 className="page-title">Actifs externes</h1>
+          <p className="page-subtitle">Gérer les actifs externes du marché (actions, crypto, ETF, etc.)</p>
         </div>
         <Button onClick={() => handleOpenDialog()}>
           <Plus className="w-4 h-4 mr-2" />
@@ -252,13 +260,63 @@ export function ManageAssets() {
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="modal-form-field">
                 <Label htmlFor="type">Type *</Label>
-                <Input
-                  id="type"
+                <Select
                   value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  placeholder="Ex: Bourse, Crypto, ETF..."
+                  onValueChange={(value) => setFormData({ ...formData, type: value })}
                   required
-                />
+                >
+                  <SelectTrigger id="type">
+                    <SelectValue placeholder="Sélectionner un type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Actions - Actifs externes du marché */}
+                    <SelectItem value="Action">Action</SelectItem>
+                    
+                    {/* Cryptomonnaies - Actifs externes du marché */}
+                    <SelectItem value="Cryptomonnaie">Cryptomonnaie</SelectItem>
+                    <SelectItem value="Crypto">Crypto</SelectItem>
+                    
+                    {/* Fonds et ETF - Actifs externes du marché */}
+                    <SelectItem value="ETF">ETF</SelectItem>
+                    <SelectItem value="SICAV">SICAV</SelectItem>
+                    <SelectItem value="FCP">FCP</SelectItem>
+                    <SelectItem value="Fonds">Fonds</SelectItem>
+                    <SelectItem value="Tracker">Tracker</SelectItem>
+                    
+                    {/* Obligations - Actifs externes du marché */}
+                    <SelectItem value="Obligation">Obligation</SelectItem>
+                    
+                    {/* Matières premières - Actifs externes du marché */}
+                    <SelectItem value="Matière première">Matière première</SelectItem>
+                    <SelectItem value="Commodity">Commodity</SelectItem>
+                    <SelectItem value="Or">Or</SelectItem>
+                    <SelectItem value="Argent">Argent</SelectItem>
+                    <SelectItem value="Pétrole">Pétrole</SelectItem>
+                    <SelectItem value="Gaz">Gaz</SelectItem>
+                    
+                    {/* Devises - Actifs externes du marché */}
+                    <SelectItem value="Devise">Devise</SelectItem>
+                    <SelectItem value="Forex">Forex</SelectItem>
+                    
+                    {/* Indices - Actifs externes du marché */}
+                    <SelectItem value="Indice">Indice</SelectItem>
+                    
+                    {/* Dérivés - Actifs externes du marché */}
+                    <SelectItem value="Warrant">Warrant</SelectItem>
+                    <SelectItem value="Option">Option</SelectItem>
+                    <SelectItem value="Future">Future</SelectItem>
+                    <SelectItem value="Dérivé">Dérivé</SelectItem>
+                    
+                    {/* Immobilier - Actifs externes du marché */}
+                    <SelectItem value="REIT">REIT</SelectItem>
+                    <SelectItem value="SCPI">SCPI</SelectItem>
+                    <SelectItem value="OPCI">OPCI</SelectItem>
+                    
+                    {/* Autres actifs externes */}
+                    <SelectItem value="Bourse">Bourse</SelectItem>
+                    <SelectItem value="Autre">Autre</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="modal-form-field">
                 <Label htmlFor="name">Nom *</Label>

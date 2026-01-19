@@ -84,4 +84,6 @@ urlpatterns = [
     # AI Generation endpoints
     path('products/generate-description/', api_views.product_generate_description, name='product-generate-description'),
     path('products/generate-cgv/', api_views.product_generate_cgv, name='product-generate-cgv'),
+    # App Settings endpoints
+    path('settings/', api_views.app_settings, name='app-settings'),
 ]

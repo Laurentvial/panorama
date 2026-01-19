@@ -8,7 +8,7 @@ import { Textarea } from './ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Badge } from './ui/badge';
-import { Plus, Edit, Trash2, TrendingUp, DollarSign } from 'lucide-react';
+import { Plus, Edit, Trash2, TrendingUp, DollarSign } from '../utils/iconMapping';
 
 const mockProducts = [
   { id: 1, name: 'Apple Inc.', type: 'Action', symbol: 'AAPL', price: 185.40, performance: 12.4, risk: 'Moyen', status: 'Actif' },

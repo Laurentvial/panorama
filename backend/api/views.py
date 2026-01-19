@@ -1,8 +1,13 @@
 from django.shortcuts import render
 from django.contrib.auth.models import User as DjangoUser
+from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from rest_framework import generics, status
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework.response import Response
 from .models import Client
 from .models import Note
 from .models import UserDetails
@@ -19,16 +24,15 @@ from .models import ClientUsefulLink
 from .models import Transaction
 from .models import ProductCategory
 from .models import Product
+from .models import AppSettings
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 import uuid
 import json
 
@@ -1906,7 +1910,12 @@ def product_create(request):
         is_savings=request.data.get('isSavings', False),
         link_to_assets=request.data.get('linkToAssets', 'Non'),
         # Gestion des prix
-        enable_price_variation=request.data.get('enablePriceVariation', 'Non')
+        enable_price_variation=request.data.get('enablePriceVariation', 'Non'),
+        min_entry_value=request.data.get('minEntryValue'),
+        max_entry_value=request.data.get('maxEntryValue'),
+        min_price_variation=request.data.get('minPriceVariation'),
+        max_price_variation=request.data.get('maxPriceVariation'),
+        current_price_variation=request.data.get('currentPriceVariation')
     )
     
     serializer = ProductSerializer(product)
@@ -1993,6 +2002,21 @@ def product_update(request, product_id):
     # Gestion des prix
     if 'enablePriceVariation' in request.data:
         product.enable_price_variation = request.data['enablePriceVariation']
+    if 'minEntryValue' in request.data:
+        min_entry = request.data['minEntryValue']
+        product.min_entry_value = float(min_entry) if min_entry is not None and min_entry != '' else None
+    if 'maxEntryValue' in request.data:
+        max_entry = request.data['maxEntryValue']
+        product.max_entry_value = float(max_entry) if max_entry is not None and max_entry != '' else None
+    if 'minPriceVariation' in request.data:
+        min_var = request.data['minPriceVariation']
+        product.min_price_variation = float(min_var) if min_var is not None and min_var != '' else None
+    if 'maxPriceVariation' in request.data:
+        max_var = request.data['maxPriceVariation']
+        product.max_price_variation = float(max_var) if max_var is not None and max_var != '' else None
+    if 'currentPriceVariation' in request.data:
+        current_var = request.data['currentPriceVariation']
+        product.current_price_variation = float(current_var) if current_var is not None and current_var != '' else None
     
     product.save()
     serializer = ProductSerializer(product)
@@ -2139,5 +2163,92 @@ CGV:"""
             {'error': f'Error generating CGV: {str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    transaction.delete()
-    return Response(status=status.HTTP_204_NO_CONTENT)
+
+# App Settings endpoints
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([IsAuthenticated])
+def app_settings(request):
+    """Get or update app settings (logo and colors)"""
+    try:
+        # Get or create settings (singleton pattern)
+        settings_obj, created = AppSettings.objects.get_or_create(
+            id='settings001',  # Single settings instance
+            defaults={
+                'primary_color': '#030213',
+                'secondary_color': '',
+                'accent_color': ''
+            }
+        )
+        
+        if request.method == 'GET':
+            serializer = AppSettingsSerializer(settings_obj, context={'request': request})
+            return Response(serializer.data)
+        
+        elif request.method in ['POST', 'PUT']:
+            # Handle FormData for file uploads
+            data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+            
+            # Handle logo removal
+            if data.get('remove_logo') == 'true':
+                if settings_obj.logo:
+                    settings_obj.logo.delete()
+                settings_obj.logo = None
+                settings_obj.save()
+            
+            # Handle logo file upload
+            if 'logo' in request.FILES:
+                settings_obj.logo = request.FILES['logo']
+                settings_obj.save()
+            
+            # Update colors from request data
+            if 'primary_color' in data:
+                settings_obj.primary_color = data.get('primary_color', '#030213')
+            if 'secondary_color' in data:
+                settings_obj.secondary_color = data.get('secondary_color', '')
+            if 'accent_color' in data:
+                settings_obj.accent_color = data.get('accent_color', '')
+            
+            settings_obj.save()
+            
+            serializer = AppSettingsSerializer(settings_obj, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# Custom Token Refresh Serializer that handles missing users gracefully
+class CustomTokenRefreshSerializer(TokenRefreshSerializer):
+    """
+    Custom token refresh serializer that handles cases where the user referenced
+    in the token no longer exists in the database.
+    """
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except TokenError:
+            # Re-raise TokenError as-is (invalid/expired token)
+            raise
+        except DjangoUser.DoesNotExist:
+            # User referenced in token doesn't exist - raise TokenError to return 401
+            raise TokenError('User no longer exists')
+        except Exception as e:
+            # Check if it's a DoesNotExist exception by checking the error message or type
+            error_str = str(e)
+            error_type = type(e).__name__
+            if 'DoesNotExist' in error_type or 'DoesNotExist' in error_str or 'matching query does not exist' in error_str:
+                raise TokenError('User no longer exists')
+            # Re-raise other exceptions
+            raise
+
+
+# Custom Token Refresh View that uses the custom serializer
+class CustomTokenRefreshView(TokenRefreshView):
+    """
+    Custom token refresh view that handles cases where the user referenced
+    in the token no longer exists in the database.
+    """
+    serializer_class = CustomTokenRefreshSerializer

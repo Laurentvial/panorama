@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, Save, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
@@ -21,6 +21,7 @@ export function AddProduct() {
   const [formData, setFormData] = useState({
     name: '',
     reference: '',
+    type: '',
     categoryId: '',
     subcategory: '',
     status: 'Brouillon',
@@ -46,7 +47,12 @@ export function AddProduct() {
     isSavings: false,
     linkToAssets: 'Non',
     // Gestion des prix
-    enablePriceVariation: 'Non'
+    enablePriceVariation: 'Non',
+    minEntryValue: '',
+    maxEntryValue: '',
+    minPriceVariation: '',
+    maxPriceVariation: '',
+    currentPriceVariation: ''
   });
 
   useEffect(() => {
@@ -212,11 +218,13 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         method: 'POST',
         body: JSON.stringify({
           ...formData,
+          type: formData.type || undefined,
           price: parseFloat(formData.price),
           profitability: profitabilityValue,
           duration: formData.noProfitability === 'Non' ? formData.duration : undefined,
           categoryId: formData.categoryId || undefined,
-          subcategory: formData.subcategory || undefined,
+          // Use type as subcategory if subcategory is not provided (for Smart Portfolio and other types)
+          subcategory: formData.subcategory || formData.type || undefined,
           status: formData.status,
           cgv: formData.cgv || undefined,
           active: formData.status === 'Actif',
@@ -233,7 +241,12 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           isSavings: formData.isSavings,
           linkToAssets: formData.linkToAssets,
           // Gestion des prix
-          enablePriceVariation: formData.enablePriceVariation
+          enablePriceVariation: formData.enablePriceVariation,
+          minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
+          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined,
+          minPriceVariation: formData.enablePriceVariation === 'Oui' && formData.minPriceVariation ? parseFloat(formData.minPriceVariation) : undefined,
+          maxPriceVariation: formData.enablePriceVariation === 'Oui' && formData.maxPriceVariation ? parseFloat(formData.maxPriceVariation) : undefined,
+          currentPriceVariation: formData.enablePriceVariation === 'Oui' && formData.currentPriceVariation ? parseFloat(formData.currentPriceVariation) : undefined
         })
       });
 
@@ -250,18 +263,17 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
   return (
     <div className="space-y-6">
       <div className="page-header-section">
-        <div className="flex items-center gap-4 mb-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate('/admin/produits-investissements')}
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <div>
-            <h1 className="page-title">Nouveau produit d'investissement</h1>
-            <p className="page-subtitle">Créer un nouveau produit financier</p>
-          </div>
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/admin/produits-investissements')}
+          className="page-header-back-button"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Retour
+        </Button>
+        <div>
+          <h1 className="page-title">Nouveau produit financier interne</h1>
+          <p className="page-subtitle">Créer un nouveau produit financier de l'établissement</p>
         </div>
       </div>
 
@@ -309,6 +321,45 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="product-type">Type de produit *</Label>
+                <Select 
+                  value={formData.type || 'none'} 
+                  onValueChange={(value) => setFormData({ ...formData, type: value === 'none' ? '' : value })}
+                  required
+                >
+                  <SelectTrigger id="product-type">
+                    <SelectValue placeholder="Sélectionner un type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sélectionner un type</SelectItem>
+                    {/* Produits d'épargne */}
+                    <SelectItem value="Épargne">Épargne</SelectItem>
+                    <SelectItem value="Livret">Livret</SelectItem>
+                    <SelectItem value="Livret A">Livret A</SelectItem>
+                    <SelectItem value="Livret de Développement Durable">Livret de Développement Durable</SelectItem>
+                    <SelectItem value="Compte Sur Livret">Compte Sur Livret</SelectItem>
+                    
+                    {/* Plans d'épargne */}
+                    <SelectItem value="PEA">PEA (Plan d'Épargne en Actions)</SelectItem>
+                    <SelectItem value="PEL">PEL (Plan d'Épargne Logement)</SelectItem>
+                    <SelectItem value="CEL">CEL (Compte Épargne Logement)</SelectItem>
+                    
+                    {/* Assurance */}
+                    <SelectItem value="Assurance vie">Assurance vie</SelectItem>
+                    
+                    {/* Comptes */}
+                    <SelectItem value="Compte titres">Compte titres</SelectItem>
+                    
+                    {/* Portefeuilles intelligents */}
+                    <SelectItem value="Smart Portfolio">Smart Portfolio</SelectItem>
+                    
+                    {/* Autres produits internes */}
+                    <SelectItem value="Autre">Autre</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="product-category">Catégorie (optionnel)</Label>
                 <Select 
                   value={formData.categoryId || 'none'} 
@@ -330,7 +381,9 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-subcategory">Sous-catégorie (optionnel)</Label>
                 <Select 
@@ -376,7 +429,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               value={formData.description}
               onChange={(value) => setFormData({ ...formData, description: value })}
               placeholder="Description détaillée du produit d'investissement..."
-              rows={6}
+              rows={4}
               onGenerateAI={generateAIDescription}
             />
 
@@ -386,7 +439,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               value={formData.cgv}
               onChange={(value) => setFormData({ ...formData, cgv: value })}
               placeholder="Conditions générales de vente du produit..."
-              rows={6}
+              rows={4}
               onGenerateAI={generateAICGV}
             />
 
@@ -408,6 +461,33 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="product-min-entry-value">Valeur minimum d'entrée (€)</Label>
+                  <Input
+                    id="product-min-entry-value"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.minEntryValue}
+                    onChange={(e) => setFormData({ ...formData, minEntryValue: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="product-max-entry-value">Valeur maximum d'entrée (€)</Label>
+                  <Input
+                    id="product-max-entry-value"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.maxEntryValue}
+                    onChange={(e) => setFormData({ ...formData, maxEntryValue: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-4 pt-4 border-t border-slate-300">
                 <h4 className="text-md font-medium text-slate-700">Gestion des variations</h4>
                 
@@ -426,6 +506,47 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                     </SelectContent>
                   </Select>
                 </div>
+
+                {formData.enablePriceVariation === 'Oui' && (
+                  <div className="grid grid-cols-3 gap-4 pl-4 border-l-2 border-slate-200">
+                    <div className="space-y-2">
+                      <Label htmlFor="product-min-price-variation">Variation Minimum (€)</Label>
+                      <Input
+                        id="product-min-price-variation"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.minPriceVariation}
+                        onChange={(e) => setFormData({ ...formData, minPriceVariation: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="product-max-price-variation">Variation Maximum (€)</Label>
+                      <Input
+                        id="product-max-price-variation"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.maxPriceVariation}
+                        onChange={(e) => setFormData({ ...formData, maxPriceVariation: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="product-current-price-variation">Variation actuelle (€)</Label>
+                      <Input
+                        id="product-current-price-variation"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.currentPriceVariation}
+                        onChange={(e) => setFormData({ ...formData, currentPriceVariation: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

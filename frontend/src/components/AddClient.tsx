@@ -330,14 +330,14 @@ export function AddClient() {
 
   return (
     <div className="space-y-6 p-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-4">
+      <div className="page-header-section">
         <Button
           variant="ghost"
-          size="icon"
           onClick={() => navigate('/admin/clients')}
-          className="h-10 w-10"
+          className="page-header-back-button"
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Retour
         </Button>
         <div className="page-title-section">
           <h1 className="page-title">Nouveau client</h1>

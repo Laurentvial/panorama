@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
@@ -25,6 +25,7 @@ export function RichTextEditor({
   onGenerateAI
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isFocused, setIsFocused] = useState(false);
 
   function insertAtCursor(text: string) {
     const textarea = textareaRef.current;
@@ -166,8 +167,14 @@ export function RichTextEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        rows={rows}
-        className="font-mono text-sm whitespace-pre-wrap"
+        rows={isFocused ? rows : 2}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        className={`font-mono text-sm whitespace-pre-wrap resize-y transition-all duration-200 ${
+          isFocused 
+            ? 'max-h-none overflow-y-auto' 
+            : 'h-16 max-h-16 overflow-hidden'
+        }`}
       />
     </div>
   );

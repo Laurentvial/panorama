@@ -1,0 +1,22 @@
+.layout-container {
+  display: block;
+  min-height: 100vh;
+  background-color: var(--bg-cream);
+  /* Notebook paper texture */
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(0, 0, 0, 0.015) 1px,
+      rgba(0, 0, 0, 0.015) 2px
+    );
+  background-size: 100% 24px;
+  background-position: 0 0;
+}
+
+.layout-content {
+  width: 100%;
+  padding: 30px;
+  background-color: transparent;
+}

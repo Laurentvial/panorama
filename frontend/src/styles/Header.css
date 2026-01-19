@@ -1,10 +1,11 @@
 .header {
-  background-color: var(--background);
-  border-bottom: 1px solid var(--border);
+  background-color: var(--bg-cream); /* Cream background */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   position: sticky;
   top: 0;
   z-index: 50;
   width: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .header-container {
@@ -70,7 +71,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem;
+  padding: 1rem;
   background: transparent;
   border: none;
   background-color: var(--primary);

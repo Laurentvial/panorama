@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { DateInput } from './ui/date-input';
-import { Calendar as CalendarIcon, Plus, Clock, User, Pencil, Trash2, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Clock, User, Pencil, Trash2, X } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import '../styles/PlanningCalendar.css';

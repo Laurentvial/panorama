@@ -161,8 +161,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
   return (
     <div className="space-y-6">
       <div className="page-header-section">
-        <h1 className="page-title">Produits d'investissements</h1>
-        <p className="page-subtitle">Gestion des produits financiers et catégories</p>
+        <h1 className="page-title">Produits financiers internes</h1>
+        <p className="page-subtitle">Gérer les produits financiers créés par l'établissement (épargnes, livrets, PEA, etc.)</p>
       </div>
 
       <Tabs defaultValue="products" className="space-y-6">

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import { useUser } from '../contexts/UserContext';
+import '../styles/Layout.css';
 
 interface LayoutProps {
   children?: React.ReactNode;
@@ -26,6 +27,7 @@ export function Layout({ children }: LayoutProps) {
     if (path === '/admin/manage/ribs') return 'manage-ribs';
     if (path === '/admin/manage/assets') return 'manage-assets';
     if (path === '/admin/manage/useful-links') return 'manage-links';
+    if (path === '/admin/settings') return 'settings';
     return 'dashboard';
   };
 
@@ -43,7 +45,7 @@ export function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <div style={{ display: 'block', minHeight: '100vh' }}>
+    <div className="layout-container">
       <Header user={currentUser} />
       <div style={{ display: 'flex' }}>
         <Sidebar 
@@ -51,7 +53,7 @@ export function Layout({ children }: LayoutProps) {
           onNavigate={handleNavigate} 
           userRole={currentUser?.role || 'admin'} 
         />
-        <div style={{ width: '100%', padding: '30px' }}>
+        <div className="layout-content">
           {children}
         </div>
       </div>

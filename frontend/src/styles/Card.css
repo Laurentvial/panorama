@@ -1,0 +1,15 @@
+/* Notebook-style card with subtle paper texture */
+[data-slot="card"] {
+  background-color: var(--card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.08);
+  /* Subtle paper texture */
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(0, 0, 0, 0.01) 1px,
+      rgba(0, 0, 0, 0.01) 2px
+    );
+}
