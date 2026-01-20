@@ -12,6 +12,7 @@ import { ClientDetail } from './components/ClientDetail';
 import { ManageRibs } from './components/ManageRibs';
 import { ManageAssets } from './components/ManageAssets';
 import { ManageUsefulLinks } from './components/ManageUsefulLinks';
+import { ManageNews } from './components/ManageNews';
 import { Transactions } from './components/Transactions';
 import { ProduitsInvestissements } from './components/ProduitsInvestissements';
 import { AddProduct } from './components/AddProduct';
@@ -21,8 +22,10 @@ import { PlatformPortfolio } from './components/PlatformPortfolio';
 import { PlatformTrading } from './components/PlatformTrading';
 import { PlatformDiscover } from './components/PlatformDiscover';
 import { PlatformLayout } from './components/PlatformLayout';
+import { ProductDetail } from './components/ProductDetail';
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { Layout } from './components/Layout';
@@ -144,6 +147,13 @@ function App() {
                             </Layout>
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/manage/news" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <ManageNews />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/transactions" element={
                         <ProtectedRoute>
                             <Layout>
@@ -187,30 +197,47 @@ function App() {
                     {/* Trading Platform Routes - For Clients */}
                     <Route path="/platform" element={
                         <ClientProtectedRoute>
-                            <PlatformLayout>
-                                <PlatformDashboard />
-                            </PlatformLayout>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <PlatformDashboard />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/portfolio" element={
                         <ClientProtectedRoute>
-                            <PlatformLayout>
-                                <PlatformPortfolio />
-                            </PlatformLayout>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <PlatformPortfolio />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/trading" element={
                         <ClientProtectedRoute>
-                            <PlatformLayout>
-                                <PlatformTrading />
-                            </PlatformLayout>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <PlatformTrading />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/discover" element={
                         <ClientProtectedRoute>
-                            <PlatformLayout>
-                                <PlatformDiscover />
-                            </PlatformLayout>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <PlatformDiscover />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/product/:id" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <ProductDetail />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     

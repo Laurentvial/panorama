@@ -40,10 +40,11 @@ urlpatterns = [
     path('assets/', api_views.asset_list, name='asset-list'),
     path('assets/create/', api_views.asset_create, name='asset-create'),
     path('assets/create-from-alpha-vantage/', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage'),
-    path('assets/<str:asset_id>/', api_views.asset_update, name='asset-update'),
-    path('assets/<str:asset_id>/delete/', api_views.asset_delete, name='asset-delete'),
-    path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
+    path('assets/get-logo/', api_views.asset_get_logo, name='asset-get-logo'),  # Specific route before generic
+    path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),
+    path('assets/<str:asset_id>/delete/', api_views.asset_delete, name='asset-delete'),
+    path('assets/<str:asset_id>/', api_views.asset_detail, name='asset-detail'),
     path('clients/<str:client_id>/assets/', api_views.client_assets, name='client-assets'),
     path('clients/<str:client_id>/assets/add/', api_views.client_asset_add, name='client-asset-add'),
     path('clients/<str:client_id>/assets/reset/', api_views.client_assets_reset, name='client-assets-reset'),
@@ -84,6 +85,7 @@ urlpatterns = [
     # Products endpoints
     path('products/', api_views.product_list, name='product-list'),
     path('products/create/', api_views.product_create, name='product-create'),
+    path('products/<str:product_id>/', api_views.product_detail, name='product-detail'),
     path('products/<str:product_id>/update/', api_views.product_update, name='product-update'),
     path('products/<str:product_id>/delete/', api_views.product_delete, name='product-delete'),
     path('products/<str:product_id>/toggle-active/', api_views.product_toggle_active, name='product-toggle-active'),
@@ -92,6 +94,15 @@ urlpatterns = [
     path('products/generate-cgv/', api_views.product_generate_cgv, name='product-generate-cgv'),
     # App Settings endpoints
     path('settings/', api_views.app_settings, name='app-settings'),
+    # News Posts endpoints
+    path('news/', api_views.news_list, name='news-list'),
+    path('news/all/', api_views.news_list_all, name='news-list-all'),
+    path('news/create/', api_views.news_create, name='news-create'),
+    path('news/fetch-from-api/', api_views.news_fetch_from_api, name='news-fetch-from-api'),
+    path('news/import-from-api/', api_views.news_import_from_api, name='news-import-from-api'),
+    path('news/bulk-import-from-api/', api_views.news_bulk_import_from_api, name='news-bulk-import-from-api'),
+    path('news/<str:news_id>/update/', api_views.news_update, name='news-update'),
+    path('news/<str:news_id>/delete/', api_views.news_delete, name='news-delete'),
     # Media proxy endpoint for CORS-compliant image serving
     path('media/<path:file_path>/', api_views.media_proxy, name='media-proxy'),
 ]

@@ -27,6 +27,7 @@ export function Layout({ children }: LayoutProps) {
     if (path === '/admin/manage/ribs') return 'manage-ribs';
     if (path === '/admin/manage/assets') return 'manage-assets';
     if (path === '/admin/manage/useful-links') return 'manage-links';
+    if (path === '/admin/manage/news') return 'manage-news';
     if (path === '/admin/settings') return 'settings';
     return 'dashboard';
   };

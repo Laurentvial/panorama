@@ -11,7 +11,8 @@ import {
   HiOutlineTrendingUp as TrendingUp,
   HiOutlineCube as Package,
   HiOutlineLink as LinkIcon,
-  HiOutlineCog as SettingsIcon
+  HiOutlineCog as SettingsIcon,
+  HiOutlineNewspaper as Newspaper
 } from 'react-icons/hi';
 import { Wallet } from '../utils/iconMapping';
 import '../styles/Sidebar.css';
@@ -37,6 +38,7 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
     { id: 'placements', label: 'Produits financiers internes', icon: Package, roles: ['admin'], path: '/admin/produits-investissements' },
     { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin'], path: '/admin/manage/ribs' },
     { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin'], path: '/admin/manage/useful-links' },
+    { id: 'manage-news', label: 'Gestion Actualités', icon: Newspaper, roles: ['admin'], path: '/admin/manage/news' },
     { id: 'settings', label: 'Paramètres', icon: SettingsIcon, roles: ['admin'], path: '/admin/settings' },
   ];
 

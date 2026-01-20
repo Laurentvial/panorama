@@ -25,11 +25,12 @@ from .models import Transaction
 from .models import ProductCategory
 from .models import Product
 from .models import AppSettings
+from .models import NewsPost
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer, NewsPostSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
@@ -868,30 +869,41 @@ def get_current_client(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_current_user(request):
-    django_user = request.user
     try:
-        # Try to get the user details profile
-        user_details = UserDetails.objects.get(django_user=django_user)
-        # Use UserDetailsSerializer to ensure consistent format with other endpoints
-        serializer = UserDetailsSerializer(user_details)
-        return Response({
-            **serializer.data,
-            'userType': 'admin'  # admin, teamleader, or gestionnaire
-        })
-    except UserDetails.DoesNotExist:
-        # If custom user doesn't exist, return Django user data with default role
-        # Still include first_name and last_name from Django Auth
-        return Response({
-            'id': str(django_user.id),
-            'username': django_user.username,
-            'email': django_user.email or '',
-            'firstName': django_user.first_name or '',
-            'lastName': django_user.last_name or '',
-            'role': '0',  # Default role
-            'phone': '',
-            'active': True,
-            'userType': 'admin'
-        })
+        django_user = request.user
+        try:
+            # Try to get the user details profile
+            user_details = UserDetails.objects.get(django_user=django_user)
+            # Use UserDetailsSerializer to ensure consistent format with other endpoints
+            serializer = UserDetailsSerializer(user_details)
+            return Response({
+                **serializer.data,
+                'userType': 'admin'  # admin, teamleader, or gestionnaire
+            })
+        except UserDetails.DoesNotExist:
+            # If custom user doesn't exist, return Django user data with default role
+            # Still include first_name and last_name from Django Auth
+            return Response({
+                'id': str(django_user.id),
+                'username': django_user.username,
+                'email': django_user.email or '',
+                'firstName': django_user.first_name or '',
+                'lastName': django_user.last_name or '',
+                'role': '0',  # Default role
+                'phone': '',
+                'active': True,
+                'userType': 'admin'
+            })
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in get_current_user: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'error': f'Error retrieving user: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 # Teams endpoints
 @api_view(['GET'])
@@ -1321,15 +1333,44 @@ def asset_create(request):
         return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['PUT', 'PATCH'])
-@permission_classes([IsAuthenticated])
-def asset_update(request, asset_id):
-    """Modifier un asset"""
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([AllowAny])
+def asset_detail(request, asset_id):
+    """Récupérer ou modifier un asset"""
+    # Check authentication: either Django user or valid client token
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        # Validate client token
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not request.user.is_authenticated:
+        # Require authentication for unauthenticated requests
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
     asset = get_object_or_404(Asset, id=asset_id)
-    serializer = AssetSerializer(asset, data=request.data, partial=True)
+    
+    if request.method == 'GET':
+        serializer = AssetSerializer(asset, context={'request': request})
+        return Response({'asset': serializer.data}, status=status.HTTP_200_OK)
+    
+    # PUT/PATCH for updates (requires Django user authentication, not client tokens)
+    if is_client_token:
+        return Response({'error': 'Seuls les administrateurs peuvent modifier les actifs'}, status=status.HTTP_403_FORBIDDEN)
+    
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    serializer = AssetSerializer(asset, data=request.data, partial=True, context={'request': request})
     if serializer.is_valid():
         serializer.save()
-        return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['DELETE'])
@@ -1473,39 +1514,79 @@ def client_assets_reset(request, client_id):
 @permission_classes([IsAuthenticated])
 def alpha_vantage_search(request):
     """
-    Search/validate a symbol using Alpha Vantage
-    This endpoint validates if a symbol exists and returns quote data
+    Search for symbols/companies using Alpha Vantage SYMBOL_SEARCH or Finnhub for cryptos
+    This endpoint searches by keywords (company name or symbol) and returns multiple matches
     """
-    symbol = request.GET.get('symbol', '').strip().upper()
+    keywords = request.GET.get('keywords', '').strip()
+    asset_type = request.GET.get('type', '').strip().lower()  # 'crypto' or other types
     
-    if not symbol:
-        return Response({'error': 'Symbol parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not keywords:
+        return Response({'error': 'Keywords parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Use Finnhub for crypto assets
+    if asset_type == 'crypto' or asset_type == 'cryptocurrency':
+        try:
+            from api.alpha_vantage_service import search_crypto_finnhub
+            results = search_crypto_finnhub(keywords)
+            
+            # Ensure logo_url is included in all results
+            for result in results:
+                if 'logo_url' not in result or not result.get('logo_url'):
+                    # Try to get logo if missing
+                    from api.alpha_vantage_service import get_crypto_logo
+                    logo_url = get_crypto_logo(result.get('symbol', ''))
+                    if logo_url:
+                        result['logo_url'] = logo_url
+            
+            return Response({
+                'results': results,
+                'count': len(results)
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error searching crypto: {str(e)}")
+            return Response({'error': f'Error searching crypto: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # Use Alpha Vantage for stocks, ETFs, etc.
     av_service = get_alpha_vantage_service()
     if not av_service:
         return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     try:
-        quote = av_service.get_quote(symbol)
+        # Use SYMBOL_SEARCH to find multiple matches by name or symbol
+        results = av_service.search_symbol(keywords)
         
-        if not quote:
-            return Response({'error': f'Symbol {symbol} not found or invalid'}, status=status.HTTP_404_NOT_FOUND)
+        if not results:
+            # Check if it's a rate limit issue by trying to get more info
+            # For now, return empty results with a message
+            return Response({
+                'results': [], 
+                'message': 'No matches found. This may be due to API rate limits (25 requests/day for free tier).',
+                'rate_limit_reached': True
+            }, status=status.HTTP_200_OK)
+        
+        # Optionally fetch current price for each result
+        results_with_prices = []
+        for result in results[:10]:  # Limit to first 10 results
+            try:
+                quote = av_service.get_quote(result['symbol'])
+                if quote:
+                    result['price'] = quote['price']
+                    result['change'] = quote['change']
+                    result['change_percent'] = quote['change_percent']
+            except:
+                pass  # If quote fails, just include the search result without price
+            
+            results_with_prices.append(result)
         
         return Response({
-            'symbol': quote['symbol'],
-            'name': quote['symbol'],  # Alpha Vantage doesn't provide company name in quote endpoint
-            'price': quote['price'],
-            'open': quote['open'],
-            'high': quote['high'],
-            'low': quote['low'],
-            'volume': quote['volume'],
-            'previous_close': quote['previous_close'],
-            'change': quote['change'],
-            'change_percent': quote['change_percent'],
-            'latest_trading_day': quote['latest_trading_day']
+            'results': results_with_prices,
+            'count': len(results_with_prices)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response({'error': f'Error fetching data: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Check if the error message indicates a rate limit
+        if "rate limit" in str(e).lower() or "api call frequency" in str(e).lower() or "information" in str(e).lower():
+            return Response({'error': 'Alpha Vantage API rate limit reached. Please try again later.', 'rate_limit_reached': True}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'error': f'Error searching: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1529,6 +1610,38 @@ def alpha_vantage_quote(request, symbol):
     except Exception as e:
         return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def asset_get_logo(request):
+    """
+    Get logo URL for a symbol (works for both stocks and cryptos)
+    """
+    symbol = request.GET.get('symbol', '').strip().upper()
+    asset_type = request.GET.get('type', '').strip().lower()
+    
+    if not symbol:
+        return Response({'error': 'Symbol parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        logo_url = None
+        
+        # Use crypto logo function for cryptos, company logo for stocks
+        if asset_type == 'crypto':
+            from api.alpha_vantage_service import get_crypto_logo
+            logo_url = get_crypto_logo(symbol)
+        else:
+            av_service = get_alpha_vantage_service()
+            if av_service:
+                logo_url = av_service.get_company_logo(symbol)
+        
+        if logo_url:
+            return Response({'logo_url': logo_url}, status=status.HTTP_200_OK)
+        else:
+            return Response({'logo_url': None, 'message': 'Logo not found'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error fetching logo for {symbol}: {str(e)}")
+        return Response({'error': f'Error fetching logo: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def asset_create_from_alpha_vantage(request):
@@ -1542,6 +1655,8 @@ def asset_create_from_alpha_vantage(request):
     exchange = request.data.get('exchange', '')
     currency = request.data.get('currency', 'USD')
     region = request.data.get('region', '')
+    # Accept both logo_url (snake_case) and logoUrl (camelCase) from frontend
+    logo_url = request.data.get('logo_url', '') or request.data.get('logoUrl', '')
     default = request.data.get('default', False)
     
     if not symbol:
@@ -1555,16 +1670,32 @@ def asset_create_from_alpha_vantage(request):
             'asset': AssetSerializer(existing_asset).data
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-    
     try:
-        # Fetch quote to get current price and validate symbol
-        quote = av_service.get_quote(symbol)
-        
-        if not quote:
-            return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        if asset_type.lower() == 'crypto':
+            from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
+            quote = get_crypto_quote_finnhub(symbol)
+            
+            if not quote:
+                return Response({'error': f'Crypto symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get logo URL if not provided
+            if not logo_url:
+                logo_url = get_crypto_logo(symbol) or ''
+        else:
+            av_service = get_alpha_vantage_service()
+            if not av_service:
+                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            # Fetch quote to get current price and validate symbol
+            quote = av_service.get_quote(symbol)
+            
+            if not quote:
+                return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Get logo URL if not provided
+            if not logo_url:
+                logo_url = av_service.get_company_logo(symbol) or ''
         
         # Generate asset ID
         asset_id = uuid.uuid4().hex[:12]
@@ -1584,6 +1715,7 @@ def asset_create_from_alpha_vantage(request):
             exchange=exchange,
             currency=currency,
             region=region,
+            logo_url=logo_url,
             last_price=quote['price'],
             last_price_update=timezone.now(),
             price_change=quote['change'],
@@ -1598,29 +1730,51 @@ def asset_create_from_alpha_vantage(request):
 @permission_classes([IsAuthenticated])
 def asset_update_price(request, asset_id):
     """
-    Update asset price from Alpha Vantage
+    Update asset price from Alpha Vantage (for stocks) or Finnhub (for cryptos)
     """
     asset = get_object_or_404(Asset, id=asset_id)
     
     if not asset.alpha_vantage_symbol:
-        return Response({'error': 'Asset does not have an Alpha Vantage symbol'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'error': 'Asset does not have a symbol configured'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        quote = av_service.get_quote(asset.alpha_vantage_symbol)
-        
-        if not quote:
-            return Response({'error': f'Symbol {asset.alpha_vantage_symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Update asset price data
-        asset.last_price = quote['price']
-        asset.last_price_update = timezone.now()
-        asset.price_change = quote['change']
-        asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
-        asset.save()
+        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        if asset.type.lower() == 'crypto':
+            from api.alpha_vantage_service import get_crypto_quote_finnhub
+            quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
+            
+            if not quote:
+                return Response({
+                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'rate_limit_reached': True
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            # Update asset price data
+            asset.last_price = quote['price']
+            asset.last_price_update = timezone.now()
+            asset.price_change = quote['change']
+            asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+            asset.save()
+        else:
+            # Use Alpha Vantage for stocks/ETFs
+            av_service = get_alpha_vantage_service()
+            if not av_service:
+                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            quote = av_service.get_quote(asset.alpha_vantage_symbol)
+            
+            if not quote:
+                return Response({
+                    'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'rate_limit_reached': True
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            # Update asset price data
+            asset.last_price = quote['price']
+            asset.last_price_update = timezone.now()
+            asset.price_change = quote['change']
+            asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+            asset.save()
         
         return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -1631,6 +1785,7 @@ def asset_update_price(request, asset_id):
 def assets_bulk_update_prices(request):
     """
     Update prices for multiple assets at once
+    Uses Alpha Vantage for stocks/ETFs and Finnhub for cryptos
     """
     asset_ids = request.data.get('assetIds', [])
     
@@ -1640,18 +1795,24 @@ def assets_bulk_update_prices(request):
     assets = Asset.objects.filter(id__in=asset_ids, alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol='')
     
     if not assets.exists():
-        return Response({'error': 'No valid assets found with Alpha Vantage symbols'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'No valid assets found with symbols configured'}, status=status.HTTP_404_NOT_FOUND)
     
+    from api.alpha_vantage_service import get_crypto_quote_finnhub
     av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     updated_count = 0
     errors = []
     
     for asset in assets:
         try:
-            quote = av_service.get_quote(asset.alpha_vantage_symbol)
+            # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+            if asset.type.lower() == 'crypto':
+                quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
+            else:
+                if not av_service:
+                    errors.append(f'{asset.alpha_vantage_symbol}: Alpha Vantage API key not configured')
+                    continue
+                quote = av_service.get_quote(asset.alpha_vantage_symbol)
             
             if quote:
                 asset.last_price = quote['price']
@@ -2329,6 +2490,46 @@ def product_create(request):
             if not product.image:
                 return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
+            # Get the actual Cloudinary URL to extract the real public_id
+            # Cloudinary may add suffixes (like _vlhlvf) to filenames, so we need to use the actual public_id
+            try:
+                storage = product.image.storage
+                from api.storage import CloudinaryMediaStorage
+                if isinstance(storage, CloudinaryMediaStorage):
+                    # Get the actual Cloudinary URL
+                    cloudinary_url = product.image.url
+                    print(f"Cloudinary URL: {cloudinary_url}")
+                    
+                    # Extract public_id from Cloudinary URL
+                    # Format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}
+                    if cloudinary_url and 'res.cloudinary.com' in cloudinary_url and '/image/upload/' in cloudinary_url:
+                        # Extract the public_id from the URL
+                        url_parts = cloudinary_url.split('/image/upload/')
+                        if len(url_parts) == 2:
+                            # Remove version prefix (v1/, v2/, etc.) if present
+                            public_id_part = url_parts[1]
+                            if public_id_part.startswith('v') and '/' in public_id_part:
+                                # Skip version: v1/media/products/... -> media/products/...
+                                public_id_part = public_id_part.split('/', 1)[1]
+                            
+                            # This is the actual public_id in Cloudinary
+                            actual_public_id = public_id_part
+                            print(f"Actual Cloudinary public_id: {actual_public_id}")
+                            
+                            # Update the database with the actual public_id if it's different
+                            if product.image.name != actual_public_id:
+                                print(f"Updating database filename from '{product.image.name}' to '{actual_public_id}'")
+                                # Update the image field directly
+                                product.image.name = actual_public_id
+                                product.save(update_fields=['image'])
+                                # Refresh to verify
+                                product.refresh_from_db(fields=['image'])
+                                print(f"Updated database filename: {product.image.name}")
+            except Exception as url_error:
+                print(f"Warning: Could not extract Cloudinary public_id: {str(url_error)}")
+                import traceback
+                print(traceback.format_exc())
+            
             # Verify the file exists in Cloudinary storage
             try:
                 storage = product.image.storage
@@ -2369,6 +2570,31 @@ def product_create(request):
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def product_detail(request, product_id):
+    """Récupérer un produit"""
+    # Check authentication: either Django user or valid client token
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        # Validate client token
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not request.user.is_authenticated:
+        # Require authentication for unauthenticated requests
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    product = get_object_or_404(Product, id=product_id)
+    serializer = ProductSerializer(product, context={'request': request})
+    return Response({'product': serializer.data}, status=status.HTTP_200_OK)
 
 @api_view(['PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
@@ -2465,35 +2691,45 @@ def product_update(request, product_id):
             if not product.image:
                 return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Verify the filename matches what we expect
-            expected_path = f'products/{custom_filename}'
-            if product.image.name != expected_path:
-                print(f"ERROR: Image filename mismatch!")
-                print(f"Expected: {expected_path}")
-                print(f"Got: {product.image.name}")
-                # Refresh from database to get the actual stored value
-                product.refresh_from_db(fields=['image'])
-                print(f"After refresh from DB: {product.image.name if product.image else 'None'}")
-                
-                if product.image and product.image.name != expected_path:
-                    # Force update the database directly
-                    print(f"Force updating database with correct filename...")
-                    from django.db import connection
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "UPDATE api_product SET image = %s WHERE id = %s",
-                            [expected_path, product_id]
-                        )
-                    # Refresh again to verify
-                    product.refresh_from_db(fields=['image'])
-                    print(f"After force update: {product.image.name if product.image else 'None'}")
+            # Get the actual Cloudinary URL to extract the real public_id
+            # Cloudinary may add suffixes (like _vlhlvf) to filenames, so we need to use the actual public_id
+            try:
+                storage = product.image.storage
+                from api.storage import CloudinaryMediaStorage
+                if isinstance(storage, CloudinaryMediaStorage):
+                    # Get the actual Cloudinary URL
+                    cloudinary_url = product.image.url
+                    print(f"Cloudinary URL: {cloudinary_url}")
                     
-                    if product.image.name != expected_path:
-                        return Response({
-                            'error': 'Image filename mismatch - file may have been saved with wrong extension',
-                            'expected': expected_path,
-                            'actual': product.image.name
-                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    # Extract public_id from Cloudinary URL
+                    # Format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}
+                    if cloudinary_url and 'res.cloudinary.com' in cloudinary_url and '/image/upload/' in cloudinary_url:
+                        # Extract the public_id from the URL
+                        url_parts = cloudinary_url.split('/image/upload/')
+                        if len(url_parts) == 2:
+                            # Remove version prefix (v1/, v2/, etc.) if present
+                            public_id_part = url_parts[1]
+                            if public_id_part.startswith('v') and '/' in public_id_part:
+                                # Skip version: v1/media/products/... -> media/products/...
+                                public_id_part = public_id_part.split('/', 1)[1]
+                            
+                            # This is the actual public_id in Cloudinary
+                            actual_public_id = public_id_part
+                            print(f"Actual Cloudinary public_id: {actual_public_id}")
+                            
+                            # Update the database with the actual public_id if it's different
+                            if product.image.name != actual_public_id:
+                                print(f"Updating database filename from '{product.image.name}' to '{actual_public_id}'")
+                                # Update the image field directly
+                                product.image.name = actual_public_id
+                                product.save(update_fields=['image'])
+                                # Refresh to verify
+                                product.refresh_from_db(fields=['image'])
+                                print(f"Updated database filename: {product.image.name}")
+            except Exception as url_error:
+                print(f"Warning: Could not extract Cloudinary public_id: {str(url_error)}")
+                import traceback
+                print(traceback.format_exc())
             
             # Verify the file exists in Cloudinary storage
             try:
@@ -2809,8 +3045,27 @@ def app_settings(request):
         )
         
         if request.method == 'GET':
-            serializer = AppSettingsSerializer(settings_obj, context={'request': request})
-            return Response(serializer.data)
+            try:
+                serializer = AppSettingsSerializer(settings_obj, context={'request': request})
+                return Response(serializer.data)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error serializing app settings: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Return basic settings even if serialization fails
+                return Response({
+                    'id': settings_obj.id,
+                    'logo': None,
+                    'logo_url': None,
+                    'primary_color': settings_obj.primary_color or '#030213',
+                    'secondary_color': settings_obj.secondary_color or '',
+                    'accent_color': settings_obj.accent_color or '',
+                    'created_at': settings_obj.created_at,
+                    'updated_at': settings_obj.updated_at,
+                    'error': f'Error loading logo: {str(e)}'
+                })
         
         elif request.method in ['POST', 'PUT']:
             # Handle FormData for file uploads
@@ -2971,7 +3226,7 @@ def media_proxy(request, file_path):
         
         # Cloudinary URLs are already complete and public, no need to modify them
 
-        # Fetch the file from Impossible Cloud (HEAD for HEAD requests, GET otherwise)
+        # Fetch the file from Cloudinary (HEAD for HEAD requests, GET otherwise)
         try:
             if request.method == 'HEAD':
                 response = requests.head(file_url, timeout=30)
@@ -3045,3 +3300,271 @@ def media_proxy(request, file_path):
             {'error': f'Unexpected error: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+# News Posts endpoints
+@api_view(['GET'])
+@permission_classes([AllowAny])  # Allow clients to view published news
+def news_list(request):
+    """Liste toutes les actualités publiées"""
+    news_posts = NewsPost.objects.filter(published=True).order_by('-created_at')
+    serializer = NewsPostSerializer(news_posts, many=True, context={'request': request})
+    return Response({'news': serializer.data})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def news_list_all(request):
+    """Liste toutes les actualités (admin seulement)"""
+    news_posts = NewsPost.objects.all().order_by('-created_at')
+    serializer = NewsPostSerializer(news_posts, many=True, context={'request': request})
+    return Response({'news': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def news_create(request):
+    """Créer une nouvelle actualité"""
+    # Generate ID
+    max_id = 0
+    for id_val in NewsPost.objects.values_list('id', flat=True):
+        try:
+            int_id = int(id_val)
+            if int_id > max_id:
+                max_id = int_id
+        except (ValueError, TypeError):
+            continue
+    
+    new_id = max_id + 1
+    news_id = str(new_id)
+    
+    if len(news_id) > 12:
+        import uuid
+        while True:
+            news_id = uuid.uuid4().hex[:12]
+            if not NewsPost.objects.filter(id=news_id).exists():
+                break
+    
+    # Create news post
+    serializer = NewsPostSerializer(data=request.data, context={'request': request})
+    if serializer.is_valid():
+        news_post = serializer.save(id=news_id, author=request.user)
+        return Response(NewsPostSerializer(news_post, context={'request': request}).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def news_update(request, news_id):
+    """Mettre à jour une actualité"""
+    try:
+        news_post = NewsPost.objects.get(id=news_id)
+    except NewsPost.DoesNotExist:
+        return Response({'error': 'News post not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    serializer = NewsPostSerializer(news_post, data=request.data, partial=True, context={'request': request})
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def news_delete(request, news_id):
+    """Supprimer une actualité"""
+    try:
+        news_post = NewsPost.objects.get(id=news_id)
+    except NewsPost.DoesNotExist:
+        return Response({'error': 'News post not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    news_post.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def news_fetch_from_api(request):
+    """Récupérer les actualités financières depuis NewsAPI"""
+    import requests
+    import os
+    
+    news_api_key = os.getenv('NEWS_API_KEY', '')
+    if not news_api_key:
+        return Response({'error': 'NewsAPI key not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    try:
+        # Fetch finance-related news (more specific than economy)
+        url = 'https://newsapi.org/v2/everything'
+        params = {
+            'q': 'finance OR financial OR investment OR stock market OR trading OR banking OR portfolio OR asset management OR wealth management',
+            'language': 'fr',
+            'sortBy': 'publishedAt',
+            'pageSize': 20,
+            'apiKey': news_api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        articles = data.get('articles', [])
+        return Response({'articles': articles})
+    except requests.exceptions.RequestException as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching news from NewsAPI: {str(e)}")
+        return Response({'error': f'Failed to fetch news: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error fetching news: {str(e)}")
+        return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def news_import_from_api(request):
+    """Importer une actualité depuis NewsAPI dans la base de données"""
+    article_data = request.data.get('article')
+    if not article_data:
+        return Response({'error': 'Article data is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Generate ID
+        max_id = 0
+        for id_val in NewsPost.objects.values_list('id', flat=True):
+            try:
+                int_id = int(id_val)
+                if int_id > max_id:
+                    max_id = int_id
+            except (ValueError, TypeError):
+                continue
+        
+        new_id = max_id + 1
+        news_id = str(new_id)
+        
+        if len(news_id) > 12:
+            import uuid
+            while True:
+                news_id = uuid.uuid4().hex[:12]
+                if not NewsPost.objects.filter(id=news_id).exists():
+                    break
+        
+        # Create news post from article data
+        title = article_data.get('title', '')[:200]
+        content = article_data.get('description', '') or article_data.get('content', '')
+        image_url = article_data.get('urlToImage', '')
+        
+        # Create news post
+        news_post = NewsPost.objects.create(
+            id=news_id,
+            title=title,
+            content=content,
+            author=request.user,
+            published=True
+        )
+        
+        # Download and save image if available
+        if image_url:
+            try:
+                import requests
+                from io import BytesIO
+                from django.core.files.base import ContentFile
+                from django.core.files.images import ImageFile
+                
+                img_response = requests.get(image_url, timeout=10)
+                if img_response.status_code == 200:
+                    img_content = ContentFile(img_response.content)
+                    news_post.image.save(
+                        f'news_{news_id}.jpg',
+                        img_content,
+                        save=True
+                    )
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Could not download image for news post {news_id}: {str(e)}")
+        
+        serializer = NewsPostSerializer(news_post, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error importing news from API: {str(e)}")
+        return Response({'error': f'Failed to import news: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def news_bulk_import_from_api(request):
+    """Importer plusieurs actualités depuis NewsAPI dans la base de données"""
+    articles_data = request.data.get('articles', [])
+    if not articles_data or not isinstance(articles_data, list):
+        return Response({'error': 'Articles array is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    imported_posts = []
+    errors = []
+    
+    # Get max ID once at the start
+    max_id = 0
+    for id_val in NewsPost.objects.values_list('id', flat=True):
+        try:
+            int_id = int(id_val)
+            if int_id > max_id:
+                max_id = int_id
+        except (ValueError, TypeError):
+            continue
+    
+    for idx, article_data in enumerate(articles_data):
+        try:
+            # Generate ID
+            new_id = max_id + 1 + idx
+            news_id = str(new_id)
+            
+            if len(news_id) > 12:
+                import uuid
+                while True:
+                    news_id = uuid.uuid4().hex[:12]
+                    if not NewsPost.objects.filter(id=news_id).exists():
+                        break
+            
+            # Create news post from article data
+            title = article_data.get('title', '')[:200]
+            content = article_data.get('description', '') or article_data.get('content', '')
+            image_url = article_data.get('urlToImage', '')
+            
+            # Create news post
+            news_post = NewsPost.objects.create(
+                id=news_id,
+                title=title,
+                content=content,
+                author=request.user,
+                published=True
+            )
+            
+            # Download and save image if available
+            if image_url:
+                try:
+                    import requests
+                    from django.core.files.base import ContentFile
+                    
+                    img_response = requests.get(image_url, timeout=10)
+                    if img_response.status_code == 200:
+                        img_content = ContentFile(img_response.content)
+                        news_post.image.save(
+                            f'news_{news_id}.jpg',
+                            img_content,
+                            save=True
+                        )
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Could not download image for news post {news_id}: {str(e)}")
+            
+            serializer = NewsPostSerializer(news_post, context={'request': request})
+            imported_posts.append(serializer.data)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error importing article {idx} from API: {str(e)}")
+            errors.append({'index': idx, 'error': str(e)})
+    
+    return Response({
+        'imported': imported_posts,
+        'errors': errors,
+        'success_count': len(imported_posts),
+        'error_count': len(errors)
+    }, status=status.HTTP_201_CREATED)

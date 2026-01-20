@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, AppSettings
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -473,6 +473,7 @@ class AssetSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     alphaVantageSymbol = serializers.CharField(source='alpha_vantage_symbol', required=False, allow_blank=True)
+    logoUrl = serializers.URLField(source='logo_url', required=False, allow_blank=True)
     lastPrice = serializers.DecimalField(source='last_price', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
     lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
     priceChange = serializers.DecimalField(source='price_change', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
@@ -482,7 +483,7 @@ class AssetSerializer(serializers.ModelSerializer):
         model = Asset
         fields = [
             'id', 'type', 'name', 'reference', 'category', 'subcategory', 'default',
-            'alphaVantageSymbol', 'exchange', 'currency', 'region',
+            'alphaVantageSymbol', 'exchange', 'currency', 'region', 'logoUrl',
             'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent',
             'createdAt', 'updatedAt'
         ]
@@ -499,6 +500,8 @@ class AssetSerializer(serializers.ModelSerializer):
             ret['priceChange'] = float(instance.price_change)
         if instance.price_change_percent:
             ret['priceChangePercent'] = float(instance.price_change_percent)
+        # Ensure logoUrl is included even if empty
+        ret['logoUrl'] = instance.logo_url or ''
         return ret
 
 class ClientAssetSerializer(serializers.ModelSerializer):
@@ -679,19 +682,26 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_imageUrl(self, obj):
         if obj.image:
             try:
-                # First, try to get the URL using the stored filename
+                # Get the URL using the storage backend
                 image_url = obj.image.url
                 
                 # Cloudinary URLs are public by default, so we can return them directly
                 # If URL is already absolute (Cloudinary URL), return as-is
                 if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    return image_url
+                    # Ensure it's a valid Cloudinary URL format
+                    if 'res.cloudinary.com' in image_url or image_url.startswith('http'):
+                        return image_url
                 
-                # If URL is a local path, build absolute URI from request
+                # If URL is relative or not a Cloudinary URL, try to build absolute URI
+                # This should not happen with Cloudinary, but handle it gracefully
                 request = self.context.get('request')
                 if request and image_url:
-                    return request.build_absolute_uri(image_url)
-                # If we still don't have a valid URL, return None
+                    # If it's a relative path, build absolute URI
+                    if not image_url.startswith('http'):
+                        return request.build_absolute_uri(image_url)
+                    return image_url
+                
+                # If we still don't have a valid URL, log and return None
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Could not generate valid image URL for product {obj.id}: {image_url}")
@@ -700,6 +710,8 @@ class ProductSerializer(serializers.ModelSerializer):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"Error getting image URL for product {obj.id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
                 return None
         return None
     
@@ -782,13 +794,58 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     
     def get_logo_url(self, obj):
         if obj.logo:
-            logo_url = obj.logo.url
-            # Cloudinary URLs are public by default, return them directly
-            if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
+            try:
+                logo_url = obj.logo.url
+                # Cloudinary URLs are public by default, return them directly
+                if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                    return logo_url
+                # Local path - build absolute URI
+                request = self.context.get('request')
+                if request and logo_url:
+                    return request.build_absolute_uri(logo_url)
                 return logo_url
-            # Local path - build absolute URI
-            request = self.context.get('request')
-            if request and logo_url:
-                return request.build_absolute_uri(logo_url)
-            return logo_url
+            except Exception as e:
+                # Log error but don't fail - return None if URL generation fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting logo URL for app settings: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return None
+        return None
+
+class NewsPostSerializer(serializers.ModelSerializer):
+    authorName = serializers.SerializerMethodField()
+    imageUrl = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = NewsPost
+        fields = ['id', 'title', 'content', 'image', 'imageUrl', 'author', 'authorName', 'published', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl', 'authorName']
+    
+    def get_authorName(self, obj):
+        if obj.author:
+            return f"{obj.author.first_name} {obj.author.last_name}".strip() or obj.author.username
+        return "Admin"
+    
+    def get_imageUrl(self, obj):
+        if obj.image:
+            try:
+                image_url = obj.image.url
+                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                    if 'res.cloudinary.com' in image_url or image_url.startswith('http'):
+                        return image_url
+                request = self.context.get('request')
+                if request and image_url:
+                    if not image_url.startswith('http'):
+                        return request.build_absolute_uri(image_url)
+                    return image_url
+                return None
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting image URL for news post {obj.id}: {str(e)}")
+                return None
         return None

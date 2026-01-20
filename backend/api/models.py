@@ -190,11 +190,13 @@ class Asset(models.Model):
     subcategory = models.CharField(max_length=100, default="", blank=True, null=True)  # Sous-catégorie
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
     
-    # Alpha Vantage integration fields
-    alpha_vantage_symbol = models.CharField(max_length=50, default="", blank=True)  # Symbol for Alpha Vantage API (e.g., "AAPL", "MSFT")
+    # External API integration fields
+    # Note: alpha_vantage_symbol stores the symbol for both Alpha Vantage (stocks/ETFs) and Finnhub (cryptos)
+    alpha_vantage_symbol = models.CharField(max_length=50, default="", blank=True)  # Symbol for external APIs (e.g., "AAPL" for stocks, "BTC" for cryptos)
     exchange = models.CharField(max_length=50, default="", blank=True)  # Stock exchange (e.g., "NASDAQ", "NYSE", "EURONEXT")
     currency = models.CharField(max_length=10, default="USD", blank=True)  # Currency code (USD, EUR, etc.)
     region = models.CharField(max_length=50, default="", blank=True)  # Region (United States, France, etc.)
+    logo_url = models.URLField(max_length=500, default="", blank=True)  # URL of the company logo
     last_price = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Last trading price
     last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last price update
     price_change = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Price change from previous close
@@ -399,3 +401,22 @@ class AppSettings(models.Model):
     
     def __str__(self):
         return f"App Settings - {self.updated_at}"
+
+class NewsPost(models.Model):
+    """Table pour stocker les actualités/news posts"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    title = models.CharField(max_length=200, default="")
+    content = models.TextField(default="")
+    image = models.ImageField(upload_to='news/', storage=app_settings_storage, null=True, blank=True)
+    author = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='news_posts')
+    published = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "News Post"
+        verbose_name_plural = "News Posts"
+    
+    def __str__(self):
+        return self.title

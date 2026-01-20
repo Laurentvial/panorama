@@ -5,10 +5,11 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, X, Eye, Filter } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
+import { Checkbox } from './ui/checkbox';
+import { Plus, X, Eye, Filter, ChevronDown } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import { Checkbox } from './ui/checkbox';
 import '../styles/Modal.css';
 
 // Helper functions for French labels
@@ -120,6 +121,7 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
     dateFrom: '',
     dateTo: ''
   });
+  const [isTypeFilterOpen, setIsTypeFilterOpen] = useState(false);
   const [transactionForm, setTransactionForm] = useState({
     type: 'depot',
     amount: '',
@@ -267,6 +269,16 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
     });
   };
 
+  const getTypeFilterDisplayText = () => {
+    if (filters.types.length === 0) {
+      return 'Tous les types';
+    }
+    if (filters.types.length === 1) {
+      return TRANSACTION_TYPES[filters.types[0] as keyof typeof TRANSACTION_TYPES]?.label || filters.types[0];
+    }
+    return `${filters.types.length} types sélectionnés`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -300,20 +312,37 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             {/* Type filter (multiple selection) */}
             <div className="space-y-2">
               <Label>Type de transaction</Label>
-              <div className="space-y-2 max-h-48 overflow-y-auto border border-slate-200 rounded p-3">
-                {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
-                  <div key={key} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`type-${key}`}
-                      checked={filters.types.includes(key)}
-                      onCheckedChange={(checked) => handleTypeFilterChange(key, checked as boolean)}
-                    />
-                    <Label htmlFor={`type-${key}`} className="text-sm font-normal cursor-pointer">
-                      {config.label}
-                    </Label>
+              <Popover open={isTypeFilterOpen} onOpenChange={setIsTypeFilterOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    className="w-full justify-between h-9 border-input bg-input-background px-3 py-2 text-sm"
+                  >
+                    <span className="truncate">{getTypeFilterDisplayText()}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <div className="max-h-64 overflow-y-auto p-2">
+                    {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
+                      <div key={key} className="flex items-center space-x-2 p-2 hover:bg-slate-50 rounded">
+                        <Checkbox
+                          id={`type-filter-${key}`}
+                          checked={filters.types.includes(key)}
+                          onCheckedChange={(checked) => handleTypeFilterChange(key, checked as boolean)}
+                        />
+                        <Label 
+                          htmlFor={`type-filter-${key}`} 
+                          className="text-sm font-normal cursor-pointer flex-1"
+                        >
+                          {config.label}
+                        </Label>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </PopoverContent>
+              </Popover>
             </div>
 
             {/* Status filter */}

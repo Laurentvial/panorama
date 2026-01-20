@@ -28,6 +28,10 @@ if not ALPHA_VANTAGE_API_KEY:
 # Alpha Vantage API base URL
 ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query'
 
+# Finnhub API for company logos (free tier available)
+FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY', '')
+FINNHUB_BASE_URL = 'https://finnhub.io/api/v1'
+
 
 class AlphaVantageService:
     """Service class for interacting with Alpha Vantage API"""
@@ -60,22 +64,36 @@ class AlphaVantageService:
             response.raise_for_status()
             data = response.json()
             
-            # Check for API errors
+            # Check for API errors first
             if 'Error Message' in data:
                 logger.error(f"Alpha Vantage API error: {data['Error Message']}")
                 return []
             
+            # Extract best matches first (they might exist even with Information/Note)
+            matches = data.get('bestMatches', [])
+            
+            # Check for rate limit warnings (but don't return empty if we have matches)
             if 'Note' in data:
                 logger.warning(f"Alpha Vantage API note: {data['Note']}")
-                return []
+                # Only return empty if we don't have matches
+                if not matches:
+                    return []
             
-            # Extract best matches
-            matches = data.get('bestMatches', [])
+            if 'Information' in data:
+                info_msg = data['Information']
+                logger.warning(f"Alpha Vantage API information: {info_msg}")
+                # Check if it's a rate limit message
+                if 'rate limit' in info_msg.lower() and not matches:
+                    # Rate limit and no matches - return empty
+                    return []
+                # If we have matches, continue processing them even with Information message
+            
             results = []
             
             for match in matches:
-                results.append({
-                    'symbol': match.get('1. symbol', ''),
+                symbol = match.get('1. symbol', '')
+                result = {
+                    'symbol': symbol,
                     'name': match.get('2. name', ''),
                     'type': match.get('3. type', ''),
                     'region': match.get('4. region', ''),
@@ -84,7 +102,14 @@ class AlphaVantageService:
                     'timezone': match.get('7. timezone', ''),
                     'currency': match.get('8. currency', ''),
                     'match_score': float(match.get('9. matchScore', 0))
-                })
+                }
+                
+                # Try to get logo URL
+                logo_url = self.get_company_logo(symbol)
+                if logo_url:
+                    result['logo_url'] = logo_url
+                
+                results.append(result)
             
             return results
         except Exception as e:
@@ -93,21 +118,41 @@ class AlphaVantageService:
     
     def get_quote(self, symbol: str, outputsize: str = 'compact') -> Optional[Dict]:
         """
-        Get real-time quote for a symbol
+        Get real-time quote for a symbol using GLOBAL_QUOTE endpoint
         
         Args:
             symbol: Stock symbol (e.g., "AAPL", "MSFT")
-            outputsize: 'compact' for last 100 data points, 'full' for full historical data
+            outputsize: Not used for GLOBAL_QUOTE, kept for compatibility
         
         Returns:
             Dictionary with quote data or None if error
         """
         try:
-            ts = TimeSeries(key=self.api_key, output_format='json')
-            data, meta_data = ts.get_quote_endpoint(symbol=symbol)
+            params = {
+                'function': 'GLOBAL_QUOTE',
+                'symbol': symbol,
+                'apikey': self.api_key
+            }
             
-            if not data:
+            response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check for API errors
+            if 'Error Message' in data:
+                logger.error(f"Alpha Vantage API error: {data['Error Message']}")
                 return None
+            
+            if 'Note' in data:
+                logger.warning(f"Alpha Vantage API note: {data['Note']}")
+                return None
+            
+            if 'Information' in data:
+                info_msg = data['Information']
+                logger.warning(f"Alpha Vantage API information: {info_msg}")
+                # Check if it's a rate limit message
+                if 'rate limit' in info_msg.lower():
+                    return None
             
             # Extract the quote data (Alpha Vantage returns it in a specific format)
             quote_data = data.get('Global Quote', {})
@@ -247,6 +292,441 @@ class AlphaVantageService:
         except Exception as e:
             logger.error(f"Error fetching forex quote for {from_currency}/{to_currency}: {str(e)}")
             return None
+    
+    def get_company_logo(self, symbol: str) -> Optional[str]:
+        """
+        Get company logo URL using Finnhub API or fallback services
+        
+        Args:
+            symbol: Stock symbol (e.g., "AAPL", "MSFT")
+        
+        Returns:
+            Logo URL or None if not found
+        """
+        # Try Finnhub API first (if API key is configured)
+        if FINNHUB_API_KEY:
+            try:
+                response = requests.get(
+                    f"{FINNHUB_BASE_URL}/stock/profile2",
+                    params={'symbol': symbol, 'token': FINNHUB_API_KEY},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('logo'):
+                        return data['logo']
+            except Exception as e:
+                logger.debug(f"Error fetching logo from Finnhub for {symbol}: {str(e)}")
+        
+        # Fallback 1: Try Finnhub without API key (limited but works for US stocks)
+        try:
+            response = requests.get(
+                f"{FINNHUB_BASE_URL}/stock/profile2",
+                params={'symbol': symbol},
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('logo'):
+                    return data['logo']
+        except Exception:
+            pass
+        
+        # Fallback 2: Use clearbit logo service (works for many companies)
+        try:
+            # Try common domain patterns
+            domains_to_try = [
+                f"{symbol.lower()}.com",
+                f"www.{symbol.lower()}.com"
+            ]
+            
+            for domain in domains_to_try:
+                logo_url = f"https://logo.clearbit.com/{domain}"
+                test_response = requests.head(logo_url, timeout=2, allow_redirects=True)
+                if test_response.status_code == 200:
+                    return logo_url
+        except Exception:
+            pass
+        
+        return None
+
+
+def get_crypto_logo(symbol: str) -> Optional[str]:
+    """
+    Get cryptocurrency logo URL
+    
+    Args:
+        symbol: Crypto symbol (e.g., "BTC", "ETH")
+    
+    Returns:
+        Logo URL or None if not found
+    """
+    try:
+        # Try CoinGecko API (free, no API key needed for basic usage)
+        # First, try to get coin by ID (symbol as ID)
+        try:
+            gecko_response = requests.get(
+                f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}",
+                timeout=5
+            )
+            
+            if gecko_response.status_code == 200:
+                coin_data = gecko_response.json()
+                image_url = coin_data.get('image', {}).get('large') or coin_data.get('image', {}).get('small')
+                if image_url:
+                    return image_url
+        except Exception:
+            pass
+        
+        # If direct ID lookup fails, search by symbol
+        try:
+            search_response = requests.get(
+                f"https://api.coingecko.com/api/v3/search?query={symbol.lower()}",
+                timeout=5
+            )
+            
+            if search_response.status_code == 200:
+                search_data = search_response.json()
+                coins = search_data.get('coins', [])
+                
+                # Find exact symbol match
+                for coin in coins[:10]:  # Check first 10 results
+                    if coin.get('symbol', '').upper() == symbol.upper():
+                        # CoinGecko search already returns logo URLs
+                        logo_url = coin.get('large') or coin.get('thumb')
+                        if logo_url:
+                            return logo_url
+                        
+                        # If not in search result, get full coin data
+                        coin_id = coin.get('id', '')
+                        if coin_id:
+                            coin_response = requests.get(
+                                f"https://api.coingecko.com/api/v3/coins/{coin_id}",
+                                timeout=5
+                            )
+                            if coin_response.status_code == 200:
+                                coin_data = coin_response.json()
+                                image_url = coin_data.get('image', {}).get('large') or coin_data.get('image', {}).get('small')
+                                if image_url:
+                                    return image_url
+                        break
+        except Exception as e:
+            logger.debug(f"CoinGecko search failed for {symbol}: {str(e)}")
+            pass
+        
+        # Fallback: Try cryptoicons.org
+        try:
+            cryptoicons_url = f"https://cryptoicons.org/api/icon/{symbol.lower()}/200"
+            test_response = requests.head(cryptoicons_url, timeout=3, allow_redirects=True)
+            if test_response.status_code == 200:
+                return cryptoicons_url
+        except Exception:
+            pass
+        
+        # Fallback 2: Use CoinGecko static images (if we know the coin ID)
+        # Common crypto mappings
+        crypto_id_map = {
+            'BTC': 'bitcoin',
+            'ETH': 'ethereum',
+            'BNB': 'binancecoin',
+            'ADA': 'cardano',
+            'SOL': 'solana',
+            'XRP': 'ripple',
+            'DOT': 'polkadot',
+            'DOGE': 'dogecoin',
+            'MATIC': 'matic-network',
+            'AVAX': 'avalanche-2',
+            'LINK': 'chainlink',
+            'LTC': 'litecoin',
+            'UNI': 'uniswap',
+            'USDT': 'tether',
+            'USDC': 'usd-coin',
+            'SHIB': 'shiba-inu',
+            'ALGO': 'algorand',
+            'XLM': 'stellar',
+            'ATOM': 'cosmos'
+        }
+        
+        coin_id = crypto_id_map.get(symbol.upper())
+        if coin_id:
+            try:
+                gecko_response = requests.get(
+                    f"https://api.coingecko.com/api/v3/coins/{coin_id}",
+                    timeout=5
+                )
+                if gecko_response.status_code == 200:
+                    coin_data = gecko_response.json()
+                    image_url = coin_data.get('image', {}).get('large') or coin_data.get('image', {}).get('small')
+                    if image_url:
+                        return image_url
+            except Exception:
+                pass
+        
+        return None
+    except Exception as e:
+        logger.debug(f"Error fetching crypto logo for {symbol}: {str(e)}")
+        return None
+
+
+def get_crypto_quote_finnhub(symbol: str) -> Optional[Dict]:
+    """
+    Get cryptocurrency quote from Finnhub API
+    
+    Args:
+        symbol: Crypto symbol (e.g., "BTC", "ETH")
+    
+    Returns:
+        Dictionary with quote data or None if error
+    """
+    try:
+        # Format symbol for Finnhub (BINANCE:SYMBOLUSDT)
+        symbol_for_quote = f"BINANCE:{symbol}USDT"
+        quote_params = {'symbol': symbol_for_quote}
+        if FINNHUB_API_KEY:
+            quote_params['token'] = FINNHUB_API_KEY
+        
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/quote",
+            params=quote_params,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            quote_data = response.json()
+            
+            # Finnhub quote format: {'c': current_price, 'd': change, 'dp': change_percent, 'h': high, 'l': low, 'o': open, 'pc': previous_close, 't': timestamp}
+            if quote_data.get('c') is not None:
+                return {
+                    'symbol': symbol,
+                    'price': float(quote_data.get('c', 0)),
+                    'change': float(quote_data.get('d', 0)),
+                    'change_percent': str(quote_data.get('dp', 0)),
+                    'high': float(quote_data.get('h', 0)),
+                    'low': float(quote_data.get('l', 0)),
+                    'open': float(quote_data.get('o', 0)),
+                    'previous_close': float(quote_data.get('pc', 0))
+                }
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching crypto quote from Finnhub for {symbol}: {str(e)}")
+        return None
+
+
+def search_crypto_finnhub(keywords: str) -> List[Dict]:
+    """
+    Search for cryptocurrencies using Finnhub API
+    
+    Args:
+        keywords: Search keywords (e.g., "Bitcoin", "BTC", "Ethereum")
+    
+    Returns:
+        List of matching cryptocurrencies with metadata
+    """
+    try:
+        keywords_lower = keywords.lower()
+        results = []
+        seen_symbols = set()  # Track symbols we've already added to avoid duplicates
+        
+        # First, try Finnhub search endpoint (if API key is available)
+        if FINNHUB_API_KEY:
+            try:
+                search_params = {
+                    'q': keywords,
+                    'token': FINNHUB_API_KEY
+                }
+                search_response = requests.get(
+                    f"{FINNHUB_BASE_URL}/search",
+                    params=search_params,
+                    timeout=10
+                )
+                
+                if search_response.status_code == 200:
+                    search_data = search_response.json()
+                    # Filter for crypto results
+                    for item in search_data.get('result', []):
+                        if item.get('type') == 'Crypto':
+                            symbol = item.get('symbol', '')
+                            description = item.get('description', '')
+                            
+                            # Normalize symbol (remove exchange prefix and USDT/USD suffix)
+                            normalized_symbol = symbol.replace('BINANCE:', '').replace('COINBASE:', '').replace('KRAKEN:', '').replace('USDT', '').replace('USD', '').upper()
+                            
+                            # Skip if we've already seen this symbol
+                            if normalized_symbol in seen_symbols:
+                                continue
+                            
+                            seen_symbols.add(normalized_symbol)
+                            
+                            # Get quote for this symbol
+                            quote_params = {'symbol': symbol, 'token': FINNHUB_API_KEY}
+                            try:
+                                quote_response = requests.get(
+                                    f"{FINNHUB_BASE_URL}/quote",
+                                    params=quote_params,
+                                    timeout=5
+                                )
+                                quote_data = quote_response.json() if quote_response.status_code == 200 else {}
+                                
+                                # Get logo URL
+                                logo_url = get_crypto_logo(normalized_symbol)
+                                
+                                result_item = {
+                                    'symbol': normalized_symbol,
+                                    'name': description or normalized_symbol,
+                                    'type': 'Crypto',
+                                    'region': 'Global',
+                                    'currency': 'USD',
+                                    'price': quote_data.get('c', 0),
+                                    'change': quote_data.get('d', 0),
+                                    'change_percent': quote_data.get('dp', 0),
+                                    'match_score': 1.0
+                                }
+                                
+                                if logo_url:
+                                    result_item['logo_url'] = logo_url
+                                
+                                results.append(result_item)
+                                
+                                if len(results) >= 10:
+                                    break
+                            except Exception:
+                                # Still add it even if quote fails, but mark it
+                                # Get logo URL
+                                logo_url = get_crypto_logo(normalized_symbol)
+                                
+                                result_item = {
+                                    'symbol': normalized_symbol,
+                                    'name': description or normalized_symbol,
+                                    'type': 'Crypto',
+                                    'region': 'Global',
+                                    'currency': 'USD',
+                                    'match_score': 0.9
+                                }
+                                
+                                if logo_url:
+                                    result_item['logo_url'] = logo_url
+                                
+                                results.append(result_item)
+                                if len(results) >= 10:
+                                    break
+            except Exception as e:
+                logger.debug(f"Finnhub search API failed: {str(e)}")
+        
+        # Fallback: Use a comprehensive crypto mapping
+        crypto_map = {
+            'bitcoin': {'symbol': 'BTC', 'name': 'Bitcoin'},
+            'btc': {'symbol': 'BTC', 'name': 'Bitcoin'},
+            'ethereum': {'symbol': 'ETH', 'name': 'Ethereum'},
+            'eth': {'symbol': 'ETH', 'name': 'Ethereum'},
+            'binance': {'symbol': 'BNB', 'name': 'Binance Coin'},
+            'bnb': {'symbol': 'BNB', 'name': 'Binance Coin'},
+            'cardano': {'symbol': 'ADA', 'name': 'Cardano'},
+            'ada': {'symbol': 'ADA', 'name': 'Cardano'},
+            'solana': {'symbol': 'SOL', 'name': 'Solana'},
+            'sol': {'symbol': 'SOL', 'name': 'Solana'},
+            'ripple': {'symbol': 'XRP', 'name': 'Ripple'},
+            'xrp': {'symbol': 'XRP', 'name': 'Ripple'},
+            'polkadot': {'symbol': 'DOT', 'name': 'Polkadot'},
+            'dot': {'symbol': 'DOT', 'name': 'Polkadot'},
+            'dogecoin': {'symbol': 'DOGE', 'name': 'Dogecoin'},
+            'doge': {'symbol': 'DOGE', 'name': 'Dogecoin'},
+            'matic': {'symbol': 'MATIC', 'name': 'Polygon'},
+            'polygon': {'symbol': 'MATIC', 'name': 'Polygon'},
+            'avalanche': {'symbol': 'AVAX', 'name': 'Avalanche'},
+            'avax': {'symbol': 'AVAX', 'name': 'Avalanche'},
+            'chainlink': {'symbol': 'LINK', 'name': 'Chainlink'},
+            'link': {'symbol': 'LINK', 'name': 'Chainlink'},
+            'litecoin': {'symbol': 'LTC', 'name': 'Litecoin'},
+            'ltc': {'symbol': 'LTC', 'name': 'Litecoin'},
+            'uniswap': {'symbol': 'UNI', 'name': 'Uniswap'},
+            'uni': {'symbol': 'UNI', 'name': 'Uniswap'},
+            'tether': {'symbol': 'USDT', 'name': 'Tether'},
+            'usdt': {'symbol': 'USDT', 'name': 'Tether'},
+            'usdc': {'symbol': 'USDC', 'name': 'USD Coin'},
+            'usd coin': {'symbol': 'USDC', 'name': 'USD Coin'},
+            'shiba': {'symbol': 'SHIB', 'name': 'Shiba Inu'},
+            'shib': {'symbol': 'SHIB', 'name': 'Shiba Inu'},
+            'algorand': {'symbol': 'ALGO', 'name': 'Algorand'},
+            'algo': {'symbol': 'ALGO', 'name': 'Algorand'},
+            'stellar': {'symbol': 'XLM', 'name': 'Stellar'},
+            'xlm': {'symbol': 'XLM', 'name': 'Stellar'},
+            'cosmos': {'symbol': 'ATOM', 'name': 'Cosmos'},
+            'atom': {'symbol': 'ATOM', 'name': 'Cosmos'},
+        }
+        
+        # Check if we already have results from Finnhub search
+        # If not, use fallback crypto mapping
+        if not results:
+            for key, value in crypto_map.items():
+                if keywords_lower in key or keywords_lower in value['name'].lower():
+                    symbol_upper = value['symbol'].upper()
+                    
+                    # Skip if we've already seen this symbol
+                    if symbol_upper in seen_symbols:
+                        continue
+                    
+                    seen_symbols.add(symbol_upper)
+                    
+                    # Try to get quote from Finnhub using Binance format
+                    symbol_for_quote = f"BINANCE:{value['symbol']}USDT"
+                    quote_params = {'symbol': symbol_for_quote}
+                    if FINNHUB_API_KEY:
+                        quote_params['token'] = FINNHUB_API_KEY
+                    
+                    try:
+                        quote_response = requests.get(
+                            f"{FINNHUB_BASE_URL}/quote",
+                            params=quote_params,
+                            timeout=5
+                        )
+                        quote_data = quote_response.json() if quote_response.status_code == 200 else {}
+                        
+                        # Get logo URL
+                        logo_url = get_crypto_logo(symbol_upper)
+                        
+                        result_item = {
+                            'symbol': symbol_upper,
+                            'name': value['name'],
+                            'type': 'Crypto',
+                            'region': 'Global',
+                            'currency': 'USD',
+                            'price': quote_data.get('c', 0),
+                            'change': quote_data.get('d', 0),
+                            'change_percent': quote_data.get('dp', 0),
+                            'match_score': 1.0
+                        }
+                        
+                        if logo_url:
+                            result_item['logo_url'] = logo_url
+                        
+                        results.append(result_item)
+                    except Exception:
+                        # Get logo URL even if quote fails
+                        logo_url = get_crypto_logo(symbol_upper)
+                        
+                        result_item = {
+                            'symbol': symbol_upper,
+                            'name': value['name'],
+                            'type': 'Crypto',
+                            'region': 'Global',
+                            'currency': 'USD',
+                            'match_score': 0.9
+                        }
+                        
+                        if logo_url:
+                            result_item['logo_url'] = logo_url
+                        
+                        results.append(result_item)
+                    
+                    if len(results) >= 10:
+                        break
+        
+        return results[:10]
+        
+    except Exception as e:
+        logger.error(f"Error searching crypto for '{keywords}': {str(e)}")
+        return []
 
 
 def get_alpha_vantage_service() -> Optional[AlphaVantageService]:

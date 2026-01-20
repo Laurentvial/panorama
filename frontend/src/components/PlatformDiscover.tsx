@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
+import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,14 +10,38 @@ import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { MdPadding } from 'react-icons/md';
 
+// Component for asset logo with fallback
+function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }: any) {
+  const [logoError, setLogoError] = useState(false);
+  
+  if (logoUrl && !logoError) {
+    return (
+      <img 
+        src={logoUrl} 
+        alt={name || 'Asset logo'}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+        }}
+        onError={() => setLogoError(true)}
+      />
+    );
+  }
+  
+  // Return null if no logo - container will be hidden
+  return null;
+}
+
 export function PlatformDiscover() {
   const { currentUser } = useUser();
+  const { searchTerm } = usePlatformSearch();
+  const navigate = useNavigate();
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
@@ -362,27 +388,6 @@ export function PlatformDiscover() {
 
   return (
     <div style={{ padding: '0' }}>
-      {/* Search Bar */}
-      <div style={{ marginBottom: '30px' }}>
-        <div style={{ position: 'relative', maxWidth: '600px', margin: '0 auto' }}>
-          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-          <Input
-            placeholder="Rechercher..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              paddingLeft: '45px',
-              paddingRight: '20px',
-              height: '48px',
-              fontSize: '16px',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              backgroundColor: 'white',
-            }}
-          />
-        </div>
-      </div>
-
       {/* Navigation Tabs */}
       <div style={{ marginBottom: '40px', borderBottom: '1px solid #e5e7eb' }}>
         <div style={{
@@ -527,6 +532,7 @@ export function PlatformDiscover() {
                   return (
                     <Card
                       key={portfolio.id}
+                      onClick={() => navigate(`/platform/product/${portfolio.id}`)}
                       style={{
                         position: 'relative',
                         overflow: 'hidden',
@@ -672,23 +678,6 @@ export function PlatformDiscover() {
                             +{Math.max(0, (portfolio.id?.charCodeAt(0) || 0) % 30 + 3)} MORE
                           </span>
                         </div>
-                        
-                        {/* Add Button */}
-                        <Button
-                          onClick={() => handleAddProduct(portfolio.id)}
-                          style={{
-                            width: '100%',
-                            backgroundColor: '#030213',
-                            color: 'white',
-                            border: 'none',
-                            fontWeight: '600',
-                            padding: '10px 16px',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Ajouter au portefeuille
-                        </Button>
                       </CardContent>
                     </Card>
                   );
@@ -717,10 +706,11 @@ export function PlatformDiscover() {
                 return (
                   <Card
                     key={asset.id}
+                    onClick={() => navigate(`/platform/product/${asset.id}`)}
                     style={{
                       position: 'relative',
                       overflow: 'hidden',
-                      backgroundColor: typeColor.bg,
+                      background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
                       border: 'none',
                       borderRadius: '16px',
                       cursor: 'pointer',
@@ -736,8 +726,6 @@ export function PlatformDiscover() {
                       e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    <WaveformPattern color={typeColor.text} />
-                    
                     <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
                       {/* Featured Badge */}
                       {isInPortfolio && (
@@ -757,7 +745,7 @@ export function PlatformDiscover() {
                         </div>
                       )}
                       
-                      {/* Large Icon */}
+                      {/* Logo or Icon */}
                       <div style={{
                         marginBottom: '20px',
                         display: 'flex',
@@ -766,19 +754,19 @@ export function PlatformDiscover() {
                         width: '64px',
                         height: '64px',
                         borderRadius: '16px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                        color: typeColor.text,
+                        backgroundColor: asset.logoUrl ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
+                        color: '#111827',
+                        overflow: 'hidden',
                       }}>
-                        <div style={{ 
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}>
-                          {React.cloneElement(getProductTypeIcon(productType), {
-                            className: 'h-10 w-10',
-                            style: { color: typeColor.text }
-                          })}
-                        </div>
+                        {asset.logoUrl && (
+                          <AssetLogo 
+                            logoUrl={asset.logoUrl}
+                            name={asset.name}
+                            productType={productType}
+                            typeColor={{ text: '#111827' }}
+                            getProductTypeIcon={getProductTypeIcon}
+                          />
+                        )}
                       </div>
                       
                       {/* Name */}
@@ -786,8 +774,7 @@ export function PlatformDiscover() {
                         <div style={{
                           fontSize: '20px',
                           fontWeight: '600',
-                          color: typeColor.text,
-                          opacity: 0.9,
+                          color: '#111827',
                           marginBottom: '8px',
                         }}>
                           {asset.name || 'N/A'}
@@ -796,8 +783,7 @@ export function PlatformDiscover() {
                         {asset.reference && (
                           <div style={{
                             fontSize: '14px',
-                            color: typeColor.text,
-                            opacity: 0.7,
+                            color: '#6b7280',
                           }}>
                             {asset.reference}
                           </div>
@@ -817,8 +803,7 @@ export function PlatformDiscover() {
                             <div style={{
                               fontSize: '16px',
                               fontWeight: '600',
-                              color: typeColor.text,
-                              opacity: 0.8,
+                              color: '#374151',
                             }}>
                               {asset.category}
                             </div>
@@ -828,15 +813,13 @@ export function PlatformDiscover() {
                               {asset.category && (
                                 <span style={{
                                   fontSize: '14px',
-                                  color: typeColor.text,
-                                  opacity: 0.5,
+                                  color: '#9ca3af',
                                 }}>•</span>
                               )}
                               <div style={{
                                 fontSize: '14px',
                                 fontWeight: '500',
-                                color: typeColor.text,
-                                opacity: 0.7,
+                                color: '#6b7280',
                               }}>
                                 {asset.subcategory}
                               </div>
@@ -845,48 +828,78 @@ export function PlatformDiscover() {
                         </div>
                       )}
                       
-                      {/* Price and Change (if available) */}
-                      {asset.price !== undefined && (
+                      {/* Price and Change */}
+                      {(asset.lastPrice !== undefined && asset.lastPrice !== null) || (asset.price !== undefined) ? (
                         <div style={{ marginBottom: '16px' }}>
+                          {/* Current Price */}
                           <div style={{
                             fontSize: '24px',
                             fontWeight: '700',
-                            color: typeColor.text,
-                            marginBottom: '4px',
+                            color: '#111827',
+                            marginBottom: '8px',
                           }}>
-                            {typeof asset.price === 'number' ? asset.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : asset.price}
+                            {(asset.lastPrice !== undefined && asset.lastPrice !== null) 
+                              ? typeof asset.lastPrice === 'number' 
+                                ? asset.lastPrice.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : asset.lastPrice
+                              : typeof asset.price === 'number' 
+                                ? asset.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : asset.price}
+                            {asset.currency && ` ${asset.currency}`}
                           </div>
-                          {asset.changePercent !== undefined && (
+                          
+                          {/* Price Change and Percentage */}
+                          {(asset.priceChangePercent !== undefined && asset.priceChangePercent !== null) || 
+                           (asset.priceChange !== undefined && asset.priceChange !== null) ||
+                           (asset.changePercent !== undefined) ? (
                             <div style={{
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              color: (asset.changePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
                             }}>
-                              {(asset.changePercent || 0) >= 0 ? '+' : ''}
-                              {typeof asset.changePercent === 'number' ? asset.changePercent.toFixed(2) : asset.changePercent}%
+                              {/* Price Change (absolute) */}
+                              {(asset.priceChange !== undefined && asset.priceChange !== null) && (
+                                <div style={{
+                                  fontSize: '14px',
+                                  fontWeight: '600',
+                                  color: (asset.priceChange || 0) >= 0 ? '#10b981' : '#ef4444',
+                                }}>
+                                  {(asset.priceChange || 0) >= 0 ? '+' : ''}
+                                  {typeof asset.priceChange === 'number' 
+                                    ? asset.priceChange.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                    : asset.priceChange}
+                                </div>
+                              )}
+                              
+                              {/* Price Change Percentage */}
+                              {(asset.priceChangePercent !== undefined && asset.priceChangePercent !== null) ? (
+                                <div style={{
+                                  fontSize: '14px',
+                                  fontWeight: '600',
+                                  color: (asset.priceChangePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                }}>
+                                  ({(asset.priceChangePercent || 0) >= 0 ? '+' : ''}
+                                  {typeof asset.priceChangePercent === 'number' 
+                                    ? asset.priceChangePercent.toFixed(2)
+                                    : asset.priceChangePercent}%)
+                                </div>
+                              ) : asset.changePercent !== undefined && (
+                                <div style={{
+                                  fontSize: '14px',
+                                  fontWeight: '600',
+                                  color: (asset.changePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                }}>
+                                  ({(asset.changePercent || 0) >= 0 ? '+' : ''}
+                                  {typeof asset.changePercent === 'number' 
+                                    ? asset.changePercent.toFixed(2)
+                                    : asset.changePercent}%)
+                                </div>
+                              )}
                             </div>
-                          )}
+                          ) : null}
                         </div>
-                      )}
-                      
-                      {/* Add Button */}
-                      <Button
-                        onClick={() => handleAddAsset(asset.id)}
-                        disabled={isInPortfolio}
-                        style={{
-                          width: '100%',
-                          backgroundColor: isInPortfolio ? 'rgba(255, 255, 255, 0.5)' : 'white',
-                          color: isInPortfolio ? typeColor.text : typeColor.text,
-                          border: 'none',
-                          fontWeight: '600',
-                          padding: '10px 16px',
-                          borderRadius: '8px',
-                          cursor: isInPortfolio ? 'not-allowed' : 'pointer',
-                          opacity: isInPortfolio ? 0.6 : 1,
-                        }}
-                      >
-                        {isInPortfolio ? 'Déjà dans le portefeuille' : 'Ajouter au portefeuille'}
-                      </Button>
+                      ) : null}
                     </CardContent>
                   </Card>
                 );
@@ -900,10 +913,16 @@ export function PlatformDiscover() {
                 return (
                   <Card
                     key={`product-${product.id}`}
+                    onClick={() => navigate(`/platform/product/${product.id}`)}
                     style={{
                       position: 'relative',
                       overflow: 'hidden',
-                      backgroundColor: typeColor.bg,
+                      background: product.imageUrl 
+                        ? `linear-gradient(135deg, rgba(243, 244, 246, 0.95) 0%, rgba(229, 231, 235, 0.95) 100%), url(${product.imageUrl})`
+                        : 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                      backgroundSize: product.imageUrl ? 'cover' : 'auto',
+                      backgroundPosition: product.imageUrl ? 'center' : 'auto',
+                      backgroundRepeat: 'no-repeat',
                       border: 'none',
                       borderRadius: '16px',
                       cursor: 'pointer',
@@ -919,89 +938,20 @@ export function PlatformDiscover() {
                       e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    <WaveformPattern color={typeColor.text} />
-                    
-                    {/* Product Image */}
-                    {product.imageUrl && (
+                    <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                      {/* Logo placeholder - empty space */}
                       <div style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: '150px',
-                        backgroundImage: `url(${product.imageUrl})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        opacity: 0.2,
-                        zIndex: 0,
-                      }} />
-                    )}
-                    
-                    <CardContent style={{ padding: '0', position: 'relative', zIndex: 1 }}>
-                      {/* Product Image Preview */}
-                      {product.imageUrl && (
-                        <div style={{
-                          marginBottom: '16px',
-                          width: '100%',
-                          height: '150px',
-                          borderRadius: '12px 12px 0px 0px',
-                          overflow: 'hidden',
-                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                        }}>
-                          <img 
-                            src={product.imageUrl} 
-                            alt={product.name || 'Product image'}
-                            style={{
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                            }}
-                            onError={(e) => {
-                              // Hide image on error and show placeholder
-                              const img = e.currentTarget;
-                              img.style.display = 'none';
-                              const parent = img.parentElement;
-                              if (parent) {
-                                parent.innerHTML = '<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 12px;">No image</div>';
-                              }
-                            }}
-                          />
-                        </div>
-                      )}
-                      
-                      {/* Large Icon */}
-                      {!product.imageUrl && (
-                        <div style={{
-                          marginBottom: '20px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '64px',
-                          height: '64px',
-                          borderRadius: '16px',
-                          backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                          color: typeColor.text,
-                        }}>
-                          <div style={{ 
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}>
-                            {React.cloneElement(getProductTypeIcon(productType), {
-                              className: 'h-10 w-10',
-                              style: { color: typeColor.text }
-                            })}
-                          </div>
-                        </div>
-                      )}
+                        marginBottom: '20px',
+                        width: '64px',
+                        height: '64px',
+                      }}></div>
                       
                       {/* Name */}
                       <div style={{ marginBottom: '12px' }}>
                         <div style={{
                           fontSize: '20px',
                           fontWeight: '600',
-                          color: typeColor.text,
-                          opacity: 0.9,
+                          color: '#111827',
                           marginBottom: '8px',
                         }}>
                           {product.name || 'N/A'}
@@ -1010,37 +960,12 @@ export function PlatformDiscover() {
                         {product.reference && (
                           <div style={{
                             fontSize: '14px',
-                            color: typeColor.text,
-                            opacity: 0.7,
+                            color: '#6b7280',
                           }}>
                             {product.reference}
                           </div>
                         )}
                       </div>
-                      
-                      {/* Price and Profitability */}
-                      {product.price !== undefined && (
-                        <div style={{ marginBottom: '16px' }}>
-                          <div style={{
-                            fontSize: '24px',
-                            fontWeight: '700',
-                            color: typeColor.text,
-                            marginBottom: '4px',
-                          }}>
-                            {typeof product.price === 'number' ? product.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : product.price} €
-                          </div>
-                          {product.profitability !== undefined && product.profitability !== null && (
-                            <div style={{
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              color: (product.profitability || 0) >= 0 ? '#10b981' : '#ef4444',
-                            }}>
-                              {(product.profitability || 0) >= 0 ? '+' : ''}
-                              {typeof product.profitability === 'number' ? product.profitability.toFixed(2) : product.profitability}%
-                            </div>
-                          )}
-                        </div>
-                      )}
                       
                       {/* Category and Subcategory */}
                       {(product.categoryName || product.subcategory) && (
@@ -1055,8 +980,7 @@ export function PlatformDiscover() {
                             <div style={{
                               fontSize: '16px',
                               fontWeight: '600',
-                              color: typeColor.text,
-                              opacity: 0.8,
+                              color: '#374151',
                             }}>
                               {product.categoryName}
                             </div>
@@ -1066,15 +990,13 @@ export function PlatformDiscover() {
                               {product.categoryName && (
                                 <span style={{
                                   fontSize: '14px',
-                                  color: typeColor.text,
-                                  opacity: 0.5,
+                                  color: '#9ca3af',
                                 }}>•</span>
                               )}
                               <div style={{
                                 fontSize: '14px',
                                 fontWeight: '500',
-                                color: typeColor.text,
-                                opacity: 0.7,
+                                color: '#6b7280',
                               }}>
                                 {product.subcategory}
                               </div>
@@ -1083,23 +1005,32 @@ export function PlatformDiscover() {
                         </div>
                       )}
                       
-                      {/* Add Button */}
-                      <Button
-                        onClick={() => handleAddProduct(product.id)}
-                        style={{
-                          width: '100%',
-                          height: '60px',
-                          backgroundColor: 'white',
-                          color: typeColor.text,
-                          border: 'none',
-                          fontWeight: '600',
-                          padding: '16px 20px',
-                          borderRadius: '0px 0px 8px 8px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Ajouter au portefeuille
-                      </Button>
+                      {/* Price and Profitability */}
+                      {product.price !== undefined && (
+                        <div style={{ marginBottom: '16px' }}>
+                          {/* Current Price */}
+                          <div style={{
+                            fontSize: '24px',
+                            fontWeight: '700',
+                            color: '#111827',
+                            marginBottom: '8px',
+                          }}>
+                            {typeof product.price === 'number' ? product.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : product.price} {product.currency || 'EUR'}
+                          </div>
+                          
+                          {/* Profitability/Change */}
+                          {product.profitability !== undefined && product.profitability !== null && (
+                            <div style={{
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              color: (product.profitability || 0) >= 0 ? '#10b981' : '#ef4444',
+                            }}>
+                              {(product.profitability || 0) >= 0 ? '+' : ''}
+                              {typeof product.profitability === 'number' ? product.profitability.toFixed(2) : product.profitability}%
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 );
