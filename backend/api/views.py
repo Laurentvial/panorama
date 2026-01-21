@@ -2260,6 +2260,23 @@ def client_transaction_create(request, client_id):
     if not transaction_datetime:
         return Response({'error': 'Format de date invalide'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Parse subscription details if provided
+    subscription_details_data = request.data.get('subscription_details')
+    if subscription_details_data:
+        if isinstance(subscription_details_data, str):
+            try:
+                subscription_details_data = json.loads(subscription_details_data)
+            except:
+                subscription_details_data = {}
+    
+    # Get product if productId is provided
+    product = None
+    if subscription_details_data and subscription_details_data.get('productId'):
+        try:
+            product = Product.objects.get(id=subscription_details_data.get('productId'))
+        except Product.DoesNotExist:
+            pass
+    
     # Create transaction
     transaction = Transaction.objects.create(
         id=transaction_id,
@@ -2268,18 +2285,54 @@ def client_transaction_create(request, client_id):
         amount=request.data.get('amount'),
         description=request.data.get('description', ''),
         status=request.data.get('status', 'en_cours'),
-        datetime=transaction_datetime
+        datetime=transaction_datetime,
+        # Subscription details
+        subscription_details=subscription_details_data or {},
+        product=product,
+        subscription_first_name=subscription_details_data.get('firstName', '') if subscription_details_data else '',
+        subscription_last_name=subscription_details_data.get('lastName', '') if subscription_details_data else '',
+        subscription_birth_date=subscription_details_data.get('birthDate', '') if subscription_details_data else '',
+        subscription_city=subscription_details_data.get('city', '') if subscription_details_data else '',
+        subscription_ip=subscription_details_data.get('ip', '') if subscription_details_data else '',
+        subscription_date=subscription_details_data.get('subscriptionDate', '') if subscription_details_data else '',
+        subscription_duration=subscription_details_data.get('duration', '') if subscription_details_data else '',
+        subscription_interest_period=subscription_details_data.get('interestPeriod', '') if subscription_details_data else '',
+        subscription_profitability=subscription_details_data.get('profitability', '') if subscription_details_data else '',
+        subscription_investment=subscription_details_data.get('investment') if subscription_details_data else None,
+        subscription_profits=subscription_details_data.get('profits') if subscription_details_data else None,
+        subscription_total=subscription_details_data.get('total') if subscription_details_data else None,
+        subscription_contract_end=subscription_details_data.get('contractEnd', '') if subscription_details_data else '',
+        subscription_signature=subscription_details_data.get('signature', '') if subscription_details_data else '',
     )
     
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'PATCH'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def client_transaction_update(request, client_id, transaction_id):
     """Mettre à jour une transaction"""
     client = get_object_or_404(Client, id=client_id)
     transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Authorization check: Only allow client accessing their own data OR admin/staff users
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        # Client token: verify it matches the client_id
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif request.user.is_authenticated:
+        # Django user: only allow staff/superuser (admin) to update transactions
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Seuls les administrateurs peuvent modifier les transactions'}, status=status.HTTP_403_FORBIDDEN)
+    else:
+        # No authentication: deny access
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Update fields
     if 'type' in request.data:
@@ -2426,13 +2479,14 @@ def product_create(request):
     else:
         is_savings_value = bool(is_savings_value)
     
-    # Handle subcategory: use subcategory if provided, otherwise fallback to type
+    # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
     subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
     
     product = Product.objects.create(
         id=product_id,
         name=request.data.get('name', ''),
         reference=request.data.get('reference', ''),
+        type=request.data.get('type', ''),
         category=category,
         subcategory=subcategory_value,
         status=request.data.get('status', 'Brouillon'),
@@ -2608,11 +2662,17 @@ def product_update(request, product_id):
         product.name = request.data['name']
     if 'reference' in request.data:
         product.reference = request.data['reference']
+    if 'type' in request.data:
+        # Always update type, even if empty string
+        product.type = request.data['type'] or ''
+    
+    # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
     if 'subcategory' in request.data:
-        product.subcategory = request.data['subcategory']
+        # Always update subcategory, even if empty string
+        product.subcategory = request.data['subcategory'] or ''
     elif 'type' in request.data:
-        # Use type as fallback for subcategory if subcategory is not provided
-        product.subcategory = request.data['type']
+        # Fallback: use type as subcategory if subcategory is not provided (backward compatibility)
+        product.subcategory = request.data['type'] or ''
     if 'status' in request.data:
         product.status = request.data['status']
     if 'categoryId' in request.data:
@@ -2853,35 +2913,13 @@ def product_update(request, product_id):
         current_var = request.data['currentPriceVariation']
         product.current_price_variation = float(current_var) if current_var is not None and current_var != '' else None
     
-    # Save the product
+    # Save the product with all updates
     # Note: If image was uploaded, it was already saved with save=True above
-    # We need to preserve the image field value to avoid overwriting it
-    image_field_before_save = product.image.name if product.image else None
-    
-    # Refresh to get latest from database (including any image updates)
-    product.refresh_from_db()
-    
-    # If image was uploaded, make sure we preserve it
-    if image_field_before_save and product.image:
-        # Ensure the image field value is preserved
-        if product.image.name != image_field_before_save:
-            print(f"WARNING: Image field changed during refresh!")
-            print(f"Before refresh: {image_field_before_save}")
-            print(f"After refresh: {product.image.name}")
-    
-    # Now save the product
-    # Use update_fields to avoid overwriting image if it was just updated
-    # But we need to save all fields, so we'll save everything
     product.save()
     
-    # Final refresh to ensure we have the latest data including image
+    # Refresh from database to get auto-updated fields (like updated_at timestamp)
+    # and ensure we have the latest state including any database-level defaults or triggers
     product.refresh_from_db()
-    
-    # Log the final image filename for debugging
-    if product.image:
-        print(f"Final product image filename after all saves: {product.image.name}")
-    else:
-        print(f"Final product has no image")
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data)

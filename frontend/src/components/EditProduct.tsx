@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Checkbox } from './ui/checkbox';
 import { ArrowLeft, Save, RefreshCw, Trash2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -44,7 +45,7 @@ export function EditProduct() {
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
     showMinProfitability: 'Non',
-    interestPeriod: '',
+    interestPeriod: [] as string[],
     capitalisationFonds: 'Non',
     // Gestion du produit
     showOnLaunch: 'Non',
@@ -142,7 +143,7 @@ export function EditProduct() {
         noProfitability: product.noProfitability,
         isVariableProfitability: product.isVariableProfitability,
         variableProfitability: product.variableProfitability,
-        interestPeriod: product.interestPeriod,
+        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
       });
       const processedInterestPeriod = product.interestPeriod ? String(product.interestPeriod).trim() : '';
       console.log('Processed values:', {
@@ -160,10 +161,26 @@ export function EditProduct() {
         interestPeriodType: typeof product.interestPeriod,
       });
       
+      // Handle type field - use type if available, otherwise fall back to subcategory for display only
+      // For existing products created before type field was added, type might be empty
+      // We'll use subcategory as a fallback for initial display, but save type separately
+      const productTypeFromDB = (product.type || '').trim();
+      const productSubcategory = (product.subcategory || '').trim();
+      // For display: if type is empty but subcategory exists, use subcategory as fallback
+      const displayType = productTypeFromDB || productSubcategory || '';
+      
+      console.log('=== PRODUCT TYPE DEBUG ===');
+      console.log('Product type field:', product.type);
+      console.log('Product subcategory field:', product.subcategory);
+      console.log('Type from DB:', productTypeFromDB);
+      console.log('Display type (with fallback):', displayType);
+      
       setFormData({
         name: product.name || '',
         reference: product.reference || '',
-        type: product.type || '', // Now available from serializer (maps to subcategory)
+        // Store the actual type from DB (empty if not set), not the fallback
+        // The fallback will be used only for display in the Select component
+        type: productTypeFromDB, // Use type from serializer or fall back to subcategory
         categoryId: product.categoryId || '',
         subcategory: product.subcategory || '',
         status: product.status || 'Brouillon',
@@ -181,7 +198,7 @@ export function EditProduct() {
         profitabilityMax: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Oui' && variableProfitabilityValue !== '') ? variableProfitabilityValue : '',
         profitabilityPeriod: product.profitabilityPeriod || '',
         showMinProfitability: product.showMinProfitability || 'Non',
-        interestPeriod: processedInterestPeriod,
+        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
         capitalisationFonds: product.capitalisationFonds || 'Non',
         showOnLaunch: product.showOnLaunch || 'Non',
         availabilityStart: formatDate(product.availabilityStart),
@@ -371,8 +388,8 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           return;
         }
       }
-      if (!formData.interestPeriod) {
-        toast.error('La période d\'intérêt disponible est requise');
+      if (!formData.interestPeriod || formData.interestPeriod.length === 0) {
+        toast.error('Au moins une période d\'intérêt disponible est requise');
         setLoading(false);
         return;
       }
@@ -401,9 +418,11 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         const formDataToSend = new FormData();
         formDataToSend.append('name', formData.name);
         formDataToSend.append('reference', formData.reference);
-        if (formData.type) formDataToSend.append('type', formData.type);
+        // Always send type, even if empty
+        formDataToSend.append('type', formData.type || '');
         if (formData.categoryId) formDataToSend.append('categoryId', formData.categoryId);
-        if (formData.subcategory || formData.type) formDataToSend.append('subcategory', formData.subcategory || formData.type || '');
+        // Always send subcategory, even if empty
+        formDataToSend.append('subcategory', formData.subcategory || '');
         formDataToSend.append('status', formData.status);
         formDataToSend.append('price', formData.price);
         // Toujours envoyer profitability si une valeur existe, même si noProfitability est 'Oui'
@@ -430,8 +449,8 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         // Always send profitabilityPeriod, even if empty
         formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod || '');
         formDataToSend.append('showMinProfitability', formData.showMinProfitability);
-        // Always send interestPeriod, even if empty - trim to ensure exact matching
-        formDataToSend.append('interestPeriod', formData.interestPeriod ? String(formData.interestPeriod).trim() : '');
+        // Always send interestPeriod, even if empty - join array with comma and space
+        formDataToSend.append('interestPeriod', Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : '');
         formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
         formDataToSend.append('showOnLaunch', formData.showOnLaunch);
         // Always send availability dates, even if empty
@@ -469,13 +488,17 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         }
         
         // Construire le payload JSON - inclure explicitement tous les champs
+        const typeToSend = formData.type || '';
+        console.log('=== SAVING TYPE (JSON) ===');
+        console.log('formData.type:', formData.type);
+        console.log('Type being sent:', typeToSend);
         const payload: any = {
           name: formData.name,
           reference: formData.reference,
-          type: formData.type || undefined,
+          type: typeToSend,
           price: parseFloat(formData.price),
           categoryId: formData.categoryId || undefined,
-          subcategory: formData.subcategory || formData.type || undefined,
+          subcategory: formData.subcategory || '',
           status: formData.status,
           description: formData.description || undefined,
           cgv: formData.cgv || undefined,
@@ -486,7 +509,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           variableProfitability: variableProfitabilityValue || undefined,
           profitabilityPeriod: formData.profitabilityPeriod || undefined,
           showMinProfitability: formData.showMinProfitability,
-          interestPeriod: formData.interestPeriod ? String(formData.interestPeriod).trim() : undefined,
+          interestPeriod: formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
           capitalisationFonds: formData.capitalisationFonds,
           duration: formData.duration || undefined,
           // Gestion du produit
@@ -613,8 +636,12 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               <div className="space-y-2">
                 <Label htmlFor="product-type">Type de produit *</Label>
                 <Select 
-                  value={formData.type || 'none'} 
-                  onValueChange={(value) => setFormData({ ...formData, type: value === 'none' ? '' : value })}
+                  value={formData.type || (formData.subcategory || 'none')} 
+                  onValueChange={(value) => {
+                    const newType = value === 'none' ? '' : value;
+                    console.log('Type changed from', formData.type, 'to', newType);
+                    setFormData({ ...formData, type: newType });
+                  }}
                   required
                 >
                   <SelectTrigger id="product-type">
@@ -1056,7 +1083,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Aucune période</SelectItem>
-                        <SelectItem value="Mensuelle">Mensuelle</SelectItem>
+                        <SelectItem value="Mensuel">Mensuel</SelectItem>
                         <SelectItem value="Trimestrielle">Trimestrielle</SelectItem>
                         <SelectItem value="Semestrielle">Semestrielle</SelectItem>
                         <SelectItem value="Annuelle">Annuelle</SelectItem>
@@ -1083,33 +1110,44 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
                   <div className="space-y-2">
                     <Label htmlFor="product-interest-period">Période d'intérêt disponible *</Label>
-                    <Select 
-                      value={(() => {
-                        const validOptions = ['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'];
-                        const trimmedValue = formData.interestPeriod ? String(formData.interestPeriod).trim() : '';
-                        // Only use the value if it matches a valid option exactly
-                        return validOptions.includes(trimmedValue) ? trimmedValue : 'none';
-                      })()}
-                      onValueChange={(value) => {
-                        const newValue = value === 'none' ? '' : value;
-                        console.log('interestPeriod changed:', { oldValue: formData.interestPeriod, newValue, value });
-                        setFormData({ ...formData, interestPeriod: newValue });
-                      }}
-                      required
-                    >
-                      <SelectTrigger id="product-interest-period">
-                        <SelectValue placeholder="Sélectionner une période" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sélectionner une période</SelectItem>
-                        <SelectItem value="Mensuel">Mensuel</SelectItem>
-                        <SelectItem value="Trimestriel">Trimestriel</SelectItem>
-                        <SelectItem value="Semestriel">Semestriel</SelectItem>
-                        <SelectItem value="Annuel">Annuel</SelectItem>
-                        <SelectItem value="Fin de contrat">Fin de contrat</SelectItem>
-                        <SelectItem value="Capitalisation des fonds">Capitalisation des fonds</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-2 border rounded-md p-4">
+                      {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'].map((option) => (
+                        <div key={option} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`interest-period-${option}`}
+                            checked={(() => {
+                              // Ensure interestPeriod is always an array
+                              const currentArray = Array.isArray(formData.interestPeriod) 
+                                ? formData.interestPeriod 
+                                : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
+                              return currentArray.includes(option);
+                            })()}
+                            onCheckedChange={(checked) => {
+                              // Ensure interestPeriod is always an array
+                              const currentArray = Array.isArray(formData.interestPeriod) 
+                                ? formData.interestPeriod 
+                                : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
+                              
+                              if (checked) {
+                                // Add option if not already present
+                                if (!currentArray.includes(option)) {
+                                  setFormData({ ...formData, interestPeriod: [...currentArray, option] });
+                                }
+                              } else {
+                                // Remove option
+                                setFormData({ ...formData, interestPeriod: currentArray.filter(p => p !== option) });
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`interest-period-${option}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            {option}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="space-y-2">

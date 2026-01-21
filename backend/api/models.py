@@ -298,6 +298,7 @@ class Transaction(models.Model):
         ('interets', 'Intérêts'),
         ('frais', 'Frais'),
         ('investissement', 'Investissement'),
+        ('transfert', 'Transfert'),
         ('perte', 'Perte'),
     ]
     
@@ -317,6 +318,24 @@ class Transaction(models.Model):
     datetime = models.DateTimeField()  # Date et heure de la transaction
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Subscription details for transfert transactions
+    subscription_details = models.JSONField(default=dict, blank=True, null=True)  # Store subscription form data as JSON
+    product = models.ForeignKey('Product', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')  # Link to product if transfert
+    subscription_first_name = models.CharField(max_length=100, default="", blank=True)
+    subscription_last_name = models.CharField(max_length=100, default="", blank=True)
+    subscription_birth_date = models.CharField(max_length=20, default="", blank=True)
+    subscription_city = models.CharField(max_length=100, default="", blank=True)
+    subscription_ip = models.CharField(max_length=50, default="", blank=True)
+    subscription_date = models.CharField(max_length=20, default="", blank=True)
+    subscription_duration = models.CharField(max_length=50, default="", blank=True)
+    subscription_interest_period = models.CharField(max_length=50, default="", blank=True)
+    subscription_profitability = models.CharField(max_length=50, default="", blank=True)
+    subscription_investment = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    subscription_profits = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    subscription_total = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    subscription_contract_end = models.CharField(max_length=20, default="", blank=True)
+    subscription_signature = models.TextField(default="", blank=True)  # Base64 encoded signature image
     
     def __str__(self):
         return f"{self.get_type_display()} - {self.amount} € - {self.client.fname} {self.client.lname}"
@@ -344,6 +363,7 @@ class Product(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     name = models.CharField(max_length=200, default="")  # Nom du produit
     reference = models.CharField(max_length=100, default="", blank=True)  # Référence du produit
+    type = models.CharField(max_length=200, default="", blank=True)  # Type de produit (Épargne, Livret, PEA, etc.)
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
     subcategory = models.CharField(max_length=200, default="", blank=True)  # Sous-catégorie
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Brouillon')  # Statut du produit

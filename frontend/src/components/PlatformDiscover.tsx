@@ -9,6 +9,7 @@ import { Search, TrendingUp, Coins, BarChart3, Building2, Wallet, DollarSign, Pa
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { MdPadding } from 'react-icons/md';
+import { useIsMobile } from './ui/use-mobile';
 
 // Component for asset logo with fallback
 function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }: any) {
@@ -37,6 +38,7 @@ export function PlatformDiscover() {
   const { currentUser } = useUser();
   const { searchTerm } = usePlatformSearch();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
@@ -389,12 +391,16 @@ export function PlatformDiscover() {
   return (
     <div style={{ padding: '0' }}>
       {/* Navigation Tabs */}
-      <div style={{ marginBottom: '40px', borderBottom: '1px solid #e5e7eb' }}>
+      <div style={{ 
+        marginBottom: isMobile ? '24px' : '40px', 
+        borderBottom: '1px solid #e5e7eb' 
+      }}>
         <div style={{
           display: 'flex',
           gap: '0',
           justifyContent: 'flex-start',
           overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
           paddingBottom: '0',
         }}>
           {[
@@ -416,11 +422,11 @@ export function PlatformDiscover() {
                 border: 'none',
                 borderBottom: selectedTypeFilter === tab.value ? '2px solid #030213' : '2px solid transparent',
                 borderRadius: 0,
-                padding: '12px 20px',
+                padding: isMobile ? '10px 16px' : '12px 20px',
                 backgroundColor: 'transparent',
                 color: selectedTypeFilter === tab.value ? '#030213' : '#6b7280',
                 fontWeight: selectedTypeFilter === tab.value ? '600' : '400',
-                fontSize: '14px',
+                fontSize: isMobile ? '12px' : '14px',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 transition: 'all 0.2s',
@@ -450,15 +456,38 @@ export function PlatformDiscover() {
         <>
 
           {/* Section Header */}
-          <div style={{ marginBottom: '30px' }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <div style={{ marginBottom: isMobile ? '20px' : '30px' }}>
+            <h2 style={{ 
+              fontSize: isMobile ? '12px' : '14px', 
+              fontWeight: '600', 
+              color: '#6b7280', 
+              marginBottom: '8px', 
+              textTransform: 'uppercase', 
+              letterSpacing: '0.5px' 
+            }}>
               Opportunités d'investissement
             </h2>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h1 style={{ fontSize: '32px', fontWeight: 'bold', margin: 0 }}>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: isMobile ? 'flex-start' : 'center',
+              flexWrap: isMobile ? 'wrap' : 'nowrap',
+              gap: isMobile ? '12px' : '0',
+            }}>
+              <h1 style={{ 
+                fontSize: isMobile ? '24px' : '32px', 
+                fontWeight: 'bold', 
+                margin: 0,
+                flex: 1,
+                minWidth: 0,
+              }}>
                 Explorer les marchés mondiaux
               </h1>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ 
+                display: 'flex', 
+                gap: '8px',
+                flexShrink: 0,
+              }}>
                 <button
                   style={{
                     width: '40px',
@@ -521,12 +550,18 @@ export function PlatformDiscover() {
               
               <div style={{ 
                 display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
-                gap: '20px',
-                marginBottom: '30px'
+                gridTemplateColumns: isMobile 
+                  ? '1fr' 
+                  : 'repeat(auto-fill, minmax(300px, 1fr))', 
+                gap: isMobile ? '16px' : '20px',
+                marginBottom: isMobile ? '20px' : '30px'
               }}>
                 {smartPortfolios.map((portfolio: any) => {
-                  const return12M = portfolio.profitability || 0;
+                  // Convert profitability to number, handling both string and number types
+                  const profitabilityValue = portfolio.profitability;
+                  const return12M = typeof profitabilityValue === 'string' 
+                    ? parseFloat(profitabilityValue) || 0 
+                    : (typeof profitabilityValue === 'number' ? profitabilityValue : 0);
                   const isPositive = return12M >= 0;
                   
                   return (
@@ -589,10 +624,10 @@ export function PlatformDiscover() {
                         </button>
                       </div>
                       
-                      <CardContent style={{ padding: '20px' }}>
+                      <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
                         {/* Title */}
                         <h4 style={{
-                          fontSize: '22px',
+                          fontSize: isMobile ? '18px' : '22px',
                           fontWeight: '700',
                           color: '#030213',
                           marginBottom: '8px',
@@ -603,7 +638,7 @@ export function PlatformDiscover() {
                         
                         {/* Description */}
                         <p style={{
-                          fontSize: '14px',
+                          fontSize: isMobile ? '13px' : '14px',
                           color: '#6b7280',
                           marginBottom: '16px',
                           lineHeight: '1.5',
@@ -696,7 +731,13 @@ export function PlatformDiscover() {
               </CardContent>
             </Card>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: isMobile 
+                ? '1fr' 
+                : 'repeat(auto-fill, minmax(280px, 1fr))', 
+              gap: isMobile ? '16px' : '20px' 
+            }}>
               {/* External Assets */}
               {filteredAssets.map((asset: any) => {
                 const isInPortfolio = isAssetInPortfolio(asset.id);

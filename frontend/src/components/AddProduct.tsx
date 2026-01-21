@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Checkbox } from './ui/checkbox';
 import { ArrowLeft, Save, RefreshCw, Trash2 } from '../utils/iconMapping';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -40,7 +41,7 @@ export function AddProduct() {
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
     showMinProfitability: 'Non',
-    interestPeriod: '',
+    interestPeriod: [] as string[],
     capitalisationFonds: 'Non',
     // Gestion du produit
     showOnLaunch: 'Non',
@@ -268,7 +269,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         if (formData.noProfitability === 'Non') {
           if (formData.profitabilityPeriod) formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod);
           formDataToSend.append('showMinProfitability', formData.showMinProfitability);
-          formDataToSend.append('interestPeriod', formData.interestPeriod);
+          formDataToSend.append('interestPeriod', formData.interestPeriod.join(', '));
           formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
         }
         formDataToSend.append('showOnLaunch', formData.showOnLaunch);
@@ -309,7 +310,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             variableProfitability: variableProfitabilityValue,
             profitabilityPeriod: formData.noProfitability === 'Non' ? formData.profitabilityPeriod || undefined : undefined,
             showMinProfitability: formData.noProfitability === 'Non' ? formData.showMinProfitability : undefined,
-            interestPeriod: formData.noProfitability === 'Non' ? formData.interestPeriod : undefined,
+            interestPeriod: formData.noProfitability === 'Non' ? (formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined) : undefined,
             capitalisationFonds: formData.noProfitability === 'Non' ? formData.capitalisationFonds : undefined,
             // Gestion du produit
             showOnLaunch: formData.showOnLaunch,
@@ -764,7 +765,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Aucune période</SelectItem>
-                        <SelectItem value="Mensuelle">Mensuelle</SelectItem>
+                        <SelectItem value="Mensuel">Mensuel</SelectItem>
                         <SelectItem value="Trimestrielle">Trimestrielle</SelectItem>
                         <SelectItem value="Semestrielle">Semestrielle</SelectItem>
                         <SelectItem value="Annuelle">Annuelle</SelectItem>
@@ -791,23 +792,29 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
                   <div className="space-y-2">
                     <Label htmlFor="product-interest-period">Période d'intérêt disponible *</Label>
-                    <Select 
-                      value={formData.interestPeriod} 
-                      onValueChange={(value) => setFormData({ ...formData, interestPeriod: value })}
-                      required
-                    >
-                      <SelectTrigger id="product-interest-period">
-                        <SelectValue placeholder="Sélectionner une période" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Mensuel">Mensuel</SelectItem>
-                        <SelectItem value="Trimestriel">Trimestriel</SelectItem>
-                        <SelectItem value="Semestriel">Semestriel</SelectItem>
-                        <SelectItem value="Annuel">Annuel</SelectItem>
-                        <SelectItem value="Fin de contrat">Fin de contrat</SelectItem>
-                        <SelectItem value="Capitalisation des fonds">Capitalisation des fonds</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-2 border rounded-md p-4">
+                      {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'].map((option) => (
+                        <div key={option} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`interest-period-${option}`}
+                            checked={formData.interestPeriod.includes(option)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setFormData({ ...formData, interestPeriod: [...formData.interestPeriod, option] });
+                              } else {
+                                setFormData({ ...formData, interestPeriod: formData.interestPeriod.filter(p => p !== option) });
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`interest-period-${option}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            {option}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="space-y-2">

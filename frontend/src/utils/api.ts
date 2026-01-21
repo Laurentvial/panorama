@@ -43,6 +43,9 @@ async function refreshAccessToken(): Promise<string | null> {
   return null;
 }
 
+// Flag to prevent multiple redirects
+let isRedirecting = false;
+
 // Helper function for API calls that returns data directly
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
   let token = localStorage.getItem(ACCESS_TOKEN);
@@ -83,10 +86,49 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
         ...options,
         headers: retryHeaders,
       });
+    } else {
+      // Refresh failed - token is invalid, redirect to login
+      const userType = localStorage.getItem('userType');
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem(REFRESH_TOKEN);
+      localStorage.removeItem('userType');
+      localStorage.removeItem('clientData');
+      
+      // Redirect to appropriate login page
+      if (userType === 'client') {
+        window.location.href = '/login';
+      } else {
+        window.location.href = '/admin/login';
+      }
+      
+      // Throw error to stop execution
+      const error = await response.json().catch(() => ({ detail: 'Authentication failed' }));
+      const errorMessage = error.detail || error.error || error.message || 'Authentication failed';
+      const errorObj = new Error(errorMessage);
+      (errorObj as any).response = error;
+      (errorObj as any).status = response.status;
+      throw errorObj;
     }
   }
 
   if (!response.ok) {
+    // If still 401 after refresh attempt, handle it
+    if (response.status === 401 && token && !isRedirecting) {
+      isRedirecting = true;
+      const userType = localStorage.getItem('userType');
+      localStorage.removeItem(ACCESS_TOKEN);
+      localStorage.removeItem(REFRESH_TOKEN);
+      localStorage.removeItem('userType');
+      localStorage.removeItem('clientData');
+      
+      // Redirect to appropriate login page
+      if (userType === 'client') {
+        window.location.href = '/login';
+      } else {
+        window.location.href = '/admin/login';
+      }
+    }
+    
     const error = await response.json().catch(() => ({ detail: 'API request failed' }));
     const errorMessage = error.detail || error.error || error.message || 'API request failed';
     const errorObj = new Error(errorMessage);

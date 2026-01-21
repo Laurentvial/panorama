@@ -631,10 +631,19 @@ class TransactionSerializer(serializers.ModelSerializer):
     clientId = serializers.CharField(source='client.id', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    productId = serializers.CharField(source='product.id', read_only=True, allow_null=True)
     
     class Meta:
         model = Transaction
-        fields = ['id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 'createdAt', 'updatedAt']
+        fields = [
+            'id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 
+            'createdAt', 'updatedAt', 'productId',
+            'subscription_details', 'subscription_first_name', 'subscription_last_name',
+            'subscription_birth_date', 'subscription_city', 'subscription_ip',
+            'subscription_date', 'subscription_duration', 'subscription_interest_period',
+            'subscription_profitability', 'subscription_investment', 'subscription_profits',
+            'subscription_total', 'subscription_contract_end', 'subscription_signature'
+        ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
     
     def to_representation(self, instance):
@@ -642,6 +651,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        if instance.product:
+            ret['productId'] = instance.product.id
+            ret['productName'] = instance.product.name
+            ret['productReference'] = instance.product.reference
         return ret
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -661,6 +674,7 @@ class ProductCategorySerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     categoryId = serializers.CharField(source='category.id', read_only=True, allow_null=True)
+    categoryTitle = serializers.CharField(source='category.title', read_only=True, allow_null=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     imageUrl = serializers.SerializerMethodField()
@@ -668,7 +682,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'reference', 'categoryId', 'subcategory', 'status', 
+            'id', 'name', 'reference', 'type', 'categoryId', 'categoryTitle', 'subcategory', 'status', 
             'price', 'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl', 'active',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
             'show_min_profitability', 'interest_period', 'capitalisation_fonds',
@@ -752,6 +766,7 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['categoryId'] = instance.category.id if instance.category else None
+        ret['categoryTitle'] = instance.category.title if instance.category else None
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         # Convert snake_case to camelCase for frontend compatibility
@@ -773,9 +788,7 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['minPriceVariation'] = ret.pop('min_price_variation', None)
         ret['maxPriceVariation'] = ret.pop('max_price_variation', None)
         ret['currentPriceVariation'] = ret.pop('current_price_variation', None)
-        # Add type field that maps to subcategory (for frontend compatibility)
-        # The Product model doesn't have a type field, so we use subcategory as type
-        ret['type'] = ret.get('subcategory', '')
+        # Type is now a real field in the model, so it's already in ret
         # Handle image URL - get_imageUrl already handles proxy URL conversion
         # Just ensure None values are handled correctly
         if not instance.image:

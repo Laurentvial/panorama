@@ -35,6 +35,7 @@ export {
   HiOutlineSearch as Search,
   HiOutlineStar as Star,
   HiOutlineHome as Home,
+  HiOutlineMenu as Menu,
   // HiOutlineCompass as Compass, // HiOutlineCompass does not exist in react-icons/hi
   HiOutlineCalendar as CalendarIcon,
   HiOutlinePencilAlt as Edit,
