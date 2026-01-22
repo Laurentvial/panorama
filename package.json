@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "Panorama - Full stack application",
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && python manage.py runserver",
-    "dev:frontend": "cd frontend && npm run dev"
+    "dev": "concurrently -k -n backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "start": "npm run dev",
+    "dev:backend": "python backend/manage.py runserver",
+    "dev:frontend": "npm --prefix frontend run dev"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

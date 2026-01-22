@@ -75,6 +75,9 @@ urlpatterns = [
     path('stats/', api_views.stats, name='stats'),
     # Transactions endpoints
     path('transactions/', api_views.all_transactions, name='all-transactions'),
+    # Positions endpoints
+    path('positions/', api_views.positions_list, name='positions-list'),
+    path('clients/<str:client_id>/positions/', api_views.client_positions, name='client-positions'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),

@@ -11,6 +11,7 @@ import { ClientInfoTab } from './ClientInfoTab';
 import { ClientAssetsTab } from './ClientAssetsTab';
 import { ClientPortfolioTab } from './ClientPortfolioTab';
 import { ClientTransactionsTab } from './ClientTransactionsTab';
+import { ClientPositionsTab } from './ClientPositionsTab';
 import { ClientAppointmentsTab } from './ClientAppointmentsTab';
 import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
@@ -133,9 +134,18 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
 
   function handlePlatformAccess() {
-    // TODO: Redirection vers la plateforme client (à implémenter plus tard)
-    toast.info('Redirection vers la plateforme client - Fonctionnalité à venir');
-    // window.location.href = `/platform/client/${clientId}`;
+    if (!client?.platform_access) {
+      toast.error('Accès à la plateforme désactivé pour ce client');
+      return;
+    }
+    if (!client?.active) {
+      toast.error('Compte client désactivé');
+      return;
+    }
+
+    // Open in a new tab with a per-tab (sessionStorage) client session,
+    // so the admin panel stays connected in the current tab.
+    window.open(`/platform/impersonate/${clientId}`, '_blank', 'noopener,noreferrer');
   }
 
   async function handleToggleActive() {
@@ -261,6 +271,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <TabsTrigger value="assets">Actifs visibles</TabsTrigger>
           <TabsTrigger value="portfolio">Portefeuille</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="appointments">RDV</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
           <TabsTrigger value="misc">Fonctionnalités diverses</TabsTrigger>
@@ -283,6 +294,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             onRefresh={loadClientData}
             clientId={clientId}
           />
+        </TabsContent>
+
+        {/* Positions Tab */}
+        <TabsContent value="positions">
+          <ClientPositionsTab clientId={clientId} />
         </TabsContent>
 
         {/* Appointments Tab */}

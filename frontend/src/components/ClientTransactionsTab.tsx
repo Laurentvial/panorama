@@ -171,7 +171,13 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
     amount: '',
     description: '',
     status: 'en_attente_paiement',
-    datetime: ''
+    datetime: '',
+    // transfert fields (admin create)
+    from_field: 'balance',
+    to_field: 'balance',
+    productId: '',
+    // kept for backward compatibility with existing UI resets
+    visibleByClient: true
   });
 
   // Update status when type changes
@@ -220,7 +226,17 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           amount: parseFloat(transactionForm.amount),
           description: transactionForm.description,
           status: transactionForm.status,
-          datetime: datetimeISO
+          datetime: datetimeISO,
+          ...(transactionForm.type === 'transfert'
+            ? {
+                from_field: transactionForm.from_field || 'balance',
+                to_field: transactionForm.to_field || undefined,
+                // help backend reliably resolve product
+                subscription_details: transactionForm.productId
+                  ? { productId: transactionForm.productId }
+                  : undefined,
+              }
+            : {}),
         })
       });
       
@@ -231,7 +247,11 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
         amount: '',
         description: '',
         status: 'en_attente_paiement',
-        datetime: ''
+        datetime: '',
+        from_field: 'balance',
+        to_field: 'balance',
+        productId: '',
+        visibleByClient: true
       });
       onRefresh();
     } catch (error: any) {
@@ -340,7 +360,11 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             amount: '',
             description: '',
             status: 'en_attente_paiement',
-            datetime: ''
+            datetime: '',
+            from_field: 'balance',
+            to_field: 'balance',
+            productId: '',
+            visibleByClient: true
           });
         }}>
           <Plus className="w-4 h-4 mr-2" />
@@ -474,7 +498,11 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             amount: '',
             description: '',
             status: 'en_attente_paiement',
-            datetime: ''
+            datetime: '',
+            from_field: 'balance',
+            to_field: 'balance',
+            productId: '',
+            visibleByClient: true
           });
         }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -494,6 +522,9 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
                     description: '',
                     status: 'en_attente_paiement',
                     datetime: '',
+                    from_field: 'balance',
+                    to_field: 'balance',
+                    productId: '',
                     visibleByClient: true
                   });
                 }}
@@ -515,6 +546,69 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
                   </SelectContent>
                 </Select>
               </div>
+
+              {transactionForm.type === 'transfert' && (
+                <>
+                  <div className="modal-form-field">
+                    <Label>Produit</Label>
+                    <Select
+                      value={transactionForm.productId || 'none'}
+                      onValueChange={(value) => {
+                        const nextProductId = value === 'none' ? '' : value;
+                        setTransactionForm({
+                          ...transactionForm,
+                          productId: nextProductId,
+                          // keep transfer_to consistent
+                          to_field: nextProductId ? nextProductId : transactionForm.to_field,
+                          from_field: transactionForm.from_field || 'balance',
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Sélectionner un produit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Aucun</SelectItem>
+                        {products.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}{p.reference ? ` (${p.reference})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="modal-form-field">
+                    <Label>Transfert vers</Label>
+                    <Select
+                      value={transactionForm.to_field || 'balance'}
+                      onValueChange={(value) => {
+                        const nextTo = value || 'balance';
+                        setTransactionForm({
+                          ...transactionForm,
+                          to_field: nextTo,
+                          from_field: transactionForm.from_field || 'balance',
+                          // if transferring to balance, clear product
+                          productId: nextTo === 'balance' ? '' : nextTo,
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="balance">Balance Cash</SelectItem>
+                        {products.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}{p.reference ? ` (${p.reference})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+
               <div className="modal-form-field">
                 <Label>Date et heure</Label>
                 <Input
@@ -568,6 +662,9 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
                     description: '',
                     status: 'en_attente_paiement',
                     datetime: '',
+                    from_field: 'balance',
+                    to_field: 'balance',
+                    productId: '',
                     visibleByClient: true
                   });
                 }}>

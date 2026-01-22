@@ -418,6 +418,13 @@ export function ProductDetail() {
 
   const handleSubscribe = async () => {
     setSubscriptionError(null);
+
+    // After a successful subscription, we intentionally block new transactions
+    // until the user refreshes the page (requested UX).
+    if (subscriptionSuccess) {
+      toast.info('Souscription déjà effectuée.');
+      return;
+    }
     
     if (!subscriptionData.acceptTerms || !subscriptionData.acceptConditions) {
       setSubscriptionError('Veuillez accepter les conditions générales');
@@ -586,6 +593,8 @@ export function ProductDetail() {
 
       if (response) {
         setSubscriptionSuccess('Souscription effectuée avec succès !');
+        // Bring the user back to the top so the success message is immediately visible.
+        window.scrollTo({ top: 0, behavior: 'smooth' });
         // Reset form
         setSubscriptionData({
           firstName: currentUser?.fname || currentUser?.firstName || '',
@@ -1230,7 +1239,23 @@ export function ProductDetail() {
                   <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Formulaire de souscription</CardTitle>
                 </CardHeader>
                 <CardContent style={{ minHeight: '100px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '12px' : '16px', minHeight: '650px' }}>
+                  {subscriptionSuccess ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{
+                        padding: '12px',
+                        backgroundColor: '#f0fdf4',
+                        border: '1px solid #86efac',
+                        borderRadius: '8px',
+                        color: '#166534',
+                        fontSize: '14px',
+                        textAlign: 'center',
+                        fontWeight: 600,
+                      }}>
+                        {subscriptionSuccess}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '12px' : '16px', minHeight: '650px' }}>
 
                     
                     <div>
@@ -1607,21 +1632,8 @@ export function ProductDetail() {
                         {subscriptionError}
                       </div>
                     )}
-                    {subscriptionSuccess && (
-                      <div style={{
-                        marginTop: '12px',
-                        padding: '12px',
-                        backgroundColor: '#f0fdf4',
-                        border: '1px solid #86efac',
-                        borderRadius: '8px',
-                        color: '#166534',
-                        fontSize: '14px',
-                        textAlign: 'center',
-                      }}>
-                        {subscriptionSuccess}
-                      </div>
-                    )}
                   </div>
+                  )}
                 </CardContent>
               </Card>
             )}

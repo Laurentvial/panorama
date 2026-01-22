@@ -15,8 +15,14 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
     }, []);
 
     const authenticate = async () => {
-        const token = localStorage.getItem(ACCESS_TOKEN);
-        const userType = localStorage.getItem('userType');
+        // Prefer per-tab client session (sessionStorage) to allow an admin to stay
+        // logged into the admin panel while opening client panels in other tabs.
+        const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+        const sessionUserType = sessionStorage.getItem('userType');
+        const storage: Storage = sessionToken ? sessionStorage : localStorage;
+
+        const token = sessionToken || localStorage.getItem(ACCESS_TOKEN);
+        const userType = sessionUserType || localStorage.getItem('userType');
         
         if (!token) {
             setIsAuthenticated(false);
@@ -26,7 +32,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
         // Check if it's a client token
         if (userType === 'client' || token.startsWith('client_')) {
             // Verify client token is valid by checking if client data exists
-            const clientData = localStorage.getItem('clientData');
+            const clientData = storage.getItem('clientData');
             if (clientData) {
                 try {
                     const client = JSON.parse(clientData);
@@ -53,7 +59,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                 if (response.ok) {
                     const data = await response.json();
                     if (data.client && data.client.platform_access && data.client.active) {
-                        localStorage.setItem('clientData', JSON.stringify(data.client));
+                        storage.setItem('clientData', JSON.stringify(data.client));
                         setIsAuthenticated(true);
                         return;
                     }

@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, AppSettings, NewsPost
+from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -678,6 +678,39 @@ class TransactionSerializer(serializers.ModelSerializer):
             ret['productReference'] = instance.product.reference
         return ret
 
+
+class PositionSerializer(serializers.ModelSerializer):
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    clientName = serializers.SerializerMethodField()
+    productId = serializers.CharField(source='product.id', read_only=True)
+    productName = serializers.CharField(source='product.name', read_only=True)
+    transactionId = serializers.CharField(source='transaction.id', read_only=True, allow_null=True)
+    assetId = serializers.CharField(source='asset.id', read_only=True, allow_null=True)
+    assetName = serializers.CharField(source='asset.name', read_only=True, allow_null=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+
+    class Meta:
+        model = Position
+        fields = [
+            'id',
+            'clientId', 'clientName',
+            'productId', 'productName',
+            'transactionId',
+            'assetId', 'assetName',
+            'period_index', 'period_date',
+            'invested_amount', 'expected_profit', 'expected_total',
+            'opened_at', 'closed_at', 'profit_loss',
+            'status',
+            'createdAt', 'updatedAt',
+        ]
+
+    def get_clientName(self, obj):
+        try:
+            return f"{obj.client.fname} {obj.client.lname}".strip()
+        except Exception:
+            return ''
+
 class ProductCategorySerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
@@ -699,6 +732,7 @@ class ProductSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     imageUrl = serializers.SerializerMethodField()
+    assetAllocations = serializers.SerializerMethodField()
     
     class Meta:
         model = Product
@@ -710,6 +744,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
             'link_to_assets', 'enable_price_variation', 'min_entry_value', 'max_entry_value',
             'min_price_variation', 'max_price_variation', 'current_price_variation',
+            'assetAllocations',
             'createdAt', 'updatedAt'
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
@@ -749,6 +784,20 @@ class ProductSerializer(serializers.ModelSerializer):
                 logger.error(traceback.format_exc())
                 return None
         return None
+
+    def get_assetAllocations(self, obj):
+        allocations = ProductAssetAllocation.objects.filter(product=obj).select_related('asset').order_by('created_at')
+        # Keep payload simple + consistent for frontend forms
+        return [
+            {
+                'id': alloc.id,
+                'assetId': alloc.asset.id,
+                'assetName': alloc.asset.name,
+                'assetType': alloc.asset.type,
+                'proportion': float(alloc.proportion) if alloc.proportion is not None else 0,
+            }
+            for alloc in allocations
+        ]
     
     def to_internal_value(self, data):
         # Convert camelCase to snake_case for backend compatibility

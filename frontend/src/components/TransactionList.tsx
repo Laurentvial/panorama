@@ -156,27 +156,35 @@ export function TransactionList({
             // First, check if transaction has productId directly
             if (transaction.productId) {
               productId = transaction.productId;
-              // Use productName from transaction if available, otherwise look it up
-              if (transaction.productName) {
-                productName = transaction.productName;
-                displayText = transaction.productReference 
-                  ? `${transaction.productName} (${transaction.productReference})`
-                  : transaction.productName;
-              } else {
-                // Look up product by ID
-                const product = products.find(p => p.id === transaction.productId);
-                if (product) {
-                  productName = product.name;
-                  displayText = product.reference 
-                    ? `${product.name} (${product.reference})`
-                    : product.name;
-                }
+              // Display the asset/product TYPE (not the name)
+              const product = products.find(p => p.id === transaction.productId);
+              const asset = assets.find(a => a.id === transaction.productId);
+              if (product) {
+                productName = product.name;
+                displayText = product.type || product.subcategory || product.categoryName || product.category || '-';
+              } else if (asset) {
+                productName = asset.name || '-';
+                displayText = asset.type || asset.category || asset.subcategory || '-';
               }
             } else {
               // Fallback: try to extract from description
               const assetInfo = extractAssetInfo(transaction.description || '');
               productId = findAssetProductId(assetInfo.name, assetInfo.reference);
-              displayText = assetInfo.displayText;
+              const productByRef = assetInfo.reference ? products.find(p => p.reference === assetInfo.reference) : null;
+              const assetByRef = assetInfo.reference ? assets.find(a => a.reference === assetInfo.reference) : null;
+              const productByName = products.find(p => p.name === assetInfo.name);
+              const assetByName = assets.find(a => a.name === assetInfo.name);
+
+              const product = productByRef || productByName;
+              const asset = assetByRef || assetByName;
+
+              if (product) {
+                displayText = product.type || product.subcategory || product.categoryName || product.category || '-';
+              } else if (asset) {
+                displayText = asset.type || asset.category || asset.subcategory || '-';
+              } else {
+                displayText = '-';
+              }
             }
             
             return (

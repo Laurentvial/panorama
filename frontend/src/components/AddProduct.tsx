@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { ArrowLeft, Save, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw, Trash2, Plus } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
@@ -20,6 +20,11 @@ export function AddProduct() {
   const [categories, setCategories] = useState<any[]>([]);
   const [productImage, setProductImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [assets, setAssets] = useState<any[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetAllocations, setAssetAllocations] = useState<Array<{ assetId: string; proportion: string }>>([
+    { assetId: '', proportion: '' }
+  ]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -62,6 +67,21 @@ export function AddProduct() {
     loadCategories();
   }, []);
 
+  useEffect(() => {
+    if (formData.linkToAssets === 'Oui') {
+      if (assets.length === 0) {
+        loadAssets();
+      }
+      if (assetAllocations.length === 0) {
+        setAssetAllocations([{ assetId: '', proportion: '' }]);
+      }
+    } else {
+      // Reset allocations when disabled
+      setAssetAllocations([{ assetId: '', proportion: '' }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.linkToAssets]);
+
   async function loadCategories() {
     try {
       const categoriesData = await apiCall('/api/categories/').catch(() => ({ categories: [] }));
@@ -69,6 +89,20 @@ export function AddProduct() {
     } catch (error) {
       console.error('Error loading categories:', error);
       setCategories([]);
+    }
+  }
+
+  async function loadAssets() {
+    try {
+      setLoadingAssets(true);
+      const data = await apiCall('/api/assets/');
+      setAssets((data as any)?.assets || []);
+    } catch (error) {
+      console.error('Error loading assets:', error);
+      toast.error('Erreur lors du chargement des actifs');
+      setAssets([]);
+    } finally {
+      setLoadingAssets(false);
     }
   }
 
@@ -196,6 +230,43 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
     e.preventDefault();
     setLoading(true);
 
+    // Validation: allocations si produit lié à des actifs
+    if (formData.linkToAssets === 'Oui') {
+      const cleaned = assetAllocations
+        .map((row) => ({
+          assetId: (row.assetId || '').trim(),
+          proportion: row.proportion
+        }))
+        .filter((row) => row.assetId || row.proportion);
+
+      if (cleaned.length === 0) {
+        toast.error('Veuillez ajouter au moins un actif et une proportion');
+        setLoading(false);
+        return;
+      }
+
+      const ids = cleaned.map((r) => r.assetId).filter(Boolean);
+      if (ids.length !== new Set(ids).size) {
+        toast.error('Un actif ne peut être sélectionné qu’une seule fois');
+        setLoading(false);
+        return;
+      }
+
+      const proportions = cleaned.map((r) => parseFloat(String(r.proportion)));
+      if (proportions.some((p) => isNaN(p) || p <= 0 || p > 100)) {
+        toast.error('Chaque proportion doit être un nombre entre 0 et 100');
+        setLoading(false);
+        return;
+      }
+
+      const total = proportions.reduce((acc, p) => acc + p, 0);
+      if (Math.abs(total - 100) > 0.01) {
+        toast.error('La somme des proportions doit être égale à 100%');
+        setLoading(false);
+        return;
+      }
+    }
+
     // Validation: si produit avec rentabilité, les champs requis doivent être remplis
     if (formData.noProfitability === 'Non') {
       if (!formData.duration) {
@@ -277,6 +348,15 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         if (formData.availabilityEnd) formDataToSend.append('availabilityEnd', formData.availabilityEnd);
         formDataToSend.append('isSavings', formData.isSavings.toString());
         formDataToSend.append('linkToAssets', formData.linkToAssets);
+        if (formData.linkToAssets === 'Oui') {
+          const allocationsPayload = assetAllocations
+            .map((row) => ({
+              assetId: (row.assetId || '').trim(),
+              proportion: parseFloat(String(row.proportion))
+            }))
+            .filter((row) => row.assetId && !isNaN(row.proportion));
+          formDataToSend.append('assetAllocations', JSON.stringify(allocationsPayload));
+        }
         formDataToSend.append('enablePriceVariation', formData.enablePriceVariation);
         if (formData.minEntryValue) formDataToSend.append('minEntryValue', formData.minEntryValue);
         if (formData.maxEntryValue) formDataToSend.append('maxEntryValue', formData.maxEntryValue);
@@ -318,6 +398,14 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             availabilityEnd: formData.availabilityEnd || undefined,
             isSavings: formData.isSavings,
             linkToAssets: formData.linkToAssets,
+            assetAllocations: formData.linkToAssets === 'Oui'
+              ? assetAllocations
+                  .map((row) => ({
+                    assetId: (row.assetId || '').trim(),
+                    proportion: parseFloat(String(row.proportion))
+                  }))
+                  .filter((row) => row.assetId && !isNaN(row.proportion))
+              : undefined,
             // Gestion des prix
             enablePriceVariation: formData.enablePriceVariation,
             minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
@@ -909,6 +997,100 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </SelectContent>
                 </Select>
               </div>
+
+              {formData.linkToAssets === 'Oui' && (
+                <div className="space-y-4 pl-4 border-l-2 border-slate-200">
+                  <div className="text-sm text-slate-600">
+                    Sélectionnez les actifs composant le produit et définissez leur proportion (la somme doit faire 100%).
+                  </div>
+
+                  {assetAllocations.map((row, idx) => {
+                    const selectedIds = new Set(assetAllocations.map(r => r.assetId).filter(Boolean));
+                    const options = assets.filter((a) => !selectedIds.has(a.id) || a.id === row.assetId);
+                    return (
+                      <div key={idx} className="grid grid-cols-12 gap-3 items-end">
+                        <div className="col-span-8 space-y-2">
+                          <Label>Actif</Label>
+                          <Select
+                            value={row.assetId || 'none'}
+                            onValueChange={(value) => {
+                              const next = [...assetAllocations];
+                              next[idx] = { ...next[idx], assetId: value === 'none' ? '' : value };
+                              setAssetAllocations(next);
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={loadingAssets ? 'Chargement...' : 'Sélectionner un actif'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Sélectionner un actif</SelectItem>
+                              {options.map((asset: any) => (
+                                <SelectItem key={asset.id} value={asset.id}>
+                                  {asset.name} ({asset.type}){asset.reference ? ` - ${asset.reference}` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="col-span-3 space-y-2">
+                          <Label>Proportion (%)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            value={row.proportion}
+                            onChange={(e) => {
+                              const next = [...assetAllocations];
+                              next[idx] = { ...next[idx], proportion: e.target.value };
+                              setAssetAllocations(next);
+                            }}
+                            placeholder="0"
+                          />
+                        </div>
+
+                        <div className="col-span-1 flex justify-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              if (assetAllocations.length === 1) return;
+                              setAssetAllocations(assetAllocations.filter((_, i) => i !== idx));
+                            }}
+                            title="Supprimer"
+                            disabled={assetAllocations.length === 1}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex items-center justify-between gap-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setAssetAllocations([...assetAllocations, { assetId: '', proportion: '' }])}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Ajouter un actif
+                    </Button>
+
+                    {(() => {
+                      const total = assetAllocations.reduce((acc, r) => acc + (parseFloat(String(r.proportion)) || 0), 0);
+                      const ok = Math.abs(total - 100) <= 0.01;
+                      return (
+                        <div className={`text-sm font-medium ${ok ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          Total: {Number.isFinite(total) ? total.toFixed(2) : '0.00'}%
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-4 pt-4 border-t">

@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 # Import storage - Cloudinary is REQUIRED (no local storage fallback)
 try:
@@ -348,6 +349,51 @@ class Transaction(models.Model):
     def __str__(self):
         return f"{self.get_type_display()} - {self.amount} € - {self.client.fname} {self.client.lname}"
 
+
+class Position(models.Model):
+    """
+    Position mensuelle créée lors du démarrage d'un investissement (transfert balance -> produit).
+    Une ligne = un mois/période pour un client sur un produit.
+    """
+    STATUS_CHOICES = [
+        # pending = scheduled but not yet opened (for trade-like positions)
+        ('pending', 'En attente'),
+        # open = currently open (opened_at passed, closed_at not yet reached)
+        ('open', 'Ouverte'),
+        ('done', 'Terminé'),
+        ('cancelled', 'Annulé'),
+    ]
+
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='positions')
+    product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='positions')
+    transaction = models.ForeignKey('Transaction', on_delete=models.SET_NULL, null=True, blank=True, related_name='positions')
+
+    # 0 = 1er mois, 1 = 2e mois, etc.
+    period_index = models.PositiveIntegerField(default=0)
+    # Date représentant le mois/période (ex: 2026-01-01)
+    period_date = models.DateField()
+
+    invested_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    expected_profit = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    expected_total = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    # For Smart Portfolio trade-like positions (optional for legacy monthly positions)
+    asset = models.ForeignKey(Asset, on_delete=models.SET_NULL, null=True, blank=True, related_name='positions')
+    opened_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    profit_loss = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['transaction', 'period_index']
+        ordering = ['period_date', 'created_at']
+
+    def __str__(self):
+        return f"Position {self.client_id} - {self.product_id} - {self.period_date} (#{self.period_index})"
+
 class ProductCategory(models.Model):
     """Table des catégories de produits financiers"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
@@ -412,6 +458,28 @@ class Product(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.reference})"
+
+
+class ProductAssetAllocation(models.Model):
+    """Liaison entre un produit et des actifs avec une proportion (%)"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='asset_allocations')
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='product_allocations')
+    proportion = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Proportion en pourcentage (0 à 100)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['product', 'asset']
+
+    def __str__(self):
+        return f"{self.product.name} - {self.asset.name}: {self.proportion}%"
 
 class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""

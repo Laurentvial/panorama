@@ -26,6 +26,14 @@ body:has(.modal-overlay) {
   margin: 0 1rem;
 }
 
+/* Scrollable variant (for large modals like transaction details) */
+.modal-content--scrollable {
+  max-height: 90vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
 /* Modal Header */
 .modal-header {
   display: flex;

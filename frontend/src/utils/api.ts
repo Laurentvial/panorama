@@ -10,6 +10,32 @@ const getEnvVar = (key: string): string | undefined => {
 
 const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
 
+function isClientAuth(token: string | null, userType: string | null): boolean {
+  if (!token) return false;
+  return userType === 'client' || token.startsWith('client_');
+}
+
+function getActiveAuth() {
+  // Prefer sessionStorage client context (per-tab) so an admin can keep the admin
+  // panel open in another tab while viewing a client panel here.
+  const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+  const sessionUserType = sessionStorage.getItem('userType');
+  if (sessionToken && isClientAuth(sessionToken, sessionUserType)) {
+    return { token: sessionToken, userType: sessionUserType, storage: sessionStorage as Storage };
+  }
+
+  const token = localStorage.getItem(ACCESS_TOKEN);
+  const userType = localStorage.getItem('userType');
+  return { token, userType, storage: localStorage as Storage };
+}
+
+function clearAuth(storage: Storage) {
+  storage.removeItem(ACCESS_TOKEN);
+  storage.removeItem(REFRESH_TOKEN);
+  storage.removeItem('userType');
+  storage.removeItem('clientData');
+}
+
 // Helper function to check if an error is a network error (server restarting)
 function isNetworkError(error: any): boolean {
   return (
@@ -93,7 +119,10 @@ async function retryRequest(
 
 // Helper function for API calls that returns data directly
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
-  let token = localStorage.getItem(ACCESS_TOKEN);
+  const auth = getActiveAuth();
+  let token = auth.token;
+  const activeUserType = auth.userType;
+  const activeStorage = auth.storage;
   
   // Don't set Content-Type for FormData, let the browser set it with boundary
   const isFormData = options.body instanceof FormData;
@@ -132,6 +161,24 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
 
   // If 401, try to refresh token and retry once
   if (response.status === 401 && token) {
+    // Client tokens are not refreshable (and must not clear admin localStorage).
+    if (isClientAuth(token, activeUserType)) {
+      if (!isRedirecting) {
+        isRedirecting = true;
+        clearAuth(activeStorage);
+        window.location.replace('/login');
+        const redirectError = new Error('Redirecting to login');
+        (redirectError as any).isRedirecting = true;
+        throw redirectError;
+      }
+      const error = await response.json().catch(() => ({ detail: 'Authentication failed' }));
+      const errorMessage = error.detail || error.error || error.message || 'Authentication failed';
+      const errorObj = new Error(errorMessage);
+      (errorObj as any).response = error;
+      (errorObj as any).status = response.status;
+      throw errorObj;
+    }
+
     // For endpoints that allow public access, try without token if refresh fails
     const isPublicEndpoint = endpoint.includes('/api/news/') || 
                              endpoint.includes('/api/settings/') ||
@@ -190,10 +237,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
       if (!isRedirecting) {
         isRedirecting = true;
         const userType = localStorage.getItem('userType');
-        localStorage.removeItem(ACCESS_TOKEN);
-        localStorage.removeItem(REFRESH_TOKEN);
-        localStorage.removeItem('userType');
-        localStorage.removeItem('clientData');
+        clearAuth(localStorage);
         
         // Use replace instead of href for immediate redirect
         if (userType === 'client') {
@@ -221,11 +265,10 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     // If still 401 after refresh attempt, handle it
     if (response.status === 401 && token && !isRedirecting) {
       isRedirecting = true;
-      const userType = localStorage.getItem('userType');
-      localStorage.removeItem(ACCESS_TOKEN);
-      localStorage.removeItem(REFRESH_TOKEN);
-      localStorage.removeItem('userType');
-      localStorage.removeItem('clientData');
+      const userType = activeUserType || localStorage.getItem('userType');
+      // Clear only the active auth storage (sessionStorage for impersonated client,
+      // localStorage for normal logins), never wipe the other context.
+      clearAuth(activeStorage);
       
       // Use replace for immediate redirect
       if (userType === 'client') {

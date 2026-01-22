@@ -22,8 +22,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   const getCurrentUser = async () => {
-    const token = localStorage.getItem(ACCESS_TOKEN);
-    const userType = localStorage.getItem('userType');
+    // Prefer per-tab client context (sessionStorage) so an admin can keep the admin
+    // panel open in another tab while viewing a client panel here.
+    const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+    const sessionUserType = sessionStorage.getItem('userType');
+    const storage: Storage = sessionToken ? sessionStorage : localStorage;
+
+    const token = sessionToken || localStorage.getItem(ACCESS_TOKEN);
+    const userType = sessionUserType || localStorage.getItem('userType');
     
     // Only make API call if we have a token
     if (!token) {
@@ -37,7 +43,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If userType is not set or is 'admin', treat as admin (Django JWT)
       if (userType === 'client' || token.startsWith('client_')) {
         // Client user
-        const clientData = localStorage.getItem('clientData');
+        const clientData = storage.getItem('clientData');
         if (clientData) {
           setCurrentUser({
             ...JSON.parse(clientData),
@@ -62,7 +68,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...data.client,
             userType: 'client'
           });
-          localStorage.setItem('clientData', JSON.stringify(data.client));
+          storage.setItem('clientData', JSON.stringify(data.client));
         } else {
           throw new Error('Failed to get client data');
         }

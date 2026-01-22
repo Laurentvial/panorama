@@ -17,6 +17,7 @@ import { Transactions } from './components/Transactions';
 import { ProduitsInvestissements } from './components/ProduitsInvestissements';
 import { AddProduct } from './components/AddProduct';
 import { EditProduct } from './components/EditProduct';
+import { Positions } from './components/Positions';
 import { PlatformDashboard } from './components/PlatformDashboard';
 import { PlatformPortfolio } from './components/PlatformPortfolio';
 import { PlatformTrading } from './components/PlatformTrading';
@@ -28,20 +29,43 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
+import { ClientImpersonate } from './components/ClientImpersonate';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
 import { Settings } from './components/Settings';
 import './styles/Card.css';
 
 function Logout() {
-    const userType = localStorage.getItem('userType');
-    localStorage.clear();
-    // Redirect based on user type
-    if (userType === 'client') {
-        return <Navigate to="/login" />;
-    } else {
-        return <Navigate to="/admin/login" />;
+    const sessionToken = sessionStorage.getItem('access');
+    const sessionUserType = sessionStorage.getItem('userType');
+    const localToken = localStorage.getItem('access');
+    const localUserType = localStorage.getItem('userType');
+
+    const isClientSession =
+      (sessionToken && (sessionUserType === 'client' || sessionToken.startsWith('client_'))) ||
+      (localToken && (localUserType === 'client' || localToken.startsWith('client_')));
+
+    // Never nuke all localStorage (would log out admin in other tabs).
+    if (isClientSession) {
+      sessionStorage.removeItem('access');
+      sessionStorage.removeItem('userType');
+      sessionStorage.removeItem('clientData');
+      // Also clear persisted client login if that is the active context.
+      if (localUserType === 'client' || (localToken && localToken.startsWith('client_'))) {
+        localStorage.removeItem('access');
+        localStorage.removeItem('refresh');
+        localStorage.removeItem('userType');
+        localStorage.removeItem('clientData');
+      }
+      return <Navigate to="/login" />;
     }
+
+    // Admin logout
+    localStorage.removeItem('access');
+    localStorage.removeItem('refresh');
+    localStorage.removeItem('userType');
+    localStorage.removeItem('clientData');
+    return <Navigate to="/admin/login" />;
 }
 
 function LegacyClientRedirect() {
@@ -161,6 +185,13 @@ function App() {
                             </Layout>
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/positions" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Positions />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/produits-investissements" element={
                         <ProtectedRoute>
                             <Layout>
@@ -195,6 +226,11 @@ function App() {
                     <Route path="/admin/placements/edit/:id" element={<Navigate to="/admin/produits-investissements/edit/:id" replace />} />
                     
                     {/* Trading Platform Routes - For Clients */}
+                    <Route path="/platform/impersonate/:id" element={
+                        <ProtectedRoute>
+                            <ClientImpersonate />
+                        </ProtectedRoute>
+                    } />
                     <Route path="/platform" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>

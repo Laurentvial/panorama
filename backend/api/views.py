@@ -24,13 +24,15 @@ from .models import ClientUsefulLink
 from .models import Transaction
 from .models import ProductCategory
 from .models import Product
+from .models import ProductAssetAllocation
+from .models import Position
 from .models import AppSettings
 from .models import NewsPost
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -38,9 +40,14 @@ from rest_framework.authentication import SessionAuthentication
 import uuid
 import json
 import os
-from datetime import datetime
+import re
+import calendar
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, date, timedelta
 from django.utils import timezone
+from django.db.models import Q
 from .alpha_vantage_service import get_alpha_vantage_service
+from .position_service import create_positions_for_investment
 
 
 def get_client_ip(request):
@@ -71,6 +78,143 @@ def get_client_ip(request):
     # Fallback to REMOTE_ADDR
     ip = request.META.get('REMOTE_ADDR', '')
     return ip.strip() if ip else 'Unknown'
+
+
+_DURATION_RE = re.compile(r"(\d+)")
+
+
+def _parse_months_from_duration(duration_str: str | None) -> int:
+    if not duration_str:
+        return 1
+    m = _DURATION_RE.search(str(duration_str))
+    if not m:
+        return 1
+    try:
+        v = int(m.group(1))
+        return v if v > 0 else 1
+    except Exception:
+        return 1
+
+
+def _add_months_keep_day(d: date, months: int) -> date:
+    year = d.year + (d.month - 1 + months) // 12
+    month = (d.month - 1 + months) % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(d.day, last_day)
+    return date(year, month, day)
+
+
+def _profitability_text_for_product(product: Product) -> str:
+    try:
+        is_var = str(product.is_variable_profitability or '').lower() == 'oui'
+    except Exception:
+        is_var = False
+    period = (product.profitability_period or '').strip()
+    if is_var and product.variable_profitability:
+        base = f"{product.profitability}% à {product.variable_profitability}%"
+    else:
+        base = f"{product.profitability}%"
+    return f"{base} {period}".strip()
+
+
+def _profitability_rate_for_calc(product: Product) -> Decimal:
+    """
+    Best-effort rate for profits estimation (keeps consistency with existing frontend simulator).
+    Uses average if variable.
+    """
+    try:
+        min_rate = Decimal(str(product.profitability or 0))
+    except Exception:
+        min_rate = Decimal('0')
+    is_var = str(product.is_variable_profitability or '').lower() == 'oui'
+    if is_var and product.variable_profitability:
+        try:
+            max_rate = Decimal(str(product.variable_profitability))
+            if max_rate > min_rate:
+                return (min_rate + max_rate) / Decimal('2')
+        except Exception:
+            pass
+    return min_rate
+
+
+def _build_subscription_details_defaults(
+    *,
+    client: Client,
+    product: Product,
+    amount: Decimal,
+    transaction_datetime: datetime,
+    request,
+) -> dict:
+    admin_ip = get_client_ip(request)
+    duration_str = product.duration or ''
+    duration_months = _parse_months_from_duration(duration_str)
+
+    # Profit estimation (best effort, consistent with current frontend calc: annual rate prorated by months/12)
+    rate = _profitability_rate_for_calc(product)
+    profits = (amount * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))).quantize(Decimal('0.01'))
+    total = (amount + profits).quantize(Decimal('0.01'))
+
+    try:
+        birth_date = client.birth_date.isoformat() if client.birth_date else ''
+    except Exception:
+        birth_date = ''
+
+    # Contract end
+    try:
+        end_date = _add_months_keep_day(transaction_datetime.date(), duration_months)
+        contract_end = end_date.strftime('%d/%m/%Y')
+    except Exception:
+        contract_end = ''
+
+    # Subscription date (FR)
+    try:
+        subscription_date = transaction_datetime.date().strftime('%d/%m/%Y')
+    except Exception:
+        subscription_date = ''
+
+    category_title = ''
+    try:
+        category_title = product.category.title if product.category else ''
+    except Exception:
+        category_title = ''
+
+    return {
+        'firstName': client.fname or '',
+        'lastName': client.lname or '',
+        'birthDate': birth_date,
+        'city': client.city or '',
+        'ip': admin_ip or '',
+        'productId': product.id,
+        'productName': product.name or '',
+        'productReference': product.reference or None,
+        'category': category_title,
+        'country': 'FRANCE',
+        'subscriptionDate': subscription_date,
+        'duration': duration_str,
+        'interestPeriod': product.interest_period or '',
+        'profitability': _profitability_text_for_product(product),
+        'investment': float(amount),
+        'profits': float(profits),
+        'total': float(total),
+        'contractEnd': contract_end,
+        'hasSignature': False,
+        'signature': '',
+    }
+
+
+def _merge_missing_fields(target: dict, defaults: dict) -> dict:
+    """
+    Fill missing/empty keys in target with defaults (target wins if value is set).
+    """
+    if target is None:
+        target = {}
+    if not isinstance(target, dict):
+        target = {}
+    for k, v in defaults.items():
+        cur = target.get(k)
+        if cur is None or cur == '' or cur == {}:
+            target[k] = v
+    return target
 
 
 def get_browser_info(request):
@@ -882,6 +1026,7 @@ def client_login(request):
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@authentication_classes([])  # Disable JWT auth; client_ tokens aren't JWTs
 def get_current_client(request):
     """Get current client from token"""
     # Get token from Authorization header or query param
@@ -2375,6 +2520,81 @@ def all_transactions(request):
     serializer = TransactionSerializer(transactions, many=True)
     return Response({'transactions': serializer.data})
 
+
+def _sync_positions_statuses(qs):
+    """
+    Update Position.status in DB based on opened_at/closed_at:
+    - pending: not opened yet (opened_at in future)
+    - open: opened_at <= now < closed_at (or closed_at is null)
+    - done: closed_at <= now
+    cancelled is never touched.
+    """
+    now = timezone.now()
+
+    # Close positions whose close time has passed
+    qs.filter(
+        ~Q(status='cancelled'),
+        closed_at__isnull=False,
+        closed_at__lte=now,
+    ).exclude(status='done').update(status='done')
+
+    # Open positions that reached opened_at and are not yet closed
+    qs.filter(
+        ~Q(status='cancelled'),
+        opened_at__isnull=False,
+        opened_at__lte=now,
+    ).filter(Q(closed_at__isnull=True) | Q(closed_at__gt=now)).exclude(status='open').update(status='open')
+
+    # Upcoming positions (opened_at in the future) should be pending
+    qs.filter(
+        ~Q(status='cancelled'),
+        opened_at__isnull=False,
+        opened_at__gt=now,
+    ).exclude(status='pending').update(status='pending')
+
+
+# Positions endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def positions_list(request):
+    """Liste toutes les positions (admin)"""
+    status_param = request.GET.get('status')
+    qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').all()
+
+    # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
+    _sync_positions_statuses(qs)
+
+    if status_param:
+        # Allow comma-separated list: ?status=pending,done
+        statuses = [s.strip() for s in str(status_param).split(',') if s.strip()]
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+    qs = qs.order_by('-period_date', '-created_at')
+    serializer = PositionSerializer(qs, many=True)
+    return Response({'positions': serializer.data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_positions(request, client_id):
+    """Liste les positions d'un client (admin)"""
+    client = get_object_or_404(Client, id=client_id)
+    status_param = request.GET.get('status')
+
+    qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
+
+    # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
+    _sync_positions_statuses(qs)
+
+    if status_param:
+        statuses = [s.strip() for s in str(status_param).split(',') if s.strip()]
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+
+    qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+    serializer = PositionSerializer(qs, many=True)
+    return Response({'positions': serializer.data})
+
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
@@ -2478,14 +2698,16 @@ def client_transaction_create(request, client_id):
                 subscription_details_data = json.loads(subscription_details_data)
             except:
                 subscription_details_data = {}
+    elif subscription_details_data is None:
+        subscription_details_data = {}
     
-    # Get product if productId is provided
+    # Get product (subscription productId preferred; otherwise infer from transfer_to)
     product = None
     if subscription_details_data and subscription_details_data.get('productId'):
         try:
             product = Product.objects.get(id=subscription_details_data.get('productId'))
         except Product.DoesNotExist:
-            pass
+            product = None
     
     # Validate balance for transfert transactions (balance → product)
     transaction_type = request.data.get('type')
@@ -2502,6 +2724,28 @@ def client_transaction_create(request, client_id):
         # Auto-set transfer_from to 'balance' for backward compatibility (but we mainly use transfer_to)
         if not transfer_from:
             transfer_from = 'balance'
+
+    # If it's a transfert investment but product wasn't resolved yet, infer from transfer_to
+    if transaction_type == 'transfert' and not product and transfer_to and transfer_to != 'balance':
+        try:
+            product = Product.objects.get(id=transfer_to)
+        except Product.DoesNotExist:
+            product = None
+
+    # If admin created a transfert without subscription form, auto-fill all possible subscription details
+    if transaction_type == 'transfert' and product:
+        try:
+            amount_dec = Decimal(str(request.data.get('amount') or 0))
+        except Exception:
+            amount_dec = Decimal('0')
+        defaults = _build_subscription_details_defaults(
+            client=client,
+            product=product,
+            amount=amount_dec,
+            transaction_datetime=transaction_datetime,
+            request=request,
+        )
+        subscription_details_data = _merge_missing_fields(subscription_details_data, defaults)
     
     # Check if it's an investment (transfer_to is a product ID, not 'balance')
     if transaction_type == 'transfert' and transfer_to and transfer_to != 'balance':
@@ -2581,6 +2825,18 @@ def client_transaction_create(request, client_id):
         transfer_from=transfer_from,
         transfer_to=transfer_to,
     )
+
+    # If this transfert starts an investment (to -> product), create monthly positions immediately.
+    if transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'balance':
+        try:
+            create_positions_for_investment(transaction)
+        except Exception as pos_err:
+            # Don't fail transaction creation if positions generation fails
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create positions for transaction {transaction.id}: {str(pos_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     # Log transaction creation
     # Determine user_id - could be Django user or None (if client token)
@@ -2624,6 +2880,16 @@ def client_transaction_update(request, client_id, transaction_id):
     """Mettre à jour une transaction"""
     client = get_object_or_404(Client, id=client_id)
     transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    previous_status = transaction.status
+    # Capture original investment state BEFORE any modifications.
+    # This avoids mixing partially-updated fields (e.g. type changed but transfer_to not yet updated).
+    original_type = transaction.type
+    original_transfer_to = transaction.transfer_to
+    was_investment = (
+        original_type == 'transfert'
+        and original_transfer_to
+        and original_transfer_to != 'balance'
+    )
     
     # Authorization check: Only allow client accessing their own data OR authenticated users
     token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
@@ -2677,6 +2943,84 @@ def client_transaction_update(request, client_id, transaction_id):
             transaction.transfer_from = 'balance'
     
     transaction.save()
+
+    is_investment = (transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'balance')
+
+    # Ensure transaction has subscription details even if created/edited by admin without subscription form
+    if is_investment:
+        # Try to resolve product and persist it on transaction for consistency
+        product = transaction.product
+        if not product and transaction.transfer_to and transaction.transfer_to != 'balance':
+            try:
+                product = Product.objects.get(id=transaction.transfer_to)
+                transaction.product = product
+            except Product.DoesNotExist:
+                product = None
+
+        if product:
+            try:
+                amount_dec = Decimal(str(transaction.amount or 0))
+            except Exception:
+                amount_dec = Decimal('0')
+            defaults = _build_subscription_details_defaults(
+                client=client,
+                product=product,
+                amount=amount_dec,
+                transaction_datetime=transaction.datetime or timezone.now(),
+                request=request,
+            )
+            merged = _merge_missing_fields(transaction.subscription_details or {}, defaults)
+            transaction.subscription_details = merged
+            # Mirror key fields into explicit columns (only fill empties)
+            if not transaction.subscription_first_name:
+                transaction.subscription_first_name = merged.get('firstName', '') or ''
+            if not transaction.subscription_last_name:
+                transaction.subscription_last_name = merged.get('lastName', '') or ''
+            if not transaction.subscription_birth_date:
+                transaction.subscription_birth_date = merged.get('birthDate', '') or ''
+            if not transaction.subscription_city:
+                transaction.subscription_city = merged.get('city', '') or ''
+            if not transaction.subscription_ip:
+                transaction.subscription_ip = merged.get('ip', '') or ''
+            if not transaction.subscription_date:
+                transaction.subscription_date = merged.get('subscriptionDate', '') or ''
+            if not transaction.subscription_duration:
+                transaction.subscription_duration = merged.get('duration', '') or ''
+            if not transaction.subscription_interest_period:
+                transaction.subscription_interest_period = merged.get('interestPeriod', '') or ''
+            if not transaction.subscription_profitability:
+                transaction.subscription_profitability = merged.get('profitability', '') or ''
+            if transaction.subscription_investment is None:
+                transaction.subscription_investment = merged.get('investment')
+            if transaction.subscription_profits is None:
+                transaction.subscription_profits = merged.get('profits')
+            if transaction.subscription_total is None:
+                transaction.subscription_total = merged.get('total')
+            if not transaction.subscription_contract_end:
+                transaction.subscription_contract_end = merged.get('contractEnd', '') or ''
+            transaction.save()
+    # If an investment becomes "termine", this is the moment it starts: create monthly positions.
+    # Also backfill if it's already termine but positions are missing (idempotent).
+    if is_investment and transaction.status == 'termine':
+        if previous_status != 'termine' or not Position.objects.filter(transaction=transaction).exists():
+            try:
+                create_positions_for_investment(transaction)
+            except Exception as pos_err:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to create positions for transaction {transaction.id} on status termine: {str(pos_err)}")
+                import traceback
+                logger.error(traceback.format_exc())
+    if is_investment and not was_investment:
+        # Transaction now represents an investment start: create positions
+        try:
+            create_positions_for_investment(transaction)
+        except Exception as pos_err:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create positions for updated transaction {transaction.id}: {str(pos_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     # Log transaction update
     # Determine user_id - could be Django user or None (if client token)
@@ -2964,6 +3308,86 @@ def product_create(request):
         max_price_variation=request.data.get('maxPriceVariation'),
         current_price_variation=request.data.get('currentPriceVariation')
     )
+
+    # Handle product-asset allocations (assetAllocations) when linkToAssets is "Oui"
+    try:
+        link_to_assets_value = request.data.get('linkToAssets', 'Non')
+        raw_allocations = request.data.get('assetAllocations', None)
+
+        def _parse_allocations(raw):
+            if raw is None or raw == '':
+                return None
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raise ValueError("assetAllocations doit être un JSON valide (liste).")
+            if not isinstance(raw, list):
+                raise ValueError("assetAllocations doit être une liste.")
+            cleaned = []
+            for idx, item in enumerate(raw):
+                if not isinstance(item, dict):
+                    raise ValueError(f"assetAllocations[{idx}] doit être un objet.")
+                asset_id = (item.get('assetId') or item.get('asset_id') or '').strip() if item.get('assetId') or item.get('asset_id') else ''
+                if not asset_id:
+                    raise ValueError(f"assetAllocations[{idx}].assetId est requis.")
+                proportion_raw = item.get('proportion', None)
+                if proportion_raw is None or proportion_raw == '':
+                    raise ValueError(f"assetAllocations[{idx}].proportion est requis.")
+                try:
+                    proportion = Decimal(str(proportion_raw))
+                except (InvalidOperation, ValueError, TypeError):
+                    raise ValueError(f"assetAllocations[{idx}].proportion invalide.")
+                cleaned.append((asset_id, proportion))
+            return cleaned
+
+        def _validate_and_normalize(cleaned):
+            if not cleaned:
+                raise ValueError("Veuillez ajouter au moins un actif et une proportion.")
+            asset_ids = [a for a, _ in cleaned]
+            if len(set(asset_ids)) != len(asset_ids):
+                raise ValueError("Un actif ne peut être sélectionné qu'une seule fois.")
+            total = Decimal('0')
+            normalized = []
+            for asset_id, proportion in cleaned:
+                if proportion < 0 or proportion > 100:
+                    raise ValueError("La proportion doit être comprise entre 0 et 100.")
+                total += proportion
+                # store with 2 decimals
+                normalized.append((asset_id, proportion.quantize(Decimal('0.01'))))
+            # Require ~100%
+            if (total - Decimal('100')).copy_abs() > Decimal('0.01'):
+                raise ValueError("La somme des proportions doit être égale à 100%.")
+
+            existing_assets = set(Asset.objects.filter(id__in=asset_ids).values_list('id', flat=True))
+            missing = [a for a in asset_ids if a not in existing_assets]
+            if missing:
+                raise ValueError("Actif(s) introuvable(s): " + ", ".join(missing))
+            return normalized
+
+        if link_to_assets_value == 'Oui':
+            cleaned = _parse_allocations(raw_allocations)
+            normalized = _validate_and_normalize(cleaned or [])
+
+            # Replace any existing allocations (should be none on create)
+            ProductAssetAllocation.objects.filter(product=product).delete()
+            for asset_id, proportion in normalized:
+                alloc_id = uuid.uuid4().hex[:12]
+                while ProductAssetAllocation.objects.filter(id=alloc_id).exists():
+                    alloc_id = uuid.uuid4().hex[:12]
+                ProductAssetAllocation.objects.create(
+                    id=alloc_id,
+                    product=product,
+                    asset=Asset.objects.get(id=asset_id),
+                    proportion=proportion,
+                )
+        else:
+            # If not linked, ensure no allocations
+            ProductAssetAllocation.objects.filter(product=product).delete()
+    except ValueError as e:
+        # Rollback product if allocations invalid
+        product.delete()
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     # Handle image upload
     if 'image' in request.FILES:
@@ -3375,6 +3799,87 @@ def product_update(request, product_id):
         current_var = request.data['currentPriceVariation']
         product.current_price_variation = float(current_var) if current_var is not None and current_var != '' else None
     
+    # Handle product-asset allocations (assetAllocations)
+    try:
+        final_link_to_assets = product.link_to_assets
+        raw_allocations = request.data.get('assetAllocations', None)
+
+        def _parse_allocations(raw):
+            if raw is None or raw == '':
+                return None
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raise ValueError("assetAllocations doit être un JSON valide (liste).")
+            if not isinstance(raw, list):
+                raise ValueError("assetAllocations doit être une liste.")
+            cleaned = []
+            for idx, item in enumerate(raw):
+                if not isinstance(item, dict):
+                    raise ValueError(f"assetAllocations[{idx}] doit être un objet.")
+                asset_id = (item.get('assetId') or item.get('asset_id') or '').strip() if item.get('assetId') or item.get('asset_id') else ''
+                if not asset_id:
+                    raise ValueError(f"assetAllocations[{idx}].assetId est requis.")
+                proportion_raw = item.get('proportion', None)
+                if proportion_raw is None or proportion_raw == '':
+                    raise ValueError(f"assetAllocations[{idx}].proportion est requis.")
+                try:
+                    proportion = Decimal(str(proportion_raw))
+                except (InvalidOperation, ValueError, TypeError):
+                    raise ValueError(f"assetAllocations[{idx}].proportion invalide.")
+                cleaned.append((asset_id, proportion))
+            return cleaned
+
+        def _validate_and_normalize(cleaned):
+            if not cleaned:
+                raise ValueError("Veuillez ajouter au moins un actif et une proportion.")
+            asset_ids = [a for a, _ in cleaned]
+            if len(set(asset_ids)) != len(asset_ids):
+                raise ValueError("Un actif ne peut être sélectionné qu'une seule fois.")
+            total = Decimal('0')
+            normalized = []
+            for asset_id, proportion in cleaned:
+                if proportion < 0 or proportion > 100:
+                    raise ValueError("La proportion doit être comprise entre 0 et 100.")
+                total += proportion
+                normalized.append((asset_id, proportion.quantize(Decimal('0.01'))))
+            if (total - Decimal('100')).copy_abs() > Decimal('0.01'):
+                raise ValueError("La somme des proportions doit être égale à 100%.")
+
+            existing_assets = set(Asset.objects.filter(id__in=asset_ids).values_list('id', flat=True))
+            missing = [a for a in asset_ids if a not in existing_assets]
+            if missing:
+                raise ValueError("Actif(s) introuvable(s): " + ", ".join(missing))
+            return normalized
+
+        if final_link_to_assets != 'Oui':
+            # If not linked, force-clear allocations
+            ProductAssetAllocation.objects.filter(product=product).delete()
+        else:
+            parsed = _parse_allocations(raw_allocations)
+            if parsed is None:
+                # If linking is enabled but allocations aren't provided, keep existing if any;
+                # otherwise require them (e.g., toggled from Non -> Oui)
+                if not ProductAssetAllocation.objects.filter(product=product).exists():
+                    raise ValueError("assetAllocations est requis quand 'Lie le produit à des actifs' = Oui.")
+            else:
+                normalized = _validate_and_normalize(parsed)
+                ProductAssetAllocation.objects.filter(product=product).delete()
+                assets_by_id = {a.id: a for a in Asset.objects.filter(id__in=[aid for aid, _ in normalized])}
+                for asset_id, proportion in normalized:
+                    alloc_id = uuid.uuid4().hex[:12]
+                    while ProductAssetAllocation.objects.filter(id=alloc_id).exists():
+                        alloc_id = uuid.uuid4().hex[:12]
+                    ProductAssetAllocation.objects.create(
+                        id=alloc_id,
+                        product=product,
+                        asset=assets_by_id[asset_id],
+                        proportion=proportion,
+                    )
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
     # Save the product with all updates
     # Note: If image was uploaded, it was already saved with save=True above
     product.save()

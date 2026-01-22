@@ -395,44 +395,34 @@ export function PlatformDiscover() {
     return { text: description.substring(0, maxLength).trim(), isTruncated: true };
   };
 
-  // Format ROI time period (e.g., "1M" for 1 month, "2Y" for 2 years)
-  const formatROITime = (profitabilityPeriod: string | null | undefined): string => {
-    if (!profitabilityPeriod) return 'trending';
-    
-    const period = profitabilityPeriod.toLowerCase();
-    
-    // Handle months
-    if (period.includes('mensuel') || period === 'month' || period === 'mois') {
-      return '1M';
+  const parseNumber = (value: any): number => {
+    if (value === null || value === undefined || value === '') return 0;
+    const parsed = typeof value === 'string' ? parseFloat(value) : Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const getProfitabilityDisplay = (product: any): { text: string; isPositive: boolean } => {
+    const hasProfitability = product?.profitability !== null && product?.profitability !== undefined && product?.profitability !== '';
+    const hasVariable =
+      product?.isVariableProfitability === 'Oui' &&
+      product?.variableProfitability !== null &&
+      product?.variableProfitability !== undefined &&
+      product?.variableProfitability !== '';
+
+    if (!hasProfitability && !hasVariable) {
+      return { text: '', isPositive: true };
     }
-    if (period.includes('trimestrielle') || period === 'quarter' || period === 'trimestre') {
-      return '3M';
+
+    const min = parseNumber(product?.profitability);
+    const isPositive = min >= 0;
+    const period = product?.profitabilityPeriod ? ` ${product.profitabilityPeriod}` : '';
+
+    if (hasVariable) {
+      const max = parseNumber(product?.variableProfitability);
+      return { text: `${min.toFixed(2)}% - ${max.toFixed(2)}%${period}`, isPositive };
     }
-    if (period.includes('semestrielle') || period === 'semester' || period === 'semestre') {
-      return '6M';
-    }
-    if (period.includes('annuelle') || period === 'year' || period === 'année' || period === 'an') {
-      return '1Y';
-    }
-    
-    // Try to extract number and unit from period string
-    const monthMatch = period.match(/(\d+)\s*(month|mois|m)/i);
-    if (monthMatch) {
-      const months = parseInt(monthMatch[1]);
-      if (months >= 12) {
-        const years = Math.floor(months / 12);
-        return `${years}Y`;
-      }
-      return `${months}M`;
-    }
-    
-    const yearMatch = period.match(/(\d+)\s*(year|année|an|y)/i);
-    if (yearMatch) {
-      return `${yearMatch[1]}Y`;
-    }
-    
-    // Default to trending if we can't parse it
-    return 'trending';
+
+    return { text: `${min.toFixed(2)}%${period}`, isPositive };
   };
 
   return (
@@ -604,15 +594,8 @@ export function PlatformDiscover() {
                 marginBottom: isMobile ? '20px' : '30px'
               }}>
                 {smartPortfolios.map((portfolio: any) => {
-                  // Convert profitability to number, handling both string and number types
-                  const profitabilityValue = portfolio.profitability;
-                  const return12M = typeof profitabilityValue === 'string' 
-                    ? parseFloat(profitabilityValue) || 0 
-                    : (typeof profitabilityValue === 'number' ? profitabilityValue : 0);
-                  const isPositive = return12M >= 0;
-                  
-                  // Format ROI time period
-                  const roiTime = formatROITime(portfolio.profitabilityPeriod);
+                  const profitabilityInfo = getProfitabilityDisplay(portfolio);
+                  const isPositive = profitabilityInfo.isPositive;
                   
                   return (
                     <Card
@@ -727,7 +710,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             color: isPositive ? '#10b981' : '#ef4444',
                           }}>
-                            {isPositive ? '+' : ''}{return12M.toFixed(2)}% RETURN ({roiTime})
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                           </div>
                         </div>
                       </CardContent>
@@ -1077,16 +1060,20 @@ export function PlatformDiscover() {
                           </div>
                           
                           {/* Profitability/Change */}
-                          {product.profitability !== undefined && product.profitability !== null && (
-                            <div style={{
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              color: (product.profitability || 0) >= 0 ? '#10b981' : '#ef4444',
-                            }}>
-                              {(product.profitability || 0) >= 0 ? '+' : ''}
-                              {typeof product.profitability === 'number' ? product.profitability.toFixed(2) : product.profitability}%
-                            </div>
-                          )}
+                          {(() => {
+                            const profitabilityInfo = getProfitabilityDisplay(product);
+                            if (!profitabilityInfo.text) return null;
+                            return (
+                              <div style={{
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                color: profitabilityInfo.isPositive ? '#10b981' : '#ef4444',
+                              }}>
+                                {profitabilityInfo.isPositive ? '+' : ''}
+                                {profitabilityInfo.text}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </CardContent>

@@ -118,9 +118,49 @@ export function ViewTransactionModal({
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
 
+  const findAssetOrProduct = () => {
+    if (assetInfo.reference) {
+      const productByRef = products.find((p) => p.reference === assetInfo.reference);
+      if (productByRef) return { kind: 'product' as const, data: productByRef };
+      const assetByRef = assets.find((a) => a.reference === assetInfo.reference);
+      if (assetByRef) return { kind: 'asset' as const, data: assetByRef };
+    }
+    if (assetInfo.name && assetInfo.name !== '-') {
+      const productByName = products.find((p) => p.name === assetInfo.name);
+      if (productByName) return { kind: 'product' as const, data: productByName };
+      const assetByName = assets.find((a) => a.name === assetInfo.name);
+      if (assetByName) return { kind: 'asset' as const, data: assetByName };
+    }
+    return null;
+  };
+
+  const assetOrProduct = findAssetOrProduct();
+  const assetTypeText = (() => {
+    if (!assetOrProduct) return '-';
+    const item = assetOrProduct.data;
+
+    // For internal products, "type" or "subcategory" is often the meaningful label.
+    if (assetOrProduct.kind === 'product') {
+      return (
+        item.type ||
+        item.subcategory ||
+        item.categoryName ||
+        item.category ||
+        '-'
+      );
+    }
+
+    // For external assets, "type" or "category" tends to represent the asset class.
+    return item.type || item.category || item.subcategory || '-';
+  })();
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '90vw', width: 'min(1200px, 90vw)' }}>
+      <div
+        className="modal-content modal-content--scrollable"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '90vw', width: 'min(1200px, 90vw)' }}
+      >
         <div className="modal-header">
           <h2 className="modal-title">Détails de la transaction</h2>
           <Button
@@ -228,11 +268,11 @@ export function ViewTransactionModal({
                     className="text-slate-900 mt-1 cursor-pointer hover:text-blue-600 hover:underline"
                     onClick={() => navigate(`/platform/product/${assetProductId}`)}
                   >
-                    {assetInfo.displayText}
+                    {assetTypeText}
                   </p>
                 ) : (
                   <p className="text-slate-900 mt-1">
-                    {assetInfo.displayText}
+                    {assetTypeText}
                   </p>
                 )}
               </div>
@@ -417,7 +457,7 @@ export function ViewTransactionModal({
                 <div className="max-h-96 overflow-y-auto pr-2">
                   <div className="space-y-1.5">
                     {transactionLogs.map((log: any) => (
-                      <div key={log.id} className="border border-slate-200 rounded p-2 bg-slate-50">
+                      <div key={log.id} className="border border-slate-200 rounded p-2 mb-2 bg-slate-50">
                         <div className="flex justify-between items-center gap-2 mb-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-semibold text-slate-900 text-xs">
