@@ -194,6 +194,7 @@ class Asset(models.Model):
     # Note: alpha_vantage_symbol stores the symbol for both Alpha Vantage (stocks/ETFs) and Finnhub (cryptos)
     alpha_vantage_symbol = models.CharField(max_length=50, default="", blank=True)  # Symbol for external APIs (e.g., "AAPL" for stocks, "BTC" for cryptos)
     exchange = models.CharField(max_length=50, default="", blank=True)  # Stock exchange (e.g., "NASDAQ", "NYSE", "EURONEXT")
+    trading_view_symbol = models.CharField(max_length=100, default="", blank=True)  # Native TradingView symbol (e.g., "TSLA", "NASDAQ:TSLA", "BINANCE:BTCUSDT")
     currency = models.CharField(max_length=10, default="USD", blank=True)  # Currency code (USD, EUR, etc.)
     region = models.CharField(max_length=50, default="", blank=True)  # Region (United States, France, etc.)
     logo_url = models.URLField(max_length=500, default="", blank=True)  # URL of the company logo
@@ -307,6 +308,7 @@ class Transaction(models.Model):
         ('en_cours', 'En cours'),
         ('termine', 'Terminé'),
         ('conteste', 'Contesté'),
+        ('annule', 'Annulé'),
     ]
     
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
@@ -318,6 +320,12 @@ class Transaction(models.Model):
     datetime = models.DateTimeField()  # Date et heure de la transaction
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Transfer direction fields (for transfert transactions)
+    # 'from' can be: null, 'balance', or product ID
+    # 'to' can be: null, 'balance', or product ID
+    transfer_from = models.CharField(max_length=50, null=True, blank=True, default=None)  # Source: 'balance' or product ID
+    transfer_to = models.CharField(max_length=50, null=True, blank=True, default=None)  # Destination: 'balance' or product ID
     
     # Subscription details for transfert transactions
     subscription_details = models.JSONField(default=dict, blank=True, null=True)  # Store subscription form data as JSON

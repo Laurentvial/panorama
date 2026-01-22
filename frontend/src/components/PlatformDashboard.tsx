@@ -39,7 +39,16 @@ export function PlatformDashboard() {
       // Load all assets for gainers/losers
       const allAssetsResponse = await apiCall('/api/assets/');
       setAssets(allAssetsResponse.assets || []);
-    } catch (error) {
+    } catch (error: any) {
+      // If it's a redirect error, don't log it - page is navigating away
+      if (error?.isRedirecting) {
+        return;
+      }
+      // If it's an authentication error, the redirect will happen in apiCall
+      if (error?.status === 401 || error?.message?.includes('token') || error?.message?.includes('Authentication')) {
+        // Redirect is handled in apiCall, just return early
+        return;
+      }
       console.error('Error loading dashboard data:', error);
     } finally {
       setLoading(false);
@@ -51,8 +60,29 @@ export function PlatformDashboard() {
       setNewsLoading(true);
       const newsResponse = await apiCall('/api/news/');
       setNewsPosts(newsResponse.news || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading news posts:', error);
+      // If it's a 401 and we're on a public endpoint, try without auth
+      if (error?.status === 401) {
+        try {
+          // Try fetching news without authentication (public endpoint)
+          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/news/`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setNewsPosts(data.news || []);
+            return;
+          }
+        } catch (fallbackError) {
+          console.error('Fallback news fetch also failed:', fallbackError);
+        }
+      }
+      // Set empty array on error
+      setNewsPosts([]);
     } finally {
       setNewsLoading(false);
     }

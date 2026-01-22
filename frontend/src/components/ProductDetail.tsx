@@ -13,6 +13,7 @@ import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
 import { useIsMobile } from './ui/use-mobile';
+import { StockChart } from './StockChart';
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,8 +31,11 @@ export function ProductDetail() {
   const [signature, setSignature] = useState<string | null>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscriptionSuccess, setSubscriptionSuccess] = useState<string | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const [transactions, setTransactions] = useState<any[]>([]);
   
   // Profitability simulator state
   const [simulatorAmount, setSimulatorAmount] = useState<number>(10000);
@@ -117,6 +121,21 @@ export function ProductDetail() {
     setSubscriptionData(prev => ({ ...prev, contractEnd: `${day}/${month}/${year}` }));
   }, []);
 
+  // Load transactions to calculate available balance
+  useEffect(() => {
+    if (currentUser && currentUser.id) {
+      const loadTransactions = async () => {
+        try {
+          const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/`);
+          setTransactions(transactionsResponse.transactions || []);
+        } catch (error) {
+          console.error('Error loading transactions:', error);
+        }
+      };
+      loadTransactions();
+    }
+  }, [currentUser]);
+
   useEffect(() => {
     if (id) {
       loadData();
@@ -152,9 +171,23 @@ export function ProductDetail() {
     try {
       setLoading(true);
       // Try loading as product first (since smartPortfolios are products)
-      // If that fails, try as asset
+      // If that fails with 404, silently try as asset (this is expected behavior)
+      let productLoaded = false;
       try {
-        const productResponse = await apiCall(`/api/products/${id}/`);
+        // Suppress console error for 404 on product endpoint (expected when ID is an asset)
+        const productResponse = await apiCall(`/api/products/${id}/`).catch((error: any) => {
+          // If 404, return null to trigger asset fallback without logging error
+          if (error?.status === 404) {
+            return null;
+          }
+          throw error;
+        });
+        
+        if (!productResponse) {
+          // 404 on product, try as asset
+          throw { status: 404 };
+        }
+        
         const productData = productResponse.product || productResponse;
         
         // Load categories if not already loaded, then enrich product
@@ -180,26 +213,43 @@ export function ProductDetail() {
         
         setData(enrichedProductData);
         setDataType('product');
+        productLoaded = true;
       } catch (productError: any) {
-        // If product fails (404), try as asset
-        if (productError?.status !== 404) {
+        // If product fails (404), silently try as asset
+        // Only log non-404 errors (404 is expected when ID is an asset, not a product)
+        if (productError?.status && productError.status !== 404) {
           console.error('Error loading product:', productError);
         }
+        // Silently continue to try loading as asset - 404 is expected here
+        
+        // Try loading as asset
         try {
           const assetResponse = await apiCall(`/api/assets/${id}/`);
           setData(assetResponse.asset || assetResponse);
           setDataType('asset');
+          productLoaded = true;
         } catch (assetError: any) {
-          // Only show error if both failed
-          if (assetError?.status !== 404) {
+          // Only show error if both failed and it's not a 404
+          if (assetError?.status && assetError.status !== 404) {
             console.error('Error loading asset:', assetError);
+            toast.error('Erreur lors du chargement');
+          } else if (productError?.status === 404 && assetError?.status === 404) {
+            // Both returned 404 - item doesn't exist
+            toast.error('Produit ou actif non trouvé');
           }
-          toast.error('Produit ou actif non trouvé');
         }
       }
-    } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Erreur lors du chargement');
+      
+      // If neither product nor asset was loaded, show error
+      if (!productLoaded && !data) {
+        toast.error('Produit ou actif non trouvé');
+      }
+    } catch (error: any) {
+      // Handle unexpected errors
+      if (error?.status !== 404) {
+        console.error('Error loading data:', error);
+        toast.error('Erreur lors du chargement');
+      }
     } finally {
       setLoading(false);
     }
@@ -281,6 +331,61 @@ export function ProductDetail() {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
       }
+
+      // Add touch event listeners manually with { passive: false } to allow preventDefault
+      const handleTouchStart = (e: TouchEvent) => {
+        e.preventDefault();
+        isDrawingRef.current = true;
+        setIsDrawing(true);
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const touch = e.touches[0];
+        ctx.beginPath();
+        ctx.moveTo(
+          touch.clientX - rect.left,
+          touch.clientY - rect.top
+        );
+      };
+
+      const handleTouchMove = (e: TouchEvent) => {
+        e.preventDefault();
+        if (!isDrawingRef.current) return;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const touch = e.touches[0];
+        ctx.lineTo(
+          touch.clientX - rect.left,
+          touch.clientY - rect.top
+        );
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      };
+
+      const handleTouchEnd = (e: TouchEvent) => {
+        e.preventDefault();
+        isDrawingRef.current = false;
+        setIsDrawing(false);
+        if (canvas) {
+          setSignature(canvas.toDataURL());
+        }
+      };
+
+      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+      return () => {
+        canvas.removeEventListener('touchstart', handleTouchStart);
+        canvas.removeEventListener('touchmove', handleTouchMove);
+        canvas.removeEventListener('touchend', handleTouchEnd);
+      };
     }
   }, []);
 
@@ -354,6 +459,52 @@ export function ProductDetail() {
       return;
     }
 
+    // Validate available balance before creating transaction
+    const completedTransactions = transactions.filter((t: any) => t.status === 'termine');
+    
+    let calculatedInvestedCapital = 0;
+    let calculatedTradingPortfolio = 0;
+    
+    completedTransactions.forEach((transaction: any) => {
+      const txnAmount = parseFloat(transaction.amount) || 0;
+      
+      if (transaction.type === 'depot') {
+        calculatedInvestedCapital += txnAmount;
+      } else if (transaction.type === 'retrait') {
+        calculatedInvestedCapital -= txnAmount;
+      } else if (transaction.type === 'bonus') {
+        calculatedInvestedCapital += txnAmount;
+      } else if (transaction.type === 'achat' || transaction.type === 'investissement') {
+        calculatedTradingPortfolio += txnAmount;
+      } else if (transaction.type === 'vente') {
+        calculatedTradingPortfolio -= txnAmount;
+      } else if (transaction.type === 'transfert') {
+        const transferFrom = transaction.from || transaction.from_field || null;
+        const transferTo = transaction.to || transaction.to_field || null;
+        if (transferFrom === 'balance' && transferTo && transferTo !== 'balance') {
+          calculatedTradingPortfolio += txnAmount;
+        } else if (transferFrom && transferFrom !== 'balance' && transferTo === 'balance') {
+          calculatedTradingPortfolio -= txnAmount;
+        }
+      }
+    });
+    
+    // Use calculated values or fallback to client object values
+    const investedCapital = completedTransactions.length > 0 
+      ? calculatedInvestedCapital 
+      : parseFinancialValue(currentUser?.investedCapital || currentUser?.invested_capital || 0);
+    const tradingPortfolio = completedTransactions.length > 0 
+      ? calculatedTradingPortfolio 
+      : parseFinancialValue(currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0);
+    
+    // Available funds = investedCapital - tradingPortfolio (bonus is included in investedCapital)
+    const availableFunds = investedCapital - tradingPortfolio;
+    
+    if (amount > availableFunds) {
+      setSubscriptionError(`Fonds insuffisants. Solde disponible: ${availableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR, montant demandé: ${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      return;
+    }
+
     setIsSubscribing(true);
     try {
       // Calculate gains - use annual rate
@@ -411,12 +562,14 @@ export function ProductDetail() {
       };
       
       // Create transaction of type 'transfert' - Transfer from Balance Cash to the chosen product
+      // We only need to_field: product ID = investment (balance → product)
       const transactionData = {
         type: 'transfert',
         amount: amount,
         description: `Transfert de Balance Cash vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}. Montant: ${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR. Période d'intérêt: ${subscriptionData.interestPeriod || productData.interestPeriod || 'N/A'}. Date de fin de contrat: ${subscriptionData.contractEnd ? formatDateToFrench(subscriptionData.contractEnd) : 'N/A'}. Signature incluse.`,
         status: 'en_cours',
         datetime: new Date().toISOString(),
+        to_field: productData.id, // Transfer to product (investment: balance → product)
         subscription_details: {
           ...subscriptionDetails,
           signature: signature || null, // Include signature in subscription_details
@@ -432,7 +585,7 @@ export function ProductDetail() {
       });
 
       if (response) {
-        toast.success('Souscription effectuée avec succès !');
+        setSubscriptionSuccess('Souscription effectuée avec succès !');
         // Reset form
         setSubscriptionData({
           firstName: currentUser?.fname || currentUser?.firstName || '',
@@ -576,6 +729,25 @@ export function ProductDetail() {
     const basePriceNum = parseFinancialValue(simulatorBasePrice) || 0;
     const calculatedGains = calculateGains(product, simulatorAmount, basePriceNum);
     const total = basePriceNum + calculatedGains;
+
+    // Helper function to get TradingView symbol for products linked to assets
+    const getProductTradingViewSymbol = (productData: any): string | null => {
+      if (!productData || productData.linkToAssets !== 'Oui' && productData.link_to_assets !== 'Oui') {
+        return null;
+      }
+      
+      // Try to use product reference as symbol (may need to be configured)
+      if (productData.reference) {
+        // For now, use reference directly - in production, you might want to fetch linked asset
+        return productData.reference;
+      }
+      
+      return null;
+    };
+
+    // Get TradingView symbol for product (if linked to assets)
+    const productTradingViewSymbol = getProductTradingViewSymbol(product);
+    const isProductLinkedToAssets = product.linkToAssets === 'Oui' || product.link_to_assets === 'Oui';
     
     return (
       <div style={{ 
@@ -759,6 +931,10 @@ export function ProductDetail() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Stock Charts for Products Linked to Assets */}
+            {/* Note: To show charts for products linked to assets, we need to fetch the linked asset ID */}
+            {/* For now, charts are only available when viewing assets directly */}
 
             {/* Profitability Simulator */}
             <Card>
@@ -1320,6 +1496,7 @@ export function ProductDetail() {
                                 touchAction: 'none',
                               }}
                               onMouseDown={(e) => {
+                                isDrawingRef.current = true;
                                 setIsDrawing(true);
                                 const canvas = signatureCanvasRef.current;
                                 if (!canvas) return;
@@ -1333,7 +1510,7 @@ export function ProductDetail() {
                                 );
                               }}
                               onMouseMove={(e) => {
-                                if (!isDrawing) return;
+                                if (!isDrawingRef.current) return;
                                 const canvas = signatureCanvasRef.current;
                                 if (!canvas) return;
                                 const rect = canvas.getBoundingClientRect();
@@ -1350,6 +1527,7 @@ export function ProductDetail() {
                                 ctx.stroke();
                               }}
                               onMouseUp={() => {
+                                isDrawingRef.current = false;
                                 setIsDrawing(false);
                                 const canvas = signatureCanvasRef.current;
                                 if (canvas) {
@@ -1357,48 +1535,7 @@ export function ProductDetail() {
                                 }
                               }}
                               onMouseLeave={() => {
-                                setIsDrawing(false);
-                                const canvas = signatureCanvasRef.current;
-                                if (canvas) {
-                                  setSignature(canvas.toDataURL());
-                                }
-                              }}
-                              onTouchStart={(e) => {
-                                e.preventDefault();
-                                setIsDrawing(true);
-                                const canvas = signatureCanvasRef.current;
-                                if (!canvas) return;
-                                const rect = canvas.getBoundingClientRect();
-                                const ctx = canvas.getContext('2d');
-                                if (!ctx) return;
-                                const touch = e.touches[0];
-                                ctx.beginPath();
-                                ctx.moveTo(
-                                  touch.clientX - rect.left,
-                                  touch.clientY - rect.top
-                                );
-                              }}
-                              onTouchMove={(e) => {
-                                e.preventDefault();
-                                if (!isDrawing) return;
-                                const canvas = signatureCanvasRef.current;
-                                if (!canvas) return;
-                                const rect = canvas.getBoundingClientRect();
-                                const ctx = canvas.getContext('2d');
-                                if (!ctx) return;
-                                const touch = e.touches[0];
-                                ctx.lineTo(
-                                  touch.clientX - rect.left,
-                                  touch.clientY - rect.top
-                                );
-                                ctx.strokeStyle = '#000';
-                                ctx.lineWidth = 2;
-                                ctx.lineCap = 'round';
-                                ctx.lineJoin = 'round';
-                                ctx.stroke();
-                              }}
-                              onTouchEnd={(e) => {
-                                e.preventDefault();
+                                isDrawingRef.current = false;
                                 setIsDrawing(false);
                                 const canvas = signatureCanvasRef.current;
                                 if (canvas) {
@@ -1468,6 +1605,20 @@ export function ProductDetail() {
                         textAlign: 'center',
                       }}>
                         {subscriptionError}
+                      </div>
+                    )}
+                    {subscriptionSuccess && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        backgroundColor: '#f0fdf4',
+                        border: '1px solid #86efac',
+                        borderRadius: '8px',
+                        color: '#166534',
+                        fontSize: '14px',
+                        textAlign: 'center',
+                      }}>
+                        {subscriptionSuccess}
                       </div>
                     )}
                   </div>
@@ -1751,6 +1902,95 @@ export function ProductDetail() {
   const priceChange = parseFinancialValue(asset?.priceChange || asset?.change || 0);
   const priceChangePercent = parseFinancialValue(asset?.priceChangePercent || asset?.changePercent || 0);
 
+  // Helper function to get TradingView symbol from asset
+  // First tries to use the native trading_view_symbol if available (user-confirmed)
+  // Otherwise falls back to constructing it from exchange and symbol
+  // CRITICAL: TradingView embed widgets REQUIRE exchange prefix format (e.g., "NASDAQ:INTC")
+  // Based on TradingView documentation, widgets work with "EXCHANGE:SYMBOL" format
+  const getTradingViewSymbol = (assetData: any): string | null => {
+    if (!assetData) return null;
+    
+    const assetTypeLower = (assetData.type || '').toLowerCase();
+    const isAssetCrypto = assetTypeLower.includes('crypto') || assetTypeLower.includes('cryptomonnaie');
+    
+    // Priority 1: Use native TradingView symbol if available (user-confirmed during creation)
+    const nativeSymbol = (assetData.trading_view_symbol || assetData.tradingViewSymbol || '').trim();
+    if (nativeSymbol) {
+      // CRITICAL: TradingView embed widgets REQUIRE exchange prefix format (e.g., "NASDAQ:INTC")
+      // Based on TradingView documentation and user's finding, widgets work with "NASDAQ:INTC" format
+      // Keep the symbol exactly as the user specified it
+      if (nativeSymbol.includes(':')) {
+        console.log(`[ProductDetail] Using native TradingView symbol with exchange prefix: ${nativeSymbol}`);
+        return nativeSymbol; // Keep exchange prefix - widgets require it
+      }
+      
+      // No exchange prefix - try to add it if we have exchange info
+      const exchange = (assetData.exchange || '').toUpperCase().trim();
+      if (exchange && !isAssetCrypto) {
+        const symbolWithExchange = `${exchange}:${nativeSymbol.toUpperCase()}`;
+        console.log(`[ProductDetail] Adding exchange prefix to native symbol: ${nativeSymbol} -> ${symbolWithExchange}`);
+        return symbolWithExchange;
+      }
+      
+      // No exchange available, return as-is
+      console.log(`[ProductDetail] Using native symbol without exchange prefix: ${nativeSymbol}`);
+      return nativeSymbol.toUpperCase();
+    }
+    
+    // Priority 2: Fallback to constructing from exchange and symbol
+    const symbol = (assetData.alpha_vantage_symbol || assetData.alphaVantageSymbol || '').toUpperCase().trim();
+    if (!symbol) return null;
+    
+    const exchange = (assetData.exchange || '').toUpperCase().trim();
+    
+    // TradingView embed widgets REQUIRE exchange prefix format
+    // Always use EXCHANGE:SYMBOL format if we have exchange info
+    if (exchange) {
+      if (isAssetCrypto) {
+        // For crypto, use EXCHANGE:SYMBOLUSDT format (e.g., BINANCE:BTCUSDT)
+        if (symbol.endsWith('USDT')) {
+          return `${exchange}:${symbol}`;
+        } else {
+          return `${exchange}:${symbol}USDT`;
+        }
+      } else {
+        // For stocks (US and international), use EXCHANGE:SYMBOL format
+        // TradingView widgets work with "NASDAQ:INTC" format
+        return `${exchange}:${symbol}`;
+      }
+    }
+    
+    // Fallback: use symbol without exchange (may not work but worth trying)
+    console.warn(`[ProductDetail] No exchange available for symbol ${symbol}, using symbol without exchange prefix`);
+    return symbol;
+  };
+
+  // Get TradingView symbol for current asset
+  const tradingViewSymbol = getTradingViewSymbol(asset);
+  
+  // Debug: log the symbol being used (only if asset exists and we have symbol data)
+  // Note: This is not a hook, just a conditional log, so it's safe
+  if (asset && dataType === 'asset' && (tradingViewSymbol || asset.alpha_vantage_symbol || asset.alphaVantageSymbol)) {
+    const nativeSymbol = (asset.trading_view_symbol || asset.tradingViewSymbol || '').trim();
+    console.log('[ProductDetail] TradingView symbol for asset:', {
+      assetName: asset.name,
+      assetReference: asset.reference,
+      alphaVantageSymbol: asset.alpha_vantage_symbol || asset.alphaVantageSymbol,
+      exchange: asset.exchange,
+      type: asset.type,
+      nativeTradingViewSymbol: nativeSymbol,
+      finalTradingViewSymbol: tradingViewSymbol,
+      hasExchangePrefix: tradingViewSymbol?.includes(':'),
+      note: nativeSymbol && nativeSymbol !== tradingViewSymbol ? 'Symbol was modified' : 'Using symbol as-is'
+    });
+    
+    // Warn if symbol doesn't have exchange prefix
+    if (tradingViewSymbol && !tradingViewSymbol.includes(':')) {
+      console.warn('[ProductDetail] WARNING: TradingView symbol has no exchange prefix:', tradingViewSymbol);
+      console.warn('[ProductDetail] TradingView widgets work better with format "EXCHANGE:SYMBOL" (e.g., "NASDAQ:INTC")');
+    }
+  }
+
   return (
     <div style={{ padding: '20px 120px' }}>
       {/* Breadcrumb */}
@@ -1797,9 +2037,9 @@ export function ProductDetail() {
               src={asset.logoUrl}
               alt={asset.name}
               style={{
-                width: isMobile ? '48px' : '64px',
-                height: isMobile ? '48px' : '64px',
-                borderRadius: '12px',
+                width: isMobile ? '48px' : '82px',
+                height: isMobile ? '48px' : '82px',
+                borderRadius: '5px',
                 objectFit: 'contain',
                 flexShrink: 0,
               }}
@@ -1827,11 +2067,10 @@ export function ProductDetail() {
               display: 'flex', 
               alignItems: 'center', 
               gap: isMobile ? '8px' : '12px', 
-              marginBottom: '8px',
               flexWrap: 'wrap',
             }}>
               <h1 style={{ 
-                fontSize: isMobile ? '20px' : '28px', 
+                fontSize: isMobile ? '16px' : '20px', 
                 fontWeight: 'bold', 
                 margin: 0,
                 wordBreak: 'break-word',
@@ -1847,14 +2086,14 @@ export function ProductDetail() {
               flexWrap: 'wrap',
             }}>
               <div style={{ 
-                fontSize: isMobile ? '18px' : '24px', 
+                fontSize: isMobile ? '18px' : '20px', 
                 fontWeight: 'bold', 
                 color: priceChangePercent >= 0 ? '#10b981' : '#ef4444' 
               }}>
                 {price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div style={{ 
-                fontSize: isMobile ? '14px' : '16px', 
+                fontSize: isMobile ? '12px' : '14px', 
                 color: priceChangePercent >= 0 ? '#10b981' : '#ef4444' 
               }}>
                 {priceChange >= 0 ? '+' : ''}{priceChange.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
@@ -1864,8 +2103,7 @@ export function ProductDetail() {
             
             <div style={{ 
               fontSize: isMobile ? '12px' : '14px', 
-              color: '#6b7280', 
-              marginTop: '8px' 
+              color: '#6b7280'
             }}>
               Marché ouvert • PRIX PAR xxx, EN EUR
             </div>
@@ -1967,22 +2205,38 @@ export function ProductDetail() {
                 </div>
               </CardHeader>
               <CardContent>
-                {/* Performance Chart Placeholder */}
-                <div style={{
-                  height: '300px',
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '20px',
-                  border: '1px solid #e5e7eb',
-                }}>
-                  <div style={{ color: '#6b7280' }}>Graphique de performance</div>
-                </div>
+                {/* Stock Chart - Shows chart using Alpha Vantage/Finnhub data */}
+                {asset.alpha_vantage_symbol || asset.alphaVantageSymbol ? (
+                  <div style={{ marginBottom: '20px' }}>
+                    <StockChart
+                      assetId={asset.id}
+                      assetName={asset.name || asset.reference}
+                      width="100%"
+                      height={isMobile ? 400 : 500}
+                      chartType="area"
+                      showVolume={false}
+                      timeframe={selectedTimeframe}
+                    />
+                  </div>
+                ) : (
+                  <div style={{
+                    height: '300px',
+                    backgroundColor: '#f9fafb',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '20px',
+                    border: '1px solid #e5e7eb',
+                  }}>
+                    <div style={{ color: '#6b7280' }}>
+                      Symbole non disponible. Veuillez configurer "alpha_vantage_symbol" pour cet actif dans la gestion des actifs.
+                    </div>
+                  </div>
+                )}
 
                 {/* Timeframe Selector */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
                   {['1D', '1W', '1M', '6M', '1Y', '3Y', 'MAX'].map((timeframe) => (
                     <button
                       key={timeframe}
@@ -2017,16 +2271,8 @@ export function ProductDetail() {
                 <CardTitle>Graphique</CardTitle>
               </CardHeader>
               <CardContent>
-                <div style={{
-                  height: '400px',
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: '1px solid #e5e7eb',
-                }}>
-                  <div style={{ color: '#6b7280' }}>Graphique de trading</div>
+                <div style={{ color: '#6b7280', textAlign: 'center', padding: '40px' }}>
+                  Le graphique est disponible dans l'onglet "Vue d'ensemble" ci-dessus.
                 </div>
               </CardContent>
             </Card>
@@ -2061,11 +2307,11 @@ export function ProductDetail() {
           {activeTab === 'financials' && (
             <Card>
               <CardHeader>
-                <CardTitle>Finances</CardTitle>
+                <CardTitle>Données financières</CardTitle>
               </CardHeader>
               <CardContent>
                 <div style={{ color: '#6b7280' }}>
-                  Informations financières à venir...
+                  Données financières détaillées à venir...
                 </div>
               </CardContent>
             </Card>

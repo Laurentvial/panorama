@@ -73,20 +73,34 @@ class AlphaVantageService:
             matches = data.get('bestMatches', [])
             
             # Check for rate limit warnings (but don't return empty if we have matches)
+            # Alpha Vantage sometimes returns "Information" or "Note" messages that are NOT rate limits
+            # Only treat as rate limit if the message explicitly mentions rate limit AND we have no matches
             if 'Note' in data:
-                logger.warning(f"Alpha Vantage API note: {data['Note']}")
-                # Only return empty if we don't have matches
-                if not matches:
+                note_msg = data['Note']
+                logger.warning(f"Alpha Vantage API note: {note_msg}")
+                # Only treat as rate limit if explicitly mentioned AND no matches
+                note_lower = note_msg.lower()
+                is_rate_limit = ('rate limit' in note_lower or 'api call frequency' in note_lower or 
+                                'call per day' in note_lower or '25 calls' in note_lower)
+                if is_rate_limit and not matches:
+                    # This is a real rate limit - return empty
+                    logger.warning("Rate limit detected from Note message")
                     return []
+                # If we have matches, continue processing even with Note message
             
             if 'Information' in data:
                 info_msg = data['Information']
                 logger.warning(f"Alpha Vantage API information: {info_msg}")
-                # Check if it's a rate limit message
-                if 'rate limit' in info_msg.lower() and not matches:
-                    # Rate limit and no matches - return empty
+                # Only treat as rate limit if explicitly mentioned AND no matches
+                info_lower = info_msg.lower()
+                is_rate_limit = ('rate limit' in info_lower or 'api call frequency' in info_lower or 
+                                'call per day' in info_lower or '25 calls' in info_lower)
+                if is_rate_limit and not matches:
+                    # This is a real rate limit - return empty
+                    logger.warning("Rate limit detected from Information message")
                     return []
                 # If we have matches, continue processing them even with Information message
+                # Many "Information" messages are just warnings, not rate limits
             
             results = []
             
@@ -209,15 +223,65 @@ class AlphaVantageService:
             outputsize: 'compact' or 'full'
         
         Returns:
-            Dictionary with daily time series data
+            Dictionary with daily time series data formatted for charts
         """
         try:
-            ts = TimeSeries(key=self.api_key, output_format='json')
-            data, meta_data = ts.get_daily(symbol=symbol, outputsize=outputsize)
+            params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': symbol,
+                'outputsize': outputsize,
+                'apikey': self.api_key
+            }
+            
+            response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check for API errors
+            if 'Error Message' in data:
+                logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+                return None
+            
+            if 'Note' in data:
+                logger.warning(f"Alpha Vantage API note: {data['Note']}")
+                return None
+            
+            if 'Information' in data:
+                info_msg = data['Information']
+                logger.warning(f"Alpha Vantage API information: {info_msg}")
+                if 'rate limit' in info_msg.lower():
+                    return None
+            
+            # Extract time series data
+            time_series_key = 'Time Series (Daily)'
+            if time_series_key not in data:
+                return None
+            
+            time_series = data[time_series_key]
+            meta_data = data.get('Meta Data', {})
+            
+            # Format data for charts: convert to array sorted by date
+            chart_data = []
+            for date_str, values in time_series.items():
+                chart_data.append({
+                    'date': date_str,
+                    'open': float(values.get('1. open', 0)),
+                    'high': float(values.get('2. high', 0)),
+                    'low': float(values.get('3. low', 0)),
+                    'close': float(values.get('4. close', 0)),
+                    'volume': int(values.get('5. volume', 0))
+                })
+            
+            # Sort by date (oldest first)
+            chart_data.sort(key=lambda x: x['date'])
             
             return {
-                'data': data,
-                'meta_data': meta_data
+                'data': chart_data,
+                'meta_data': {
+                    'symbol': meta_data.get('2. Symbol', symbol),
+                    'last_refreshed': meta_data.get('3. Last Refreshed', ''),
+                    'timezone': meta_data.get('5. Time Zone', '')
+                }
             }
         except Exception as e:
             logger.error(f"Error fetching daily data for {symbol}: {str(e)}")
@@ -465,6 +529,88 @@ def get_crypto_logo(symbol: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.debug(f"Error fetching crypto logo for {symbol}: {str(e)}")
+        return None
+
+
+def get_crypto_candles_finnhub(symbol: str, resolution: str = 'D', days: int = 100) -> Optional[Dict]:
+    """
+    Get cryptocurrency historical candles (OHLCV) from Finnhub API
+    
+    Args:
+        symbol: Crypto symbol (e.g., "BTC", "ETH")
+        resolution: Time resolution ('D' for daily, 'W' for weekly, 'M' for monthly, '1', '5', '15', '30', '60' for minutes)
+        days: Number of days of historical data to fetch (max depends on resolution and API tier)
+    
+    Returns:
+        Dictionary with candle data formatted for charts or None if error
+    """
+    try:
+        import time
+        from datetime import datetime, timedelta
+        
+        # Format symbol for Finnhub (BINANCE:SYMBOLUSDT)
+        symbol_for_quote = f"BINANCE:{symbol}USDT"
+        
+        # Calculate start and end timestamps (Unix timestamps)
+        end_time = int(time.time())
+        start_time = int((datetime.now() - timedelta(days=days)).timestamp())
+        
+        params = {
+            'symbol': symbol_for_quote,
+            'resolution': resolution,
+            'from': start_time,
+            'to': end_time
+        }
+        if FINNHUB_API_KEY:
+            params['token'] = FINNHUB_API_KEY
+        
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/stock/candle",
+            params=params,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            candle_data = response.json()
+            
+            # Finnhub candle format: {'c': [close prices], 'h': [high prices], 'l': [low prices], 'o': [open prices], 's': 'ok', 't': [timestamps], 'v': [volumes]}
+            if candle_data.get('s') == 'ok' and candle_data.get('c'):
+                closes = candle_data.get('c', [])
+                opens = candle_data.get('o', [])
+                highs = candle_data.get('h', [])
+                lows = candle_data.get('l', [])
+                volumes = candle_data.get('v', [])
+                timestamps = candle_data.get('t', [])
+                
+                # Format data for charts
+                chart_data = []
+                for i in range(len(closes)):
+                    # Convert Unix timestamp to date string
+                    date_str = datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d')
+                    chart_data.append({
+                        'date': date_str,
+                        'open': float(opens[i]) if i < len(opens) else float(closes[i]),
+                        'high': float(highs[i]) if i < len(highs) else float(closes[i]),
+                        'low': float(lows[i]) if i < len(lows) else float(closes[i]),
+                        'close': float(closes[i]),
+                        'volume': int(volumes[i]) if i < len(volumes) else 0
+                    })
+                
+                # Sort by date (oldest first)
+                chart_data.sort(key=lambda x: x['date'])
+                
+                return {
+                    'data': chart_data,
+                    'meta_data': {
+                        'symbol': symbol,
+                        'resolution': resolution,
+                        'last_refreshed': datetime.now().isoformat()
+                    }
+                }
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching crypto candles from Finnhub for {symbol}: {str(e)}")
         return None
 
 

@@ -30,10 +30,11 @@ from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer, NewsPostSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.authentication import SessionAuthentication
 import uuid
 import json
 import os
@@ -195,29 +196,65 @@ def get_useful_link_data_for_log(useful_link):
     
     return useful_link_data
 
-
-def create_log_entry(event_type, user_id, request, old_value=None, new_value=None):
-    """Create a log entry for an activity"""
-    # Generate log ID
-    log_id = uuid.uuid4().hex[:12]
-    while Log.objects.filter(id=log_id).exists():
-        log_id = uuid.uuid4().hex[:12]
-    
-    # Extract details from request
-    details = {
-        'ip_address': get_client_ip(request),
-        'browser': get_browser_info(request),
+def get_transaction_data_for_log(transaction):
+    """Helper function to extract transaction data for logging"""
+    transaction_data = {
+        'id': transaction.id,
+        'clientId': transaction.client.id,
+        'type': transaction.type,
+        'amount': float(transaction.amount) if transaction.amount else 0,
+        'description': transaction.description or '',
+        'status': transaction.status,
+        'datetime': transaction.datetime.isoformat() if transaction.datetime else None,
+        'transfer_from': transaction.transfer_from,
+        'transfer_to': transaction.transfer_to,
     }
     
-    # Create log entry
-    Log.objects.create(
-        id=log_id,
-        event_type=event_type,
-        user_id=user_id if user_id else None,
-        details=details,
-        old_value=old_value if old_value else {},
-        new_value=new_value if new_value else {}
-    )
+    if transaction.product:
+        transaction_data['productId'] = transaction.product.id
+    
+    return transaction_data
+
+
+def create_log_entry(event_type, user_id, request, old_value=None, new_value=None, transaction_id=None, client_name=None):
+    """Create a log entry for an activity"""
+    try:
+        # Generate log ID
+        log_id = uuid.uuid4().hex[:12]
+        while Log.objects.filter(id=log_id).exists():
+            log_id = uuid.uuid4().hex[:12]
+        
+        # Extract details from request
+        details = {
+            'ip_address': get_client_ip(request),
+            'browser': get_browser_info(request),
+        }
+        
+        # Add transaction_id to details if provided
+        if transaction_id:
+            details['transaction_id'] = transaction_id
+        
+        # Add client name to details if provided (for client-created transactions)
+        if client_name:
+            details['client_name'] = client_name
+        
+        # Create log entry
+        Log.objects.create(
+            id=log_id,
+            event_type=event_type,
+            user_id=user_id if user_id else None,
+            details=details,
+            old_value=old_value if old_value else {},
+            new_value=new_value if new_value else {}
+        )
+    except Exception as e:
+        # Log the error but don't raise it (to prevent breaking the main operation)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create log entry for event_type={event_type}, transaction_id={transaction_id}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Don't re-raise - allow the main operation to succeed even if logging fails
 
 
 class UserCreateView(generics.CreateAPIView):
@@ -1312,9 +1349,43 @@ def team_set_leader(request, team_id):
 
 # Assets endpoints
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
 def asset_list(request):
     """Liste tous les assets disponibles"""
+    # Check authentication manually
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    # Validate client token if provided
+    if token and token.startswith('client_'):
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    # Allow access if authenticated or if it's a client token
+    elif auth_header.startswith('Bearer ') and not token.startswith('client_'):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not token:
+        # No token provided - allow public access to assets list
+        # (This endpoint can be public for discover page)
+        pass
+    
     assets = Asset.objects.all().order_by('type', 'name')
     serializer = AssetSerializer(assets, many=True)
     return Response({'assets': serializer.data})
@@ -1334,11 +1405,13 @@ def asset_create(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'PATCH'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
 def asset_detail(request, asset_id):
     """Récupérer ou modifier un asset"""
     # Check authentication: either Django user or valid client token
-    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
     is_client_token = token and token.startswith('client_')
     
     if is_client_token:
@@ -1350,8 +1423,22 @@ def asset_detail(request, asset_id):
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
-    elif not request.user.is_authenticated:
-        # Require authentication for unauthenticated requests
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     asset = get_object_or_404(Asset, id=asset_id)
@@ -1382,20 +1469,39 @@ def asset_delete(request, asset_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
 def client_assets(request, client_id):
     """Liste les assets d'un client"""
     client = get_object_or_404(Client, id=client_id)
     
     # Check if it's a client accessing their own data
-    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
     if token and token.startswith('client_'):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         if not client.platform_access or not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-    elif not request.user.is_authenticated:
+    # Check if user is authenticated via JWT (validate manually to avoid DRF failing on invalid tokens)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
@@ -1556,12 +1662,14 @@ def alpha_vantage_search(request):
         results = av_service.search_symbol(keywords)
         
         if not results:
-            # Check if it's a rate limit issue by trying to get more info
-            # For now, return empty results with a message
+            # Check if it's actually a rate limit by making a test call
+            # Only return rate_limit_reached if we're certain it's a rate limit
+            # For now, return empty results without assuming it's a rate limit
+            # The user might just have searched for something that doesn't exist
             return Response({
                 'results': [], 
-                'message': 'No matches found. This may be due to API rate limits (25 requests/day for free tier).',
-                'rate_limit_reached': True
+                'message': 'Aucun résultat trouvé. Vérifiez l\'orthographe ou essayez un autre terme de recherche.',
+                'rate_limit_reached': False
             }, status=status.HTTP_200_OK)
         
         # Optionally fetch current price for each result
@@ -1583,10 +1691,15 @@ def alpha_vantage_search(request):
             'count': len(results_with_prices)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        # Check if the error message indicates a rate limit
-        if "rate limit" in str(e).lower() or "api call frequency" in str(e).lower() or "information" in str(e).lower():
-            return Response({'error': 'Alpha Vantage API rate limit reached. Please try again later.', 'rate_limit_reached': True}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        return Response({'error': f'Error searching: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        error_str = str(e).lower()
+        # Only treat as rate limit if the error message explicitly mentions rate limit
+        # Don't treat generic "Information" messages as rate limits
+        if ("rate limit" in error_str or "api call frequency" in error_str) and "information" not in error_str:
+            return Response({
+                'error': 'Limite de requêtes API Alpha Vantage atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain ou passer à un plan premium.',
+                'rate_limit_reached': True
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'error': f'Erreur lors de la recherche: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1609,6 +1722,54 @@ def alpha_vantage_quote(request, symbol):
         return Response(quote, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def asset_chart_data(request, asset_id):
+    """
+    Get historical chart data for an asset (stocks via Alpha Vantage, cryptos via Finnhub)
+    """
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    if not asset.alpha_vantage_symbol:
+        return Response({'error': 'Asset does not have a symbol configured'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get outputsize parameter (compact = last 100 days, full = 20+ years)
+    outputsize = request.GET.get('outputsize', 'compact').lower()
+    if outputsize not in ['compact', 'full']:
+        outputsize = 'compact'
+    
+    try:
+        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        if asset.type.lower() == 'crypto':
+            from api.alpha_vantage_service import get_crypto_candles_finnhub
+            chart_data = get_crypto_candles_finnhub(asset.alpha_vantage_symbol, resolution='D', days=100 if outputsize == 'compact' else 730)
+            
+            if not chart_data:
+                return Response({
+                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'rate_limit_reached': True
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            return Response(chart_data, status=status.HTTP_200_OK)
+        else:
+            # Use Alpha Vantage for stocks/ETFs
+            av_service = get_alpha_vantage_service()
+            if not av_service:
+                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            chart_data = av_service.get_daily_data(asset.alpha_vantage_symbol, outputsize=outputsize)
+            
+            if not chart_data:
+                return Response({
+                    'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'rate_limit_reached': True
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            return Response(chart_data, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error fetching chart data for asset {asset_id}: {str(e)}")
+        return Response({'error': f'Error fetching chart data: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -2215,29 +2376,78 @@ def all_transactions(request):
     return Response({'transactions': serializer.data})
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
 def client_transactions(request, client_id):
     """Liste les transactions d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    
+    # Check authentication manually
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    if token and token.startswith('client_'):
+        # Client token validation
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
     transactions = Transaction.objects.filter(client=client).order_by('-datetime', '-created_at')
     serializer = TransactionSerializer(transactions, many=True)
     return Response({'transactions': serializer.data})
 
 @api_view(['POST'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
 def client_transaction_create(request, client_id):
     """Créer une transaction pour un client"""
     client = get_object_or_404(Client, id=client_id)
     
     # Check if it's a client accessing their own data
-    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
     if token and token.startswith('client_'):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         if not client.platform_access or not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-    elif not request.user.is_authenticated:
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Validate required fields
@@ -2277,6 +2487,70 @@ def client_transaction_create(request, client_id):
         except Product.DoesNotExist:
             pass
     
+    # Validate balance for transfert transactions (balance → product)
+    transaction_type = request.data.get('type')
+    transfer_from = request.data.get('from_field') or request.data.get('transfer_from')
+    transfer_to = request.data.get('to_field') or request.data.get('transfer_to')
+    transaction_amount = float(request.data.get('amount', 0))
+    
+    # Auto-set transfer_to for subscription transactions (transfert with product)
+    # We only need transfer_to: if it's a product ID, it's an investment (balance → product)
+    if transaction_type == 'transfert' and product:
+        # If transfer_to is not provided but product exists, assume it's a subscription (balance → product)
+        if not transfer_to:
+            transfer_to = product.id
+        # Auto-set transfer_from to 'balance' for backward compatibility (but we mainly use transfer_to)
+        if not transfer_from:
+            transfer_from = 'balance'
+    
+    # Check if it's an investment (transfer_to is a product ID, not 'balance')
+    if transaction_type == 'transfert' and transfer_to and transfer_to != 'balance':
+        # Calculate available balance from completed transactions
+        completed_transactions = Transaction.objects.filter(
+            client=client,
+            status='termine'
+        )
+        
+        calculated_invested_capital = 0
+        calculated_trading_portfolio = 0
+        calculated_bonus = 0
+        
+        for txn in completed_transactions:
+            amount = float(txn.amount)
+            if txn.type == 'depot':
+                calculated_invested_capital += amount
+            elif txn.type == 'retrait':
+                calculated_invested_capital -= amount
+            elif txn.type == 'bonus':
+                calculated_bonus += amount
+                calculated_invested_capital += amount
+            elif txn.type in ['achat', 'investissement']:
+                calculated_trading_portfolio += amount
+            elif txn.type == 'vente':
+                calculated_trading_portfolio -= amount
+            elif txn.type == 'transfert':
+                txn_to = txn.transfer_to
+                if txn_to and txn_to != 'balance':
+                    # Investment: balance → product (transfer_to is product ID)
+                    calculated_trading_portfolio += amount
+                elif txn_to == 'balance':
+                    # Withdrawal: product → balance
+                    calculated_trading_portfolio -= amount
+        
+        # Always use calculated values from transactions (not client object values)
+        # This ensures we get fresh data even if client.invested_capital/trading_portfolio are stale
+        invested_capital = calculated_invested_capital
+        trading_portfolio = calculated_trading_portfolio
+        bonus = calculated_bonus
+        
+        # Available funds = invested_capital - trading_portfolio (bonus is included in invested_capital and available)
+        available_funds = invested_capital - trading_portfolio
+        
+        if transaction_amount > available_funds:
+            return Response({
+                'error': f'Fonds insuffisants. Solde disponible: {available_funds:.2f} EUR, montant demandé: {transaction_amount:.2f} EUR'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
     # Create transaction
     transaction = Transaction.objects.create(
         id=transaction_id,
@@ -2303,7 +2577,43 @@ def client_transaction_create(request, client_id):
         subscription_total=subscription_details_data.get('total') if subscription_details_data else None,
         subscription_contract_end=subscription_details_data.get('contractEnd', '') if subscription_details_data else '',
         subscription_signature=subscription_details_data.get('signature', '') if subscription_details_data else '',
+        # Transfer direction fields
+        transfer_from=transfer_from,
+        transfer_to=transfer_to,
     )
+    
+    # Log transaction creation
+    # Determine user_id - could be Django user or None (if client token)
+    user_id_for_log = None
+    client_name_for_log = None
+    if request.user.is_authenticated:
+        user_id_for_log = request.user
+    elif token and token.startswith('client_'):
+        # For client tokens, we don't have a Django user, so user_id will be None
+        # But we can store the client name in the log details
+        user_id_for_log = None
+        # Get client name for logging
+        client_name_for_log = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or 'Client'
+    
+    # Always create log entry for transaction creation (wrap in try-except to prevent silent failures)
+    try:
+        transaction_data = get_transaction_data_for_log(transaction)
+        create_log_entry(
+            event_type='createTransaction',
+            user_id=user_id_for_log,
+            request=request,
+            old_value={},
+            new_value=transaction_data,
+            transaction_id=transaction_id,
+            client_name=client_name_for_log
+        )
+    except Exception as log_error:
+        # Log the error but don't fail the transaction creation
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create log entry for transaction {transaction_id}: {str(log_error)}")
+        import traceback
+        logger.error(traceback.format_exc())
     
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2315,7 +2625,7 @@ def client_transaction_update(request, client_id, transaction_id):
     client = get_object_or_404(Client, id=client_id)
     transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
     
-    # Authorization check: Only allow client accessing their own data OR admin/staff users
+    # Authorization check: Only allow client accessing their own data OR authenticated users
     token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
     is_client_token = token and token.startswith('client_')
     
@@ -2326,13 +2636,12 @@ def client_transaction_update(request, client_id, transaction_id):
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         if not client.platform_access or not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-    elif request.user.is_authenticated:
-        # Django user: only allow staff/superuser (admin) to update transactions
-        if not (request.user.is_staff or request.user.is_superuser):
-            return Response({'error': 'Seuls les administrateurs peuvent modifier les transactions'}, status=status.HTTP_403_FORBIDDEN)
-    else:
+    elif not request.user.is_authenticated:
         # No authentication: deny access
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Store old values for logging
+    old_transaction_data = get_transaction_data_for_log(transaction)
     
     # Update fields
     if 'type' in request.data:
@@ -2350,7 +2659,52 @@ def client_transaction_update(request, client_id, transaction_id):
         if transaction_datetime:
             transaction.datetime = transaction_datetime
     
+    # Update transfer_to field (accept both to_field and transfer_to)
+    # We mainly use transfer_to: product ID = investment, 'balance' = withdrawal
+    if 'to_field' in request.data or 'transfer_to' in request.data:
+        transaction.transfer_to = request.data.get('to_field') or request.data.get('transfer_to')
+    
+    # Update transfer_from for backward compatibility (but we mainly use transfer_to)
+    if 'from_field' in request.data or 'transfer_from' in request.data:
+        transaction.transfer_from = request.data.get('from_field') or request.data.get('transfer_from')
+    
+    # Auto-set transfer_to for transfert transactions with product if missing
+    if transaction.type == 'transfert' and transaction.product:
+        if not transaction.transfer_to:
+            transaction.transfer_to = transaction.product.id
+        # Auto-set transfer_from to 'balance' for backward compatibility
+        if not transaction.transfer_from:
+            transaction.transfer_from = 'balance'
+    
     transaction.save()
+    
+    # Log transaction update
+    # Determine user_id - could be Django user or None (if client token)
+    user_id_for_log = None
+    client_name_for_log = None
+    if request.user.is_authenticated:
+        user_id_for_log = request.user
+    elif token and token.startswith('client_'):
+        # For client tokens, we don't have a Django user, so user_id will be None
+        # But we can store the client name in the log details
+        user_id_for_log = None
+        # Get client name for logging
+        client_name_for_log = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or 'Client'
+    
+    new_transaction_data = get_transaction_data_for_log(transaction)
+    
+    # Only log if something actually changed
+    if old_transaction_data != new_transaction_data:
+        create_log_entry(
+            event_type='editTransaction',
+            user_id=user_id_for_log,
+            request=request,
+            old_value=old_transaction_data,
+            new_value=new_transaction_data,
+            transaction_id=transaction_id,
+            client_name=client_name_for_log
+        )
+    
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data)
 
@@ -2363,11 +2717,70 @@ def client_transaction_delete(request, client_id, transaction_id):
     transaction.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
-# Product Categories endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def transaction_logs(request, client_id, transaction_id):
+    """Récupérer les logs d'une transaction"""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Get logs for this transaction (filter by transaction_id in details)
+    # Use a more reliable filtering approach that works across all database backends
+    # First, try JSONField lookup (works on PostgreSQL, MySQL 5.7+, etc.)
+    try:
+        logs = Log.objects.filter(
+            details__transaction_id=transaction_id
+        ).order_by('-created_at')
+    except Exception:
+        # Fallback: fetch all logs and filter in Python (more reliable but less efficient)
+        # This ensures compatibility with all database backends
+        all_logs = Log.objects.all().order_by('-created_at')
+        logs = [
+            log for log in all_logs 
+            if log.details and log.details.get('transaction_id') == transaction_id
+        ]
+    
+    serializer = LogSerializer(logs, many=True)
+    return Response({'logs': serializer.data})
+
+# Product Categories endpoints
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
 def category_list(request):
     """Liste toutes les catégories de produits"""
+    # Check authentication manually
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    # Validate client token if provided
+    if token and token.startswith('client_'):
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    # Allow access if authenticated or if it's a client token
+    elif auth_header.startswith('Bearer ') and not token.startswith('client_'):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not token:
+        # No token provided - allow public access to categories list
+        pass
+    
     categories = ProductCategory.objects.all().order_by('title')
     serializer = ProductCategorySerializer(categories, many=True)
     return Response({'categories': serializer.data})
@@ -2418,9 +2831,42 @@ def category_delete(request, category_id):
 
 # Products endpoints
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
 def product_list(request):
     """Liste tous les produits financiers"""
+    # Check authentication manually
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    # Validate client token if provided
+    if token and token.startswith('client_'):
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    # Allow access if authenticated or if it's a client token
+    elif auth_header.startswith('Bearer ') and not token.startswith('client_'):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not token:
+        # No token provided - allow public access to products list
+        pass
+    
     products = Product.objects.all().order_by('-created_at')
     serializer = ProductSerializer(products, many=True, context={'request': request})
     return Response({'products': serializer.data})
@@ -2626,11 +3072,13 @@ def product_create(request):
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 @api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
 def product_detail(request, product_id):
     """Récupérer un produit"""
     # Check authentication: either Django user or valid client token
-    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
     is_client_token = token and token.startswith('client_')
     
     if is_client_token:
@@ -2642,8 +3090,22 @@ def product_detail(request, product_id):
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
-    elif not request.user.is_authenticated:
-        # Require authentication for unauthenticated requests
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     product = get_object_or_404(Product, id=product_id)
@@ -3068,9 +3530,14 @@ CGV:"""
 
 # App Settings endpoints
 @api_view(['GET', 'POST', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])  # Allow public access, we'll check auth manually for POST/PUT
 def app_settings(request):
     """Get or update app settings (logo and colors)"""
+    # Require authentication for POST/PUT, but allow GET without authentication
+    if request.method in ['POST', 'PUT']:
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
     try:
         # Get or create settings (singleton pattern)
         settings_obj, created = AppSettings.objects.get_or_create(
@@ -3341,6 +3808,7 @@ def media_proxy(request, file_path):
 
 # News Posts endpoints
 @api_view(['GET'])
+@authentication_classes([])  # Disable authentication - don't validate tokens
 @permission_classes([AllowAny])  # Allow clients to view published news
 def news_list(request):
     """Liste toutes les actualités publiées"""

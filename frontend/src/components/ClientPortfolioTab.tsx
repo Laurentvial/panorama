@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
@@ -16,24 +16,156 @@ import { toast } from 'sonner';
 interface ClientPortfolioTabProps {
   client: any;
   clientId?: string;
+  transactions?: any[];
   onRefresh?: () => void;
 }
 
-export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfolioTabProps) {
+export function ClientPortfolioTab({ client, clientId, transactions = [], onRefresh }: ClientPortfolioTabProps) {
   const [loading, setLoading] = useState(false);
   
-  // Get wallet data from client object
-  const investedCapital = client?.investedCapital || client?.invested_capital || 0;
-  const tradingPortfolio = client?.tradingPortfolio || client?.trading_portfolio || 0;
-  const bonus = client?.bonus || 0;
+  // Calculate values from transactions
+  const calculateValuesFromTransactions = () => {
+    let calculatedInvestedCapital = 0;
+    let calculatedTradingPortfolio = 0;
+    let calculatedBonus = 0;
+    let calculatedProfitLoss = 0;
+    let calculatedTotalInvesti = 0; // Only achat and transfert (balance → product)
+
+    // Only consider completed transactions (status === 'termine')
+    const completedTransactions = transactions.filter((transaction: any) => 
+      transaction.status === 'termine'
+    );
+
+    completedTransactions.forEach((transaction: any) => {
+      const amount = parseFloat(transaction.amount) || 0;
+      
+      switch (transaction.type) {
+        case 'depot':
+          // Deposits increase invested capital
+          calculatedInvestedCapital += amount;
+          break;
+        case 'retrait':
+          // Withdrawals decrease invested capital
+          calculatedInvestedCapital -= amount;
+          break;
+        case 'bonus':
+          // Bonus increases bonus and invested capital
+          calculatedBonus += amount;
+          calculatedInvestedCapital += amount;
+          break;
+        case 'achat':
+        case 'investissement':
+          // Purchases increase trading portfolio (money invested in assets)
+          calculatedTradingPortfolio += amount;
+          // Don't affect profit/loss - investments start at 0 profit/loss
+          // Profit/loss will only change when position values change (future feature)
+          // Count as investment for "Total Investi"
+          calculatedTotalInvesti += amount;
+          break;
+        case 'vente':
+          // Sales decrease trading portfolio (money withdrawn from assets)
+          calculatedTradingPortfolio -= amount;
+          // Note: Sales profit/loss will be calculated based on position values when that feature is implemented
+          // For now, we don't adjust profit/loss for sales since we don't track cost basis
+          break;
+        case 'interets':
+          // Interest increases profit
+          calculatedProfitLoss += amount;
+          break;
+        case 'frais':
+        case 'perte':
+          // Fees and losses reduce profit
+          calculatedProfitLoss -= amount;
+          break;
+        case 'transfert':
+          // Simplified logic: only check transfer_to (to_field)
+          // If transfer_to = product ID → investment (balance → product)
+          // If transfer_to = 'balance' → withdrawal (product → balance)
+          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
+          const hasProductId = transaction.productId || null;
+          
+          // If transfer_to is a product ID (not 'balance'), it's an investment
+          if (transferTo && transferTo !== 'balance') {
+            // Investment: balance → product
+            calculatedTotalInvesti += amount;
+            calculatedTradingPortfolio += amount;
+            // Don't affect profit/loss - investments start at 0 profit/loss
+            // Profit/loss will only change when position values change (future feature)
+          } else if (transferTo === 'balance') {
+            // Withdrawal: product → balance
+            calculatedTradingPortfolio -= amount;
+            // Note: Withdrawal profit/loss will be calculated based on position values when that feature is implemented
+            // For now, we don't adjust profit/loss for withdrawals since we don't track position values
+          } else if (hasProductId) {
+            // Fallback: If transaction has productId but no transfer_to, assume it's a subscription (balance → product)
+            calculatedTotalInvesti += amount;
+            calculatedTradingPortfolio += amount;
+            // Don't affect profit/loss - investments start at 0 profit/loss
+            // Profit/loss will only change when position values change (future feature)
+          }
+          // Other cases don't affect calculations
+          break;
+        default:
+          break;
+      }
+    });
+
+    return {
+      investedCapital: calculatedInvestedCapital,
+      tradingPortfolio: Math.max(0, calculatedTradingPortfolio), // Ensure non-negative
+      bonus: calculatedBonus,
+      profitLoss: calculatedProfitLoss,
+      totalInvesti: calculatedTotalInvesti
+    };
+  };
+
+  // Calculate values from transactions - use useMemo to recalculate when transactions change
+  const calculatedValues = useMemo(() => calculateValuesFromTransactions(), [transactions]);
+  
+  // Check if there are completed transactions
+  const hasCompletedTransactions = useMemo(() => 
+    transactions.some((t: any) => t.status === 'termine'),
+    [transactions]
+  );
+  
+  // Use calculated values from completed transactions, fallback to client object values if no completed transactions
+  const investedCapital = useMemo(() => 
+    hasCompletedTransactions 
+      ? calculatedValues.investedCapital 
+      : (client?.investedCapital || client?.invested_capital || 0),
+    [hasCompletedTransactions, calculatedValues.investedCapital, client?.investedCapital, client?.invested_capital]
+  );
+  
+  const tradingPortfolio = useMemo(() => 
+    hasCompletedTransactions 
+      ? calculatedValues.tradingPortfolio 
+      : (client?.tradingPortfolio || client?.trading_portfolio || 0),
+    [hasCompletedTransactions, calculatedValues.tradingPortfolio, client?.tradingPortfolio, client?.trading_portfolio]
+  );
+  
+  const bonus = useMemo(() => 
+    hasCompletedTransactions 
+      ? calculatedValues.bonus 
+      : (client?.bonus || 0),
+    [hasCompletedTransactions, calculatedValues.bonus, client?.bonus]
+  );
+  
+  const profitLoss = useMemo(() => calculatedValues.profitLoss, [calculatedValues.profitLoss]);
+  
+  // Total Investi: only achat and transfert (balance → product)
+  const totalInvesti = useMemo(() => 
+    hasCompletedTransactions 
+      ? calculatedValues.totalInvesti 
+      : 0,
+    [hasCompletedTransactions, calculatedValues.totalInvesti]
+  );
   
   // Calculate available funds
-  const availableFunds = investedCapital - tradingPortfolio - bonus;
+  // Bonus is cash and should be included in liquidités (available funds), so we don't subtract it
+  // investedCapital already includes deposits + bonuses, so we only subtract what's invested (tradingPortfolio)
+  const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
   
-  // Calculate profit/loss from transactions (simplified - you might want to fetch actual transactions)
-  const profitLoss = 0; // This could be calculated from transactions if needed
-  
-  const portfolioValue = tradingPortfolio + profitLoss;
+  const portfolioValue = useMemo(() => tradingPortfolio + profitLoss, [tradingPortfolio, profitLoss]);
 
   // Product types available
   const productTypes = [
@@ -161,9 +293,9 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatCurrency(investedCapital)}
+              {formatCurrency(totalInvesti)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Capital total investi</p>
+            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit)</p>
           </CardContent>
         </Card>
 

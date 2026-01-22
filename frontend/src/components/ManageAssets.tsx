@@ -25,14 +25,20 @@ export function ManageAssets() {
     subcategory: '',
     default: false,
     alphaVantageSymbol: '',
+    tradingViewSymbol: '',
+    exchange: '',
     logoUrl: ''
   });
+  const [validating, setValidating] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   
   // Alpha Vantage search state (inside modal)
   const [alphaVantageSearch, setAlphaVantageSearch] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
   const [updatingPrices, setUpdatingPrices] = useState(false);
+  const [selectedSearchResult, setSelectedSearchResult] = useState<any>(null);
+  const [tradingViewSuggestions, setTradingViewSuggestions] = useState<string[]>([]);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -71,6 +77,8 @@ export function ManageAssets() {
         subcategory: asset.subcategory || '',
         default: asset.default || false,
         alphaVantageSymbol: asset.alphaVantageSymbol || '',
+        tradingViewSymbol: asset.tradingViewSymbol || '',
+        exchange: asset.exchange || '',
         logoUrl: asset.logoUrl || ''
       });
     } else {
@@ -83,12 +91,15 @@ export function ManageAssets() {
         subcategory: '',
         default: false,
         alphaVantageSymbol: '',
+        tradingViewSymbol: '',
+        exchange: '',
         logoUrl: ''
       });
     }
     // Reset search when opening dialog
     setAlphaVantageSearch('');
     setSearchResults([]);
+    setValidationErrors([]);
     setIsDialogOpen(true);
   }
 
@@ -108,25 +119,150 @@ export function ManageAssets() {
       category: '',
       subcategory: '',
       default: false,
-      alphaVantageSymbol: ''
+      alphaVantageSymbol: '',
+      tradingViewSymbol: '',
+      exchange: '',
+      logoUrl: ''
     });
     setAlphaVantageSearch('');
     setSearchResults([]);
+    setSelectedSearchResult(null);
+    setTradingViewSuggestions([]);
+  }
+
+  // Validate asset data before saving
+  async function validateAssetData(): Promise<{ isValid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    
+    // Basic required fields
+    if (!formData.type || !formData.name) {
+      errors.push('Le type et le nom sont obligatoires');
+      return { isValid: false, errors };
+    }
+    
+    // Check if alpha_vantage_symbol is provided
+    if (!formData.alphaVantageSymbol || !formData.alphaVantageSymbol.trim()) {
+      errors.push('⚠️ Le symbole Alpha Vantage est requis pour récupérer les prix en temps réel');
+    }
+    
+    // Check exchange for TradingView compatibility
+    const assetType = formData.type?.toLowerCase() || '';
+    const isCrypto = assetType.includes('crypto') || assetType.includes('cryptomonnaie');
+    
+    if (!formData.exchange || !formData.exchange.trim()) {
+      if (isCrypto) {
+        errors.push('⚠️ L\'exchange est requis pour les cryptos. Utilisez "BINANCE" pour TradingView.');
+      } else {
+        errors.push('⚠️ L\'exchange est requis pour afficher les graphiques TradingView (ex: NASDAQ, NYSE, EURONEXT)');
+      }
+    } else {
+      const exchange = formData.exchange.trim().toUpperCase();
+      
+      // Validate exchange format for TradingView
+      if (isCrypto) {
+        if (exchange !== 'BINANCE') {
+          errors.push('⚠️ Pour les cryptos, TradingView fonctionne mieux avec l\'exchange "BINANCE".');
+        }
+        // For crypto, validate that symbol format matches TradingView expectations
+        // Crypto symbols in TradingView should be like BINANCE:BTCUSDT
+        if (formData.alphaVantageSymbol && formData.alphaVantageSymbol.trim()) {
+          const symbol = formData.alphaVantageSymbol.trim().toUpperCase();
+          // Check if symbol already has USDT suffix (common for crypto)
+          const tradingViewSymbol = symbol.endsWith('USDT') ? `${exchange}:${symbol}` : `${exchange}:${symbol}USDT`;
+          // Add info about TradingView format (this is informational, not an error)
+          console.log(`TradingView format pour crypto: "${tradingViewSymbol}"`);
+        }
+      } else {
+        // For stocks, validate exchange is a known exchange
+        const usExchanges = ['NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'BATS'];
+        const internationalExchanges = ['EURONEXT', 'LSE', 'TSE', 'ASX', 'SSE', 'SZSE', 'HKEX', 'XETR', 'FWB', 'SWX'];
+        const validExchanges = [...usExchanges, ...internationalExchanges];
+        
+        if (!validExchanges.includes(exchange)) {
+          errors.push(`⚠️ Exchange "${exchange}" peut ne pas être reconnu par TradingView. Exchanges recommandés: ${validExchanges.slice(0, 10).join(', ')}...`);
+        }
+      }
+    }
+    
+    // If we have alpha_vantage_symbol, validate it
+    if (formData.alphaVantageSymbol && formData.alphaVantageSymbol.trim()) {
+      try {
+        // Try to verify the symbol exists in Alpha Vantage
+        const symbol = formData.alphaVantageSymbol.trim().toUpperCase();
+        const apiType = isCrypto ? 'crypto' : '';
+        const url = `/api/alpha-vantage/search/?keywords=${encodeURIComponent(symbol)}${apiType ? `&type=${apiType}` : ''}`;
+        const response = await apiCall(url);
+        
+        const found = response.results?.some((r: any) => 
+          r.symbol?.toUpperCase() === symbol || r.symbol?.toUpperCase() === `${symbol}USDT`
+        );
+        
+        if (!found && response.results?.length > 0) {
+          errors.push(`⚠️ Le symbole "${symbol}" n'a pas été trouvé dans Alpha Vantage. Vérifiez l'orthographe.`);
+        } else if (!found && response.results?.length === 0) {
+          // Only mention rate limit if explicitly indicated
+          if (response.rate_limit_reached === true) {
+            errors.push(`⚠️ Impossible de vérifier le symbole "${symbol}" - limite API Alpha Vantage atteinte (25/jour pour le plan gratuit)`);
+          } else {
+            errors.push(`⚠️ Le symbole "${symbol}" n'a pas été trouvé dans Alpha Vantage. Vérifiez l'orthographe.`);
+          }
+        }
+      } catch (error: any) {
+        console.warn('Could not validate symbol:', error);
+        errors.push(`⚠️ Impossible de vérifier le symbole Alpha Vantage (${error?.message || 'erreur API'})`);
+      }
+    }
+    
+    // Validate TradingView symbol is provided
+    if (!formData.tradingViewSymbol || !formData.tradingViewSymbol.trim()) {
+      errors.push('⚠️ Le symbole TradingView est requis pour afficher les graphiques. Recherchez le symbole exact sur TradingView et saisissez-le ici.');
+    }
+    
+    // Check logo URL (warning only, not blocking)
+    if (!formData.logoUrl || !formData.logoUrl.trim()) {
+      errors.push('⚠️ L\'URL du logo est manquante. Le logo peut être récupéré automatiquement depuis Finnhub lors de la recherche.');
+    }
+    
+    return { isValid: errors.length === 0, errors };
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
-    // Validation
+    // Basic validation
     if (!formData.type || !formData.name) {
       toast.error('Veuillez remplir tous les champs obligatoires');
       return;
     }
     
+    // Validate asset data
+    setValidating(true);
+    setValidationErrors([]);
+    
     try {
+      const validation = await validateAssetData();
+      
+      if (!validation.isValid && validation.errors.length > 0) {
+        setValidationErrors(validation.errors);
+        
+        // Show warning but allow saving if user confirms
+        const shouldContinue = window.confirm(
+          '⚠️ Des avertissements ont été détectés :\n\n' +
+          validation.errors.join('\n') +
+          '\n\nSouhaitez-vous continuer malgré ces avertissements ?'
+        );
+        
+        if (!shouldContinue) {
+          setValidating(false);
+          return;
+        }
+      }
+      
       const payload = {
         ...formData,
         alphaVantageSymbol: formData.alphaVantageSymbol || undefined,
+        tradingViewSymbol: formData.tradingViewSymbol || undefined,
+        exchange: formData.exchange || undefined,
         logoUrl: formData.logoUrl || undefined
       };
       
@@ -150,6 +286,8 @@ export function ManageAssets() {
     } catch (error: any) {
       console.error('Error saving asset:', error);
       toast.error(error.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setValidating(false);
     }
   }
 
@@ -181,11 +319,16 @@ export function ManageAssets() {
       setSearching(true);
       const url = `/api/alpha-vantage/search/?keywords=${encodeURIComponent(keywords)}${apiType ? `&type=${apiType}` : ''}`;
       const response = await apiCall(url);
-      setSearchResults(response.results || []);
+      const results = response.results || [];
+      setSearchResults(results);
       
-      // Show warning if rate limit reached
-      if (response.rate_limit_reached && response.results?.length === 0) {
+      // Only show rate limit warning if explicitly indicated AND no results
+      // Don't show warning if we have results (even if there's a rate limit warning, we got data)
+      if (response.rate_limit_reached === true && results.length === 0) {
         toast.warning('Limite de requêtes API atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain ou passer à un plan premium.');
+      } else if (results.length === 0 && alphaVantageSearch.trim()) {
+        // Show info message if no results but not necessarily rate limit
+        toast.info(response.message || 'Aucun résultat trouvé. Vérifiez l\'orthographe ou essayez un autre terme.');
       }
     } catch (error: any) {
       console.error('Error searching:', error);
@@ -196,12 +339,110 @@ export function ManageAssets() {
     }
   }
 
+  // Generate TradingView symbol suggestions based on search result
+  // Prioritizes formats that work best with TradingView embed widgets
+  function generateTradingViewSuggestions(result: any): string[] {
+    const suggestions: string[] = [];
+    const symbol = result.symbol?.toUpperCase() || '';
+    const assetType = result.type === 'Crypto' ? 'Crypto' : 
+                      result.type === 'Equity' ? 'Action' : 
+                      result.type === 'ETF' ? 'ETF' : '';
+    const isCrypto = assetType === 'Crypto' || assetType.toLowerCase().includes('crypto');
+    const region = (result.region || '').toLowerCase();
+    const exchange = (result.exchange || '').toUpperCase();
+    
+    if (isCrypto) {
+      // Crypto suggestions - prioritize BINANCE format
+      // Most cryptos on TradingView use BINANCE exchange
+      if (!symbol.endsWith('USDT') && !symbol.endsWith('USD')) {
+        suggestions.push(`BINANCE:${symbol}USDT`); // Most common format
+        suggestions.push(`BINANCE:${symbol}BUSD`); // Binance USD
+      } else {
+        suggestions.push(`BINANCE:${symbol}`); // Already has USDT/USD suffix
+      }
+      suggestions.push(`COINBASE:${symbol}USD`);
+      suggestions.push(`KRAKEN:${symbol}USD`);
+      // Fallback: just symbol (may not work but worth trying)
+      if (!symbol.includes(':')) {
+        suggestions.push(symbol);
+      }
+    } else {
+      // Stock suggestions
+      // US stocks - prioritize symbol without exchange (works best with embed widgets)
+      if (region.includes('united states') || region.includes('usa') || region.includes('us') || 
+          ['NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'BATS'].includes(exchange)) {
+        // For US stocks, TradingView embed widgets work best with just the symbol
+        suggestions.push(symbol); // First priority - just symbol
+        // Add exchange variants as alternatives (though widgets normalize them)
+        if (exchange && ['NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'BATS'].includes(exchange)) {
+          suggestions.push(`${exchange}:${symbol}`); // Include exchange variant
+        } else {
+          // Try common US exchanges
+          suggestions.push(`NASDAQ:${symbol}`);
+          suggestions.push(`NYSE:${symbol}`);
+        }
+      } else {
+        // International stocks - need exchange prefix
+        if (exchange) {
+          suggestions.push(`${exchange}:${symbol}`); // Use exchange from result first
+        }
+        
+        // Add region-specific exchanges
+        if (region.includes('france') || region.includes('europe')) {
+          suggestions.push(`EURONEXT:${symbol}`);
+          suggestions.push(`XPAR:${symbol}`);
+        } else if (region.includes('uk') || region.includes('united kingdom')) {
+          suggestions.push(`LSE:${symbol}`);
+          suggestions.push(`LON:${symbol}`);
+        } else if (region.includes('germany')) {
+          suggestions.push(`XETR:${symbol}`);
+          suggestions.push(`FWB:${symbol}`);
+        } else if (region.includes('japan')) {
+          suggestions.push(`TSE:${symbol}`);
+        } else if (region.includes('switzerland')) {
+          suggestions.push(`SWX:${symbol}`);
+        }
+        
+        // Always include just symbol as fallback (may work for some international stocks)
+        suggestions.push(symbol);
+      }
+    }
+    
+    // Remove duplicates and return (keep order - first suggestions are most likely to work)
+    return [...new Set(suggestions)];
+  }
+
   async function handleSelectSearchResult(result: any) {
+    // Set selected result and generate TradingView suggestions
+    setSelectedSearchResult(result);
+    const suggestions = generateTradingViewSuggestions(result);
+    setTradingViewSuggestions(suggestions);
+    
     // Prefill form with selected result
     const assetType = result.type === 'Crypto' ? 'Crypto' : 
                       result.type === 'Equity' ? 'Action' : 
                       result.type === 'ETF' ? 'ETF' : 
                       formData.type || 'Action';
+    
+    const isCrypto = assetType === 'Crypto' || assetType.toLowerCase().includes('crypto');
+    
+    // Determine exchange from result or infer from type
+    let exchange = result.exchange || '';
+    if (!exchange) {
+      if (isCrypto) {
+        exchange = 'BINANCE'; // Default for crypto
+      } else if (result.region) {
+        // Try to infer from region
+        const region = result.region.toLowerCase();
+        if (region.includes('united states') || region.includes('usa') || region.includes('us')) {
+          exchange = 'NASDAQ'; // Default for US stocks
+        } else if (region.includes('france') || region.includes('europe')) {
+          exchange = 'EURONEXT';
+        } else if (region.includes('uk') || region.includes('united kingdom')) {
+          exchange = 'LSE';
+        }
+      }
+    }
     
     let logoUrl = result.logo_url || '';
     
@@ -220,18 +461,28 @@ export function ManageAssets() {
       }
     }
     
+    // Use first suggestion as default (prioritized to work best with TradingView)
+    const defaultTradingViewSymbol = suggestions[0] || result.symbol;
+    
+    console.log('Generated TradingView suggestions:', suggestions);
+    console.log('Selected default:', defaultTradingViewSymbol);
+    
     setFormData({
       ...formData,
       name: result.name || result.symbol,
       reference: result.symbol,
       alphaVantageSymbol: result.symbol,
+      tradingViewSymbol: defaultTradingViewSymbol,
+      exchange: exchange,
       type: assetType,
       category: result.region || formData.category,
       subcategory: result.type || formData.subcategory,
       logoUrl: logoUrl
     });
-    setSearchResults([]);
-    setAlphaVantageSearch('');
+  }
+  
+  function handleSelectTradingViewSymbol(symbol: string) {
+    setFormData({ ...formData, tradingViewSymbol: symbol });
   }
 
 
@@ -476,7 +727,7 @@ export function ManageAssets() {
       {/* Create/Edit Dialog */}
       {isDialogOpen && (
         <div className="modal-overlay" onClick={handleCloseDialog}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: selectedSearchResult ? '64rem' : '32rem', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
               <h2 className="modal-title">
                 {editingAsset ? 'Modifier l\'actif' : 'Créer un nouvel actif'}
@@ -504,6 +755,8 @@ export function ManageAssets() {
                         setFormData({ ...formData, type: value });
                         setSearchResults([]);
                         setAlphaVantageSearch('');
+                        setSelectedSearchResult(null);
+                        setTradingViewSuggestions([]);
                       }}
                     >
                       <SelectTrigger id="asset-type-select">
@@ -521,97 +774,169 @@ export function ManageAssets() {
                   </div>
                   
                   {formData.type && (
-                    <div className="modal-form-field">
-                      <Label htmlFor="alpha-vantage-search">
-                        {formData.type === 'Crypto' 
-                          ? 'Rechercher une crypto-monnaie (nom ou symbole)' 
-                          : 'Rechercher un actif (nom ou symbole)'}
-                      </Label>
-                      <div className="relative">
-                        {/* @ts-ignore - react-icons accepts className at runtime */}
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 z-10" />
-                        <Input
-                          id="alpha-vantage-search"
-                          className={`pl-10${searching ? ' pr-10' : ''}`}
-                          placeholder={
-                            formData.type === 'Crypto' 
-                              ? 'Ex: Bitcoin, BTC, Ethereum, ETH...' 
-                              : 'Ex: Apple, AAPL, Microsoft, MSFT...'
-                          }
-                          value={alphaVantageSearch}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setAlphaVantageSearch(value);
-                            
-                            // Clear previous timeout
-                            if (searchTimeoutRef.current) {
-                              clearTimeout(searchTimeoutRef.current);
+                    <div className={`${selectedSearchResult ? 'grid grid-cols-2 gap-4' : ''}`}>
+                      {/* Left Column: Search */}
+                      <div className={selectedSearchResult ? '' : 'modal-form-field'}>
+                        <Label htmlFor="alpha-vantage-search">
+                          {formData.type === 'Crypto' 
+                            ? 'Rechercher une crypto-monnaie (nom ou symbole)' 
+                            : 'Rechercher un actif (nom ou symbole)'}
+                        </Label>
+                        <div className="relative">
+                          {/* @ts-ignore - react-icons accepts className at runtime */}
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4 z-10" />
+                          <Input
+                            id="alpha-vantage-search"
+                            className="pl-10"
+                            placeholder={
+                              formData.type === 'Crypto' 
+                                ? 'Ex: Bitcoin, BTC, Ethereum, ETH...' 
+                                : 'Ex: Apple, AAPL, Microsoft, MSFT...'
                             }
-                            
-                            // Debounce search
-                            searchTimeoutRef.current = setTimeout(() => {
-                              if (value.trim()) {
-                                handleAlphaVantageSearch(value);
-                              } else {
-                                setSearchResults([]);
+                            value={alphaVantageSearch}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setAlphaVantageSearch(value);
+                              
+                              // Clear previous timeout
+                              if (searchTimeoutRef.current) {
+                                clearTimeout(searchTimeoutRef.current);
                               }
-                            }, 500);
-                          }}
-                        />
+                              
+                              // Debounce search
+                              searchTimeoutRef.current = setTimeout(() => {
+                                if (value.trim()) {
+                                  handleAlphaVantageSearch(value);
+                                } else {
+                                  setSearchResults([]);
+                                  setSelectedSearchResult(null);
+                                  setTradingViewSuggestions([]);
+                                }
+                              }, 500);
+                            }}
+                          />
+                        </div>
                         {searching && (
-                          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                          <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
                             {/* @ts-ignore - react-icons accepts className at runtime */}
                             <RefreshCw className="w-4 h-4 animate-spin text-slate-400" />
+                            <span>Recherche en cours...</span>
                           </div>
                         )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Search Results */}
-                  {searchResults.length > 0 && (
-                    <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                      <div 
-                        className="overflow-y-auto"
-                        style={{ 
-                          maxHeight: '200px',
-                          scrollbarWidth: 'thin',
-                          scrollbarColor: '#cbd5e1 #f1f5f9'
-                        }}
-                      >
-                        {searchResults.map((result: any, index: number) => (
-                          <div
-                            key={index}
-                            onClick={() => handleSelectSearchResult(result)}
-                            className="p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-sm truncate">{result.name}</div>
-                                <div className="text-xs text-slate-500 font-mono">{result.symbol}</div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                  {result.type} • {result.region} • {result.currency}
-                                </div>
-                              </div>
-                              {result.price && (
-                                <div className="text-right ml-4 flex-shrink-0">
-                                  <div className="font-semibold text-sm">${parseFloat(result.price).toFixed(2)}</div>
-                                  {result.change !== undefined && (
-                                    <div className={`text-xs ${parseFloat(result.change) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                      {parseFloat(result.change) >= 0 ? '+' : ''}{parseFloat(result.change).toFixed(2)}
-                                      {result.change_percent && ` (${parseFloat(result.change_percent) >= 0 ? '+' : ''}${parseFloat(result.change_percent)}%)`}
+                        
+                        {/* Search Results */}
+                        {searchResults.length > 0 && (
+                          <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                            <div 
+                              className="overflow-y-auto"
+                              style={{ 
+                                maxHeight: selectedSearchResult ? '400px' : '200px',
+                                scrollbarWidth: 'thin',
+                                scrollbarColor: '#cbd5e1 #f1f5f9'
+                              }}
+                            >
+                              {searchResults.map((result: any, index: number) => (
+                                <div
+                                  key={index}
+                                  onClick={() => handleSelectSearchResult(result)}
+                                  className={`p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
+                                    selectedSearchResult?.symbol === result.symbol ? 'bg-blue-50 border-blue-200' : ''
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-semibold text-sm truncate">{result.name}</div>
+                                      <div className="text-xs text-slate-500 font-mono">{result.symbol}</div>
+                                      <div className="text-xs text-slate-400 mt-1">
+                                        {result.type} • {result.region} • {result.currency}
+                                      </div>
                                     </div>
-                                  )}
+                                    {result.price && (
+                                      <div className="text-right ml-4 flex-shrink-0">
+                                        <div className="font-semibold text-sm">${parseFloat(result.price).toFixed(2)}</div>
+                                        {result.change !== undefined && (
+                                          <div className={`text-xs ${parseFloat(result.change) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {parseFloat(result.change) >= 0 ? '+' : ''}{parseFloat(result.change).toFixed(2)}
+                                            {result.change_percent && ` (${parseFloat(result.change_percent) >= 0 ? '+' : ''}${parseFloat(result.change_percent)}%)`}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                              )}
+                              ))}
                             </div>
                           </div>
-                        ))}
+                        )}
+                        {searchResults.length === 0 && alphaVantageSearch.trim() && !searching && (
+                          <p className="text-xs text-slate-500 mt-1">Aucun résultat trouvé</p>
+                        )}
                       </div>
+                      
+                      {/* Right Column: TradingView Symbol Selection */}
+                      {selectedSearchResult && (
+                        <div className="modal-form-field">
+                          <Label>Choisir le symbole TradingView</Label>
+                          <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                            <div className="p-3 bg-slate-50 border-b border-slate-200">
+                              <div className="font-semibold text-sm">{selectedSearchResult.name}</div>
+                              <div className="text-xs text-slate-500 font-mono">{selectedSearchResult.symbol}</div>
+                            </div>
+                            <div 
+                              className="overflow-y-auto"
+                              style={{ 
+                                maxHeight: '400px',
+                                scrollbarWidth: 'thin',
+                                scrollbarColor: '#cbd5e1 #f1f5f9'
+                              }}
+                            >
+                              {tradingViewSuggestions.map((suggestion, index) => {
+                                const isRecommended = index === 0;
+                                return (
+                                  <div
+                                    key={index}
+                                    onClick={() => handleSelectTradingViewSymbol(suggestion)}
+                                    className={`p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
+                                      formData.tradingViewSymbol === suggestion ? 'bg-blue-50 border-blue-200' : ''
+                                    } ${isRecommended && formData.tradingViewSymbol !== suggestion ? 'bg-green-50' : ''}`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <div className="font-mono text-sm">{suggestion}</div>
+                                        {isRecommended && (
+                                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Recommandé</span>
+                                        )}
+                                      </div>
+                                      {formData.tradingViewSymbol === suggestion && (
+                                        <div className="text-blue-600 text-xs font-semibold">✓ Sélectionné</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-xs text-blue-800 mb-2">
+                              <strong>💡 Astuce :</strong> Le premier symbole (recommandé) fonctionne généralement le mieux. 
+                              Si vous obtenez l'erreur "Symbole invalide", essayez les autres options ou vérifiez le symbole sur{' '}
+                              <a 
+                                href={`https://www.tradingview.com/symbols/${encodeURIComponent(tradingViewSuggestions[0] || '')}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-blue-600 hover:underline font-semibold"
+                              >
+                                TradingView
+                              </a>.
+                            </p>
+                            <p className="text-xs text-blue-700">
+                              Pour les actions US, utilisez généralement juste le symbole (ex: "TSLA"). 
+                              Pour les cryptos, utilisez "BINANCE:SYMBOLUSDT".
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {searchResults.length === 0 && alphaVantageSearch.trim() && !searching && (
-                    <p className="text-xs text-slate-500 mt-1">Aucun résultat trouvé</p>
                   )}
                 </>
               )}
@@ -710,14 +1035,43 @@ export function ManageAssets() {
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="alphaVantageSymbol">Symbole Ticker</Label>
+                <Label htmlFor="alphaVantageSymbol">Symbole Ticker *</Label>
                 <Input
                   id="alphaVantageSymbol"
                   value={formData.alphaVantageSymbol}
                   onChange={(e) => setFormData({ ...formData, alphaVantageSymbol: e.target.value.toUpperCase() })}
                   placeholder="Ex: AAPL, MSFT, TSLA, BTC, ETH..."
+                  required
                 />
-                <p className="text-xs text-slate-500 mt-1">Symbole utilisé pour récupérer les prix en temps réel (ex: AAPL pour les actions, BTC pour les cryptos)</p>
+                <p className="text-xs text-slate-500 mt-1">Symbole utilisé pour récupérer les prix en temps réel depuis Alpha Vantage (ex: AAPL pour les actions, BTC pour les cryptos)</p>
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="exchange">Exchange (Bourse) *</Label>
+                <Input
+                  id="exchange"
+                  value={formData.exchange}
+                  onChange={(e) => setFormData({ ...formData, exchange: e.target.value.toUpperCase() })}
+                  placeholder="Ex: NASDAQ, NYSE, BINANCE, EURONEXT..."
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Exchange requis pour TradingView. Pour les cryptos, utilisez "BINANCE". Pour les actions US: "NASDAQ" ou "NYSE". Pour l'Europe: "EURONEXT", "LSE", etc.
+                </p>
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="tradingViewSymbol">Symbole TradingView *</Label>
+                <Input
+                  id="tradingViewSymbol"
+                  value={formData.tradingViewSymbol}
+                  onChange={(e) => setFormData({ ...formData, tradingViewSymbol: e.target.value })}
+                  placeholder="Ex: TSLA, NASDAQ:TSLA, BINANCE:BTCUSDT..."
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  {selectedSearchResult 
+                    ? 'Vous pouvez modifier le symbole sélectionné ci-dessus ou saisir un symbole personnalisé.'
+                    : 'Sélectionnez un actif dans les résultats de recherche pour voir les suggestions de symboles TradingView, ou saisissez manuellement le symbole exact.'}
+                </p>
               </div>
               <div className="modal-form-field">
                 <Label htmlFor="category">Catégorie</Label>
@@ -747,12 +1101,26 @@ export function ManageAssets() {
                   <Label htmlFor="default">Disponible par défaut pour tous les clients</Label>
                 </div>
               </div>
+              {/* Validation Errors Display */}
+              {validationErrors.length > 0 && (
+                <div className="modal-form-field">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="font-semibold text-yellow-800 mb-2">⚠️ Avertissements de validation :</div>
+                    <ul className="list-disc list-inside text-sm text-yellow-700 space-y-1">
+                      {validationErrors.map((error, index) => (
+                        <li key={index}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+              
               <div className="modal-form-actions">
-                <Button type="button" variant="outline" onClick={handleCloseDialog}>
+                <Button type="button" variant="outline" onClick={handleCloseDialog} disabled={validating}>
                   Annuler
                 </Button>
-                <Button type="submit">
-                  {editingAsset ? 'Modifier' : 'Créer'}
+                <Button type="submit" disabled={validating}>
+                  {validating ? 'Validation...' : (editingAsset ? 'Modifier' : 'Créer')}
                 </Button>
               </div>
             </form>

@@ -53,6 +53,8 @@ urlpatterns = [
     # Alpha Vantage endpoints
     path('alpha-vantage/search/', api_views.alpha_vantage_search, name='alpha-vantage-search'),
     path('alpha-vantage/quote/<str:symbol>/', api_views.alpha_vantage_quote, name='alpha-vantage-quote'),
+    # Chart data endpoint
+    path('assets/<str:asset_id>/chart-data/', api_views.asset_chart_data, name='asset-chart-data'),
     # RIBs endpoints
     path('ribs/', api_views.rib_list, name='rib-list'),
     path('ribs/create/', api_views.rib_create, name='rib-create'),
@@ -77,6 +79,7 @@ urlpatterns = [
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/logs/', api_views.transaction_logs, name='transaction-logs'),
     # Product Categories endpoints
     path('categories/', api_views.category_list, name='category-list'),
     path('categories/create/', api_views.category_create, name='category-create'),

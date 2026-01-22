@@ -446,6 +446,7 @@ class EventSerializer(serializers.ModelSerializer):
 
 class LogSerializer(serializers.ModelSerializer):
     userId = serializers.SerializerMethodField()
+    userName = serializers.SerializerMethodField()
     eventType = serializers.CharField(source='event_type', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     oldValue = serializers.JSONField(source='old_value', read_only=True)
@@ -453,16 +454,31 @@ class LogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Log
-        fields = ['id', 'eventType', 'userId', 'createdAt', 'details', 'oldValue', 'newValue']
+        fields = ['id', 'eventType', 'userId', 'userName', 'createdAt', 'details', 'oldValue', 'newValue']
         read_only_fields = ['id', 'createdAt']
     
     def get_userId(self, obj):
         return obj.user_id.id if obj.user_id else None
     
+    def get_userName(self, obj):
+        if obj.user_id:
+            return f"{obj.user_id.first_name} {obj.user_id.last_name}".strip() or obj.user_id.username
+        # If no user_id but we have client_name in details (client-created transaction)
+        if obj.details and obj.details.get('client_name'):
+            return obj.details.get('client_name')
+        return None
+    
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['eventType'] = instance.event_type
         ret['userId'] = instance.user_id.id if instance.user_id else None
+        # Get user name from user_id if available, otherwise from client_name in details
+        if instance.user_id:
+            ret['userName'] = f"{instance.user_id.first_name} {instance.user_id.last_name}".strip() or instance.user_id.username
+        elif instance.details and instance.details.get('client_name'):
+            ret['userName'] = instance.details.get('client_name')
+        else:
+            ret['userName'] = None
         ret['createdAt'] = instance.created_at
         ret['details'] = instance.details if instance.details else {}
         ret['oldValue'] = instance.old_value if instance.old_value else {}
@@ -473,6 +489,7 @@ class AssetSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     alphaVantageSymbol = serializers.CharField(source='alpha_vantage_symbol', required=False, allow_blank=True)
+    tradingViewSymbol = serializers.CharField(source='trading_view_symbol', required=False, allow_blank=True)
     logoUrl = serializers.URLField(source='logo_url', required=False, allow_blank=True)
     lastPrice = serializers.DecimalField(source='last_price', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
     lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
@@ -483,7 +500,7 @@ class AssetSerializer(serializers.ModelSerializer):
         model = Asset
         fields = [
             'id', 'type', 'name', 'reference', 'category', 'subcategory', 'default',
-            'alphaVantageSymbol', 'exchange', 'currency', 'region', 'logoUrl',
+            'alphaVantageSymbol', 'tradingViewSymbol', 'exchange', 'currency', 'region', 'logoUrl',
             'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent',
             'createdAt', 'updatedAt'
         ]
@@ -632,12 +649,14 @@ class TransactionSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     productId = serializers.CharField(source='product.id', read_only=True, allow_null=True)
+    from_field = serializers.CharField(source='transfer_from', allow_null=True, required=False)
+    to_field = serializers.CharField(source='transfer_to', allow_null=True, required=False)
     
     class Meta:
         model = Transaction
         fields = [
             'id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 
-            'createdAt', 'updatedAt', 'productId',
+            'createdAt', 'updatedAt', 'productId', 'from_field', 'to_field',
             'subscription_details', 'subscription_first_name', 'subscription_last_name',
             'subscription_birth_date', 'subscription_city', 'subscription_ip',
             'subscription_date', 'subscription_duration', 'subscription_interest_period',
@@ -651,6 +670,8 @@ class TransactionSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        ret['from'] = instance.transfer_from
+        ret['to'] = instance.transfer_to
         if instance.product:
             ret['productId'] = instance.product.id
             ret['productName'] = instance.product.name

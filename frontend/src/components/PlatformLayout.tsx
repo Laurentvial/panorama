@@ -153,7 +153,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           left: isMobile ? (sidebarOpen ? '0' : '-280px') : '0',
           top: isMobile ? '60px' : '0',
           bottom: 0,
-          zIndex: 1000,
+          zIndex: 10,
           transition: 'left 0.3s ease, width 0.3s ease',
           overflowY: 'auto',
           overflowX: 'hidden',
@@ -162,7 +162,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           {(sidebarOpen || !isMobile) && (
             <>
               <div style={{ 
-                padding: isMobile ? '16px 20px' : '20px 30px', 
+                padding: isMobile ? '16px 20px' : '00px 30px', 
                 marginBottom: '20px', 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -174,8 +174,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     alt="Logo" 
                     style={location.pathname.startsWith('/platform/product/') 
                       ? { 
-                          width: isMobile ? '80px' : '128px', 
-                          height: isMobile ? '80px' : '128px', 
+                          width: isMobile ? '80px' : '200px', 
+                          height: isMobile ? '80px' : '100px', 
                           objectFit: 'contain' 
                         }
                       : { 

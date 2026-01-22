@@ -388,6 +388,53 @@ export function PlatformDiscover() {
     return name.substring(0, 4).toUpperCase();
   };
 
+  // Truncate description to a maximum length and add trending label
+  const truncateDescription = (description: string | null | undefined, maxLength: number = 150): { text: string; isTruncated: boolean } => {
+    if (!description) return { text: '', isTruncated: false };
+    if (description.length <= maxLength) return { text: description, isTruncated: false };
+    return { text: description.substring(0, maxLength).trim(), isTruncated: true };
+  };
+
+  // Format ROI time period (e.g., "1M" for 1 month, "2Y" for 2 years)
+  const formatROITime = (profitabilityPeriod: string | null | undefined): string => {
+    if (!profitabilityPeriod) return 'trending';
+    
+    const period = profitabilityPeriod.toLowerCase();
+    
+    // Handle months
+    if (period.includes('mensuel') || period === 'month' || period === 'mois') {
+      return '1M';
+    }
+    if (period.includes('trimestrielle') || period === 'quarter' || period === 'trimestre') {
+      return '3M';
+    }
+    if (period.includes('semestrielle') || period === 'semester' || period === 'semestre') {
+      return '6M';
+    }
+    if (period.includes('annuelle') || period === 'year' || period === 'année' || period === 'an') {
+      return '1Y';
+    }
+    
+    // Try to extract number and unit from period string
+    const monthMatch = period.match(/(\d+)\s*(month|mois|m)/i);
+    if (monthMatch) {
+      const months = parseInt(monthMatch[1]);
+      if (months >= 12) {
+        const years = Math.floor(months / 12);
+        return `${years}Y`;
+      }
+      return `${months}M`;
+    }
+    
+    const yearMatch = period.match(/(\d+)\s*(year|année|an|y)/i);
+    if (yearMatch) {
+      return `${yearMatch[1]}Y`;
+    }
+    
+    // Default to trending if we can't parse it
+    return 'trending';
+  };
+
   return (
     <div style={{ padding: '0' }}>
       {/* Navigation Tabs */}
@@ -564,6 +611,9 @@ export function PlatformDiscover() {
                     : (typeof profitabilityValue === 'number' ? profitabilityValue : 0);
                   const isPositive = return12M >= 0;
                   
+                  // Format ROI time period
+                  const roiTime = formatROITime(portfolio.profitabilityPeriod);
+                  
                   return (
                     <Card
                       key={portfolio.id}
@@ -599,29 +649,49 @@ export function PlatformDiscover() {
                         justifyContent: 'flex-end',
                         padding: '12px',
                       }}>
-                        {/* Menu Button */}
-                        <button
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '6px',
-                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                            border: 'none',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 1)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-                          }}
-                        >
-                          <MoreHorizontal className="h-4 w-4" style={{ color: '#374151' }} />
-                        </button>
+                        {/* Trending Label or Menu Button */}
+                        {(() => {
+                          const desc = truncateDescription(portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150);
+                          if (desc.isTruncated) {
+                            return (
+                              <span style={{
+                                fontSize: isMobile ? '11px' : '12px',
+                                color: '#6b7280',
+                                fontWeight: '500',
+                                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                display: 'inline-block',
+                              }}>
+                                Trending
+                              </span>
+                            );
+                          }
+                          return (
+                            <button
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                border: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 1)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+                              }}
+                            >
+                              <MoreHorizontal className="h-4 w-4" style={{ color: '#374151' }} />
+                            </button>
+                          );
+                        })()}
                       </div>
                       
                       <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
@@ -644,7 +714,10 @@ export function PlatformDiscover() {
                           lineHeight: '1.5',
                           minHeight: '40px',
                         }}>
-                          {portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.'}
+                          {(() => {
+                            const desc = truncateDescription(portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150);
+                            return desc.text;
+                          })()}
                         </p>
                         
                         {/* Return */}
@@ -654,64 +727,8 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             color: isPositive ? '#10b981' : '#ef4444',
                           }}>
-                            {isPositive ? '+' : ''}{return12M.toFixed(2)}% RETURN (12M)
+                            {isPositive ? '+' : ''}{return12M.toFixed(2)}% RETURN ({roiTime})
                           </div>
-                        </div>
-                        
-                        {/* Underlying Assets Icons */}
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          marginBottom: '16px',
-                          
-                        }}>
-                          <div style={{
-                            display: 'flex',
-                            gap: '-4px',
-                            alignItems: 'center',
-                          }}>
-                            {/* Placeholder icons */}
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              backgroundColor: '#e5e7eb',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              color: '#374151',
-                              border: '2px solid white',
-                              marginLeft: '-8px',
-                            }}>
-                              {portfolio.name?.substring(0, 1).toUpperCase() || 'A'}
-                            </div>
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              backgroundColor: '#dbeafe',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              color: '#1e40af',
-                              border: '2px solid white',
-                              marginLeft: '-8px',
-                            }}>
-                              {portfolio.name?.substring(1, 2).toUpperCase() || 'B'}
-                            </div>
-                          </div>
-                          <span style={{
-                            fontSize: '12px',
-                            color: '#6b7280',
-                            fontWeight: '500',
-                          }}>
-                            +{Math.max(0, (portfolio.id?.charCodeAt(0) || 0) % 30 + 3)} MORE
-                          </span>
                         </div>
                       </CardContent>
                     </Card>

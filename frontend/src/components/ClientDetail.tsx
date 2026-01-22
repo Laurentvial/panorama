@@ -302,7 +302,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Portfolio Tab */}
         <TabsContent value="portfolio">
-          <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
+          <ClientPortfolioTab client={client} clientId={clientId} transactions={transactions} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Notes Tab */}

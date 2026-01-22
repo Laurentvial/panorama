@@ -6,6 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { clientSignIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
@@ -13,6 +14,7 @@ import '../styles/LoginPage.css';
 export function LoginPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
+  const { settings, loading: settingsLoading } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -52,7 +54,27 @@ export function LoginPage() {
     <div className="login-page-container">
       <Card className="login-card">
         <CardHeader className="login-card-header">
-          <CardTitle>Panorama</CardTitle>
+          {!settingsLoading && settings?.logo_url ? (
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'center', 
+              marginBottom: '1rem' 
+            }}>
+              <img 
+                src={settings.logo_url} 
+                alt="Logo" 
+                style={{ 
+                  maxHeight: '60px', 
+                  maxWidth: '200px', 
+                  objectFit: 'contain' 
+                }} 
+                onError={(e) => {
+                  // If logo fails to load, hide the image and show nothing (or fallback)
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </div>
+          ) : null}
           <CardDescription>
             Connectez-vous à votre compte client
           </CardDescription>

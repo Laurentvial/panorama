@@ -80,7 +80,7 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
     <aside className="sidebar">
       <nav className="sidebar-nav">
         {visibleItems.map((item) => {
-          const Icon = item.icon;
+          const Icon = item.icon as React.ComponentType<{ className?: string }>;
           const isActive = location.pathname === item.path || currentPage === item.id;
           
           return (
