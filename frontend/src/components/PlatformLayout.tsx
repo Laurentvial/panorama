@@ -4,7 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { signOut } from '../utils/auth';
-import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X } from '../utils/iconMapping';
+import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { CookieBanner } from './CookieBanner';
@@ -12,6 +12,7 @@ import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile } from './ui/use-mobile';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformButtons.css';
+import '../styles/PlatformInputs.css';
 
 interface PlatformLayoutProps {
   children: React.ReactNode;
@@ -28,6 +29,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
     '#030213';
+  const platformPrimaryBg = (settings?.primary_color || '').trim() || '#030213';
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -57,7 +59,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Tableau de bord', icon: Home, path: '/platform' },
     { id: 'portfolio', label: 'Portefeuille', icon: Wallet, path: '/platform/portfolio' },
-    { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/trading' },
+    { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/funds' },
     { id: 'discover', label: 'Découvrir', icon: Compass, path: '/platform/discover' },
   ];
 
@@ -68,8 +70,16 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     }
   };
 
+  const handleFundsAction = (movement: 'depot' | 'retrait') => {
+    navigate(`/platform/funds?movement=${movement}`);
+    if (showBottomNav) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <div
+      className="platform-root"
       style={{
         minHeight: '100vh',
         backgroundColor: 'var(--accent)',
@@ -302,31 +312,93 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   );
                 })}
 
-                {/* Logout as a "page" in the sidebar */}
+                {/* Funds shortcuts */}
                 <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb' }} />
-                <button
-                  onClick={async () => {
-                    if (showBottomNav) setSidebarOpen(false);
-                    await handleLogout();
-                  }}
+                <div
                   style={{
-                    width: '100%',
-                    padding: isMobile ? '12px 20px' : '16px 30px',
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: isMobile ? '12px' : '16px',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontSize: isMobile ? '16px' : '18px',
-                    color: '#ef4444',
-                    fontWeight: 600,
+                    gap: 10,
+                    marginLeft: isMobile ? 20 : 30,
+                    marginRight: isMobile ? 20 : 30,
+                    marginTop: 12,
                   }}
                 >
-                  <LogOut size={isMobile ? 20 : 24} />
-                  Déconnexion
-                </button>
+                  <button
+                    onClick={() => handleFundsAction('depot')}
+                    style={{
+                      flex: 1,
+                      height: 44,
+                      padding: '0 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 10,
+                      backgroundColor: platformButtonBg,
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: isMobile ? '15px' : '16px',
+                      color: 'white',
+                      fontWeight: 500,
+                      borderRadius: 12,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <ArrowDown size={isMobile ? 18 : 20} />
+                    Déposer des fonds
+                  </button>
+                  <button
+                    onClick={() => handleFundsAction('retrait')}
+                    style={{
+                      width: 48,
+                      height: 44,
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 10,
+                      backgroundColor: platformPrimaryBg,
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: isMobile ? '15px' : '16px',
+                      color: 'white',
+                      fontWeight: 500,
+                      borderRadius: 12,
+                      whiteSpace: 'nowrap',
+                    }}
+                    aria-label="Retrait"
+                  >
+                    <ArrowUp size={isMobile ? 18 : 20} />
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (showBottomNav) setSidebarOpen(false);
+                      await handleLogout();
+                    }}
+                    style={{
+                      width: 48,
+                      height: 44,
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #fecaca',
+                      cursor: 'pointer',
+                      color: '#ef4444',
+                      borderRadius: 12,
+                    }}
+                    aria-label="Déconnexion"
+                    title="Déconnexion"
+                  >
+                    <LogOut size={isMobile ? 18 : 20} />
+                  </button>
+                </div>
+
+                {/* Logout as a "page" in the sidebar */}
+                <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb' }} />
               </nav>
             </>
           )}

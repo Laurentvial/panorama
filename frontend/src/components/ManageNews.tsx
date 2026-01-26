@@ -25,6 +25,8 @@ export function ManageNews() {
   const [formData, setFormData] = useState({
     title: '',
     content: '',
+    sourceName: '',
+    articleUrl: '',
     image: null as File | null,
     published: true
   });
@@ -143,6 +145,8 @@ export function ManageNews() {
       setFormData({
         title: post.title || '',
         content: post.content || '',
+        sourceName: post.sourceName || '',
+        articleUrl: post.articleUrl || '',
         image: null,
         published: post.published !== false
       });
@@ -153,6 +157,8 @@ export function ManageNews() {
       setFormData({
         title: '',
         content: '',
+        sourceName: '',
+        articleUrl: '',
         image: null,
         published: true
       });
@@ -168,6 +174,8 @@ export function ManageNews() {
     setFormData({
       title: '',
       content: '',
+      sourceName: '',
+      articleUrl: '',
       image: null,
       published: true
     });
@@ -181,6 +189,8 @@ export function ManageNews() {
       const formDataToSend = new FormData();
       formDataToSend.append('title', formData.title);
       formDataToSend.append('content', formData.content);
+      formDataToSend.append('sourceName', formData.sourceName);
+      formDataToSend.append('articleUrl', formData.articleUrl);
       formDataToSend.append('published', formData.published.toString());
       if (formData.image) {
         formDataToSend.append('image', formData.image);
@@ -398,6 +408,24 @@ export function ManageNews() {
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="sourceName">Source (site)</Label>
+                <Input
+                  id="sourceName"
+                  value={formData.sourceName}
+                  onChange={(e) => setFormData({ ...formData, sourceName: e.target.value })}
+                  placeholder="Ex: Les Echos"
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="articleUrl">Lien de l'article</Label>
+                <Input
+                  id="articleUrl"
+                  value={formData.articleUrl}
+                  onChange={(e) => setFormData({ ...formData, articleUrl: e.target.value })}
+                  placeholder="https://..."
                 />
               </div>
               <div className="modal-form-field">

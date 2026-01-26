@@ -4903,19 +4903,48 @@ def news_fetch_from_api(request):
     """Récupérer les actualités financières depuis NewsAPI"""
     import requests
     import os
+    from datetime import datetime, timedelta
     
     news_api_key = os.getenv('NEWS_API_KEY', '')
     if not news_api_key:
         return Response({'error': 'NewsAPI key not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     try:
-        # Fetch finance-related news (more specific than economy)
+        # Fetch finance/investing-focused news and reduce noise.
+        # Strategy:
+        # - Use a finance-oriented query (FR + EN keywords)
+        # - Restrict to reputable business/finance domains
+        # - Search in title/description only (less spammy than full content)
+        # - Limit to recent articles
         url = 'https://newsapi.org/v2/everything'
+        from_date = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+        # You can override domains and query via query params if needed (admin use).
+        domains = request.GET.get('domains', '') or (
+            'lesechos.fr,latribune.fr,boursorama.com,capital.fr,challenges.fr,investir.lesechos.fr,zonebourse.com,'
+            'reuters.com,bloomberg.com,ft.com,wsj.com,institutional-investor.com,cointelegraph.com,cointribune.com'
+        )
+
+        q = request.GET.get('q', '') or (
+            '('
+            'bourse OR marchés OR actions OR obligations OR taux OR inflation OR '
+            'banque OR \"banque centrale\" OR \"politique monétaire\" OR '
+            'investissement OR \"gestion de patrimoine\" OR portefeuille OR '
+            'ETF OR dividende OR résultats OR \"marchés financiers\" OR '
+            'crypto OR bitcoin OR ethereum OR '
+            'finance OR financial OR investment OR \"stock market\" OR trading OR banking'
+            ')'
+            ' AND NOT (sport OR football OR tennis OR recette OR cuisine OR people OR cinéma OR série OR météo)'
+        )
+
         params = {
-            'q': 'finance OR financial OR investment OR stock market OR trading OR banking OR portfolio OR asset management OR wealth management',
+            'q': q,
             'language': 'fr',
+            'searchIn': 'title,description',
+            'domains': domains,
+            'from': from_date,
             'sortBy': 'publishedAt',
-            'pageSize': 20,
+            'pageSize': int(request.GET.get('pageSize', 30)),
             'apiKey': news_api_key
         }
         

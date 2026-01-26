@@ -1,0 +1,19 @@
+.platform-root [data-slot='input'] {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(2, 6, 23, 0.22);
+  border-radius: 0;
+  padding: 0.7rem 0 0.55rem;
+  box-shadow: none;
+}
+
+.platform-root [data-slot='input']:focus,
+.platform-root [data-slot='input']:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent, var(--primary, #030213));
+  box-shadow: none;
+}
+
+.platform-root [data-slot='input'][aria-invalid='true'] {
+  border-bottom-color: rgb(220 38 38);
+}

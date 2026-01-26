@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
+import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
 
@@ -11,10 +12,51 @@ export function PlatformPortfolio() {
   const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
+  const ORDERS_PAGE_SIZE = 10;
+  const TRANSACTIONS_PAGE_SIZE = 10;
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [transactionsPage, setTransactionsPage] = useState(1);
 
   const visiblePositions = useMemo(() => {
     return (positions || []).filter((p: any) => p?.status !== 'pending');
   }, [positions]);
+
+  // Pagination helpers
+  const clampPage = (page: number, totalPages: number) => Math.min(Math.max(1, page), Math.max(1, totalPages));
+
+  const ordersPagination = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil((visiblePositions || []).length / ORDERS_PAGE_SIZE));
+    const safePage = clampPage(ordersPage, totalPages);
+    const start = (safePage - 1) * ORDERS_PAGE_SIZE;
+    return {
+      page: safePage,
+      totalPages,
+      items: (visiblePositions || []).slice(start, start + ORDERS_PAGE_SIZE),
+    };
+  }, [visiblePositions, ordersPage]);
+
+  const transactionsPagination = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil((transactions || []).length / TRANSACTIONS_PAGE_SIZE));
+    const safePage = clampPage(transactionsPage, totalPages);
+    const start = (safePage - 1) * TRANSACTIONS_PAGE_SIZE;
+    return {
+      page: safePage,
+      totalPages,
+      items: (transactions || []).slice(start, start + TRANSACTIONS_PAGE_SIZE),
+    };
+  }, [transactions, transactionsPage]);
+
+  // If the dataset shrinks, keep page in range
+  useEffect(() => {
+    setOrdersPage((p) => clampPage(p, Math.max(1, Math.ceil((visiblePositions || []).length / ORDERS_PAGE_SIZE))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visiblePositions.length]);
+
+  useEffect(() => {
+    setTransactionsPage((p) => clampPage(p, Math.max(1, Math.ceil((transactions || []).length / TRANSACTIONS_PAGE_SIZE))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions.length]);
 
   useEffect(() => {
     if (currentUser && currentUser.id) {
@@ -113,13 +155,61 @@ export function PlatformPortfolio() {
       return tb > ta ? b : a;
     };
 
+    // Invested amount must be based on transactions (not positions)
+    // Strategy: use completed transactions only, and sum amounts that represent
+    // "balance -> product" investments per product.
+    const investedByProduct = new Map<string, number>();
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    for (const t of completedTransactions) {
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amt = Number.isFinite(amountNum) ? amountNum : 0;
+      if (!amt) continue;
+
+      const type = String(t?.type || '');
+
+      // Transfer direction fields can come from several aliases (serializer exposes from/to and from_field/to_field)
+      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+
+      // product id can be on productId, to_field/to, from_field/from, or subscription_details.productId
+      const productId =
+        (t?.productId != null ? String(t.productId) : null) ||
+        (to != null ? String(to) : null) ||
+        (from != null ? String(from) : null) ||
+        (t?.subscription_details?.productId != null ? String(t.subscription_details.productId) : null);
+
+      if (!productId || productId === 'balance') continue;
+
+      // Invested amount per product should reflect net investment based on completed transactions:
+      // - achat / investissement: +amount
+      // - transfert: balance -> product: +amount ; product -> balance: -amount
+      // Note: we intentionally don't adjust for 'vente' here because the current UI expects
+      // "Investi" based on cash movements into/out of the product.
+      if (type === 'achat' || type === 'investissement') {
+        investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
+      } else if (type === 'transfert') {
+        const toIsBalance = to != null && String(to) === 'balance';
+        const fromIsBalance = from != null && String(from) === 'balance';
+
+        if (!toIsBalance && fromIsBalance) {
+          // balance -> product
+          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
+        } else if (toIsBalance && !fromIsBalance) {
+          // product -> balance (disinvestment)
+          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) - amt);
+        } else if (!toIsBalance && !fromIsBalance) {
+          // product -> product: keep direction as "invested into destination"
+          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
+        }
+      }
+    }
+
     for (const p of visiblePositions || []) {
       const productId = String(p.productId || p.product_id || '—');
       const productName = p.productName || p.product_name || productId;
       const productType = p.productType || p.product_type || p.product?.type || '';
       const productReference = p.productReference || p.product_reference || p.product?.reference || '';
 
-      const invested = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
       const profitLossNum =
         p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
       const investedNum = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
@@ -155,7 +245,7 @@ export function PlatformPortfolio() {
         productName,
         productType,
         productReference,
-        totalInvested: prev.totalInvested + (Number.isFinite(invested) ? invested : 0),
+        totalInvested: investedByProduct.get(productId) || prev.totalInvested || 0,
         realizedPnl: prev.realizedPnl + (p.status === 'open' || p.status === 'done' ? positionPnl : 0),
         latestDateIso: pickLatestIso(prev.latestDateIso, latestIso),
       };
@@ -164,7 +254,7 @@ export function PlatformPortfolio() {
     }
 
     return Array.from(map.values()).sort((a, b) => b.totalInvested - a.totalInvested);
-  }, [visiblePositions]);
+  }, [visiblePositions, transactions]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -294,15 +384,13 @@ export function PlatformPortfolio() {
 
   return (
     <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
-      <h1 className="platform-page-title" style={{ marginBottom: '30px' }}>Mon Portefeuille</h1>
-
       {loading ? (
         <div>Chargement...</div>
       ) : (
         <>
           {/* Summary Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Liquidités Disponibles</CardTitle>
                 <Wallet className="h-4 w-4 text-muted-foreground" />
@@ -315,7 +403,7 @@ export function PlatformPortfolio() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Investi</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -328,7 +416,7 @@ export function PlatformPortfolio() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Bénéfices / Perte</CardTitle>
                 {isProfit ? (
@@ -350,7 +438,7 @@ export function PlatformPortfolio() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Valeur du Portefeuille</CardTitle>
                 <PieChart className="h-4 w-4 text-muted-foreground" />
@@ -363,7 +451,7 @@ export function PlatformPortfolio() {
           </div>
 
           {/* Actifs détenus */}
-          <Card style={{ marginBottom: '30px' }}>
+          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
               <CardTitle>Actifs détenus</CardTitle>
               <CardDescription>Produits détenus</CardDescription>
@@ -375,7 +463,6 @@ export function PlatformPortfolio() {
                 <>
                   {holdingsByProduct.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Produits détenus</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {holdingsByProduct.map((h) => {
                           const pnlColor = h.realizedPnl >= 0 ? '#10b981' : '#ef4444';
@@ -425,69 +512,8 @@ export function PlatformPortfolio() {
             </CardContent>
           </Card>
 
-          {/* Ordres (positions) */}
-          <Card style={{ marginBottom: '30px' }}>
-            <CardHeader>
-              <CardTitle>Ordres</CardTitle>
-              <CardDescription>Vos achats/ventes et mouvements</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {visiblePositions.length === 0 ? (
-                <p>Aucun ordre</p>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visiblePositions.map((p: any) => {
-                        const investedNum =
-                          typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
-                        const pnlNum =
-                          p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
-                        const pnlColor = pnlNum == null ? '#111827' : pnlNum >= 0 ? '#10b981' : '#ef4444';
-                        const statusLabel =
-                          p.status === 'open'
-                            ? 'Ouverte'
-                            : p.status === 'done'
-                              ? 'Fermée'
-                              : p.status === 'cancelled'
-                                ? 'Annulée'
-                                : p.status || '-';
-                        const productLabel = p.productName || p.productId || '-';
-                        const productType = p.productType || p.product_type || '';
-                        return (
-                          <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{productType || '-'}</td>
-                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatPositionRange(p)}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>
-                              {Number.isFinite(investedNum) ? formatCurrency(investedNum) : '-'}
-                            </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
-                              {p.profit_loss == null ? '-' : formatCurrency(p.profit_loss)}
-                            </td>
-                            <td style={{ padding: '10px 8px' }}>{statusLabel}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           {/* Transactions */}
-          <Card style={{ marginBottom: '30px' }}>
+          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
               <CardTitle>Transactions</CardTitle>
               <CardDescription>Historique des transactions</CardDescription>
@@ -496,8 +522,9 @@ export function PlatformPortfolio() {
               {transactions.length === 0 ? (
                 <p>Aucune transaction</p>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
@@ -507,7 +534,7 @@ export function PlatformPortfolio() {
                       </tr>
                     </thead>
                     <tbody>
-                      {transactions.map((t: any) => {
+                      {transactionsPagination.items.map((t: any) => {
                         const typeLabel =
                           t.type === 'depot'
                             ? 'Dépôt'
@@ -541,8 +568,132 @@ export function PlatformPortfolio() {
                         );
                       })}
                     </tbody>
-                  </table>
-                </div>
+                    </table>
+                  </div>
+
+                  {transactions.length > TRANSACTIONS_PAGE_SIZE && (
+                    <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                        Page {transactionsPagination.page} / {transactionsPagination.totalPages}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={transactionsPagination.page <= 1}
+                          onClick={() => setTransactionsPage((p) => Math.max(1, p - 1))}
+                        >
+                          Précédent
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={transactionsPagination.page >= transactionsPagination.totalPages}
+                          onClick={() => setTransactionsPage((p) => p + 1)}
+                        >
+                          Suivant
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Ordres (positions) */}
+          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
+            <CardHeader>
+              <CardTitle>Ordres</CardTitle>
+              <CardDescription>Vos achats/ventes et mouvements</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {visiblePositions.length === 0 ? (
+                <p>Aucun ordre</p>
+              ) : (
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date d'ouverture</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date de fermeture</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ordersPagination.items.map((p: any) => {
+                        const investedNum =
+                          typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+                        const pnlNum =
+                          p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+                        const pnlColor = pnlNum == null ? '#111827' : pnlNum >= 0 ? '#10b981' : '#ef4444';
+                        const statusLabel =
+                          p.status === 'open'
+                            ? 'Ouverte'
+                            : p.status === 'done'
+                              ? 'Fermée'
+                              : p.status === 'cancelled'
+                                ? 'Annulée'
+                                : p.status || '-';
+                        const productLabel = p.productName || p.productId || '-';
+                        const productType = p.productType || p.product_type || '';
+                        const openedLabel = p.opened_at
+                          ? formatDateTime(p.opened_at)
+                          : p.period_date
+                            ? formatDateTime(p.period_date)
+                            : '-';
+                        const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
+                        return (
+                          <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{productType || '-'}</td>
+                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{openedLabel}</td>
+                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{closedLabel}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>
+                              {Number.isFinite(investedNum) ? formatCurrency(investedNum) : '-'}
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
+                              {p.profit_loss == null ? '-' : formatCurrency(p.profit_loss)}
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>{statusLabel}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    </table>
+                  </div>
+
+                  {visiblePositions.length > ORDERS_PAGE_SIZE && (
+                    <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                        Page {ordersPagination.page} / {ordersPagination.totalPages}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={ordersPagination.page <= 1}
+                          onClick={() => setOrdersPage((p) => Math.max(1, p - 1))}
+                        >
+                          Précédent
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={ordersPagination.page >= ordersPagination.totalPages}
+                          onClick={() => setOrdersPage((p) => p + 1)}
+                        >
+                          Suivant
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

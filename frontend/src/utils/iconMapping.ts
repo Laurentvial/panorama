@@ -13,6 +13,8 @@ export {
   HiOutlineMail as Mail,
   HiOutlineTrendingUp as TrendingUp,
   HiOutlineTrendingDown as TrendingDown,
+  HiOutlineArrowDown as ArrowDown,
+  HiOutlineArrowUp as ArrowUp,
   HiOutlineCube as Package,
   // HiOutlineWallet as Wallet, // HiOutlineWallet does not exist in react-icons/hi
   HiOutlineLink as LinkIcon,

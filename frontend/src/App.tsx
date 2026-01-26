@@ -267,7 +267,11 @@ function App() {
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
-                    <Route path="/platform/trading" element={
+                    {/* Legacy route redirect */}
+                    <Route path="/platform/trading" element={<Navigate to="/platform/funds" replace />} />
+                    <Route path="/platform/trading/*" element={<Navigate to="/platform/funds" replace />} />
+
+                    <Route path="/platform/funds" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
                                 <PlatformLayout>

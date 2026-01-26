@@ -15,6 +15,8 @@ export function PlatformDashboard() {
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
   const [visibleNewsCount, setVisibleNewsCount] = useState(5);
   const [assets, setAssets] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [positions, setPositions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [newsLoading, setNewsLoading] = useState(true);
 
@@ -23,13 +25,21 @@ export function PlatformDashboard() {
     try {
       setLoading(true);
       // Load all transactions
-      const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/`);
-      const allTransactionsList = transactionsResponse.transactions || [];
-      setAllTransactions(allTransactionsList);
+      const [transactionsResponse, allAssetsResponse, productsResponse, positionsResponse] = await Promise.all([
+        apiCall(`/api/clients/${currentUser.id}/transactions/`),
+        apiCall('/api/assets/'),
+        apiCall('/api/products/'),
+        apiCall(`/api/clients/${currentUser.id}/positions/`),
+      ]);
 
-      // Load all assets for gainers/losers
-      const allAssetsResponse = await apiCall('/api/assets/');
+      setAllTransactions(transactionsResponse.transactions || []);
       setAssets(allAssetsResponse.assets || []);
+      // Ensure `products` is always an array.
+      // Some backends return `{ products: [...] }` while others return an object without `products`.
+      // Falling back to the whole response object breaks `.find()` calls downstream.
+      const rawProducts = (productsResponse as any)?.products;
+      setProducts(Array.isArray(rawProducts) ? rawProducts : Array.isArray(productsResponse) ? (productsResponse as any) : []);
+      setPositions((positionsResponse as any)?.positions || []);
     } catch (error: any) {
       // If it's a redirect error, don't log it - page is navigating away
       if (error?.isRedirecting) {
@@ -82,6 +92,20 @@ export function PlatformDashboard() {
     }
   };
 
+  const getWebsiteNameFromUrl = (url?: string) => {
+    if (!url) return '';
+    try {
+      const host = new URL(url).hostname;
+      return host.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  };
+
+  const getAssetLogoUrl = (asset: any): string => {
+    return (asset?.logoUrl || asset?.logo_url || '').toString();
+  };
+
   useEffect(() => {
     if (currentUser && currentUser.id) {
       loadDashboardData();
@@ -96,36 +120,222 @@ export function PlatformDashboard() {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const tradingPortfolio = parseFinancialValue(currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0);
+  // Stats: align with "Mon Portefeuille" (PlatformPortfolio)
+  const calculatedValues = React.useMemo(() => {
+    let calculatedInvestedCapital = 0;
+    let calculatedTradingPortfolio = 0;
 
-  const calculateProfitLoss = () => {
-    let profitLoss = 0;
-    (allTransactions || []).forEach((transaction: any) => {
+    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'termine');
+
+    for (const transaction of completedTransactions) {
       const amount = parseFinancialValue(transaction?.amount);
       switch (transaction?.type) {
+        case 'depot':
+          calculatedInvestedCapital += amount;
+          break;
+        case 'retrait':
+          calculatedInvestedCapital -= amount;
+          break;
+        case 'bonus':
+          calculatedInvestedCapital += amount;
+          break;
         case 'achat':
-          profitLoss -= amount;
+        case 'investissement':
+          calculatedTradingPortfolio += amount;
           break;
         case 'vente':
-          profitLoss += amount;
+          calculatedTradingPortfolio -= amount;
           break;
-        case 'interets':
-        case 'bonus':
-          profitLoss += amount;
+        case 'transfert': {
+          const transferTo = transaction?.to || transaction?.to_field || transaction?.transfer_to || null;
+          const hasProductId = Boolean(transaction?.productId);
+          if (transferTo && transferTo !== 'balance') {
+            // balance -> product
+            calculatedTradingPortfolio += amount;
+          } else if (transferTo === 'balance') {
+            // product -> balance
+            calculatedTradingPortfolio -= amount;
+          } else if (hasProductId) {
+            // Fallback: assume subscription (balance -> product)
+            calculatedTradingPortfolio += amount;
+          }
           break;
-        case 'frais':
-        case 'perte':
-          profitLoss -= amount;
-          break;
+        }
         default:
           break;
       }
-    });
-    return profitLoss;
-  };
+    }
 
-  const profitLoss = calculateProfitLoss();
-  const portfolioValue = tradingPortfolio + profitLoss;
+    return {
+      investedCapital: calculatedInvestedCapital,
+      tradingPortfolio: Math.max(0, calculatedTradingPortfolio),
+      hasCompletedTransactions: completedTransactions.length > 0,
+    };
+  }, [allTransactions]);
+
+  const investedCapital = React.useMemo(
+    () =>
+      calculatedValues.hasCompletedTransactions
+        ? calculatedValues.investedCapital
+        : parseFinancialValue(currentUser?.investedCapital || currentUser?.invested_capital || 0),
+    [
+      calculatedValues.hasCompletedTransactions,
+      calculatedValues.investedCapital,
+      currentUser?.investedCapital,
+      currentUser?.invested_capital,
+    ]
+  );
+
+  const tradingPortfolio = React.useMemo(
+    () =>
+      calculatedValues.hasCompletedTransactions
+        ? calculatedValues.tradingPortfolio
+        : parseFinancialValue(currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0),
+    [
+      calculatedValues.hasCompletedTransactions,
+      calculatedValues.tradingPortfolio,
+      currentUser?.tradingPortfolio,
+      currentUser?.trading_portfolio,
+    ]
+  );
+
+  const profitLoss = React.useMemo(() => {
+    let total = 0;
+    for (const p of positions || []) {
+      if (p?.status !== 'open' && p?.status !== 'done') continue;
+
+      const profitLossNum =
+        p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+
+      let positionPnl = 0;
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        positionPnl = profitLossNum;
+      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        positionPnl = expectedTotalNum - investedNum;
+      }
+
+      total += Number.isFinite(positionPnl) ? positionPnl : 0;
+    }
+    return total;
+  }, [positions]);
+
+  const availableFunds = React.useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
+
+  // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
+  const allocationByType = React.useMemo(() => {
+    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'termine');
+
+    const productTypeById = (productId: any): string | null => {
+      if (!productId) return null;
+      const id = String(productId);
+      const p = (products || []).find((x: any) => String(x?.id) === id);
+      return (p?.type || p?.subcategory || p?.categoryName || p?.category || null) as any;
+    };
+
+    const assetTypeById = (assetId: any): string | null => {
+      if (!assetId) return null;
+      const id = String(assetId);
+      const a = (assets || []).find((x: any) => String(x?.id) === id);
+      return (a?.type || a?.subcategory || null) as any;
+    };
+
+    const resolveTypeLabel = (t: any, fallbackProductId?: any): string => {
+      // 1) If transaction references an asset, prefer its type
+      const assetType = assetTypeById(t?.assetId || t?.asset_id || t?.asset) || assetTypeById(t?.asset?.id);
+      if (assetType) return String(assetType);
+
+      // 2) If transaction references a product, use product.type
+      const pid = t?.productId || t?.product_id || t?.product?.id || fallbackProductId || null;
+      const productType = productTypeById(pid);
+      if (productType) return String(productType);
+
+      // 3) Fallback to subscription_details.category when available
+      const cat = t?.subscription_details?.category || t?.category || null;
+      if (cat) return String(cat);
+
+      return 'Autre';
+    };
+
+    const totals = new Map<string, number>();
+
+    for (const t of completedTransactions) {
+      const amount = parseFinancialValue(t?.amount);
+      if (!amount) continue;
+
+      // Transfer direction fields can come from several aliases (serializer exposes from/to and from_field/to_field)
+      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+
+      // What counts for "portfolio allocation" is the product/asset side, not deposits/withdrawals.
+      // - transfert: balance → product (invest) / product → balance (withdraw)
+      // - achat / investissement: invest
+      // - vente: disinvest (if resolvable)
+      let delta = 0;
+      let typeLabel: string | null = null;
+
+      if (t?.type === 'transfert') {
+        if (to && String(to) !== 'balance') {
+          // balance -> product
+          delta = amount;
+          typeLabel = resolveTypeLabel(t, to);
+        } else if (to && String(to) === 'balance') {
+          // product -> balance
+          const productId = from && String(from) !== 'balance' ? from : t?.productId || null;
+          delta = -amount;
+          typeLabel = resolveTypeLabel(t, productId);
+        } else {
+          // Best-effort fallback: treat as investment into linked product
+          delta = amount;
+          typeLabel = resolveTypeLabel(t);
+        }
+      } else if (t?.type === 'achat' || t?.type === 'investissement') {
+        delta = amount;
+        typeLabel = resolveTypeLabel(t);
+      } else if (t?.type === 'vente') {
+        delta = -amount;
+        typeLabel = resolveTypeLabel(t);
+      } else {
+        continue;
+      }
+
+      const key = String(typeLabel || 'Autre');
+      totals.set(key, (totals.get(key) || 0) + delta);
+    }
+
+    // Ajouter la balance (fonds disponibles)
+    const cash = Math.max(0, parseFinancialValue(availableFunds));
+    if (cash > 0) {
+      totals.set('Balance', (totals.get('Balance') || 0) + cash);
+    }
+
+    // Clamp negatives to 0 (cannot display negative allocation)
+    const items = Array.from(totals.entries())
+      .map(([type, value]) => ({ type, value: Math.max(0, value) }))
+      .filter((it) => it.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    const total = items.reduce((sum, it) => sum + it.value, 0);
+
+    const palette = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#64748b'];
+    const colorForIndex = (i: number) => palette[i % palette.length];
+
+    return {
+      total,
+      segments: items.map((it, idx) => ({
+        ...it,
+        pct: total > 0 ? (it.value / total) * 100 : 0,
+        color: colorForIndex(idx),
+      })),
+    };
+  }, [allTransactions, products, assets, availableFunds]);
+
+  const portfolioValue = React.useMemo(
+    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
+    [availableFunds, tradingPortfolio, profitLoss]
+  );
   const isProfit = profitLoss >= 0;
 
   // Calculate gainers and losers
@@ -291,11 +501,13 @@ export function PlatformDashboard() {
             marginBottom: isMobile ? '20px' : '30px' 
           }}>
             <Card style={roundedCardStyle}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>
-                  Valeur du Portefeuille
-                </CardTitle>
-                <PieChart className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+              <CardHeader>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>
+                    Valeur du Portefeuille
+                  </CardTitle>
+                  <PieChart className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '22px' : '28px' }}>
@@ -304,7 +516,53 @@ export function PlatformDashboard() {
                 <div style={{ marginTop: 6, fontSize: isMobile ? '12px' : '13px', color: isProfit ? '#10b981' : '#ef4444' }}>
                   {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <div style={{ marginTop: 12 }}>
+
+                {allocationByType.total > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div
+                      style={{
+                        width: '100%',
+                        height: isMobile ? 10 : 12,
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                        backgroundColor: '#eef2f7',
+                        display: 'flex',
+                      }}
+                      aria-label="Répartition du portefeuille par type d'actif"
+                    >
+                      {allocationByType.segments.map((seg) => (
+                        <div
+                          key={seg.type}
+                          title={`${seg.type} • ${seg.pct.toFixed(0)}%`}
+                          style={{
+                            width: `${seg.pct}%`,
+                            backgroundColor: seg.color,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        fontSize: isMobile ? 11 : 12,
+                        color: '#6b7280',
+                      }}
+                    >
+                      {allocationByType.segments.slice(0, 6).map((seg) => (
+                        <div key={seg.type} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: seg.color }} />
+                          <span>
+                            {seg.type} {seg.pct.toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                   <Button
                     variant="platform"
                     onClick={() => navigate('/platform/portfolio')}
@@ -382,20 +640,37 @@ export function PlatformDashboard() {
                         <div style={{ 
                           display: 'flex', 
                           justifyContent: 'space-between', 
-                          alignItems: 'center', 
+                          alignItems: 'flex-start', 
                           fontSize: isMobile ? '11px' : '12px', 
                           color: '#9ca3af',
                           flexWrap: 'wrap',
                           gap: isMobile ? '8px' : '0',
                         }}>
-                          <span>Par {post.authorName || 'Admin'}</span>
-                          <span>
-                            {new Date(post.createdAt).toLocaleDateString('fr-FR', {
-                              day: '2-digit',
-                              month: 'long',
-                              year: 'numeric',
-                            })}
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span>
+                              Par {post.sourceName || getWebsiteNameFromUrl(post.articleUrl) || 'Admin'}
+                            </span>
+                            <span>
+                              {new Date(post.createdAt).toLocaleDateString('fr-FR', {
+                                day: '2-digit',
+                                month: 'long',
+                                year: 'numeric',
+                              })}
+                            </span>
+                          </div>
+
+                          {post.articleUrl ? (
+                            <Button
+                              type="button"
+                              variant="platform"
+                              onClick={() => window.open(post.articleUrl, '_blank', 'noopener,noreferrer')}
+                              style={{ borderRadius: 12 }}
+                            >
+                              Lire plus
+                            </Button>
+                          ) : (
+                            <div />
+                          )}
                         </div>
                       </div>
                     ))}
@@ -435,6 +710,7 @@ export function PlatformDashboard() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '10px' : '12px' }}>
                       {gainers.map((asset: any) => {
                         const changePercent = parseFinancialValue(asset.priceChangePercent);
+                        const logoUrl = getAssetLogoUrl(asset);
                         return (
                           <div
                             key={asset.id}
@@ -449,42 +725,61 @@ export function PlatformDashboard() {
                               display: 'flex', 
                               justifyContent: 'space-between', 
                               alignItems: 'center', 
-                              marginBottom: '4px',
                               flexWrap: 'wrap',
-                              gap: '4px',
+                              gap: '8px',
                             }}>
-                              <div style={{ 
-                                fontWeight: '600', 
-                                fontSize: isMobile ? '13px' : '14px',
-                                wordBreak: 'break-word',
-                              }}>{asset.name}</div>
-                              <div style={{ 
-                                fontSize: isMobile ? '13px' : '14px', 
-                                fontWeight: '600', 
-                                color: '#10b981',
-                                flexShrink: 0,
-                              }}>
-                                +{changePercent.toFixed(2)}%
+                              <div style={{ display: 'flex', gap: logoUrl ? '10px' : '0', alignItems: 'center', minWidth: 0 }}>
+                                {logoUrl ? (
+                                  <img
+                                    src={logoUrl}
+                                    alt={asset.name ? `Logo ${asset.name}` : 'Logo'}
+                                    style={{
+                                      width: isMobile ? '30px' : '34px',
+                                      height: isMobile ? '30px' : '34px',
+                                      borderRadius: '10px',
+                                      objectFit: 'contain',
+                                      display: 'block',
+                                      flexShrink: 0,
+                                      backgroundColor: '#ffffff',
+                                      border: '1px solid #e5e7eb',
+                                    }}
+                                    loading="lazy"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : null}
+                                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                  <div style={{ 
+                                    fontWeight: '600', 
+                                    fontSize: isMobile ? '13px' : '14px',
+                                    wordBreak: 'break-word',
+                                  }}>{asset.name}</div>
+                                  <div style={{ 
+                                    fontSize: isMobile ? '11px' : '12px', 
+                                    color: '#6b7280',
+                                    marginTop: 2,
+                                    wordBreak: 'break-word',
+                                  }}>
+                                    {asset.type}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                            <div style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              gap: '4px',
-                            }}>
-                              <div style={{ 
-                                fontSize: isMobile ? '11px' : '12px', 
-                                color: '#6b7280' 
-                              }}>{asset.type}</div>
-                              <div style={{ 
-                                fontSize: isMobile ? '11px' : '12px', 
-                                fontWeight: '500', 
-                                color: '#111827',
-                                flexShrink: 0,
-                              }}>
-                                {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                                <div style={{ 
+                                  fontSize: isMobile ? '13px' : '14px', 
+                                  fontWeight: '600', 
+                                  color: '#10b981',
+                                  lineHeight: 1.1,
+                                }}>
+                                  +{changePercent.toFixed(2)}%
+                                </div>
+                                <div style={{ 
+                                  fontSize: isMobile ? '11px' : '12px', 
+                                  fontWeight: '500', 
+                                  color: '#111827',
+                                  lineHeight: 1.1,
+                                }}>
+                                  {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -511,6 +806,7 @@ export function PlatformDashboard() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '10px' : '12px' }}>
                       {losers.map((asset: any) => {
                         const changePercent = parseFinancialValue(asset.priceChangePercent);
+                        const logoUrl = getAssetLogoUrl(asset);
                         return (
                           <div
                             key={asset.id}
@@ -525,42 +821,61 @@ export function PlatformDashboard() {
                               display: 'flex', 
                               justifyContent: 'space-between', 
                               alignItems: 'center', 
-                              marginBottom: '4px',
                               flexWrap: 'wrap',
-                              gap: '4px',
+                              gap: '8px',
                             }}>
-                              <div style={{ 
-                                fontWeight: '600', 
-                                fontSize: isMobile ? '13px' : '14px',
-                                wordBreak: 'break-word',
-                              }}>{asset.name}</div>
-                              <div style={{ 
-                                fontSize: isMobile ? '13px' : '14px', 
-                                fontWeight: '600', 
-                                color: '#ef4444',
-                                flexShrink: 0,
-                              }}>
-                                {changePercent.toFixed(2)}%
+                              <div style={{ display: 'flex', gap: logoUrl ? '10px' : '0', alignItems: 'center', minWidth: 0 }}>
+                                {logoUrl ? (
+                                  <img
+                                    src={logoUrl}
+                                    alt={asset.name ? `Logo ${asset.name}` : 'Logo'}
+                                    style={{
+                                      width: isMobile ? '30px' : '34px',
+                                      height: isMobile ? '30px' : '34px',
+                                      borderRadius: '10px',
+                                      objectFit: 'contain',
+                                      display: 'block',
+                                      flexShrink: 0,
+                                      backgroundColor: '#ffffff',
+                                      border: '1px solid #e5e7eb',
+                                    }}
+                                    loading="lazy"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : null}
+                                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                  <div style={{ 
+                                    fontWeight: '600', 
+                                    fontSize: isMobile ? '13px' : '14px',
+                                    wordBreak: 'break-word',
+                                  }}>{asset.name}</div>
+                                  <div style={{ 
+                                    fontSize: isMobile ? '11px' : '12px', 
+                                    color: '#6b7280',
+                                    marginTop: 2,
+                                    wordBreak: 'break-word',
+                                  }}>
+                                    {asset.type}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                            <div style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              gap: '4px',
-                            }}>
-                              <div style={{ 
-                                fontSize: isMobile ? '11px' : '12px', 
-                                color: '#6b7280' 
-                              }}>{asset.type}</div>
-                              <div style={{ 
-                                fontSize: isMobile ? '11px' : '12px', 
-                                fontWeight: '500', 
-                                color: '#111827',
-                                flexShrink: 0,
-                              }}>
-                                {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                                <div style={{ 
+                                  fontSize: isMobile ? '13px' : '14px', 
+                                  fontWeight: '600', 
+                                  color: '#ef4444',
+                                  lineHeight: 1.1,
+                                }}>
+                                  {changePercent.toFixed(2)}%
+                                </div>
+                                <div style={{ 
+                                  fontSize: isMobile ? '11px' : '12px', 
+                                  fontWeight: '500', 
+                                  color: '#111827',
+                                  lineHeight: 1.1,
+                                }}>
+                                  {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
+                                </div>
                               </div>
                             </div>
                           </div>
