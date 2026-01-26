@@ -22,14 +22,20 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   const getCurrentUser = async () => {
-    // Prefer per-tab client context (sessionStorage) so an admin can keep the admin
-    // panel open in another tab while viewing a client panel here.
+    const path =
+      typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
+    const isAdminRoute = path.startsWith('/admin');
+
     const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
     const sessionUserType = sessionStorage.getItem('userType');
-    const storage: Storage = sessionToken ? sessionStorage : localStorage;
+    const isSessionClient =
+      Boolean(sessionToken) && (sessionUserType === 'client' || sessionToken!.startsWith('client_'));
 
-    const token = sessionToken || localStorage.getItem(ACCESS_TOKEN);
-    const userType = sessionUserType || localStorage.getItem('userType');
+    // On admin routes, always use admin auth from localStorage.
+    // On client routes, allow per-tab sessionStorage client context.
+    const storage: Storage = !isAdminRoute && isSessionClient ? sessionStorage : localStorage;
+    const token = storage.getItem(ACCESS_TOKEN);
+    const userType = storage.getItem('userType');
     
     // Only make API call if we have a token
     if (!token) {
@@ -45,12 +51,17 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Client user
         const clientData = storage.getItem('clientData');
         if (clientData) {
-          setCurrentUser({
-            ...JSON.parse(clientData),
-            userType: 'client'
-          });
-          setLoading(false);
-          return;
+          try {
+            setCurrentUser({
+              ...JSON.parse(clientData),
+              userType: 'client'
+            });
+            // Show cached data immediately, then refresh from API to keep server-derived
+            // flags (like accountVerified) consistent.
+            setLoading(false);
+          } catch (e) {
+            // ignore parse errors; we'll fetch below
+          }
         }
         
         // Fetch client data from API
@@ -69,7 +80,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             userType: 'client'
           });
           storage.setItem('clientData', JSON.stringify(data.client));
-        } else {
+        } else if (!clientData) {
+          // Only fail hard if we had no cached clientData at all
           throw new Error('Failed to get client data');
         }
       } else {

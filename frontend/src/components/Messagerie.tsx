@@ -1,349 +1,233 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Badge } from './ui/badge';
-import { Plus, Mail, Send, Trash2, Eye } from 'lucide-react';
+import { Send, RefreshCw, MessageCircle } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { useUser } from '../contexts/UserContext';
 import '../styles/PageHeader.css';
 
-interface MessagerieProps {
-  user: any;
-}
+type Client = {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  email?: string;
+  managerUserDetailsId?: string | null;
+  managerName?: string;
+};
 
-export function Messagerie({ user }: MessagerieProps) {
-  const [messages, setMessages] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [selectedMessage, setSelectedMessage] = useState<any>(null);
-  const [isNewMessageOpen, setIsNewMessageOpen] = useState(false);
-  const [isViewMessageOpen, setIsViewMessageOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    recipientId: '',
-    subject: '',
-    message: ''
-  });
+type ChatMessage = {
+  id: string;
+  sender: 'client' | 'manager' | string;
+  message: string;
+  createdAt?: string;
+};
+
+export function Messagerie() {
+  const { currentUser } = useUser();
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [draft, setDraft] = useState('');
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const isAdmin = (currentUser?.role || '').toLowerCase() === 'admin';
+
+  const visibleClients = useMemo(() => {
+    if (isAdmin) return clients;
+    const myUserDetailsId = currentUser?.id;
+    if (!myUserDetailsId) return clients;
+    return clients.filter((c) => c.managerUserDetailsId === myUserDetailsId);
+  }, [clients, currentUser?.id, isAdmin]);
+
+  const selectedClient = useMemo(
+    () => visibleClients.find((c) => c.id === selectedClientId) || null,
+    [visibleClients, selectedClientId],
+  );
+
+  async function loadClients() {
+    setLoadingClients(true);
+    try {
+      const data = await apiCall('/api/clients/');
+      setClients((data?.clients || []) as Client[]);
+    } catch (error) {
+      console.error('Error loading clients:', error);
+    } finally {
+      setLoadingClients(false);
+    }
+  }
+
+  async function loadChat(clientId: string) {
+    setLoadingChat(true);
+    try {
+      const data = await apiCall(`/api/clients/${clientId}/chat/`);
+      setChatMessages((data?.messages || []) as ChatMessage[]);
+    } catch (error) {
+      console.error('Error loading chat:', error);
+    } finally {
+      setLoadingChat(false);
+    }
+  }
+
+  async function sendChatMessage() {
+    const clientId = selectedClientId;
+    const text = draft.trim();
+    if (!clientId || !text) return;
+    setSending(true);
+    try {
+      const res = await apiCall(`/api/clients/${clientId}/chat/`, {
+        method: 'POST',
+        body: JSON.stringify({ message: text }),
+      });
+      const newMsg = res?.message as ChatMessage | undefined;
+      setDraft('');
+      if (newMsg) {
+        setChatMessages((prev) => [...prev, newMsg]);
+      } else {
+        await loadChat(clientId);
+      }
+    } catch (error) {
+      console.error('Error sending chat message:', error);
+    } finally {
+      setSending(false);
+    }
+  }
 
   useEffect(() => {
-    loadData();
+    loadClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadData() {
-    try {
-      const [messagesData, clientsData, usersData] = await Promise.all([
-        apiCall('/messages'),
-        apiCall('/clients'),
-        apiCall('/users')
-      ]);
-      
-      setMessages(messagesData.messages || []);
-      setClients(clientsData.clients || []);
-      setUsers(usersData.users || []);
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    }
-  }
+  useEffect(() => {
+    if (!selectedClientId) return;
+    loadChat(selectedClientId);
+    const interval = window.setInterval(() => loadChat(selectedClientId), 10000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClientId]);
 
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    
-    try {
-      await apiCall('/messages', {
-        method: 'POST',
-        body: JSON.stringify(formData)
-      });
-      
-      setIsNewMessageOpen(false);
-      setFormData({ recipientId: '', subject: '', message: '' });
-      loadData();
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  }
-
-  async function handleMarkAsRead(messageId: string) {
-    try {
-      await apiCall(`/messages/${messageId}/read`, { method: 'POST' });
-      loadData();
-    } catch (error) {
-      console.error('Error marking message as read:', error);
-    }
-  }
-
-  async function handleDeleteMessage(messageId: string) {
-    if (!confirm('Supprimer ce message ?')) return;
-    
-    try {
-      await apiCall(`/messages/${messageId}`, { method: 'DELETE' });
-      loadData();
-      setIsViewMessageOpen(false);
-    } catch (error) {
-      console.error('Error deleting message:', error);
-    }
-  }
-
-  function viewMessage(message: any) {
-    setSelectedMessage(message);
-    setIsViewMessageOpen(true);
-    if (!message.read && message.recipientId === user.id) {
-      handleMarkAsRead(message.id);
-    }
-  }
-
-  const receivedMessages = messages.filter(m => m.recipientId === user.id);
-  const sentMessages = messages.filter(m => m.senderId === user.id);
-  const unreadCount = receivedMessages.filter(m => !m.read).length;
-
-  function getRecipientName(recipientId: string) {
-    const client = clients.find(c => c.authId === recipientId);
-    if (client) return `${client.firstName} ${client.lastName}`;
-    
-    const userRecord = users.find(u => u.id === recipientId);
-    if (userRecord) return `${userRecord.firstName} ${userRecord.lastName}`;
-    
-    return 'Inconnu';
-  }
-
-  function getSenderName(senderId: string) {
-    const userRecord = users.find(u => u.id === senderId);
-    if (userRecord) return `${userRecord.firstName} ${userRecord.lastName}`;
-    
-    return 'Système';
-  }
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    });
+  }, [chatMessages.length]);
 
   return (
     <div className="space-y-6">
       <div className="page-header">
         <div className="page-title-section">
           <h1 className="page-title">Messagerie</h1>
-          <p className="page-subtitle">Boîte de réception et messages envoyés</p>
+          <p className="page-subtitle">Chat avec les clients</p>
         </div>
-        
-        <Dialog open={isNewMessageOpen} onOpenChange={setIsNewMessageOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              Nouveau message
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nouveau message</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSendMessage} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Destinataire</Label>
-                <Select value={formData.recipientId} onValueChange={(value) => setFormData({ ...formData, recipientId: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner un destinataire" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__clients__" disabled>-- Clients --</SelectItem>
-                    {clients.filter(c => c.authId).map((client) => (
-                      <SelectItem key={client.id} value={client.authId}>
-                        {client.firstName} {client.lastName}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__users__" disabled>-- Utilisateurs --</SelectItem>
-                    {users.filter(u => u.id !== user.id).map((userRecord) => (
-                      <SelectItem key={userRecord.id} value={userRecord.id}>
-                        {userRecord.firstName} {userRecord.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Sujet</Label>
-                <Input
-                  value={formData.subject}
-                  onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                  required
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Message</Label>
-                <Textarea
-                  value={formData.message}
-                  onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                  rows={6}
-                  required
-                />
-              </div>
-              
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="outline" onClick={() => setIsNewMessageOpen(false)}>
-                  Annuler
-                </Button>
-                <Button type="submit">
-                  <Send className="w-4 h-4 mr-2" />
-                  Envoyer
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => loadClients()} disabled={loadingClients}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Actualiser
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="received" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="received">
-            Boîte de réception
-            {unreadCount > 0 && (
-              <Badge className="ml-2" variant="destructive">
-                {unreadCount}
-              </Badge>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="w-5 h-5" />
+            Chat client
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2">
+            <div className="text-sm text-slate-600">Sélectionnez un client</div>
+            <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+              <SelectTrigger>
+                <SelectValue placeholder={loadingClients ? 'Chargement…' : 'Choisir un client'} />
+              </SelectTrigger>
+              <SelectContent>
+                {visibleClients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {(c.fullName || `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || c.id).trim()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedClient && (
+              <div className="text-xs text-slate-500">
+                Gestionnaire: {selectedClient.managerName || '—'}
+              </div>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="sent">Messages envoyés</TabsTrigger>
-        </TabsList>
+          </div>
 
-        {/* Received Messages */}
-        <TabsContent value="received">
-          <Card>
-            <CardHeader>
-              <CardTitle>Messages reçus</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {receivedMessages.length > 0 ? (
-                <div className="space-y-2">
-                  {receivedMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                        !message.read ? 'bg-blue-50 border-blue-200' : 'border-slate-200 hover:bg-slate-50'
-                      }`}
-                      onClick={() => viewMessage(message)}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Mail className="w-4 h-4 text-slate-500" />
-                            <p className={!message.read ? '' : 'text-slate-600'}>
-                              {message.subject}
-                            </p>
-                            {!message.read && (
-                              <Badge variant="destructive" className="text-xs">Nouveau</Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-slate-600">
-                            De: {getSenderName(message.senderId)}
-                          </p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            {new Date(message.createdAt).toLocaleDateString('fr-FR')} à{' '}
-                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                          </p>
+          <div
+            ref={listRef}
+            className="border rounded-lg p-3 bg-slate-50"
+            style={{ height: 420, overflowY: 'auto' }}
+          >
+            {!selectedClientId ? (
+              <div className="text-sm text-slate-500">Choisissez un client pour afficher la conversation.</div>
+            ) : loadingChat ? (
+              <div className="text-sm text-slate-500">Chargement…</div>
+            ) : chatMessages.length === 0 ? (
+              <div className="text-sm text-slate-500">Aucun message pour le moment.</div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {chatMessages.map((m) => {
+                  const isMe = m.sender === 'manager';
+                  return (
+                    <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%]`}>
+                        <div
+                          className={`px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
+                            isMe ? 'bg-slate-900 text-white' : 'bg-white border'
+                          }`}
+                        >
+                          {m.message}
                         </div>
-                        <Button variant="ghost" size="sm">
-                          <Eye className="w-4 h-4" />
-                        </Button>
+                        {m.createdAt && (
+                          <div className={`mt-1 text-[11px] text-slate-400 ${isMe ? 'text-right' : 'text-left'}`}>
+                            {new Date(m.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">Aucun message reçu</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
-        {/* Sent Messages */}
-        <TabsContent value="sent">
-          <Card>
-            <CardHeader>
-              <CardTitle>Messages envoyés</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {sentMessages.length > 0 ? (
-                <div className="space-y-2">
-                  {sentMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className="p-4 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50"
-                      onClick={() => viewMessage(message)}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Send className="w-4 h-4 text-slate-500" />
-                            <p>{message.subject}</p>
-                          </div>
-                          <p className="text-sm text-slate-600">
-                            À: {getRecipientName(message.recipientId)}
-                          </p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            {new Date(message.createdAt).toLocaleDateString('fr-FR')} à{' '}
-                            {new Date(message.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}
-                          </p>
-                        </div>
-                        <Button variant="ghost" size="sm">
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">Aucun message envoyé</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* View Message Dialog */}
-      <Dialog open={isViewMessageOpen} onOpenChange={setIsViewMessageOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{selectedMessage?.subject}</DialogTitle>
-          </DialogHeader>
-          
-          {selectedMessage && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-sm text-slate-600">
-                <div>
-                  <p>
-                    {selectedMessage.senderId === user.id 
-                      ? `À: ${getRecipientName(selectedMessage.recipientId)}`
-                      : `De: ${getSenderName(selectedMessage.senderId)}`
-                    }
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {new Date(selectedMessage.createdAt).toLocaleDateString('fr-FR')} à{' '}
-                    {new Date(selectedMessage.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="border-t pt-4">
-                <p className="text-slate-700 whitespace-pre-wrap">{selectedMessage.message}</p>
-              </div>
-              
-              <div className="flex gap-2 justify-end border-t pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => handleDeleteMessage(selectedMessage.id)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Supprimer
-                </Button>
-                <Button onClick={() => setIsViewMessageOpen(false)}>
-                  Fermer
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendChatMessage();
+            }}
+            className="flex gap-2"
+          >
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={selectedClientId ? 'Écrire un message…' : 'Sélectionnez un client…'}
+              disabled={!selectedClientId || sending}
+            />
+            <Button type="submit" disabled={!selectedClientId || sending || !draft.trim()}>
+              <Send className="w-4 h-4 mr-2" />
+              Envoyer
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => selectedClientId && loadChat(selectedClientId)}
+              disabled={!selectedClientId || loadingChat}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Rafraîchir
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -8,24 +8,62 @@ import { signIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
 import { ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
+import { useTheme } from '../contexts/ThemeContext';
 import '../styles/LoginPage.css';
 
 export function AdminLoginPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
+  const { settings, loading: settingsLoading } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
+  const [touched, setTouched] = useState<{ username?: boolean; password?: boolean }>({});
+  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const bannerLogoSrc = settings?.logo_url || '';
+  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const buttonBg =
+    (settings?.secondary_color || '').trim() ||
+    (settings?.primary_color || '').trim() ||
+    '#030213';
+  const containerStyle: React.CSSProperties = {
+    ['--login-button-bg' as any]: buttonBg,
+  };
+  if (!settingsLoading && settings?.login_background_image_url) {
+    (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
+  }
+
+  const validate = (values: { username: string; password: string }) => {
+    const next: { username?: string; password?: string } = {};
+    if (!values.username.trim()) next.username = 'Veuillez renseigner ce champ.';
+    if (!values.password) next.password = 'Veuillez renseigner ce champ.';
+    return next;
+  };
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError('');
+    // Some browsers/password managers can autofill without triggering React onChange.
+    // Read the actual DOM values at submit time to avoid "field required" while visibly filled.
+    const form = e.currentTarget;
+    const usernameValue =
+      (form.elements.namedItem('username') as HTMLInputElement | null)?.value ?? username;
+    const passwordValue =
+      (form.elements.namedItem('password') as HTMLInputElement | null)?.value ?? password;
+    if (usernameValue !== username) setUsername(usernameValue);
+    if (passwordValue !== password) setPassword(passwordValue);
+
+    const nextErrors = validate({ username: usernameValue, password: passwordValue });
+    setFieldErrors(nextErrors);
+    setTouched({ username: true, password: true });
+    if (Object.keys(nextErrors).length > 0) return;
     setLoading(true);
 
     try {
-      console.log('Admin login attempt for:', username);
-      const result = await signIn(username, password);
+      console.log('Admin login attempt for:', usernameValue);
+      const result = await signIn(usernameValue, passwordValue);
       console.log('Login successful, result:', result);
       
       // Wait a bit for localStorage to be set
@@ -72,7 +110,15 @@ export function AdminLoginPage() {
       }
       
       setError(errorMessage);
-      toast.error(errorMessage);
+      // Don't show a toast for the common "wrong credentials" case (we already show it under the form)
+      const normalized = String(errorMessage || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const isWrongCredentials =
+        normalized.includes('username ou mot de passe incorrect') ||
+        normalized.includes('invalid credentials') ||
+        normalized.includes('no active account found');
+      if (!isWrongCredentials) {
+        toast.error(errorMessage);
+      }
       
       // Clear any partial login data
       localStorage.removeItem(ACCESS_TOKEN);
@@ -85,52 +131,94 @@ export function AdminLoginPage() {
   }
 
   return (
-    <div className="login-page-container">
-      <Card className="login-card">
-        <CardHeader className="login-card-header">
-          <CardTitle>Panorama - Administration</CardTitle>
-          <CardDescription>
-            Connectez-vous à votre compte administrateur
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="login-form">
-            <div className="login-form-field">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                placeholder="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-              />
-            </div>
-            
-            <div className="login-form-field">
-              <Label htmlFor="password">Mot de passe</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+    <div className="login-page-container" style={containerStyle}>
+      <header className="login-banner">
+        {settingsLoading ? (
+          <div className="login-banner-placeholder" aria-hidden="true" />
+        ) : hasLogo ? (
+          <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
+        ) : (
+          <div className="login-banner-title">{platformName}</div>
+        )}
+      </header>
 
-            {error && (
-              <div className="login-error">
-                {error}
+      <div className="login-content">
+        <Card className="login-card">
+          <CardHeader className="login-card-header">
+            <CardTitle>{platformName ? `${platformName} - Administration` : 'Administration'}</CardTitle>
+            <CardDescription>
+              Connectez-vous à votre compte administrateur
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="login-form" noValidate>
+              <div className="login-form-field">
+                <Input
+                  id="username"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  placeholder=" "
+                  value={username}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setUsername(v);
+                    if (touched.username) setFieldErrors((prev) => ({ ...prev, ...validate({ username: v, password }) }));
+                  }}
+                  onBlur={() => {
+                    setTouched((prev) => ({ ...prev, username: true }));
+                    setFieldErrors((prev) => ({ ...prev, ...validate({ username, password }) }));
+                  }}
+                  aria-invalid={Boolean(touched.username && fieldErrors.username)}
+                  required
+                  className="login-floating-input"
+                />
+                <label className="login-floating-label" htmlFor="username">Username</label>
+                {touched.username && fieldErrors.username && (
+                  <div className="login-field-error">{fieldErrors.username}</div>
+                )}
               </div>
-            )}
+              
+              <div className="login-form-field">
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder=" "
+                  value={password}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPassword(v);
+                    if (touched.password) setFieldErrors((prev) => ({ ...prev, ...validate({ username, password: v }) }));
+                  }}
+                  onBlur={() => {
+                    setTouched((prev) => ({ ...prev, password: true }));
+                    setFieldErrors((prev) => ({ ...prev, ...validate({ username, password }) }));
+                  }}
+                  aria-invalid={Boolean(touched.password && fieldErrors.password)}
+                  required
+                  className="login-floating-input"
+                />
+                <label className="login-floating-label" htmlFor="password">Mot de passe</label>
+                {touched.password && fieldErrors.password && (
+                  <div className="login-field-error">{fieldErrors.password}</div>
+                )}
+              </div>
 
-            <Button type="submit" className="login-button" disabled={loading}>
-              {loading ? 'Connexion...' : 'Se connecter'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              {error && (
+                <div className="login-error">
+                  {error}
+                </div>
+              )}
+
+              <Button type="submit" className="login-button" disabled={loading}>
+                {loading ? 'Connexion...' : 'Se connecter'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

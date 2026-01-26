@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
+from .models import Client, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -254,6 +254,20 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['password'] = ret.get('password', '') or ''
         ret['platformAccess'] = bool(ret.get('platform_access', True))
         ret['active'] = bool(ret.get('active', True))
+        ret['middleName'] = ret.get('middle_name', '') or ''
+        ret['legalName'] = ret.get('legal_name', '') or ''
+        ret['sex'] = ret.get('sex', '') or ''
+        ret['accountVerified'] = bool(ret.get('account_verified', False))
+        ret['preferences'] = ret.get('preferences', []) or []
+        ret['tradingObjective'] = ret.get('trading_objective', '') or ''
+        ret['plannedInvestment12m'] = ret.get('planned_investment_12m', '') or ''
+        ret['riskRewardProfile'] = ret.get('risk_reward_profile', '') or ''
+        ret['complianceFamilyFlags'] = ret.get('compliance_family_flags', []) or []
+        ret['fundsSources'] = ret.get('funds_sources', []) or []
+        ret['primaryProfession'] = ret.get('primary_profession', '') or ''
+        ret['employerName'] = ret.get('employer_name', '') or ''
+        ret['annualNetIncome'] = ret.get('annual_net_income', '') or ''
+        ret['totalLiquidities'] = ret.get('total_liquidities', '') or ''
         ret['birthDate'] = instance.birth_date.isoformat() if instance.birth_date else None
         ret['birthPlace'] = ret.get('birth_place', '') or ''
         ret['address'] = ret.get('address', '') or ''
@@ -294,6 +308,23 @@ class ClientSerializer(serializers.ModelSerializer):
         # availableFunds is calculated on frontend
         
         return ret
+
+
+class ClientChatMessageSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+
+    class Meta:
+        model = ClientChatMessage
+        fields = [
+            'id',
+            'client',
+            'manager_user',
+            'sender',
+            'message',
+            'read_by_client',
+            'read_by_manager',
+            'createdAt',
+        ]
 
 class TeamSerializer(serializers.ModelSerializer):
     class Meta:
@@ -684,6 +715,8 @@ class PositionSerializer(serializers.ModelSerializer):
     clientName = serializers.SerializerMethodField()
     productId = serializers.CharField(source='product.id', read_only=True)
     productName = serializers.CharField(source='product.name', read_only=True)
+    productType = serializers.CharField(source='product.type', read_only=True)
+    productReference = serializers.CharField(source='product.reference', read_only=True)
     transactionId = serializers.CharField(source='transaction.id', read_only=True, allow_null=True)
     assetId = serializers.CharField(source='asset.id', read_only=True, allow_null=True)
     assetName = serializers.CharField(source='asset.name', read_only=True, allow_null=True)
@@ -695,7 +728,7 @@ class PositionSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'clientId', 'clientName',
-            'productId', 'productName',
+            'productId', 'productName', 'productType', 'productReference',
             'transactionId',
             'assetId', 'assetName',
             'period_index', 'period_date',
@@ -869,10 +902,25 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class AppSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
+    login_background_image_url = serializers.SerializerMethodField()
     
     class Meta:
         model = AppSettings
-        fields = ['id', 'logo', 'logo_url', 'primary_color', 'secondary_color', 'accent_color', 'created_at', 'updated_at']
+        fields = [
+            'id',
+            'platform_name',
+            # Writable file fields (required for uploads)
+            'logo',
+            'login_background_image',
+            # Read-only URL helpers for frontend consumption
+            'logo_url',
+            'login_background_image_url',
+            'primary_color',
+            'secondary_color',
+            'accent_color',
+            'created_at',
+            'updated_at',
+        ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_logo_url(self, obj):
@@ -897,15 +945,36 @@ class AppSettingsSerializer(serializers.ModelSerializer):
                 return None
         return None
 
+    def get_login_background_image_url(self, obj):
+        if obj.login_background_image:
+            try:
+                image_url = obj.login_background_image.url
+                # Cloudinary URLs are public by default, return them directly
+                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                    return image_url
+                # Local path - build absolute URI
+                request = self.context.get('request')
+                if request and image_url:
+                    return request.build_absolute_uri(image_url)
+                return image_url
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting login background URL for app settings: {str(e)}")
+                return None
+        return None
+
 class NewsPostSerializer(serializers.ModelSerializer):
     authorName = serializers.SerializerMethodField()
     imageUrl = serializers.SerializerMethodField()
+    sourceName = serializers.CharField(source='source_name', required=False, allow_blank=True)
+    articleUrl = serializers.URLField(source='article_url', required=False, allow_blank=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
     class Meta:
         model = NewsPost
-        fields = ['id', 'title', 'content', 'image', 'imageUrl', 'author', 'authorName', 'published', 'createdAt', 'updatedAt']
+        fields = ['id', 'title', 'content', 'sourceName', 'articleUrl', 'image', 'imageUrl', 'author', 'authorName', 'published', 'createdAt', 'updatedAt']
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl', 'authorName']
     
     def get_authorName(self, obj):

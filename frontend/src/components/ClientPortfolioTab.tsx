@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
 import { ClientWallet } from './ClientWallet';
+import { apiCall } from '../utils/api';
 
 interface ClientPortfolioTabProps {
   client: any;
@@ -11,6 +12,26 @@ interface ClientPortfolioTabProps {
 }
 
 export function ClientPortfolioTab({ client, clientId, transactions = [], onRefresh }: ClientPortfolioTabProps) {
+  const [positions, setPositions] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadPositions() {
+      if (!clientId) {
+        setPositions([]);
+        return;
+      }
+      try {
+        // open + closed (done) only
+        const data = await apiCall(`/api/clients/${clientId}/positions/?status=open,done`);
+        setPositions((data as any)?.positions || []);
+      } catch (error) {
+        console.error('Error loading client positions for portfolio:', error);
+        setPositions([]);
+      }
+    }
+    loadPositions();
+  }, [clientId]);
+
   // Calculate values from transactions
   const calculateValuesFromTransactions = () => {
     let calculatedInvestedCapital = 0;
@@ -138,7 +159,29 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
     [hasCompletedTransactions, calculatedValues.bonus, client?.bonus]
   );
   
-  const profitLoss = useMemo(() => calculatedValues.profitLoss, [calculatedValues.profitLoss]);
+  const profitLoss = useMemo(() => {
+    // Profit/Loss basé sur les positions ouvertes + fermées
+    let total = 0;
+    for (const p of positions || []) {
+      if (p?.status !== 'open' && p?.status !== 'done') continue;
+
+      const profitLossNum =
+        p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+
+      let positionPnl = 0;
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        positionPnl = profitLossNum;
+      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        positionPnl = expectedTotalNum - investedNum;
+      }
+
+      total += Number.isFinite(positionPnl) ? positionPnl : 0;
+    }
+    return total;
+  }, [positions]);
   
   // Total Investi: only achat and transfert (balance → product)
   const totalInvesti = useMemo(() => 

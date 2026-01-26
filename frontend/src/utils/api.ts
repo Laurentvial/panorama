@@ -16,12 +16,21 @@ function isClientAuth(token: string | null, userType: string | null): boolean {
 }
 
 function getActiveAuth() {
-  // Prefer sessionStorage client context (per-tab) so an admin can keep the admin
-  // panel open in another tab while viewing a client panel here.
-  const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
-  const sessionUserType = sessionStorage.getItem('userType');
-  if (sessionToken && isClientAuth(sessionToken, sessionUserType)) {
-    return { token: sessionToken, userType: sessionUserType, storage: sessionStorage as Storage };
+  const path =
+    typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
+  const isAdminRoute = path.startsWith('/admin');
+
+  // Never prefer the client (sessionStorage) token on admin routes, otherwise a
+  // tab that previously impersonated a client can get kicked out of admin on
+  // the next API call + HMR reload (401 -> redirect).
+  if (!isAdminRoute) {
+    // Prefer sessionStorage client context (per-tab) so an admin can keep the admin
+    // panel open in another tab while viewing a client panel here.
+    const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+    const sessionUserType = sessionStorage.getItem('userType');
+    if (sessionToken && isClientAuth(sessionToken, sessionUserType)) {
+      return { token: sessionToken, userType: sessionUserType, storage: sessionStorage as Storage };
+    }
   }
 
   const token = localStorage.getItem(ACCESS_TOKEN);

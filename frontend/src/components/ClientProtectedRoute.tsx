@@ -19,10 +19,13 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
         // logged into the admin panel while opening client panels in other tabs.
         const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
         const sessionUserType = sessionStorage.getItem('userType');
-        const storage: Storage = sessionToken ? sessionStorage : localStorage;
+        const isSessionClient =
+            Boolean(sessionToken) && (sessionUserType === 'client' || sessionToken!.startsWith('client_'));
 
-        const token = sessionToken || localStorage.getItem(ACCESS_TOKEN);
-        const userType = sessionUserType || localStorage.getItem('userType');
+        const storage: Storage = isSessionClient ? sessionStorage : localStorage;
+
+        const token = isSessionClient ? sessionToken : localStorage.getItem(ACCESS_TOKEN);
+        const userType = isSessionClient ? sessionUserType : localStorage.getItem('userType');
         
         if (!token) {
             setIsAuthenticated(false);

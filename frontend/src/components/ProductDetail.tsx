@@ -809,13 +809,7 @@ export function ProductDetail() {
           flexWrap: 'wrap',
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h1 style={{ 
-              fontSize: isMobile ? '20px' : '28px', 
-              fontWeight: 'bold', 
-              margin: 0, 
-              marginBottom: '8px',
-              wordBreak: 'break-word',
-            }}>
+            <h1 className="platform-page-title" style={{ marginBottom: '8px', wordBreak: 'break-word' }}>
               {product.name || 'N/A'}
             </h1>
             {product.reference && (
@@ -2212,7 +2206,7 @@ export function ProductDetail() {
                     padding: isMobile ? '6px 10px' : '6px 12px',
                     flexShrink: 0,
                   }}>
-                    {isMobile ? 'Vue complète' : 'Vue complète du trading'}
+                    {isMobile ? 'Vue complète' : 'Vue complète des fonds'}
                   </Button>
                 </div>
               </CardHeader>

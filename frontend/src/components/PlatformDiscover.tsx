@@ -511,13 +511,7 @@ export function PlatformDiscover() {
               flexWrap: isMobile ? 'wrap' : 'nowrap',
               gap: isMobile ? '12px' : '0',
             }}>
-              <h1 style={{ 
-                fontSize: isMobile ? '24px' : '32px', 
-                fontWeight: 'bold', 
-                margin: 0,
-                flex: 1,
-                minWidth: 0,
-              }}>
+              <h1 className="platform-page-title" style={{ flex: 1, minWidth: 0 }}>
                 Explorer les marchés mondiaux
               </h1>
               <div style={{ 

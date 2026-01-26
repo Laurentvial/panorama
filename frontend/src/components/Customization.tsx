@@ -12,9 +12,13 @@ import '../styles/Customization.css';
 export function Customization() {
   const { settings, loadSettings, updateSettings, loading: themeLoading } = useTheme();
   const [loading, setLoading] = useState(false);
+  const [platformName, setPlatformName] = useState('Panorama');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [shouldRemoveLogo, setShouldRemoveLogo] = useState(false);
+  const [bgFile, setBgFile] = useState<File | null>(null);
+  const [bgPreview, setBgPreview] = useState<string | null>(null);
+  const [shouldRemoveBg, setShouldRemoveBg] = useState(false);
   const [colors, setColors] = useState({
     primary: '#030213',
     secondary: '',
@@ -23,6 +27,7 @@ export function Customization() {
 
   useEffect(() => {
     if (settings) {
+      setPlatformName(settings.platform_name || 'Panorama');
       setColors({
         primary: settings.primary_color || '#030213',
         secondary: settings.secondary_color || '',
@@ -30,6 +35,9 @@ export function Customization() {
       });
       if (settings.logo_url) {
         setLogoPreview(settings.logo_url);
+      }
+      if (settings.login_background_image_url) {
+        setBgPreview(settings.login_background_image_url);
       }
     }
   }, [settings]);
@@ -63,18 +71,55 @@ export function Customization() {
     setShouldRemoveLogo(true);
   };
 
+  const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner un fichier image');
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        toast.error('L\'image ne doit pas dépasser 8MB');
+        return;
+      }
+      setBgFile(file);
+      setShouldRemoveBg(false);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setBgPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveBg = () => {
+    setBgFile(null);
+    setBgPreview(null);
+    setShouldRemoveBg(true);
+  };
+
   const handleSave = async () => {
     try {
       setLoading(true);
       const formData = new FormData();
       
+      formData.append('platform_name', platformName);
+      
       if (logoFile) {
         formData.append('logo', logoFile);
+      }
+
+      if (bgFile) {
+        formData.append('login_background_image', bgFile);
       }
       
       // If logo should be removed, send a flag
       if (shouldRemoveLogo && !logoFile) {
         formData.append('remove_logo', 'true');
+      }
+
+      if (shouldRemoveBg && !bgFile) {
+        formData.append('remove_login_background_image', 'true');
       }
       
       formData.append('primary_color', colors.primary);
@@ -92,6 +137,7 @@ export function Customization() {
 
       toast.success('Paramètres sauvegardés avec succès');
       setShouldRemoveLogo(false);
+      setShouldRemoveBg(false);
       await loadSettings(); // Reload settings to get updated logo URL
     } catch (error: any) {
       console.error('Error saving settings:', error);
@@ -102,6 +148,7 @@ export function Customization() {
   };
 
   const handleReset = () => {
+    setPlatformName(settings?.platform_name || 'Panorama');
     setColors({
       primary: '#030213',
       secondary: '',
@@ -109,10 +156,17 @@ export function Customization() {
     });
     setLogoFile(null);
     setShouldRemoveLogo(false);
+    setBgFile(null);
+    setShouldRemoveBg(false);
     if (settings?.logo_url) {
       setLogoPreview(settings.logo_url);
     } else {
       setLogoPreview(null);
+    }
+    if (settings?.login_background_image_url) {
+      setBgPreview(settings.login_background_image_url);
+    } else {
+      setBgPreview(null);
     }
   };
 
@@ -126,6 +180,28 @@ export function Customization() {
 
   return (
     <div className="customization-container">
+      {/* Platform name */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Nom de la plateforme</CardTitle>
+          <CardDescription>
+            Ce nom peut être affiché sur la page de connexion et dans l’interface.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="customization-card-content">
+          <div className="space-y-2">
+            <Label htmlFor="platform-name">Nom de la plateforme</Label>
+            <Input
+              id="platform-name"
+              type="text"
+              value={platformName}
+              onChange={(e) => setPlatformName(e.target.value)}
+              placeholder="Panorama"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Logo Section */}
       <Card>
         <CardHeader>
@@ -177,6 +253,64 @@ export function Customization() {
               </div>
               <p className="customization-logo-info">
                 Formats acceptés: PNG, JPG, SVG (max 5MB)
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Login Background Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Image de fond (page de connexion)</CardTitle>
+          <CardDescription>
+            Téléchargez une image de fond qui sera affichée sur la page de connexion, avec un overlay blanc par-dessus.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="customization-card-content">
+          <div className="customization-logo-section">
+            {bgPreview && (
+              <div className="customization-logo-preview">
+                <img
+                  src={bgPreview}
+                  alt="Background preview"
+                  className="customization-logo-image"
+                  style={{ width: '10rem', height: '6rem', objectFit: 'cover' }}
+                />
+              </div>
+            )}
+            <div className="customization-logo-controls">
+              <Label htmlFor="bg-upload">Image de fond</Label>
+              <div className="customization-logo-upload-group">
+                <input
+                  id="bg-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBgChange}
+                  className="customization-logo-upload-input"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById('bg-upload')?.click()}
+                >
+                  <HiOutlineUpload className="h-4 w-4 mr-2" />
+                  {bgPreview ? 'Changer l\'image' : 'Télécharger une image'}
+                </Button>
+                {bgPreview && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleRemoveBg}
+                    className="customization-delete-button"
+                  >
+                    <HiOutlineTrash className="h-4 w-4 mr-2" />
+                    Supprimer
+                  </Button>
+                )}
+              </div>
+              <p className="customization-logo-info">
+                Formats acceptés: PNG, JPG, WEBP (max 8MB). Recommandé: 1920×1080.
               </p>
             </div>
           </div>

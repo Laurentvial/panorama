@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Button } from './ui/button';
 
-export function CookieBanner() {
+interface CookieBannerProps {
+  bottomOffset?: number;
+}
+
+export function CookieBanner({ bottomOffset = 0 }: CookieBannerProps) {
   const [showBanner, setShowBanner] = useState(false);
+  const bannerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     // Check if user has already made a choice
@@ -14,6 +19,28 @@ export function CookieBanner() {
       }, 1000);
     }
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const update = () => {
+      const el = bannerRef.current;
+      if (!el) return;
+      const height = el.getBoundingClientRect().height || 0;
+      root.style.setProperty('--cookie-banner-height', `${height}px`);
+    };
+
+    if (!showBanner) {
+      root.style.setProperty('--cookie-banner-height', '0px');
+      return;
+    }
+
+    update();
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      root.style.setProperty('--cookie-banner-height', '0px');
+    };
+  }, [showBanner, bottomOffset]);
 
   const handleAccept = () => {
     localStorage.setItem('cookieConsent', 'accepted');
@@ -33,9 +60,10 @@ export function CookieBanner() {
 
   return (
     <div
+      ref={bannerRef}
       style={{
         position: 'fixed',
-        bottom: 0,
+        bottom: bottomOffset,
         left: 0,
         right: 0,
         backgroundColor: 'white',

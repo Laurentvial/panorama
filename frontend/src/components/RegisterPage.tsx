@@ -8,11 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { signIn } from '../utils/auth';
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { Building2 } from 'lucide-react';
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
+  const { settings, loading: settingsLoading } = useTheme();
+  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
   const [signupData, setSignupData] = useState({
     firstName: '',
     lastName: '',
@@ -76,7 +79,7 @@ export function RegisterPage() {
           <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl flex items-center justify-center mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <CardTitle>Panorama</CardTitle>
+          <CardTitle>{platformName}</CardTitle>
           <CardDescription>
             Créez votre compte administrateur
           </CardDescription>

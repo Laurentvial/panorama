@@ -56,16 +56,16 @@ function Home() {
   };
 
   return (
-    <div>
+    <div className="home-page">
       <Dashboard user={currentUser} />
       <div style={{ padding: "40px 0px" }}>
-        <div>
+        <div className="home-block notes-section">
           <h1>Notes</h1>
           {notes.map((note: any) => (
             <Note key={note.id} note={note} onDelete={deleteNote} />
           ))}
         </div>
-        <div>
+        <div className="home-block">
           <h2>Créer une note</h2>
           <form onSubmit={createNote} className="form-container">
             <label htmlFor="content">Contenu</label>

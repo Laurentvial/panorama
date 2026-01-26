@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { TrendingUp, TrendingDown, Wallet, DollarSign, Newspaper, Check } from 'lucide-react';
+import { TrendingUp, TrendingDown, Check, PieChart } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
 
 export function PlatformDashboard() {
   const { currentUser } = useUser();
   const isMobile = useIsMobile();
-  const [portfolio, setPortfolio] = useState<any>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const navigate = useNavigate();
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
+  const [visibleNewsCount, setVisibleNewsCount] = useState(5);
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [newsLoading, setNewsLoading] = useState(true);
@@ -21,20 +22,10 @@ export function PlatformDashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      // Load client assets/portfolio
-      const assetsResponse = await apiCall(`/api/clients/${currentUser.id}/assets/`);
-      setPortfolio(assetsResponse.assets || []);
-
       // Load all transactions
       const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/`);
       const allTransactionsList = transactionsResponse.transactions || [];
       setAllTransactions(allTransactionsList);
-      
-      // Get recent transactions for display (last 5)
-      const sortedTransactions = allTransactionsList
-        .sort((a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime())
-        .slice(0, 5);
-      setTransactions(sortedTransactions);
 
       // Load all assets for gainers/losers
       const allAssetsResponse = await apiCall('/api/assets/');
@@ -60,13 +51,14 @@ export function PlatformDashboard() {
       setNewsLoading(true);
       const newsResponse = await apiCall('/api/news/');
       setNewsPosts(newsResponse.news || []);
+      setVisibleNewsCount(5);
     } catch (error: any) {
       console.error('Error loading news posts:', error);
       // If it's a 401 and we're on a public endpoint, try without auth
       if (error?.status === 401) {
         try {
           // Try fetching news without authentication (public endpoint)
-          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/news/`, {
+          const response = await fetch(`${(import.meta as any).env?.VITE_API_URL || 'http://127.0.0.1:8000'}/api/news/`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
@@ -75,6 +67,7 @@ export function PlatformDashboard() {
           if (response.ok) {
             const data = await response.json();
             setNewsPosts(data.news || []);
+            setVisibleNewsCount(5);
             return;
           }
         } catch (fallbackError) {
@@ -83,6 +76,7 @@ export function PlatformDashboard() {
       }
       // Set empty array on error
       setNewsPosts([]);
+      setVisibleNewsCount(5);
     } finally {
       setNewsLoading(false);
     }
@@ -102,15 +96,37 @@ export function PlatformDashboard() {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const investedCapital = parseFinancialValue(currentUser?.investedCapital || currentUser?.invested_capital || 0);
   const tradingPortfolio = parseFinancialValue(currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0);
-  const bonus = parseFinancialValue(currentUser?.bonus || 0);
-  
-  // Calculate Fonds Disponibles using the account balance formula
-  // Formula: investedCapital - tradingPortfolio - bonus
-  // This represents the actual available funds based on the client's account state,
-  // not just summing transactions which may not reflect the current balance
-  const availableFunds = Math.max(0, investedCapital - tradingPortfolio - bonus);
+
+  const calculateProfitLoss = () => {
+    let profitLoss = 0;
+    (allTransactions || []).forEach((transaction: any) => {
+      const amount = parseFinancialValue(transaction?.amount);
+      switch (transaction?.type) {
+        case 'achat':
+          profitLoss -= amount;
+          break;
+        case 'vente':
+          profitLoss += amount;
+          break;
+        case 'interets':
+        case 'bonus':
+          profitLoss += amount;
+          break;
+        case 'frais':
+        case 'perte':
+          profitLoss -= amount;
+          break;
+        default:
+          break;
+      }
+    });
+    return profitLoss;
+  };
+
+  const profitLoss = calculateProfitLoss();
+  const portfolioValue = tradingPortfolio + profitLoss;
+  const isProfit = profitLoss >= 0;
 
   // Calculate gainers and losers
   const getGainersAndLosers = () => {
@@ -136,18 +152,12 @@ export function PlatformDashboard() {
 
   const { gainers, losers } = getGainersAndLosers();
 
-  // Check if account is verified (for now, assume not verified if no verification status exists)
-  const isVerified = currentUser?.verified || currentUser?.accountVerified || false;
+  // Check if account is verified (server-side flag computed from all required onboarding fields)
+  const isVerified = Boolean(currentUser?.accountVerified || currentUser?.account_verified);
+  const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '20px 120px' }}>
-      <h1 style={{ 
-        fontSize: isMobile ? '22px' : '28px', 
-        fontWeight: 'bold', 
-        marginBottom: isMobile ? '20px' : '30px' 
-      }}>
-        Bienvenue, {currentUser?.fname || currentUser?.firstName || currentUser?.fullName || 'Client'}
-      </h1>
+    <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
 
       {loading ? (
         <div>Chargement...</div>
@@ -155,7 +165,7 @@ export function PlatformDashboard() {
         <>
           {/* Account Verification Steps */}
           {!isVerified && (
-            <Card style={{ marginBottom: isMobile ? '20px' : '30px', backgroundColor: '#f9fafb' }}>
+            <Card style={{ ...roundedCardStyle, marginBottom: isMobile ? '20px' : '30px', backgroundColor: '#f9fafb' }}>
               <CardContent style={{ padding: isMobile ? '20px' : '30px' }}>
                 {/* Progress Steps */}
                 <div style={{ 
@@ -259,19 +269,12 @@ export function PlatformDashboard() {
                 {/* Verify Button */}
                 <Button 
                   onClick={() => {
-                    // TODO: Implement verification flow
-                    console.log('Verify account clicked');
+                    navigate('/platform/verification');
                   }}
+                  variant="platform"
                   style={{
-                    backgroundColor: '#10b981',
-                    color: 'white',
-                    fontWeight: 'bold',
-                    padding: isMobile ? '10px 20px' : '12px 24px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: isMobile ? '14px' : '16px',
                     width: isMobile ? '100%' : 'auto',
+                    ['--platform-button-bg' as any]: '#10b981',
                   }}
                 >
                   Vérifier votre compte
@@ -283,224 +286,36 @@ export function PlatformDashboard() {
           {/* Summary Cards */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(250px, 1fr))', 
-            gap: isMobile ? '16px' : '20px', 
+            gridTemplateColumns: '1fr',
+            gap: isMobile ? '16px' : '20px',
             marginBottom: isMobile ? '20px' : '30px' 
           }}>
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>Capital Investi</CardTitle>
-                <DollarSign className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>
+                  Valeur du Portefeuille
+                </CardTitle>
+                <PieChart className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '20px' : '24px' }}>
-                  {investedCapital.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '22px' : '28px' }}>
+                  {portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>Portefeuille Trading</CardTitle>
-                <TrendingUp className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '20px' : '24px' }}>
-                  {tradingPortfolio.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                <div style={{ marginTop: 6, fontSize: isMobile ? '12px' : '13px', color: isProfit ? '#10b981' : '#ef4444' }}>
+                  {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>Fonds Disponibles</CardTitle>
-                <Wallet className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '20px' : '24px' }}>
-                  {availableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium" style={{ fontSize: isMobile ? '13px' : '14px' }}>Bonus</CardTitle>
-                <TrendingDown className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '20px' : '24px' }}>
-                  {bonus.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                <div style={{ marginTop: 12 }}>
+                  <Button
+                    variant="platform"
+                    onClick={() => navigate('/platform/portfolio')}
+                    style={{ borderRadius: 12 }}
+                  >
+                    Voir mon portefeuille
+                  </Button>
                 </div>
               </CardContent>
             </Card>
           </div>
-
-          {/* Recent Transactions */}
-          <Card style={{ marginBottom: isMobile ? '20px' : '30px' }}>
-            <CardHeader>
-              <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Transactions Récentes</CardTitle>
-              <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Vos dernières transactions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {transactions.length === 0 ? (
-                <p style={{ fontSize: isMobile ? '14px' : '16px' }}>Aucune transaction récente</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '8px' : '10px' }}>
-                  {transactions.map((transaction: any) => {
-                    const getStatusLabel = (status: string) => {
-                      switch (status) {
-                        case 'en_attente_paiement':
-                          return 'En attente de paiement';
-                        case 'en_cours':
-                          return 'En cours';
-                        case 'termine':
-                          return 'Terminé';
-                        case 'conteste':
-                          return 'Contesté';
-                        default:
-                          return status;
-                      }
-                    };
-
-                    const getStatusColor = (status: string) => {
-                      switch (status) {
-                        case 'en_attente_paiement':
-                          return { bg: '#fef3c7', text: '#92400e' }; // yellow
-                        case 'en_cours':
-                          return { bg: '#dbeafe', text: '#1e40af' }; // blue
-                        case 'termine':
-                          return { bg: '#d1fae5', text: '#065f46' }; // green
-                        case 'conteste':
-                          return { bg: '#fee2e2', text: '#991b1b' }; // red
-                        default:
-                          return { bg: '#f3f4f6', text: '#374151' }; // gray
-                      }
-                    };
-
-                    const statusColors = getStatusColor(transaction.status || 'en_cours');
-
-                    return (
-                      <div
-                        key={transaction.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: isMobile ? 'flex-start' : 'center',
-                          padding: isMobile ? '12px' : '15px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          flexWrap: isMobile ? 'wrap' : 'nowrap',
-                          gap: isMobile ? '8px' : '0',
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: isMobile ? '8px' : '10px', 
-                            marginBottom: '5px',
-                            flexWrap: 'wrap',
-                          }}>
-                            <div style={{ 
-                              fontWeight: 'bold',
-                              fontSize: isMobile ? '14px' : '16px',
-                            }}>
-                              {transaction.type === 'depot' ? 'Dépôt' :
-                               transaction.type === 'retrait' ? 'Retrait' :
-                               transaction.type === 'achat' ? 'Achat' :
-                               transaction.type === 'vente' ? 'Vente' :
-                               transaction.type === 'bonus' ? 'Bonus' :
-                               transaction.type}
-                            </div>
-                            {transaction.status && (
-                              <span
-                                style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  fontSize: isMobile ? '11px' : '12px',
-                                  fontWeight: '500',
-                                  backgroundColor: statusColors.bg,
-                                  color: statusColors.text,
-                                }}
-                              >
-                                {getStatusLabel(transaction.status)}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ 
-                            fontSize: isMobile ? '12px' : '14px', 
-                            color: '#6b7280' 
-                          }}>
-                            {new Date(transaction.datetime).toLocaleDateString('fr-FR', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </div>
-                        </div>
-                        <div style={{ 
-                          fontWeight: 'bold', 
-                          fontSize: isMobile ? '16px' : '18px',
-                          flexShrink: 0,
-                        }}>
-                          {transaction.amount > 0 ? '+' : ''}{transaction.amount.toLocaleString('fr-FR')} €
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Portfolio */}
-          <Card style={{ marginBottom: isMobile ? '20px' : '30px' }}>
-            <CardHeader>
-              <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Mon Portefeuille</CardTitle>
-              <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Vos actifs disponibles</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {portfolio && portfolio.length === 0 ? (
-                <p style={{ fontSize: isMobile ? '14px' : '16px' }}>Aucun actif dans votre portefeuille</p>
-              ) : (
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(200px, 1fr))', 
-                  gap: isMobile ? '12px' : '15px' 
-                }}>
-                  {portfolio?.map((asset: any) => (
-                    <div
-                      key={asset.id}
-                      style={{
-                        padding: isMobile ? '12px' : '15px',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                      }}
-                    >
-                      <div style={{ 
-                        fontWeight: 'bold',
-                        fontSize: isMobile ? '14px' : '16px',
-                      }}>{asset.asset?.name || 'N/A'}</div>
-                      <div style={{ 
-                        fontSize: isMobile ? '12px' : '14px', 
-                        color: '#6b7280' 
-                      }}>{asset.asset?.type || ''}</div>
-                      {asset.featured && (
-                        <div style={{ 
-                          fontSize: isMobile ? '11px' : '12px', 
-                          color: '#3b82f6', 
-                          marginTop: '5px' 
-                        }}>⭐ Mis en avant</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
           {/* News Feed and Market Movers */}
           <div style={{ 
@@ -509,10 +324,9 @@ export function PlatformDashboard() {
             gap: isMobile ? '20px' : '30px' 
           }}>
             {/* News Feed */}
-            <Card>
+            <Card style={roundedCardStyle}>
               <CardHeader>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Newspaper className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
                   <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Actualités</CardTitle>
                 </div>
                 <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Dernières nouvelles et mises à jour</CardDescription>
@@ -524,7 +338,7 @@ export function PlatformDashboard() {
                   <p style={{ fontSize: isMobile ? '14px' : '16px' }}>Aucune actualité disponible</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
-                    {newsPosts.map((post: any) => (
+                    {newsPosts.slice(0, visibleNewsCount).map((post: any) => (
                       <div
                         key={post.id}
                         style={{
@@ -585,6 +399,19 @@ export function PlatformDashboard() {
                         </div>
                       </div>
                     ))}
+
+                    {newsPosts.length > visibleNewsCount && (
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <Button
+                          type="button"
+                          variant="platform"
+                          onClick={() => setVisibleNewsCount((c) => c + 5)}
+                          style={{ borderRadius: 12 }}
+                        >
+                          Charger plus
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -593,11 +420,11 @@ export function PlatformDashboard() {
             {/* Gainers and Losers */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
               {/* Top Gainers */}
-              <Card>
+              <Card style={roundedCardStyle}>
                 <CardHeader>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <TrendingUp className={isMobile ? "h-4 w-4 text-green-600" : "h-5 w-5 text-green-600"} />
-                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Plus hausses</CardTitle>
+                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Les plus fortes variations haussières</CardTitle>
                   </div>
                   <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Actifs en hausse aujourd'hui</CardDescription>
                 </CardHeader>
@@ -669,11 +496,11 @@ export function PlatformDashboard() {
               </Card>
 
               {/* Top Losers */}
-              <Card>
+              <Card style={roundedCardStyle}>
                 <CardHeader>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <TrendingDown className={isMobile ? "h-4 w-4 text-red-600" : "h-5 w-5 text-red-600"} />
-                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Plus baisses</CardTitle>
+                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Les plus fortes variations baissières</CardTitle>
                   </div>
                   <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Actifs en baisse aujourd'hui</CardDescription>
                 </CardHeader>

@@ -41,7 +41,11 @@ class Client(models.Model):
     profile_photo = models.ImageField(upload_to='client_profiles/', storage=client_profile_storage, null=True, blank=True)
     civility = models.CharField(max_length=10, default="", blank=True)  # Monsieur, Madame, etc.
     fname = models.CharField(max_length=50, default="")
+    middle_name = models.CharField(max_length=80, default="", blank=True)  # Deuxième prénom (optionnel)
     lname = models.CharField(max_length=50, default="")
+    legal_name = models.CharField(max_length=200, default="", blank=True)  # Dénomination légale (nom complet)
+    sex = models.CharField(max_length=20, default="", blank=True)  # male | female | other
+    account_verified = models.BooleanField(default=False)
     platform_access = models.BooleanField(default=True)  # Connexion à la plateforme
     active = models.BooleanField(null=False, default=True)
     template = models.CharField(max_length=100, default="", blank=True)
@@ -57,6 +61,20 @@ class Client(models.Model):
     city = models.CharField(max_length=100, default="", blank=True)
     nationality = models.CharField(max_length=100, default="", blank=True)
     successor = models.CharField(max_length=200, default="", blank=True)
+
+    # Onboarding / Preferences (client platform)
+    preferences = models.JSONField(default=list, blank=True)  # ex: ["stocks", "crypto", ...]
+
+    # Verification questionnaire (client platform)
+    trading_objective = models.CharField(max_length=200, default="", blank=True)
+    planned_investment_12m = models.CharField(max_length=100, default="", blank=True)
+    risk_reward_profile = models.CharField(max_length=20, default="", blank=True)  # e.g. "5", "10", "20", "40", "80"
+    compliance_family_flags = models.JSONField(default=list, blank=True)
+    funds_sources = models.JSONField(default=list, blank=True)
+    primary_profession = models.CharField(max_length=120, default="", blank=True)
+    employer_name = models.CharField(max_length=200, default="", blank=True)
+    annual_net_income = models.CharField(max_length=80, default="", blank=True)
+    total_liquidities = models.CharField(max_length=80, default="", blank=True)
     
     # Fiche patrimoniale - Activité professionnelle
     professional_activity_status = models.CharField(max_length=50, default="", blank=True)  # Aucune, En activité, Salarié(e), etc.
@@ -104,6 +122,23 @@ class Client(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+class ClientChatMessage(models.Model):
+    """Simple chat message between a client and their manager."""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='chat_messages')
+    manager_user = models.ForeignKey(
+        DjangoUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_client_chat_messages',
+    )
+    sender = models.CharField(max_length=10, default="client")  # client | manager
+    message = models.TextField(default="")
+    read_by_client = models.BooleanField(default=False)
+    read_by_manager = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 class Note(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
@@ -484,7 +519,9 @@ class ProductAssetAllocation(models.Model):
 class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    platform_name = models.CharField(max_length=80, default='Panorama')
     logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
+    login_background_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
     secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)
     accent_color = models.CharField(max_length=7, default='', blank=True)  # Couleur d'accent (hex)
@@ -503,6 +540,8 @@ class NewsPost(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     title = models.CharField(max_length=200, default="")
     content = models.TextField(default="")
+    source_name = models.CharField(max_length=200, default="", blank=True)  # e.g. "Les Echos"
+    article_url = models.URLField(max_length=500, default="", blank=True)  # Link to original article
     image = models.ImageField(upload_to='news/', storage=app_settings_storage, null=True, blank=True)
     author = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='news_posts')
     published = models.BooleanField(default=True)

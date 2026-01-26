@@ -1,0 +1,22 @@
+/* Platform button styles (match Login "Se connecter") */
+
+.platform-button-primary {
+  width: fit-content !important;
+  align-self: flex-start;
+  border-radius: 9999px !important;
+  padding-left: 1.5rem !important;
+  padding-right: 1.5rem !important;
+  background-color: var(--platform-button-bg, var(--secondary, var(--primary, #030213))) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+
+.platform-button-primary:hover {
+  filter: brightness(0.95);
+}
+
+.platform-button-primary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent, var(--primary, #030213)) 35%, transparent);
+  outline-offset: 3px;
+}
+

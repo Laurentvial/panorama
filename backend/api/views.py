@@ -9,6 +9,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework.response import Response
 from .models import Client
+from .models import ClientChatMessage
 from .models import Note
 from .models import UserDetails
 from .models import Team
@@ -32,7 +33,8 @@ from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
+    ClientChatMessageSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -78,6 +80,59 @@ def get_client_ip(request):
     # Fallback to REMOTE_ADDR
     ip = request.META.get('REMOTE_ADDR', '')
     return ip.strip() if ip else 'Unknown'
+
+
+def _recompute_client_account_verified(client: Client) -> list[str]:
+    """
+    Keep the persisted `account_verified` consistent with required onboarding fields.
+    Returns list of model fields that were changed and should be saved.
+    """
+    changed: list[str] = []
+
+    # Derive legal_name if missing
+    try:
+        if not (client.legal_name or '').strip():
+            derived = " ".join(
+                p.strip()
+                for p in [client.fname or '', getattr(client, 'middle_name', '') or '', client.lname or '']
+                if p and p.strip()
+            ).strip()
+            if derived:
+                client.legal_name = derived
+                changed.append('legal_name')
+    except Exception:
+        pass
+
+    prefs_complete = isinstance(getattr(client, 'preferences', None), list) and len(client.preferences) > 0
+    compliance_complete = isinstance(getattr(client, 'compliance_family_flags', None), list) and len(client.compliance_family_flags) > 0
+    sources_complete = isinstance(getattr(client, 'funds_sources', None), list) and len(client.funds_sources) > 0
+
+    is_complete = (
+        bool((client.legal_name or '').strip())
+        and bool((client.fname or '').strip())
+        and bool((client.lname or '').strip())
+        and bool((getattr(client, 'sex', '') or '').strip())
+        and bool(getattr(client, 'birth_date', None))
+        and bool((getattr(client, 'address', '') or '').strip())
+        and bool((getattr(client, 'postal_code', '') or '').strip())
+        and bool((getattr(client, 'city', '') or '').strip())
+        and prefs_complete
+        and bool((getattr(client, 'trading_objective', '') or '').strip())
+        and bool((getattr(client, 'planned_investment_12m', '') or '').strip())
+        and compliance_complete
+        and sources_complete
+        and bool((getattr(client, 'primary_profession', '') or '').strip())
+        and bool((getattr(client, 'employer_name', '') or '').strip())
+        and bool((getattr(client, 'annual_net_income', '') or '').strip())
+        and bool((getattr(client, 'total_liquidities', '') or '').strip())
+    )
+
+    new_verified = bool(is_complete)
+    if bool(getattr(client, 'account_verified', False)) != new_verified:
+        client.account_verified = new_verified
+        changed.append('account_verified')
+
+    return changed
 
 
 _DURATION_RE = re.compile(r"(\d+)")
@@ -527,7 +582,11 @@ def client_create(request):
         'id': client_id,
         'civility': request.data.get('civility', '') or '',
         'fname': request.data.get('firstName', '') or '',
+        'middle_name': request.data.get('middleName', '') or '',
         'lname': request.data.get('lastName', '') or '',
+        'legal_name': request.data.get('legalName', '') or '',
+        'sex': request.data.get('sex', '') or '',
+        'account_verified': request.data.get('accountVerified', False),
         'platform_access': request.data.get('platformAccess', True),
         'active': request.data.get('active', True),
         'template': request.data.get('template', '') or '',
@@ -543,6 +602,14 @@ def client_create(request):
         'city': request.data.get('city', '') or '',
         'nationality': request.data.get('nationality', '') or '',
         'successor': request.data.get('successor', '') or '',
+        # Questionnaire fields
+        'trading_objective': request.data.get('tradingObjective', '') or '',
+        'planned_investment_12m': request.data.get('plannedInvestment12m', '') or '',
+        'risk_reward_profile': request.data.get('riskRewardProfile', '') or '',
+        'primary_profession': request.data.get('primaryProfession', '') or '',
+        'employer_name': request.data.get('employerName', '') or '',
+        'annual_net_income': request.data.get('annualNetIncome', '') or '',
+        'total_liquidities': request.data.get('totalLiquidities', '') or '',
         # managed_by will be set separately to ensure it's a valid user ID
     }
     
@@ -556,12 +623,19 @@ def client_create(request):
         client_data['platform_access'] = client_data['platform_access'].lower() == 'true'
     if isinstance(client_data.get('active'), str):
         client_data['active'] = client_data['active'].lower() == 'true'
+    if isinstance(client_data.get('account_verified'), str):
+        client_data['account_verified'] = client_data['account_verified'].lower() == 'true'
+    else:
+        client_data['account_verified'] = bool(client_data.get('account_verified', False))
     
     # Handle patrimonial data
     # Use getlist for FormData, get for JSON
     professions = request.data.getlist('professions') if hasattr(request.data, 'getlist') else get_list(request.data.get('professions'))
     objectives = request.data.getlist('objectives') if hasattr(request.data, 'getlist') else get_list(request.data.get('objectives'))
     experience = request.data.getlist('experience') if hasattr(request.data, 'getlist') else get_list(request.data.get('experience'))
+    preferences = request.data.getlist('preferences') if hasattr(request.data, 'getlist') else get_list(request.data.get('preferences'))
+    compliance_family_flags = request.data.getlist('complianceFamilyFlags') if hasattr(request.data, 'getlist') else get_list(request.data.get('complianceFamilyFlags'))
+    funds_sources = request.data.getlist('fundsSources') if hasattr(request.data, 'getlist') else get_list(request.data.get('fundsSources'))
     
     # Handle managed_by separately to ensure it's a valid user ID
     # The frontend sends UserDetails.id (string), we need to convert it to DjangoUser.id
@@ -620,6 +694,10 @@ def client_create(request):
         'tax_optimization': bool(request.data.get('taxOptimization', False)) if not isinstance(request.data.get('taxOptimization'), str) else request.data.get('taxOptimization', 'false').lower() == 'true',
         'tax_optimization_comment': request.data.get('taxOptimizationComment') or '',
         'annual_household_income': to_decimal(request.data.get('annualHouseholdIncome')),
+        # Onboarding preferences
+        'preferences': preferences,
+        'compliance_family_flags': compliance_family_flags,
+        'funds_sources': funds_sources,
     })
     
     try:
@@ -742,8 +820,17 @@ def client_detail(request, client_id):
             client.civility = request.data.get('civility', '') or ''
         if 'firstName' in request.data:
             client.fname = request.data.get('firstName', '') or ''
+        if 'middleName' in request.data:
+            client.middle_name = request.data.get('middleName', '') or ''
         if 'lastName' in request.data:
             client.lname = request.data.get('lastName', '') or ''
+        if 'legalName' in request.data:
+            client.legal_name = request.data.get('legalName', '') or ''
+        if 'sex' in request.data:
+            client.sex = request.data.get('sex', '') or ''
+        if 'accountVerified' in request.data:
+            v = request.data.get('accountVerified')
+            client.account_verified = (v.lower() == 'true') if isinstance(v, str) else bool(v)
         if 'template' in request.data:
             client.template = request.data.get('template', '') or ''
         if 'support' in request.data:
@@ -766,6 +853,50 @@ def client_detail(request, client_id):
             client.postal_code = request.data.get('postalCode', '') or ''
         if 'city' in request.data:
             client.city = request.data.get('city', '') or ''
+        if 'preferences' in request.data:
+            prefs = request.data.get('preferences')
+            if isinstance(prefs, str):
+                try:
+                    prefs = json.loads(prefs)
+                except Exception:
+                    prefs = []
+            if not isinstance(prefs, list):
+                prefs = []
+            client.preferences = prefs
+        if 'tradingObjective' in request.data:
+            client.trading_objective = request.data.get('tradingObjective', '') or ''
+        if 'plannedInvestment12m' in request.data:
+            client.planned_investment_12m = request.data.get('plannedInvestment12m', '') or ''
+        if 'riskRewardProfile' in request.data:
+            client.risk_reward_profile = request.data.get('riskRewardProfile', '') or ''
+        if 'complianceFamilyFlags' in request.data:
+            flags = request.data.get('complianceFamilyFlags')
+            if isinstance(flags, str):
+                try:
+                    flags = json.loads(flags)
+                except Exception:
+                    flags = []
+            if not isinstance(flags, list):
+                flags = []
+            client.compliance_family_flags = flags
+        if 'fundsSources' in request.data:
+            sources = request.data.get('fundsSources')
+            if isinstance(sources, str):
+                try:
+                    sources = json.loads(sources)
+                except Exception:
+                    sources = []
+            if not isinstance(sources, list):
+                sources = []
+            client.funds_sources = sources
+        if 'primaryProfession' in request.data:
+            client.primary_profession = request.data.get('primaryProfession', '') or ''
+        if 'employerName' in request.data:
+            client.employer_name = request.data.get('employerName', '') or ''
+        if 'annualNetIncome' in request.data:
+            client.annual_net_income = request.data.get('annualNetIncome', '') or ''
+        if 'totalLiquidities' in request.data:
+            client.total_liquidities = request.data.get('totalLiquidities', '') or ''
         if 'nationality' in request.data:
             client.nationality = request.data.get('nationality', '') or ''
         if 'successor' in request.data:
@@ -1015,6 +1146,11 @@ def client_login(request):
     # Verify password (simple string comparison for now - in production, use hashing)
     if client.password != password:
         return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Ensure account_verified is consistent with required fields
+    changed_fields = _recompute_client_account_verified(client)
+    if changed_fields:
+        client.save(update_fields=changed_fields)
     
     # Return client data (in production, generate a proper token)
     serializer = ClientSerializer(client, context={'request': request})
@@ -1040,6 +1176,12 @@ def get_current_client(request):
         client = Client.objects.get(id=client_id)
         if not client.platform_access or not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Ensure account_verified is consistent with required fields
+        changed_fields = _recompute_client_account_verified(client)
+        if changed_fields:
+            client.save(update_fields=changed_fields)
+
         serializer = ClientSerializer(client, context={'request': request})
         return Response({
             'client': serializer.data,
@@ -1047,6 +1189,156 @@ def get_current_client(request):
         })
     except Client.DoesNotExist:
         return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+@authentication_classes([])  # Disable JWT auth; client_ tokens aren't JWTs
+def client_update_identity(request):
+    """
+    Update current client identity fields using a client_ token.
+    This endpoint is intended for the client platform (self-service verification).
+    """
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not client.platform_access or not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+    def parse_birth_date(value):
+        if not value:
+            return None
+        try:
+            # Handle both YYYY-MM-DD and DD/MM/YYYY formats
+            if '/' in str(value):
+                parts = str(value).split('/')
+                if len(parts) == 3:
+                    day, month, year = parts
+                    return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d").date()
+            return datetime.strptime(str(value), "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    # Update identity fields
+    if 'firstName' in request.data:
+        client.fname = request.data.get('firstName', '') or ''
+    if 'middleName' in request.data:
+        client.middle_name = request.data.get('middleName', '') or ''
+    if 'lastName' in request.data:
+        client.lname = request.data.get('lastName', '') or ''
+    if 'legalName' in request.data:
+        client.legal_name = request.data.get('legalName', '') or ''
+    if 'sex' in request.data:
+        client.sex = request.data.get('sex', '') or ''
+    if 'birthDate' in request.data:
+        client.birth_date = parse_birth_date(request.data.get('birthDate'))
+    if 'address' in request.data:
+        client.address = request.data.get('address', '') or ''
+    if 'postalCode' in request.data:
+        client.postal_code = request.data.get('postalCode', '') or ''
+    if 'city' in request.data:
+        client.city = request.data.get('city', '') or ''
+    if 'preferences' in request.data:
+        prefs = request.data.get('preferences')
+        # Accept array, or JSON-encoded string
+        if isinstance(prefs, str):
+            try:
+                prefs = json.loads(prefs)
+            except Exception:
+                prefs = []
+        if not isinstance(prefs, list):
+            prefs = []
+        client.preferences = prefs
+
+    # Questionnaire fields
+    if 'tradingObjective' in request.data:
+        client.trading_objective = request.data.get('tradingObjective', '') or ''
+    if 'plannedInvestment12m' in request.data:
+        client.planned_investment_12m = request.data.get('plannedInvestment12m', '') or ''
+    if 'riskRewardProfile' in request.data:
+        client.risk_reward_profile = request.data.get('riskRewardProfile', '') or ''
+    if 'complianceFamilyFlags' in request.data:
+        flags = request.data.get('complianceFamilyFlags')
+        if isinstance(flags, str):
+            try:
+                flags = json.loads(flags)
+            except Exception:
+                flags = []
+        if not isinstance(flags, list):
+            flags = []
+        client.compliance_family_flags = flags
+    if 'fundsSources' in request.data:
+        sources = request.data.get('fundsSources')
+        if isinstance(sources, str):
+            try:
+                sources = json.loads(sources)
+            except Exception:
+                sources = []
+        if not isinstance(sources, list):
+            sources = []
+        client.funds_sources = sources
+    if 'primaryProfession' in request.data:
+        client.primary_profession = request.data.get('primaryProfession', '') or ''
+    if 'employerName' in request.data:
+        client.employer_name = request.data.get('employerName', '') or ''
+    if 'annualNetIncome' in request.data:
+        client.annual_net_income = request.data.get('annualNetIncome', '') or ''
+    if 'totalLiquidities' in request.data:
+        client.total_liquidities = request.data.get('totalLiquidities', '') or ''
+
+    # If no legal_name provided, try to derive it from name parts
+    if not (client.legal_name or '').strip():
+        derived = " ".join(
+            p.strip()
+            for p in [client.fname or '', client.middle_name or '', client.lname or '']
+            if p and p.strip()
+        ).strip()
+        if derived:
+            client.legal_name = derived
+
+    # Verification status: consider verified only when ALL onboarding fields are complete
+    prefs_complete = isinstance(getattr(client, 'preferences', None), list) and len(client.preferences) > 0
+    compliance_complete = isinstance(getattr(client, 'compliance_family_flags', None), list) and len(client.compliance_family_flags) > 0
+    sources_complete = isinstance(getattr(client, 'funds_sources', None), list) and len(client.funds_sources) > 0
+    is_complete = (
+        bool((client.legal_name or '').strip())
+        and bool((client.fname or '').strip())
+        and bool((client.lname or '').strip())
+        and bool((client.sex or '').strip())
+        and bool(client.birth_date)
+        and bool((client.address or '').strip())
+        and bool((client.postal_code or '').strip())
+        and bool((client.city or '').strip())
+        and prefs_complete
+        and bool((client.trading_objective or '').strip())
+        and bool((client.planned_investment_12m or '').strip())
+        and compliance_complete
+        and sources_complete
+        and bool((client.primary_profession or '').strip())
+        and bool((client.employer_name or '').strip())
+        and bool((client.annual_net_income or '').strip())
+        and bool((client.total_liquidities or '').strip())
+    )
+    client.account_verified = bool(is_complete)
+
+    client.save(update_fields=[
+        'fname', 'middle_name', 'lname', 'legal_name', 'sex', 'birth_date',
+        'address', 'postal_code', 'city',
+        'preferences',
+        'trading_objective', 'planned_investment_12m', 'risk_reward_profile',
+        'compliance_family_flags', 'funds_sources',
+        'primary_profession', 'employer_name', 'annual_net_income', 'total_liquidities',
+        'account_verified'
+    ])
+    serializer = ClientSerializer(client, context={'request': request})
+    return Response({'client': serializer.data, 'userType': 'client'})
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1869,11 +2161,44 @@ def alpha_vantage_quote(request, symbol):
         return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
 def asset_chart_data(request, asset_id):
     """
     Get historical chart data for an asset (stocks via Alpha Vantage, cryptos via Finnhub)
     """
+    # Check authentication: either Django user via JWT or valid client token
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        # Validate client token
+        client_id = token.replace('client_', '')
+        try:
+            client = Client.objects.get(id=client_id)
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
     asset = get_object_or_404(Asset, id=asset_id)
     
     if not asset.alpha_vantage_symbol:
@@ -2575,11 +2900,40 @@ def positions_list(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
 def client_positions(request, client_id):
-    """Liste les positions d'un client (admin)"""
+    """Liste les positions d'un client (client token ou admin JWT)."""
     client = get_object_or_404(Client, id=client_id)
     status_param = request.GET.get('status')
+
+    # Check authentication manually (same approach as client_transactions)
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+
+    if token and token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
 
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
 
@@ -2594,6 +2948,97 @@ def client_positions(request, client_id):
     qs = qs.order_by('-opened_at', '-period_date', '-created_at')
     serializer = PositionSerializer(qs, many=True)
     return Response({'positions': serializer.data})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
+def client_chat(request, client_id):
+    """
+    Simple chat between a client and their manager.
+    - Client: uses Bearer client_<client_id>
+    - Admin/manager: uses JWT Bearer token
+    """
+    client = get_object_or_404(Client, id=client_id)
+
+    # Check authentication manually (same approach as client_transactions)
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+
+    is_client_token = bool(token and token.startswith('client_'))
+    is_admin_token = False
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+                is_admin_token = True
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Resolve manager user (from client.managed_by)
+    manager_user = None
+    if client.managed_by:
+        try:
+            manager_id = int(client.managed_by)
+            manager_user = DjangoUser.objects.filter(id=manager_id).first()
+        except (ValueError, TypeError):
+            manager_user = DjangoUser.objects.filter(username=client.managed_by).first()
+
+    if request.method == 'GET':
+        qs = ClientChatMessage.objects.filter(client=client).order_by('created_at')
+        serializer = ClientChatMessageSerializer(qs, many=True)
+        return Response({
+            'messages': serializer.data,
+            'manager': {
+                'id': str(manager_user.id) if manager_user else None,
+                'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
+                'email': (manager_user.email if manager_user else ''),
+            },
+        })
+
+    # POST: send message
+    try:
+        payload = request.data or {}
+    except Exception:
+        payload = {}
+
+    message_text = str(payload.get('message', '') or '').strip()
+    if not message_text:
+        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    message_id = uuid.uuid4().hex[:12]
+    while ClientChatMessage.objects.filter(id=message_id).exists():
+        message_id = uuid.uuid4().hex[:12]
+
+    sender = 'client' if is_client_token else 'manager'
+    msg = ClientChatMessage.objects.create(
+        id=message_id,
+        client=client,
+        manager_user=manager_user,
+        sender=sender,
+        message=message_text,
+        read_by_client=(sender == 'client'),
+        read_by_manager=(sender == 'manager'),
+    )
+
+    return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
@@ -4035,12 +4480,32 @@ CGV:"""
 
 # App Settings endpoints
 @api_view(['GET', 'POST', 'PUT'])
+@authentication_classes([])  # Disable authentication - avoid 401 on non-JWT Bearer tokens (e.g. client tokens)
 @permission_classes([AllowAny])  # Allow public access, we'll check auth manually for POST/PUT
 def app_settings(request):
     """Get or update app settings (logo and colors)"""
     # Require authentication for POST/PUT, but allow GET without authentication
     if request.method in ['POST', 'PUT']:
-        if not request.user.is_authenticated:
+        auth_header = request.headers.get('Authorization', '')
+        token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
+
+        # Clients should not update global app settings
+        if token.startswith('client_'):
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Validate JWT manually
+        if auth_header.startswith('Bearer ') and token:
+            from rest_framework_simplejwt.authentication import JWTAuthentication
+            jwt_auth = JWTAuthentication()
+            try:
+                validated_token = jwt_auth.get_validated_token(token)
+                user = jwt_auth.get_user(validated_token)
+                if user and user.is_authenticated:
+                    request.user = user
+            except Exception:
+                return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if not getattr(request, 'user', None) or not request.user.is_authenticated:
             return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
     try:
@@ -4048,6 +4513,7 @@ def app_settings(request):
         settings_obj, created = AppSettings.objects.get_or_create(
             id='settings001',  # Single settings instance
             defaults={
+                'platform_name': 'Panorama',
                 'primary_color': '#030213',
                 'secondary_color': '',
                 'accent_color': ''
@@ -4067,8 +4533,11 @@ def app_settings(request):
                 # Return basic settings even if serialization fails
                 return Response({
                     'id': settings_obj.id,
+                    'platform_name': getattr(settings_obj, 'platform_name', 'Panorama'),
                     'logo': None,
                     'logo_url': None,
+                    'login_background_image': None,
+                    'login_background_image_url': None,
                     'primary_color': settings_obj.primary_color or '#030213',
                     'secondary_color': settings_obj.secondary_color or '',
                     'accent_color': settings_obj.accent_color or '',
@@ -4086,6 +4555,13 @@ def app_settings(request):
                 if settings_obj.logo:
                     settings_obj.logo.delete(save=False)
                 settings_obj.logo = None
+                settings_obj.save()
+
+            # Handle login background removal
+            if data.get('remove_login_background_image') == 'true':
+                if settings_obj.login_background_image:
+                    settings_obj.login_background_image.delete(save=False)
+                settings_obj.login_background_image = None
                 settings_obj.save()
             
             # Handle logo file upload
@@ -4105,8 +4581,13 @@ def app_settings(request):
                         print(f"Deleting old logo: {settings_obj.logo.name}")
                         settings_obj.logo.delete(save=False)
                     
-                    # Save with custom filename - this will upload to cloud storage
-                    settings_obj.logo.save(custom_filename, logo_file, save=True)
+                    # Save with custom filename - load into memory first to avoid temp-file issues on Windows/Python 3.14
+                    from django.core.files.base import ContentFile
+                    try:
+                        logo_file.seek(0)
+                    except Exception:
+                        pass
+                    settings_obj.logo.save(custom_filename, ContentFile(logo_file.read()), save=True)
                     
                     # Verify the logo was saved and uploaded to Cloudinary
                     if not settings_obj.logo:
@@ -4128,8 +4609,37 @@ def app_settings(request):
                     import traceback
                     traceback.print_exc()
                     return Response({'error': f'Logo upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Handle login background image upload
+            if 'login_background_image' in request.FILES:
+                try:
+                    bg_file = request.FILES['login_background_image']
+                    original_filename = bg_file.name
+                    _, ext = os.path.splitext(original_filename)
+                    custom_filename = f'login_background{ext}'
+
+                    # Delete old background if it exists
+                    if settings_obj.login_background_image:
+                        settings_obj.login_background_image.delete(save=False)
+
+                    # Load into memory first to avoid temp-file issues on Windows/Python 3.14
+                    from django.core.files.base import ContentFile
+                    try:
+                        bg_file.seek(0)
+                    except Exception:
+                        pass
+                    settings_obj.login_background_image.save(custom_filename, ContentFile(bg_file.read()), save=True)
+
+                    if not settings_obj.login_background_image:
+                        return Response({'error': 'Background upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as upload_error:
+                    import traceback
+                    traceback.print_exc()
+                    return Response({'error': f'Background upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Update colors from request data
+            if 'platform_name' in data:
+                settings_obj.platform_name = (data.get('platform_name') or 'Panorama').strip()[:80]
             if 'primary_color' in data:
                 settings_obj.primary_color = data.get('primary_color', '#030213')
             if 'secondary_color' in data:
@@ -4459,12 +4969,20 @@ def news_import_from_api(request):
         title = article_data.get('title', '')[:200]
         content = article_data.get('description', '') or article_data.get('content', '')
         image_url = article_data.get('urlToImage', '')
+        source_name = ''
+        try:
+            source_name = (article_data.get('source') or {}).get('name', '') or ''
+        except Exception:
+            source_name = ''
+        article_url = article_data.get('url', '') or ''
         
         # Create news post
         news_post = NewsPost.objects.create(
             id=news_id,
             title=title,
             content=content,
+            source_name=source_name[:200],
+            article_url=article_url[:500],
             author=request.user,
             published=True
         )
@@ -4536,12 +5054,20 @@ def news_bulk_import_from_api(request):
             title = article_data.get('title', '')[:200]
             content = article_data.get('description', '') or article_data.get('content', '')
             image_url = article_data.get('urlToImage', '')
+            source_name = ''
+            try:
+                source_name = (article_data.get('source') or {}).get('name', '') or ''
+            except Exception:
+                source_name = ''
+            article_url = article_data.get('url', '') or ''
             
             # Create news post
             news_post = NewsPost.objects.create(
                 id=news_id,
                 title=title,
                 content=content,
+                source_name=source_name[:200],
+                article_url=article_url[:500],
                 author=request.user,
                 published=True
             )

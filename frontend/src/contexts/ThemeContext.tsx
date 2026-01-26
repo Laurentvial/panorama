@@ -5,6 +5,9 @@ interface AppSettings {
   id: string;
   logo?: string;
   logo_url?: string;
+  login_background_image?: string;
+  login_background_image_url?: string;
+  platform_name?: string;
   primary_color: string;
   secondary_color?: string;
   accent_color?: string;
@@ -34,6 +37,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       // Use default settings if API fails
       const defaultSettings: AppSettings = {
         id: 'default',
+        platform_name: 'Panorama',
         primary_color: '#030213',
         secondary_color: '',
         accent_color: ''
@@ -47,6 +51,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const applyTheme = (appSettings: AppSettings) => {
     const root = document.documentElement;
+
+    // Apply platform name (document title)
+    const platformName = (appSettings.platform_name || '').trim();
+    if (platformName) {
+      document.title = platformName;
+    }
     
     // Apply primary color
     if (appSettings.primary_color) {

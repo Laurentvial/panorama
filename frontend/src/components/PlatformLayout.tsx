@@ -4,24 +4,50 @@ import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { signOut } from '../utils/auth';
-import { Home, Wallet, TrendingUp, LogOut, User, Compass, Search, Menu, X } from '../utils/iconMapping';
+import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { CookieBanner } from './CookieBanner';
+import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile } from './ui/use-mobile';
+import '../styles/PlatformTypography.css';
+import '../styles/PlatformButtons.css';
 
 interface PlatformLayoutProps {
   children: React.ReactNode;
 }
 
 export function PlatformLayout({ children }: PlatformLayoutProps) {
+  const MOBILE_BOTTOM_NAV_HEIGHT = 72;
+  const BOTTOM_NAV_BREAKPOINT = 1400;
   const { currentUser } = useUser();
   const { searchTerm, setSearchTerm } = usePlatformSearch();
-  const { settings } = useTheme();
+  const { settings, loading: settingsLoading } = useTheme();
+  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const platformButtonBg =
+    (settings?.secondary_color || '').trim() ||
+    (settings?.primary_color || '').trim() ||
+    '#030213';
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showBottomNav, setShowBottomNav] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);
+    const onChange = () => setShowBottomNav(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    // When bottom navigation is active, keep the side menu folded by default.
+    if (showBottomNav) {
+      setSidebarOpen(false);
+    }
+  }, [showBottomNav]);
 
   const handleLogout = async () => {
     await signOut();
@@ -31,19 +57,25 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Tableau de bord', icon: Home, path: '/platform' },
     { id: 'portfolio', label: 'Portefeuille', icon: Wallet, path: '/platform/portfolio' },
-    { id: 'trading', label: 'Trading', icon: TrendingUp, path: '/platform/trading' },
+    { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/trading' },
     { id: 'discover', label: 'Découvrir', icon: Compass, path: '/platform/discover' },
   ];
 
   const handleMenuClick = (path: string) => {
     navigate(path);
-    if (isMobile) {
+    if (showBottomNav) {
       setSidebarOpen(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--accent)',
+        ['--platform-button-bg' as any]: platformButtonBg,
+      }}
+    >
       {/* Header */}
       <header style={{
         backgroundColor: 'white',
@@ -55,10 +87,11 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         gap: isMobile ? '12px' : '20px',
         position: 'sticky',
         top: 0,
-        zIndex: 100,
+        // Keep header (and close X) above the drawer overlay.
+        zIndex: showBottomNav ? 500 : 100,
       }}>
         {/* Mobile Menu Button */}
-        {isMobile && (
+        {showBottomNav && (
           <Button
             variant="outline"
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -77,7 +110,6 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           flex: 1, 
           maxWidth: isMobile ? '100%' : '600px', 
           position: 'relative',
-          display: isMobile && sidebarOpen ? 'none' : 'block',
         }}>
           <div style={{ 
             position: 'absolute', 
@@ -111,32 +143,22 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           gap: isMobile ? '8px' : '15px',
           flexShrink: 0,
         }}>
-          {!isMobile && (
-            <Button variant="outline" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <LogOut size={16} />
-              Déconnexion
-            </Button>
-          )}
-          {isMobile && (
-            <Button variant="outline" onClick={handleLogout} style={{ padding: '8px', minWidth: '40px', height: '40px' }}>
-              <LogOut size={18} />
-            </Button>
-          )}
         </div>
       </header>
 
       <div style={{ display: 'flex', position: 'relative' }}>
-        {/* Mobile Sidebar Overlay */}
-        {isMobile && sidebarOpen && (
+        {/* Drawer Overlay (when bottom nav is active) */}
+        {showBottomNav && sidebarOpen && (
           <div
             style={{
               position: 'fixed',
-              top: 0,
+              // Don't cover the header; it contains the close (X) button.
+              top: '60px',
               left: 0,
               right: 0,
               bottom: 0,
               backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 999,
+              zIndex: 300,
             }}
             onClick={() => setSidebarOpen(false)}
           />
@@ -144,22 +166,22 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
 
         {/* Sidebar */}
         <aside style={{
-          width: isMobile ? (sidebarOpen ? '280px' : '0') : '500px',
+          width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '500px',
           backgroundColor: 'white',
-          borderRight: '1px solid #e5e7eb',
+          borderRight: showBottomNav ? 'none' : '1px solid #e5e7eb',
           minHeight: 'calc(100vh - 60px)',
-          padding: isMobile ? (sidebarOpen ? '20px 0' : '0') : '20px 0',
-          position: isMobile ? 'fixed' : 'relative',
-          left: isMobile ? (sidebarOpen ? '0' : '-280px') : '0',
-          top: isMobile ? '60px' : '0',
+          padding: showBottomNav ? (sidebarOpen ? '20px 0' : '0') : '20px 0',
+          position: showBottomNav ? 'fixed' : 'relative',
+          left: showBottomNav ? (sidebarOpen ? '0' : '-280px') : '0',
+          top: showBottomNav ? '60px' : '0',
           bottom: 0,
-          zIndex: 10,
+          zIndex: showBottomNav ? 400 : 10,
           transition: 'left 0.3s ease, width 0.3s ease',
           overflowY: 'auto',
           overflowX: 'hidden',
         }}>
           {/* Logo */}
-          {(sidebarOpen || !isMobile) && (
+          {(sidebarOpen || !showBottomNav) && (
             <>
               <div style={{ 
                 padding: isMobile ? '16px 20px' : '00px 30px', 
@@ -186,7 +208,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     } 
                   />
                 ) : (
-                  <h1 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: 'bold', margin: 0 }}>Panorama</h1>
+                  <h1 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: 'bold', margin: 0 }}>{platformName}</h1>
                 )}
               </div>
               
@@ -279,6 +301,32 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     </button>
                   );
                 })}
+
+                {/* Logout as a "page" in the sidebar */}
+                <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb' }} />
+                <button
+                  onClick={async () => {
+                    if (showBottomNav) setSidebarOpen(false);
+                    await handleLogout();
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: isMobile ? '12px 20px' : '16px 30px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: isMobile ? '12px' : '16px',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontSize: isMobile ? '16px' : '18px',
+                    color: '#ef4444',
+                    fontWeight: 600,
+                  }}
+                >
+                  <LogOut size={isMobile ? 20 : 24} />
+                  Déconnexion
+                </button>
               </nav>
             </>
           )}
@@ -287,16 +335,77 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Main Content */}
         <main style={{ 
           flex: 1, 
-          padding: isMobile ? '16px' : '30px',
+          paddingTop: isMobile ? '16px' : '30px',
+          paddingRight: isMobile ? '16px' : '30px',
+          paddingLeft: isMobile ? '16px' : '30px',
+          paddingBottom: showBottomNav ? `${16 + MOBILE_BOTTOM_NAV_HEIGHT}px` : '30px',
           width: isMobile ? '100%' : 'auto',
           minWidth: 0,
         }}>
           {children}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      {showBottomNav && (
+        <nav
+          style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: `${MOBILE_BOTTOM_NAV_HEIGHT}px`,
+            backgroundColor: 'white',
+            borderTop: '1px solid #e5e7eb',
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-around',
+            padding: '8px 8px 12px',
+          }}
+          aria-label="Navigation mobile"
+        >
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive =
+              location.pathname === item.path ||
+              (item.path !== '/platform' && location.pathname.startsWith(`${item.path}/`));
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => handleMenuClick(item.path)}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  padding: '8px 4px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  color: isActive ? '#111827' : '#6b7280',
+                  fontWeight: isActive ? 600 : 400,
+                }}
+                aria-current={isActive ? 'page' : undefined}
+              >
+                <Icon size={22} />
+                <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
+      {/* Chat bubble (client -> manager) */}
+      <ManagerChatWidget bottomOffsetPx={showBottomNav ? MOBILE_BOTTOM_NAV_HEIGHT : 0} />
       
       {/* Cookie Banner */}
-      <CookieBanner />
+      <CookieBanner bottomOffset={showBottomNav ? MOBILE_BOTTOM_NAV_HEIGHT : 0} />
     </div>
   );
 }

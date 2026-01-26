@@ -165,6 +165,12 @@ DEFAULT_FILE_STORAGE = 'api.storage.CloudinaryMediaStorage'
 MEDIA_URL = '/media/'  # Not used by Cloudinary, but needed for compatibility
 MEDIA_ROOT = BASE_DIR / "media"  # Not used by Cloudinary, but needed for compatibility
 
+# Upload handling
+# On Windows/Python 3.14 we have seen issues with Django's TemporaryFile cleanup during uploads.
+# Keep reasonably-sized uploads in memory to avoid temp-file based handlers.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20MB
+
 # Only include frontend directories if they exist (for local development)
 # On Choreo, frontend is deployed separately, so these directories won't exist
 STATICFILES_DIRS = []

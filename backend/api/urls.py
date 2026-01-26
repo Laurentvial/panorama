@@ -25,6 +25,9 @@ urlpatterns = [
     # Client authentication endpoints
     path('client/login/', api_views.client_login, name='client-login'),
     path('client/current/', api_views.get_current_client, name='get-current-client'),
+    path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
+    # Client chat (client <-> manager)
+    path('clients/<str:client_id>/chat/', api_views.client_chat, name='client-chat'),
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),

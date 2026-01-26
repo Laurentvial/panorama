@@ -14,6 +14,7 @@ import { ManageAssets } from './components/ManageAssets';
 import { ManageUsefulLinks } from './components/ManageUsefulLinks';
 import { ManageNews } from './components/ManageNews';
 import { Transactions } from './components/Transactions';
+import { Messagerie } from './components/Messagerie';
 import { ProduitsInvestissements } from './components/ProduitsInvestissements';
 import { AddProduct } from './components/AddProduct';
 import { EditProduct } from './components/EditProduct';
@@ -22,6 +23,7 @@ import { PlatformDashboard } from './components/PlatformDashboard';
 import { PlatformPortfolio } from './components/PlatformPortfolio';
 import { PlatformTrading } from './components/PlatformTrading';
 import { PlatformDiscover } from './components/PlatformDiscover';
+import { PlatformAccountVerification } from './components/PlatformAccountVerification';
 import { PlatformLayout } from './components/PlatformLayout';
 import { ProductDetail } from './components/ProductDetail';
 import { UserProvider } from './contexts/UserContext';
@@ -185,6 +187,13 @@ function App() {
                             </Layout>
                         </ProtectedRoute>
                     } />
+                    <Route path="/admin/messagerie" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <Messagerie />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
                     <Route path="/admin/positions" element={
                         <ProtectedRoute>
                             <Layout>
@@ -245,6 +254,15 @@ function App() {
                             <PlatformSearchProvider>
                                 <PlatformLayout>
                                     <PlatformPortfolio />
+                                </PlatformLayout>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/verification" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <PlatformLayout>
+                                    <PlatformAccountVerification />
                                 </PlatformLayout>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>

@@ -19,7 +19,8 @@ interface HeaderProps {
 
 export function Header({ user }: HeaderProps) {
   const navigate = useNavigate();
-  const { settings } = useTheme();
+  const { settings, loading: settingsLoading } = useTheme();
+  const platformName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
 
   // Returns full name only if both firstName and lastName exist and are non-empty (after trimming)
   function getFullName() {
@@ -53,7 +54,9 @@ export function Header({ user }: HeaderProps) {
               {settings?.logo_url ? (
                 <img src={settings.logo_url} alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
               ) : (
-                <img src="/images/logo.png" alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
+                <div className="header-platform-name">
+                  {platformName}
+                </div>
               )}
               <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>
             </div>

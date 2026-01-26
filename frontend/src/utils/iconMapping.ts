@@ -57,7 +57,7 @@ export {
   FaEdit as FaEdit,
   FaTrash as FaTrash,
   FaPlus as FaPlus,
-  FaCompass as Compass,
+  FaRegCompass as Compass,
 } from 'react-icons/fa';
 
 // Note: 'react-icons/ph' does not exist, so these exports are removed.

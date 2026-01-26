@@ -1,14 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { useIsMobile } from './ui/use-mobile';
 
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
-  const [assets, setAssets] = useState<any[]>([]);
+  const isMobile = useIsMobile();
+  const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const visiblePositions = useMemo(() => {
+    return (positions || []).filter((p: any) => p?.status !== 'pending');
+  }, [positions]);
 
   useEffect(() => {
     if (currentUser && currentUser.id) {
@@ -19,12 +25,23 @@ export function PlatformPortfolio() {
   const loadPortfolioData = async () => {
     try {
       setLoading(true);
-      const [assetsResponse, transactionsResponse] = await Promise.all([
-        apiCall(`/api/clients/${currentUser.id}/assets/`),
+      const [positionsResponse, transactionsResponse] = await Promise.all([
+        apiCall(`/api/clients/${currentUser.id}/positions/`),
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
       ]);
-      setAssets(assetsResponse.assets || []);
-      setTransactions(transactionsResponse.transactions || []);
+      setPositions((positionsResponse as any)?.positions || []);
+      const sortedTransactions = (transactionsResponse.transactions || []).sort(
+        (a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
+      );
+      const now = Date.now();
+      const filteredTransactions = sortedTransactions.filter((t: any) => {
+        const status = String(t?.status || '').toLowerCase();
+        const isUpcomingStatus = status === 'en_attente_paiement';
+        const dt = new Date(t?.datetime).getTime();
+        const isFuture = Number.isFinite(dt) && dt > now;
+        return !isFuture && !isUpcomingStatus;
+      });
+      setTransactions(filteredTransactions);
     } catch (error) {
       console.error('Error loading portfolio data:', error);
     } finally {
@@ -32,58 +49,252 @@ export function PlatformPortfolio() {
     }
   };
 
-  // Calcul des valeurs financières
-  const investedCapital = currentUser?.invested_capital || currentUser?.investedCapital || 0;
-  const tradingPortfolio = currentUser?.trading_portfolio || currentUser?.tradingPortfolio || 0;
-  const bonus = currentUser?.bonus || 0;
-  const availableFunds = investedCapital - tradingPortfolio - bonus;
+  const formatCurrency = (value: any) => {
+    const n = typeof value === 'string' ? parseFloat(value) : Number(value);
+    if (!Number.isFinite(n)) return '-';
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+  };
 
-  // Calcul des bénéfices/pertes à partir des transactions
-  const calculateProfitLoss = () => {
-    let profitLoss = 0;
-    transactions.forEach((transaction: any) => {
-      const amount = parseFloat(transaction.amount) || 0;
+  const formatDateTime = (iso: string) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return new Intl.DateTimeFormat('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  };
+
+  const formatPositionRange = (p: any) => {
+    if (p.opened_at) {
+      const start = formatDateTime(p.opened_at);
+      const end = p.closed_at ? formatDateTime(p.closed_at) : '-';
+      return `${start} → ${end}`;
+    }
+    if (p.period_date) {
+      const d = new Date(p.period_date);
+      if (!Number.isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat('fr-FR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        }).format(d);
+      }
+      return p.period_date;
+    }
+    return '-';
+  };
+
+  const holdingsByProduct = useMemo(() => {
+    // Aggregate by product to give a quick "produits détenus" overview
+    const map = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        productType: string;
+        productReference: string;
+        totalInvested: number;
+        realizedPnl: number;
+        latestDateIso: string | null;
+      }
+    >();
+
+    const pickLatestIso = (a: string | null, b: string | null) => {
+      if (!a) return b;
+      if (!b) return a;
+      const ta = new Date(a).getTime();
+      const tb = new Date(b).getTime();
+      if (!Number.isFinite(ta)) return b;
+      if (!Number.isFinite(tb)) return a;
+      return tb > ta ? b : a;
+    };
+
+    for (const p of visiblePositions || []) {
+      const productId = String(p.productId || p.product_id || '—');
+      const productName = p.productName || p.product_name || productId;
+      const productType = p.productType || p.product_type || p.product?.type || '';
+      const productReference = p.productReference || p.product_reference || p.product?.reference || '';
+
+      const invested = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const profitLossNum =
+        p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+
+      // P&L par position:
+      // - si profit_loss existe: utiliser
+      // - sinon, si position terminée et expected_total existe: expected_total - invested_amount
+      // - sinon: 0
+      let positionPnl = 0;
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        positionPnl = profitLossNum;
+      } else if (p.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        positionPnl = expectedTotalNum - investedNum;
+      }
+
+      const latestIso = pickLatestIso(p.closed_at || null, pickLatestIso(p.opened_at || null, p.period_date || null));
+
+      const prev =
+        map.get(productId) || ({
+          productId,
+          productName,
+          productType,
+          productReference,
+          totalInvested: 0,
+          realizedPnl: 0,
+          latestDateIso: null,
+        } as const);
+
+      const next = {
+        ...prev,
+        productName,
+        productType,
+        productReference,
+        totalInvested: prev.totalInvested + (Number.isFinite(invested) ? invested : 0),
+        realizedPnl: prev.realizedPnl + (p.status === 'open' || p.status === 'done' ? positionPnl : 0),
+        latestDateIso: pickLatestIso(prev.latestDateIso, latestIso),
+      };
+
+      map.set(productId, next);
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.totalInvested - a.totalInvested);
+  }, [visiblePositions]);
+
+  // Stats du haut: même logique que le CRM (ClientPortfolioTab)
+  const calculatedValues = useMemo(() => {
+    let calculatedInvestedCapital = 0;
+    let calculatedTradingPortfolio = 0;
+    let calculatedBonus = 0;
+    let calculatedProfitLoss = 0;
+    let calculatedTotalInvesti = 0; // Only achat + investissement + transfert (balance -> product)
+
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+
+    completedTransactions.forEach((transaction: any) => {
+      const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
+      const amt = Number.isFinite(amount) ? amount : 0;
+
       switch (transaction.type) {
+        case 'depot':
+          calculatedInvestedCapital += amt;
+          break;
+        case 'retrait':
+          calculatedInvestedCapital -= amt;
+          break;
+        case 'bonus':
+          calculatedBonus += amt;
+          calculatedInvestedCapital += amt;
+          break;
         case 'achat':
-          // Les achats réduisent les bénéfices (coût d'achat)
-          profitLoss -= amount;
+        case 'investissement':
+          calculatedTradingPortfolio += amt;
+          calculatedTotalInvesti += amt;
           break;
         case 'vente':
-          // Les ventes augmentent les bénéfices (revenu de vente)
-          profitLoss += amount;
+          calculatedTradingPortfolio -= amt;
           break;
         case 'interets':
-        case 'bonus':
-          // Les intérêts et bonus augmentent les bénéfices
-          profitLoss += amount;
+          calculatedProfitLoss += amt;
           break;
         case 'frais':
         case 'perte':
-          // Les frais et pertes réduisent les bénéfices
-          profitLoss -= amount;
+          calculatedProfitLoss -= amt;
           break;
-        case 'depot':
-          // Les dépôts n'affectent pas les bénéfices/pertes (c'est du capital)
+        case 'transfert': {
+          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
+          const hasProductId = transaction.productId || null;
+
+          if (transferTo && transferTo !== 'balance') {
+            // balance -> product
+            calculatedTotalInvesti += amt;
+            calculatedTradingPortfolio += amt;
+          } else if (transferTo === 'balance') {
+            // product -> balance
+            calculatedTradingPortfolio -= amt;
+          } else if (hasProductId) {
+            // Fallback: assume subscription (balance -> product)
+            calculatedTotalInvesti += amt;
+            calculatedTradingPortfolio += amt;
+          }
           break;
-        case 'retrait':
-          // Les retraits n'affectent pas les bénéfices/pertes (c'est du capital)
-          break;
+        }
         default:
           break;
       }
     });
-    return profitLoss;
-  };
 
-  const profitLoss = calculateProfitLoss();
-  const portfolioValue = tradingPortfolio + profitLoss;
+    return {
+      investedCapital: calculatedInvestedCapital,
+      tradingPortfolio: Math.max(0, calculatedTradingPortfolio),
+      bonus: calculatedBonus,
+      profitLoss: calculatedProfitLoss,
+      totalInvesti: calculatedTotalInvesti,
+      hasCompletedTransactions: completedTransactions.length > 0,
+    };
+  }, [transactions]);
+
+  const investedCapital = useMemo(
+    () =>
+      calculatedValues.hasCompletedTransactions
+        ? calculatedValues.investedCapital
+        : (currentUser?.investedCapital || currentUser?.invested_capital || 0),
+    [calculatedValues.hasCompletedTransactions, calculatedValues.investedCapital, currentUser?.investedCapital, currentUser?.invested_capital]
+  );
+
+  const tradingPortfolio = useMemo(
+    () =>
+      calculatedValues.hasCompletedTransactions
+        ? calculatedValues.tradingPortfolio
+        : (currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0),
+    [calculatedValues.hasCompletedTransactions, calculatedValues.tradingPortfolio, currentUser?.tradingPortfolio, currentUser?.trading_portfolio]
+  );
+
+  const totalInvesti = useMemo(
+    () => (calculatedValues.hasCompletedTransactions ? calculatedValues.totalInvesti : 0),
+    [calculatedValues.hasCompletedTransactions, calculatedValues.totalInvesti]
+  );
+
+  const profitLoss = useMemo(() => {
+    let total = 0;
+    for (const p of visiblePositions || []) {
+      if (p?.status !== 'open' && p?.status !== 'done') continue;
+
+      const profitLossNum =
+        p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+
+      let positionPnl = 0;
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        positionPnl = profitLossNum;
+      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        positionPnl = expectedTotalNum - investedNum;
+      }
+
+      total += Number.isFinite(positionPnl) ? positionPnl : 0;
+    }
+    return total;
+  }, [visiblePositions]);
+
+  // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
+  const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
+
+  const portfolioValue = useMemo(
+    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
+    [availableFunds, tradingPortfolio, profitLoss]
+  );
   const isProfit = profitLoss >= 0;
 
   return (
-    <div>
-      <h1 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '30px' }}>
-        Mon Portefeuille
-      </h1>
+    <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
+      <h1 className="platform-page-title" style={{ marginBottom: '30px' }}>Mon Portefeuille</h1>
 
       {loading ? (
         <div>Chargement...</div>
@@ -97,7 +308,9 @@ export function PlatformPortfolio() {
                 <Wallet className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{availableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div className="text-2xl font-bold">
+                  {Math.max(0, availableFunds).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">Fonds disponibles pour investir</p>
               </CardContent>
             </Card>
@@ -108,8 +321,10 @@ export function PlatformPortfolio() {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{investedCapital.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
-                <p className="text-xs text-muted-foreground mt-1">Capital total investi</p>
+                <div className="text-2xl font-bold">
+                  {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit)</p>
               </CardContent>
             </Card>
 
@@ -147,57 +362,191 @@ export function PlatformPortfolio() {
             </Card>
           </div>
 
-          {/* Assets List */}
-          <Card>
+          {/* Actifs détenus */}
+          <Card style={{ marginBottom: '30px' }}>
             <CardHeader>
-              <CardTitle>Actifs Disponibles</CardTitle>
-              <CardDescription>Gérez vos actifs et placements</CardDescription>
+              <CardTitle>Actifs détenus</CardTitle>
+              <CardDescription>Produits détenus</CardDescription>
             </CardHeader>
             <CardContent>
-              {assets.length === 0 ? (
-                <p>Aucun actif dans votre portefeuille</p>
+              {visiblePositions.length === 0 ? (
+                <p>Aucune position</p>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
-                  {assets.map((asset: any) => (
-                    <Card key={asset.id}>
-                      <CardHeader>
-                        <CardTitle style={{ fontSize: '18px' }}>{asset.asset?.name || 'N/A'}</CardTitle>
-                        <CardDescription>{asset.asset?.type || ''}</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {asset.asset?.category && (
-                          <div style={{ marginBottom: '10px' }}>
-                            <span style={{ fontSize: '14px', color: '#6b7280' }}>Catégorie: </span>
-                            <span>{asset.asset.category}</span>
-                          </div>
-                        )}
-                        {asset.asset?.reference && (
-                          <div style={{ marginBottom: '10px' }}>
-                            <span style={{ fontSize: '14px', color: '#6b7280' }}>Référence: </span>
-                            <span>{asset.asset.reference}</span>
-                          </div>
-                        )}
-                        {asset.featured && (
-                          <div style={{
-                            display: 'inline-block',
-                            padding: '4px 8px',
-                            backgroundColor: '#dbeafe',
-                            color: '#1e40af',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            fontWeight: '600',
-                            marginTop: '10px',
-                          }}>
-                            ⭐ Mis en avant
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
+                <>
+                  {holdingsByProduct.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Produits détenus</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {holdingsByProduct.map((h) => {
+                          const pnlColor = h.realizedPnl >= 0 ? '#10b981' : '#ef4444';
+                          return (
+                            <div
+                              key={h.productId}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 12,
+                                padding: '12px 14px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: 10,
+                                backgroundColor: 'white',
+                                flexWrap: 'wrap',
+                              }}
+                            >
+                              <div style={{ minWidth: 260 }}>
+                                <div style={{ fontWeight: 700 }}>{h.productName}</div>
+                                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                                  {h.productType ? `Type: ${h.productType}` : 'Type: -'}
+                                  {h.productReference ? ` • Réf: ${h.productReference}` : ''}
+                                </div>
+                                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                                  Date: {h.latestDateIso ? formatDateTime(h.latestDateIso) : '-'}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ fontSize: 12, color: '#6b7280' }}>Investi</div>
+                                  <div style={{ fontWeight: 700 }}>{formatCurrency(h.totalInvested)}</div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ fontSize: 12, color: '#6b7280' }}>P&amp;L</div>
+                                  <div style={{ fontWeight: 700, color: pnlColor }}>{formatCurrency(h.realizedPnl)}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Ordres (positions) */}
+          <Card style={{ marginBottom: '30px' }}>
+            <CardHeader>
+              <CardTitle>Ordres</CardTitle>
+              <CardDescription>Vos achats/ventes et mouvements</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {visiblePositions.length === 0 ? (
+                <p>Aucun ordre</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visiblePositions.map((p: any) => {
+                        const investedNum =
+                          typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+                        const pnlNum =
+                          p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+                        const pnlColor = pnlNum == null ? '#111827' : pnlNum >= 0 ? '#10b981' : '#ef4444';
+                        const statusLabel =
+                          p.status === 'open'
+                            ? 'Ouverte'
+                            : p.status === 'done'
+                              ? 'Fermée'
+                              : p.status === 'cancelled'
+                                ? 'Annulée'
+                                : p.status || '-';
+                        const productLabel = p.productName || p.productId || '-';
+                        const productType = p.productType || p.product_type || '';
+                        return (
+                          <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{productType || '-'}</td>
+                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatPositionRange(p)}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>
+                              {Number.isFinite(investedNum) ? formatCurrency(investedNum) : '-'}
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
+                              {p.profit_loss == null ? '-' : formatCurrency(p.profit_loss)}
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>{statusLabel}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </CardContent>
           </Card>
+
+          {/* Transactions */}
+          <Card style={{ marginBottom: '30px' }}>
+            <CardHeader>
+              <CardTitle>Transactions</CardTitle>
+              <CardDescription>Historique des transactions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {transactions.length === 0 ? (
+                <p>Aucune transaction</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map((t: any) => {
+                        const typeLabel =
+                          t.type === 'depot'
+                            ? 'Dépôt'
+                            : t.type === 'retrait'
+                              ? 'Retrait'
+                              : t.type === 'achat'
+                                ? 'Achat'
+                                : t.type === 'vente'
+                                  ? 'Vente'
+                                  : t.type === 'transfert'
+                                    ? 'Investissement'
+                                    : t.type === 'investissement'
+                                      ? 'Investissement'
+                                  : t.type === 'bonus'
+                                    ? 'Bonus'
+                                    : t.type === 'interets'
+                                      ? 'Intérêts'
+                                      : t.type;
+                        const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
+                        const amountColor = Number.isFinite(amountNum) ? (amountNum >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                        const productLabel = t.productName || '-';
+                        return (
+                          <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatDateTime(t.datetime)}</td>
+                            <td style={{ padding: '10px 8px' }}>{typeLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
+                              {formatCurrency(t.amount)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
         </>
       )}
     </div>
