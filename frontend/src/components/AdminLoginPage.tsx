@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { signIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
-import { ACCESS_TOKEN } from '../utils/constants';
+import { ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import '../styles/LoginPage.css';
@@ -79,8 +79,10 @@ export function AdminLoginPage() {
       }
       
       if (userType === 'client') {
-        // Clear everything and try again
-        localStorage.clear();
+        // Legacy safety: don't wipe all localStorage (would log out client session in other tabs).
+        localStorage.removeItem(ACCESS_TOKEN);
+        localStorage.removeItem(REFRESH_TOKEN);
+        localStorage.removeItem('userType');
         throw new Error('Erreur: Connexion client détectée. Veuillez utiliser /login pour les clients.');
       }
       
@@ -91,7 +93,9 @@ export function AdminLoginPage() {
       console.log('Final UserType after refresh:', finalUserType);
       
       if (finalUserType === 'client') {
-        localStorage.clear();
+        localStorage.removeItem(ACCESS_TOKEN);
+        localStorage.removeItem(REFRESH_TOKEN);
+        localStorage.removeItem('userType');
         throw new Error('Erreur: Type d\'utilisateur incorrect après connexion');
       }
       
@@ -122,9 +126,8 @@ export function AdminLoginPage() {
       
       // Clear any partial login data
       localStorage.removeItem(ACCESS_TOKEN);
-      localStorage.removeItem('refresh');
+      localStorage.removeItem(REFRESH_TOKEN);
       localStorage.removeItem('userType');
-      localStorage.removeItem('clientData');
     } finally {
       setLoading(false);
     }

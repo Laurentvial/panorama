@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
-import { ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 
 interface UserContextType {
   currentUser: any;
@@ -31,11 +31,27 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isSessionClient =
       Boolean(sessionToken) && (sessionUserType === 'client' || sessionToken!.startsWith('client_'));
 
-    // On admin routes, always use admin auth from localStorage.
-    // On client routes, allow per-tab sessionStorage client context.
-    const storage: Storage = !isAdminRoute && isSessionClient ? sessionStorage : localStorage;
-    const token = storage.getItem(ACCESS_TOKEN);
-    const userType = storage.getItem('userType');
+    let storage: Storage;
+    let token: string | null;
+    let userType: string | null;
+
+    if (isAdminRoute) {
+      // Admin routes always use admin auth from localStorage.
+      storage = localStorage;
+      token = storage.getItem(ACCESS_TOKEN);
+      userType = storage.getItem('userType');
+    } else if (isSessionClient) {
+      // Client routes prefer per-tab client context (impersonation).
+      storage = sessionStorage;
+      token = sessionToken;
+      userType = 'client';
+    } else {
+      // Normal client login uses a dedicated localStorage key so it can coexist
+      // with an admin JWT session.
+      storage = localStorage;
+      token = storage.getItem(CLIENT_ACCESS_TOKEN);
+      userType = token ? 'client' : null;
+    }
     
     // Only make API call if we have a token
     if (!token) {
@@ -141,7 +157,6 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.removeItem(ACCESS_TOKEN);
         localStorage.removeItem(REFRESH_TOKEN);
         localStorage.removeItem('userType');
-        localStorage.removeItem('clientData');
       }
       
       setCurrentUser(null);

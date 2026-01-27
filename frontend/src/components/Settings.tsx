@@ -9,7 +9,10 @@ export function Settings() {
   return (
     <div className="settings-page">
       <div className="page-header">
-        <h1>Paramètres</h1>
+        <div className="page-title-section">
+          <h1 className="page-title">Paramètres</h1>
+          <p className="page-subtitle">Configuration de l'application</p>
+        </div>
       </div>
       
       <Card>

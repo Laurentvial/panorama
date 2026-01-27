@@ -20,6 +20,7 @@ interface StockChartProps {
   chartType?: 'line' | 'area' | 'candlestick';
   showVolume?: boolean;
   timeframe?: '1D' | '1W' | '1M' | '6M' | '1Y' | '3Y' | 'MAX';
+  onPerformanceChange?: (performance: { percent: number; absolute: number; start: number; end: number } | null) => void;
 }
 
 export function StockChart({
@@ -30,6 +31,7 @@ export function StockChart({
   chartType = 'area',
   showVolume = false,
   timeframe = '1W',
+  onPerformanceChange,
 }: StockChartProps) {
   const [allChartData, setAllChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,13 +89,20 @@ export function StockChart({
       return [];
     }
 
+    // Ensure consistent ordering (oldest -> newest) for slicing.
+    const sortedAll = allChartData
+      .slice()
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
     const now = new Date();
     let startDate: Date;
 
     switch (timeframe) {
       case '1D':
-        startDate = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
-        break;
+        // Backend provides daily candles (1 point/day). A strict "last 24h" filter
+        // often returns 0 points. For 1D view, show the last 2 daily points
+        // (yesterday -> today) so users always see a meaningful 1-day move.
+        return sortedAll.length <= 2 ? sortedAll : sortedAll.slice(-2);
       case '1W':
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
@@ -111,10 +120,10 @@ export function StockChart({
         break;
       case 'MAX':
       default:
-        return allChartData;
+        return sortedAll;
     }
 
-    return allChartData.filter((point) => {
+    return sortedAll.filter((point) => {
       const pointDate = new Date(point.date);
       return pointDate >= startDate;
     });
@@ -123,13 +132,40 @@ export function StockChart({
   // Use useMemo to recalculate filtered data when timeframe or allChartData changes
   const chartData = useMemo(() => getFilteredData(), [allChartData, timeframe]);
 
+  // Compute timeframe performance from the displayed series.
+  useEffect(() => {
+    if (!onPerformanceChange) return;
+
+    const sorted = (chartData || [])
+      .filter((p) => typeof p?.close === 'number' && Number.isFinite(p.close))
+      .slice()
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (sorted.length < 2) {
+      onPerformanceChange(null);
+      return;
+    }
+
+    const start = sorted[0].close;
+    const end = sorted[sorted.length - 1].close;
+
+    if (!Number.isFinite(start) || start === 0 || !Number.isFinite(end)) {
+      onPerformanceChange(null);
+      return;
+    }
+
+    const absolute = end - start;
+    const percent = (absolute / start) * 100;
+    onPerformanceChange({ percent, absolute, start, end });
+  }, [chartData, onPerformanceChange]);
+
   // Format date for display (adapt format based on timeframe)
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     
-    // For very short timeframes (1D), show time
+    // For 1D we are showing daily points, so show day/month (not time).
     if (timeframe === '1D') {
-      return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' });
     }
     
     // For short timeframes (1W), show day and month

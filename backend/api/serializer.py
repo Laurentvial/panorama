@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -312,12 +312,14 @@ class ClientSerializer(serializers.ModelSerializer):
 
 class ClientChatMessageSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    conversationId = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientChatMessage
         fields = [
             'id',
             'client',
+            'conversationId',
             'manager_user',
             'sender',
             'message',
@@ -325,6 +327,48 @@ class ClientChatMessageSerializer(serializers.ModelSerializer):
             'read_by_manager',
             'createdAt',
         ]
+
+    def get_conversationId(self, obj):
+        return getattr(obj.conversation, 'id', None)
+
+
+class ClientConversationSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    lastMessageAt = serializers.SerializerMethodField()
+    lastMessagePreview = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClientConversation
+        fields = [
+            'id',
+            'client',
+            'manager_user',
+            'subject',
+            'closed',
+            'createdAt',
+            'updatedAt',
+            'lastMessageAt',
+            'lastMessagePreview',
+        ]
+
+    def _get_last_message(self, obj):
+        # Fallback to None when there are no messages.
+        try:
+            return obj.messages.order_by('-created_at').first()
+        except Exception:
+            return None
+
+    def get_lastMessageAt(self, obj):
+        m = self._get_last_message(obj)
+        return m.created_at if m else None
+
+    def get_lastMessagePreview(self, obj):
+        m = self._get_last_message(obj)
+        if not m:
+            return ''
+        text = (m.message or '').strip()
+        return (text[:120] + '…') if len(text) > 120 else text
 
 class TeamSerializer(serializers.ModelSerializer):
     class Meta:
@@ -342,12 +386,13 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
     mobile = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    profilePhoto = serializers.SerializerMethodField()
 
     class Meta:
         model = UserDetails
         fields = [
             'id', 'firstName', 'lastName', 'username', 'email',
-            'role', 'phone', 'mobile', 'teamId', 'active', 'createdAt'
+            'role', 'phone', 'mobile', 'teamId', 'active', 'createdAt', 'profilePhoto'
         ]
         read_only_fields = ['id']
 
@@ -374,6 +419,18 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         # Get team from TeamMember relationship
         team_member = obj.team_memberships.first()
         return team_member.team.id if team_member else None
+
+    def get_profilePhoto(self, obj):
+        if not getattr(obj, 'profile_photo', None):
+            return ''
+        try:
+            url = obj.profile_photo.url
+        except Exception:
+            return ''
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request and url else (url or '')
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -526,6 +583,9 @@ class AssetSerializer(serializers.ModelSerializer):
     lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
     priceChange = serializers.DecimalField(source='price_change', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
     priceChangePercent = serializers.DecimalField(source='price_change_percent', max_digits=10, decimal_places=4, read_only=True, allow_null=True)
+    marketCap = serializers.IntegerField(source='market_cap', read_only=True, allow_null=True)
+    marketCapCurrency = serializers.CharField(source='market_cap_currency', required=False, allow_blank=True)
+    foundedYear = serializers.IntegerField(source='founded_year', read_only=True, allow_null=True)
     
     class Meta:
         model = Asset
@@ -533,6 +593,8 @@ class AssetSerializer(serializers.ModelSerializer):
             'id', 'type', 'name', 'reference', 'category', 'subcategory', 'default',
             'alphaVantageSymbol', 'tradingViewSymbol', 'exchange', 'currency', 'region', 'logoUrl',
             'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent',
+            'description', 'sector', 'industry', 'headquarters', 'ceo', 'employees', 'website',
+            'marketCap', 'marketCapCurrency', 'foundedYear', 'country',
             'createdAt', 'updatedAt'
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent']
@@ -548,6 +610,11 @@ class AssetSerializer(serializers.ModelSerializer):
             ret['priceChange'] = float(instance.price_change)
         if instance.price_change_percent:
             ret['priceChangePercent'] = float(instance.price_change_percent)
+        if instance.market_cap is not None:
+            try:
+                ret['marketCap'] = int(instance.market_cap)
+            except Exception:
+                pass
         # Ensure logoUrl is included even if empty
         ret['logoUrl'] = instance.logo_url or ''
         return ret

@@ -9,16 +9,6 @@
   overflow-x: hidden; /* Empêche le débordement horizontal du conteneur */
 }
 
-.clients-header {
-  position: sticky;
-  top: 0;
-  background-color: white;
-  z-index: 30;
-  padding: 1rem 0;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid #e2e8f0;
-}
-
 /* Header title/subtitle styles moved to PageHeader.css */
 
 .clients-filters-card {

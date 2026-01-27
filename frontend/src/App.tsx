@@ -35,38 +35,34 @@ import { ClientImpersonate } from './components/ClientImpersonate';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
 import { Settings } from './components/Settings';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './utils/constants';
 import './styles/Card.css';
 
 function Logout() {
-    const sessionToken = sessionStorage.getItem('access');
+    const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
     const sessionUserType = sessionStorage.getItem('userType');
-    const localToken = localStorage.getItem('access');
     const localUserType = localStorage.getItem('userType');
+    const clientToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
 
     const isClientSession =
       (sessionToken && (sessionUserType === 'client' || sessionToken.startsWith('client_'))) ||
-      (localToken && (localUserType === 'client' || localToken.startsWith('client_')));
+      Boolean(clientToken);
 
     // Never nuke all localStorage (would log out admin in other tabs).
     if (isClientSession) {
-      sessionStorage.removeItem('access');
+      sessionStorage.removeItem(ACCESS_TOKEN);
       sessionStorage.removeItem('userType');
       sessionStorage.removeItem('clientData');
-      // Also clear persisted client login if that is the active context.
-      if (localUserType === 'client' || (localToken && localToken.startsWith('client_'))) {
-        localStorage.removeItem('access');
-        localStorage.removeItem('refresh');
-        localStorage.removeItem('userType');
-        localStorage.removeItem('clientData');
-      }
+      // Also clear persisted client login.
+      localStorage.removeItem(CLIENT_ACCESS_TOKEN);
+      localStorage.removeItem('clientData');
       return <Navigate to="/login" />;
     }
 
     // Admin logout
-    localStorage.removeItem('access');
-    localStorage.removeItem('refresh');
+    localStorage.removeItem(ACCESS_TOKEN);
+    localStorage.removeItem(REFRESH_TOKEN);
     localStorage.removeItem('userType');
-    localStorage.removeItem('clientData');
     return <Navigate to="/admin/login" />;
 }
 

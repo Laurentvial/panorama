@@ -1,5 +1,5 @@
 import { apiCall } from './api';
-import { ACCESS_TOKEN, REFRESH_TOKEN } from './constants';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './constants';
 
 // Get API base URL from environment or use default
 const getEnvVar = (key: string): string | undefined => {
@@ -37,9 +37,6 @@ export async function signIn(username: string, password: string) {
     
     if (data.access) {
       localStorage.setItem(ACCESS_TOKEN, data.access);
-      // Clear client-related data when admin logs in
-      localStorage.removeItem('userType');
-      localStorage.removeItem('clientData');
       // Set userType to admin to distinguish from client
       localStorage.setItem('userType', 'admin');
       console.log('Token stored, userType set to admin');
@@ -79,8 +76,8 @@ export async function clientSignIn(email: string, password: string) {
     const data = await response.json();
     
     if (data.token) {
-      localStorage.setItem(ACCESS_TOKEN, data.token);
-      localStorage.setItem('userType', 'client');
+      // Store client token under a dedicated key so it doesn't overwrite admin auth.
+      localStorage.setItem(CLIENT_ACCESS_TOKEN, data.token);
       localStorage.setItem('clientData', JSON.stringify(data.client));
     }
     
@@ -94,6 +91,17 @@ export async function signOut() {
   localStorage.removeItem(ACCESS_TOKEN);
   localStorage.removeItem(REFRESH_TOKEN);
   localStorage.removeItem('userType');
+  // Don't clear client session here; admin and client sessions can coexist.
+}
+
+export async function clientSignOut() {
+  // Clear per-tab client impersonation context (if any)
+  sessionStorage.removeItem(ACCESS_TOKEN);
+  sessionStorage.removeItem('userType');
+  sessionStorage.removeItem('clientData');
+
+  // Clear normal client login context (persisted)
+  localStorage.removeItem(CLIENT_ACCESS_TOKEN);
   localStorage.removeItem('clientData');
 }
 

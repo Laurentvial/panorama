@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
-import { ACCESS_TOKEN } from '../utils/constants';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { useIsMobile } from './ui/use-mobile';
 import { Card, CardContent, CardHeader } from './ui/card';
 import { Button } from './ui/button';
@@ -94,9 +94,8 @@ export function PlatformAccountVerification() {
       return { token: sessionToken, storage: sessionStorage };
     }
 
-    const localToken = localStorage.getItem(ACCESS_TOKEN);
-    const localUserType = localStorage.getItem('userType');
-    if (localToken && (localUserType === 'client' || localToken.startsWith('client_'))) {
+    const localToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
+    if (localToken) {
       return { token: localToken, storage: localStorage };
     }
 
@@ -130,7 +129,10 @@ export function PlatformAccountVerification() {
 
     if (data?.client) {
       auth.storage.setItem('clientData', JSON.stringify(data.client));
-      auth.storage.setItem('userType', 'client');
+      // Avoid writing "userType=client" into localStorage (would overwrite admin).
+      if (auth.storage === sessionStorage) {
+        auth.storage.setItem('userType', 'client');
+      }
     }
 
     return data;

@@ -31,6 +31,8 @@ export function CreateUserModal({
   const { teams = [] as Team[], loading: teamsLoading } = useTeams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -69,19 +71,21 @@ export function CreateUserModal({
     }
 
     try {
-      // Map form data to Django API format
-      // Use email as username - backend will handle this automatically
+      const payload = new FormData();
+      payload.append('email', formData.email);
+      payload.append('password', formData.password);
+      payload.append('first_name', formData.firstName);
+      payload.append('last_name', formData.lastName);
+      payload.append('phone', formData.phone || '');
+      payload.append('role', formData.role);
+      payload.append('teamId', formData.teamId || '');
+      if (profilePhoto) {
+        payload.append('profilePhoto', profilePhoto);
+      }
+
       await apiCall("/api/users/create/", {
         method: 'POST',
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          first_name: formData.firstName,
-          last_name: formData.lastName,
-          phone: formData.phone,
-          role: formData.role,
-          teamId: formData.teamId || null,
-        }),
+        body: payload,
       });
 
       toast.success("Utilisateur créé avec succès");
@@ -96,6 +100,8 @@ export function CreateUserModal({
         role: "admin",
         teamId: "",
       });
+      setProfilePhoto(null);
+      setProfilePhotoPreview(null);
       onClose();
       onUserCreated();
     } catch (err: any) {
@@ -130,6 +136,68 @@ export function CreateUserModal({
           </Button>
         </div>
         <form onSubmit={handleSubmit} className="modal-form">
+          <div className="modal-form-field">
+            <Label>Photo (optionnel)</Label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {profilePhotoPreview ? (
+                <img
+                  src={profilePhotoPreview}
+                  alt="Aperçu"
+                  style={{ width: 56, height: 56, borderRadius: 9999, objectFit: 'cover', border: '1px solid #e5e7eb' }}
+                />
+              ) : (
+                <div style={{ width: 56, height: 56, borderRadius: 9999, background: '#f3f4f6', border: '1px solid #e5e7eb' }} />
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  type="file"
+                  id="create-user-profilePhoto"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (!file) return;
+                    if (!file.type.startsWith('image/')) {
+                      toast.error('Veuillez sélectionner une image');
+                      return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                      toast.error("L'image ne doit pas dépasser 5MB");
+                      return;
+                    }
+                    setProfilePhoto(file);
+                    const reader = new FileReader();
+                    reader.onloadend = () => setProfilePhotoPreview(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('create-user-profilePhoto')?.click()}
+                >
+                  {profilePhoto ? 'Changer la photo' : 'Importer une photo'}
+                </Button>
+                {profilePhoto && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setProfilePhoto(null);
+                      setProfilePhotoPreview(null);
+                      const input = document.getElementById('create-user-profilePhoto') as HTMLInputElement | null;
+                      if (input) input.value = '';
+                    }}
+                  >
+                    Retirer
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="modal-form-field">
             <Label htmlFor="create-firstName">Prénom</Label>
             <Input

@@ -189,6 +189,34 @@ class AlphaVantageService:
         except Exception as e:
             logger.error(f"Error fetching quote for {symbol}: {str(e)}")
             return None
+
+    def get_company_overview(self, symbol: str) -> Optional[Dict]:
+        """
+        Get company overview data using Alpha Vantage OVERVIEW endpoint.
+
+        Returns a raw dict (best-effort) or None.
+        """
+        try:
+            params = {
+                'function': 'OVERVIEW',
+                'symbol': symbol,
+                'apikey': self.api_key
+            }
+            response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json() or {}
+
+            # If Alpha Vantage returns an empty dict, it's usually a missing symbol or rate-limit.
+            if not isinstance(data, dict) or not data:
+                return None
+
+            if 'Error Message' in data or 'Note' in data or 'Information' in data:
+                return None
+
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching company overview for {symbol}: {str(e)}")
+            return None
     
     def get_intraday_data(self, symbol: str, interval: str = '1min', outputsize: str = 'compact') -> Optional[Dict]:
         """

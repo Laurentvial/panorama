@@ -5,6 +5,7 @@ export interface User {
   lastName: string;
   username: string;
   email: string;
+  profilePhoto?: string;
   phone?: string;
   role: string;
   teamId: string | null;

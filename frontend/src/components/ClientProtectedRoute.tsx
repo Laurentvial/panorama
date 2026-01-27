@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate } from "react-router-dom";
-import { ACCESS_TOKEN } from "../utils/constants";
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from "../utils/constants";
 import { useState, useEffect } from "react";
 
 interface ClientProtectedRouteProps {
@@ -24,8 +24,8 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
 
         const storage: Storage = isSessionClient ? sessionStorage : localStorage;
 
-        const token = isSessionClient ? sessionToken : localStorage.getItem(ACCESS_TOKEN);
-        const userType = isSessionClient ? sessionUserType : localStorage.getItem('userType');
+        const token = isSessionClient ? sessionToken : localStorage.getItem(CLIENT_ACCESS_TOKEN);
+        const userType = isSessionClient ? sessionUserType : (token ? 'client' : null);
         
         if (!token) {
             setIsAuthenticated(false);

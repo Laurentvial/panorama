@@ -28,6 +28,13 @@ urlpatterns = [
     path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
     # Client chat (client <-> manager)
     path('clients/<str:client_id>/chat/', api_views.client_chat, name='client-chat'),
+    # Client conversations (threaded messaging)
+    path('clients/<str:client_id>/conversations/', api_views.client_conversations, name='client-conversations'),
+    path(
+        'clients/<str:client_id>/conversations/<str:conversation_id>/messages/',
+        api_views.client_conversation_messages,
+        name='client-conversation-messages',
+    ),
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),
@@ -43,6 +50,8 @@ urlpatterns = [
     path('assets/', api_views.asset_list, name='asset-list'),
     path('assets/create/', api_views.asset_create, name='asset-create'),
     path('assets/create-from-alpha-vantage/', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage'),
+    # AI (assets) - must be BEFORE the generic assets/<asset_id>/ route
+    path('assets/generate-description/', api_views.asset_generate_description, name='asset-generate-description'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
     path('assets/get-logo/', api_views.asset_get_logo, name='asset-get-logo'),  # Specific route before generic
     path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),
@@ -56,6 +65,8 @@ urlpatterns = [
     # Alpha Vantage endpoints
     path('alpha-vantage/search/', api_views.alpha_vantage_search, name='alpha-vantage-search'),
     path('alpha-vantage/quote/<str:symbol>/', api_views.alpha_vantage_quote, name='alpha-vantage-quote'),
+    # FX endpoint (used by client trading modal for EUR-only liquidity)
+    path('forex/quote/', api_views.forex_quote, name='forex-quote'),
     # Chart data endpoint
     path('assets/<str:asset_id>/chart-data/', api_views.asset_chart_data, name='asset-chart-data'),
     # RIBs endpoints

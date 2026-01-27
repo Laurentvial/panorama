@@ -1,4 +1,4 @@
-import { ACCESS_TOKEN, REFRESH_TOKEN } from "./constants";
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from "./constants";
 
 // Use environment variable if set, otherwise use Choreo proxy path
 // For production on Choreo, this should be the Choreo proxy path
@@ -15,7 +15,12 @@ function isClientAuth(token: string | null, userType: string | null): boolean {
   return userType === 'client' || token.startsWith('client_');
 }
 
-function getActiveAuth() {
+type ActiveAuth =
+  | { kind: 'admin'; token: string | null; userType: string | null; storage: Storage }
+  | { kind: 'client_session'; token: string; userType: 'client'; storage: Storage }
+  | { kind: 'client_local'; token: string; userType: 'client'; storage: Storage };
+
+function getActiveAuth(): ActiveAuth {
   const path =
     typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
   const isAdminRoute = path.startsWith('/admin');
@@ -29,20 +34,37 @@ function getActiveAuth() {
     const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
     const sessionUserType = sessionStorage.getItem('userType');
     if (sessionToken && isClientAuth(sessionToken, sessionUserType)) {
-      return { token: sessionToken, userType: sessionUserType, storage: sessionStorage as Storage };
+      return { kind: 'client_session', token: sessionToken, userType: 'client', storage: sessionStorage as Storage };
+    }
+
+    // Normal client login (persisted) uses a separate localStorage key so it
+    // doesn't overwrite the admin JWT token.
+    const clientToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
+    if (clientToken) {
+      return { kind: 'client_local', token: clientToken, userType: 'client', storage: localStorage as Storage };
     }
   }
 
   const token = localStorage.getItem(ACCESS_TOKEN);
   const userType = localStorage.getItem('userType');
-  return { token, userType, storage: localStorage as Storage };
+  return { kind: 'admin', token, userType, storage: localStorage as Storage };
 }
 
-function clearAuth(storage: Storage) {
-  storage.removeItem(ACCESS_TOKEN);
-  storage.removeItem(REFRESH_TOKEN);
-  storage.removeItem('userType');
-  storage.removeItem('clientData');
+function clearAuth(auth: ActiveAuth) {
+  if (auth.kind === 'client_session') {
+    auth.storage.removeItem(ACCESS_TOKEN);
+    auth.storage.removeItem('userType');
+    auth.storage.removeItem('clientData');
+    return;
+  }
+  if (auth.kind === 'client_local') {
+    auth.storage.removeItem(CLIENT_ACCESS_TOKEN);
+    auth.storage.removeItem('clientData');
+    return;
+  }
+  auth.storage.removeItem(ACCESS_TOKEN);
+  auth.storage.removeItem(REFRESH_TOKEN);
+  auth.storage.removeItem('userType');
 }
 
 // Helper function to check if an error is a network error (server restarting)
@@ -174,7 +196,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     if (isClientAuth(token, activeUserType)) {
       if (!isRedirecting) {
         isRedirecting = true;
-        clearAuth(activeStorage);
+        clearAuth(auth);
         window.location.replace('/login');
         const redirectError = new Error('Redirecting to login');
         (redirectError as any).isRedirecting = true;
@@ -246,7 +268,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
       if (!isRedirecting) {
         isRedirecting = true;
         const userType = localStorage.getItem('userType');
-        clearAuth(localStorage);
+        clearAuth({ kind: 'admin', token: null, userType: null, storage: localStorage as Storage });
         
         // Use replace instead of href for immediate redirect
         if (userType === 'client') {
@@ -277,7 +299,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
       const userType = activeUserType || localStorage.getItem('userType');
       // Clear only the active auth storage (sessionStorage for impersonated client,
       // localStorage for normal logins), never wipe the other context.
-      clearAuth(activeStorage);
+      clearAuth(auth);
       
       // Use replace for immediate redirect
       if (userType === 'client') {

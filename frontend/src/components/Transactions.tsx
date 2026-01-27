@@ -10,6 +10,14 @@ import { useUser } from '../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
@@ -153,6 +161,15 @@ export function Transactions() {
     setIsEditTransactionModalOpen(true);
   };
 
+  const selectedTypeCount = filters.types.length;
+  const typeFilterLabel =
+    selectedTypeCount === 0
+      ? 'Tous les types'
+      : selectedTypeCount === 1
+        ? (TRANSACTION_TYPES_FILTER[filters.types[0] as keyof typeof TRANSACTION_TYPES_FILTER] ||
+            filters.types[0])
+        : `${selectedTypeCount} sélectionnés`;
+
   return (
     <div className="space-y-6">
       <div className="page-header-section">
@@ -173,20 +190,43 @@ export function Transactions() {
             {/* Type filter (multiple selection) */}
             <div className="space-y-2">
               <Label>Type de transaction</Label>
-              <div className="space-y-2 max-h-48 overflow-y-auto border border-slate-200 rounded p-3">
-                {Object.entries(TRANSACTION_TYPES_FILTER).map(([key, label]) => (
-                  <div key={key} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`type-${key}`}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between font-normal"
+                  >
+                    {typeFilterLabel}
+                    <span className="ml-2 text-slate-500">▼</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-64" align="start">
+                  <DropdownMenuLabel>Type de transaction</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={filters.types.length === 0}
+                    onCheckedChange={(checked) => {
+                      // When "all" is checked, we clear types.
+                      if (checked) {
+                        setFilters((prev) => ({ ...prev, types: [] }));
+                      }
+                    }}
+                  >
+                    Tous les types
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                  {Object.entries(TRANSACTION_TYPES_FILTER).map(([key, label]) => (
+                    <DropdownMenuCheckboxItem
+                      key={key}
                       checked={filters.types.includes(key)}
                       onCheckedChange={(checked) => handleTypeFilterChange(key, checked as boolean)}
-                    />
-                    <Label htmlFor={`type-${key}`} className="text-sm font-normal cursor-pointer">
+                    >
                       {label}
-                    </Label>
-                  </div>
-                ))}
-              </div>
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             {/* Status filter */}

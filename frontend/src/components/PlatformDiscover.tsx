@@ -702,7 +702,7 @@ export function PlatformDiscover() {
                           <div style={{
                             fontSize: '20px',
                             fontWeight: '700',
-                            color: isPositive ? '#10b981' : '#ef4444',
+                            color: isPositive ? 'var(--platform-button-bg)' : '#ef4444',
                           }}>
                             {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                           </div>
@@ -898,7 +898,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.priceChange || 0) >= 0 ? '#10b981' : '#ef4444',
+                                  color: (asset.priceChange || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
                                 }}>
                                   {(asset.priceChange || 0) >= 0 ? '+' : ''}
                                   {typeof asset.priceChange === 'number' 
@@ -912,7 +912,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.priceChangePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                  color: (asset.priceChangePercent || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
                                 }}>
                                   ({(asset.priceChangePercent || 0) >= 0 ? '+' : ''}
                                   {typeof asset.priceChangePercent === 'number' 
@@ -923,7 +923,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.changePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                  color: (asset.changePercent || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
                                 }}>
                                   ({(asset.changePercent || 0) >= 0 ? '+' : ''}
                                   {typeof asset.changePercent === 'number' 
@@ -1061,7 +1061,7 @@ export function PlatformDiscover() {
                               <div style={{
                                 fontSize: '14px',
                                 fontWeight: '600',
-                                color: profitabilityInfo.isPositive ? '#10b981' : '#ef4444',
+                                color: profitabilityInfo.isPositive ? 'var(--platform-button-bg)' : '#ef4444',
                               }}>
                                 {profitabilityInfo.isPositive ? '+' : ''}
                                 {profitabilityInfo.text}

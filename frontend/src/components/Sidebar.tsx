@@ -31,7 +31,6 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin' },
     { id: 'planning', label: 'Planning', icon: Calendar, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/planning' },
-    { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin'], path: '/admin/users' },
     { id: 'clients', label: 'Clients', icon: UserCircle, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/clients' },
     { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/transactions' },
     { id: 'positions', label: 'Positions', icon: ChartPie, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/positions' },
@@ -41,6 +40,7 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
     { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin'], path: '/admin/manage/ribs' },
     { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin'], path: '/admin/manage/useful-links' },
     { id: 'manage-news', label: 'Gestion Actualités', icon: Newspaper, roles: ['admin'], path: '/admin/manage/news' },
+    { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin'], path: '/admin/users' },
     { id: 'settings', label: 'Paramètres', icon: SettingsIcon, roles: ['admin'], path: '/admin/settings' },
   ];
 

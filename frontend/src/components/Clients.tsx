@@ -219,7 +219,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
 
   return (
     <div className="clients-container">
-      <div className="clients-header page-header">
+      <div className="page-header">
         <div className="page-title-section">
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">Gestion de vos clients</p>

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Slider } from './ui/slider';
-import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, MoreHorizontal, Check, ExternalLink } from 'lucide-react';
+import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, Check, ExternalLink } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
@@ -23,8 +23,14 @@ export function ProductDetail() {
   const [dataType, setDataType] = useState<'asset' | 'product' | null>(null);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'chart' | 'analysis' | 'news' | 'financials'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analysis' | 'news'>('overview');
   const [selectedTimeframe, setSelectedTimeframe] = useState<'1D' | '1W' | '1M' | '6M' | '1Y' | '3Y' | 'MAX'>('1W');
+  const [timeframePerformance, setTimeframePerformance] = useState<{ percent: number; absolute: number; start: number; end: number } | null>(null);
+  const [showTradeModal, setShowTradeModal] = useState(false);
+  const [tradeAmountEur, setTradeAmountEur] = useState<string>('');
+  const [fxRateEurToAsset, setFxRateEurToAsset] = useState<number>(1);
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
   const [showCGVModal, setShowCGVModal] = useState(false);
   const [showGainsModal, setShowGainsModal] = useState(false);
   const [showContractPreview, setShowContractPreview] = useState(false);
@@ -75,6 +81,10 @@ export function ProductDetail() {
   });
   const [clientIP, setClientIP] = useState('');
   const isMobile = useIsMobile();
+
+  // Keep a stable currency value for hooks (never behind conditional returns)
+  const tradeAssetCurrency =
+    dataType === 'asset' ? (String(data?.currency || 'EUR').trim().toUpperCase() || 'EUR') : 'EUR';
 
   // Helper function to convert date string to Date object
   const parseDateString = (dateString: string): Date | undefined => {
@@ -156,6 +166,47 @@ export function ProductDetail() {
       }
     }
   }, [categories, dataType, data]);
+
+  // FX rate fetch for the Trade modal (must be a top-level hook).
+  useEffect(() => {
+    if (!showTradeModal) return;
+    if (dataType !== 'asset') return;
+
+    setFxError(null);
+
+    if (!tradeAssetCurrency || tradeAssetCurrency === 'EUR') {
+      setFxRateEurToAsset(1);
+      return;
+    }
+
+    let cancelled = false;
+    setFxLoading(true);
+
+    apiCall(`/api/forex/quote/?from=EUR&to=${encodeURIComponent(tradeAssetCurrency)}`, { method: 'GET' })
+      .then((res: any) => {
+        if (cancelled) return;
+        const rate = Number(res?.exchange_rate);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          setFxError('Impossible de récupérer le taux de change.');
+          setFxRateEurToAsset(0);
+          return;
+        }
+        setFxRateEurToAsset(rate);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        setFxError(e?.message || 'Impossible de récupérer le taux de change.');
+        setFxRateEurToAsset(0);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setFxLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showTradeModal, dataType, tradeAssetCurrency]);
 
   const loadCategories = async () => {
     try {
@@ -873,7 +924,7 @@ export function ProductDetail() {
                   
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Rentabilité</div>
-                    <div style={{ fontSize: '16px', fontWeight: '600', color: '#10b981' }}>
+                    <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--platform-button-bg)' }}>
                       {formatProfitability(product)}
                     </div>
                   </div>
@@ -992,7 +1043,7 @@ export function ProductDetail() {
                           border-radius: 9999px !important;
                         }
                         [data-slot="slider-range"] {
-                          background-color: #10b981 !important;
+                          background-color: var(--platform-button-bg) !important;
                           height: 100% !important;
                           border-radius: 9999px !important;
                         }
@@ -1000,7 +1051,7 @@ export function ProductDetail() {
                           width: 20px !important;
                           height: 20px !important;
                           background-color: white !important;
-                          border: 3px solid #10b981 !important;
+                          border: 3px solid var(--platform-button-bg) !important;
                           border-radius: 50% !important;
                           cursor: pointer !important;
                           box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
@@ -1600,7 +1651,7 @@ export function ProductDetail() {
                       disabled={isSubscribing}
                       style={{
                         width: '100%',
-                        backgroundColor: '#10b981',
+                        backgroundColor: 'var(--platform-button-bg)',
                         color: 'white',
                         fontWeight: '600',
                         padding: '12px',
@@ -1907,6 +1958,37 @@ export function ProductDetail() {
   const price = parseFinancialValue(asset?.price || asset?.lastPrice || 0);
   const priceChange = parseFinancialValue(asset?.priceChange || asset?.change || 0);
   const priceChangePercent = parseFinancialValue(asset?.priceChangePercent || asset?.changePercent || 0);
+  const displayedChangePercent =
+    typeof timeframePerformance?.percent === 'number' && Number.isFinite(timeframePerformance.percent)
+      ? timeframePerformance.percent
+      : priceChangePercent;
+
+  const assetCurrency = tradeAssetCurrency;
+
+  const amountEurNum = parseFinancialValue(String(tradeAmountEur).replace(',', '.'));
+  const amountInAssetCurrency = amountEurNum * (assetCurrency === 'EUR' ? 1 : fxRateEurToAsset || 0);
+  const estimatedShares =
+    amountInAssetCurrency > 0 && price > 0 ? amountInAssetCurrency / price : 0;
+
+  const getTimeframeLabel = (tf: typeof selectedTimeframe) => {
+    switch (tf) {
+      case '1D':
+        return 'Dernières 24h';
+      case '1W':
+        return 'Semaine passée';
+      case '1M':
+        return 'Mois passé';
+      case '6M':
+        return '6 derniers mois';
+      case '1Y':
+        return 'Année passée';
+      case '3Y':
+        return '3 dernières années';
+      case 'MAX':
+      default:
+        return 'Depuis le début';
+    }
+  };
 
   // Helper function to get TradingView symbol from asset
   // First tries to use the native trading_view_symbol if available (user-confirmed)
@@ -2094,13 +2176,13 @@ export function ProductDetail() {
               <div style={{ 
                 fontSize: isMobile ? '18px' : '20px', 
                 fontWeight: 'bold', 
-                color: priceChangePercent >= 0 ? '#10b981' : '#ef4444' 
+                color: priceChangePercent >= 0 ? 'var(--platform-button-bg)' : '#ef4444' 
               }}>
                 {price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div style={{ 
                 fontSize: isMobile ? '12px' : '14px', 
-                color: priceChangePercent >= 0 ? '#10b981' : '#ef4444' 
+                color: priceChangePercent >= 0 ? 'var(--platform-button-bg)' : '#ef4444' 
               }}>
                 {priceChange >= 0 ? '+' : ''}{priceChange.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
                 {' '}({priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%)
@@ -2119,22 +2201,109 @@ export function ProductDetail() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Button 
             style={{
-              backgroundColor: '#10b981',
+              backgroundColor: 'var(--platform-button-bg)',
               color: 'white',
               fontWeight: '600',
               padding: '12px 24px',
-              borderRadius: '8px',
+              borderRadius: 9999,
               border: 'none',
               cursor: 'pointer',
             }}
+          onClick={() => {
+            setTradeAmountEur('');
+            setFxError(null);
+            setShowTradeModal(true);
+          }}
           >
             Trader
           </Button>
-          <Button variant="outline" style={{ padding: '12px' }}>
-            <MoreHorizontal className="h-5 w-5" />
-          </Button>
         </div>
       </div>
+
+      {/* Trade modal (client enters amount in EUR) */}
+      <Dialog open={showTradeModal} onOpenChange={setShowTradeModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trader {asset?.reference || asset?.name || ''}</DialogTitle>
+            <DialogDescription>
+              Saisissez un montant en EUR. Le nombre d’actions est estimé en fonction du prix actuel{assetCurrency !== 'EUR' ? ` et du taux de change EUR/${assetCurrency}` : ''}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <Label htmlFor="trade-amount-eur">Montant (EUR)</Label>
+              <Input
+                id="trade-amount-eur"
+                inputMode="decimal"
+                placeholder="Ex: 1000"
+                value={tradeAmountEur}
+                onChange={(e) => setTradeAmountEur(e.target.value)}
+              />
+            </div>
+
+            {assetCurrency !== 'EUR' && (
+              <div style={{ fontSize: 13, color: '#6b7280' }}>
+                {fxLoading ? (
+                  <div>Récupération du taux de change…</div>
+                ) : fxError ? (
+                  <div style={{ color: '#ef4444' }}>{fxError}</div>
+                ) : (
+                  <>
+                    <div>
+                      Taux estimé: <strong>1 EUR ≈ {fxRateEurToAsset.toFixed(6)} {assetCurrency}</strong>
+                    </div>
+                    {amountEurNum > 0 && fxRateEurToAsset > 0 && (
+                      <div>
+                        Montant converti: <strong>{amountInAssetCurrency.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} {assetCurrency}</strong>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 6 }}>Estimation</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                <span>Prix par action</span>
+                <strong>
+                  {price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} {assetCurrency}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginTop: 6 }}>
+                <span>Actions estimées</span>
+                <strong>
+                  {estimatedShares > 0
+                    ? estimatedShares.toLocaleString('fr-FR', { maximumFractionDigits: 6 })
+                    : '—'}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, color: '#6b7280' }}>
+              {isCrypto
+                ? "Marché crypto: ouvert 24/7."
+                : "Si le marché est fermé, l’opération sera exécutée à la prochaine ouverture."}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Button variant="outline" onClick={() => setShowTradeModal(false)}>
+                Fermer
+              </Button>
+              <Button
+                disabled={amountEurNum <= 0 || (assetCurrency !== 'EUR' && (fxLoading || fxRateEurToAsset <= 0))}
+                onClick={() => {
+                  toast.success('Ordre préparé (démo UI).');
+                  setShowTradeModal(false);
+                }}
+              >
+                Confirmer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Tabs */}
       <div style={{ 
@@ -2148,10 +2317,8 @@ export function ProductDetail() {
       }}>
         {[
           { id: 'overview', label: 'Vue d\'ensemble', icon: BarChart3 },
-          { id: 'chart', label: 'Graphique', icon: TrendingUp },
           { id: 'analysis', label: 'Analyse', icon: FileText },
           { id: 'news', label: 'Actualités', icon: Newspaper },
-          { id: 'financials', label: 'Finances', icon: DollarSign },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -2163,7 +2330,7 @@ export function ProductDetail() {
                 padding: isMobile ? '10px 16px' : '12px 20px',
                 border: 'none',
                 backgroundColor: 'transparent',
-                borderBottom: isActive ? '2px solid #10b981' : '2px solid transparent',
+                borderBottom: isActive ? '2px solid var(--platform-button-bg)' : '2px solid transparent',
                 color: isActive ? '#111827' : '#6b7280',
                 fontWeight: isActive ? '600' : '400',
                 cursor: 'pointer',
@@ -2193,21 +2360,50 @@ export function ProductDetail() {
           {activeTab === 'overview' && (
             <Card>
               <CardHeader>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  flexWrap: isMobile ? 'wrap' : 'nowrap',
-                  gap: isMobile ? '8px' : '0',
-                }}>
-                  <CardTitle style={{ fontSize: isMobile ? '16px' : '18px' }}>Performance</CardTitle>
-                  <Button variant="outline" style={{ 
-                    fontSize: isMobile ? '11px' : '12px', 
-                    padding: isMobile ? '6px 10px' : '6px 12px',
-                    flexShrink: 0,
-                  }}>
-                    {isMobile ? 'Vue complète' : 'Vue complète des fonds'}
-                  </Button>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    flexWrap: isMobile ? 'wrap' : 'nowrap',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <CardTitle style={{ fontSize: isMobile ? '16px' : '18px' }}>Performance</CardTitle>
+                    <div
+                      style={{
+                        fontSize: isMobile ? 12 : 13,
+                        fontWeight: 600,
+                        lineHeight: 1.1,
+                        color: displayedChangePercent >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
+                      }}
+                    >
+                      {displayedChangePercent >= 0 ? '+' : ''}
+                      {displayedChangePercent.toFixed(2)}% {getTimeframeLabel(selectedTimeframe)}
+                    </div>
+                  </div>
+
+                  {/* Time range selector (top-right of chart) */}
+                  <div style={{ width: isMobile ? '100%' : 180 }}>
+                    <Select
+                      value={selectedTimeframe}
+                      onValueChange={(v) => setSelectedTimeframe(v as any)}
+                    >
+                      <SelectTrigger style={{ height: 38 }}>
+                        <SelectValue placeholder="Période" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1D">1 jour</SelectItem>
+                        <SelectItem value="1W">1 semaine</SelectItem>
+                        <SelectItem value="1M">1 mois</SelectItem>
+                        <SelectItem value="6M">6 mois</SelectItem>
+                        <SelectItem value="1Y">1 an</SelectItem>
+                        <SelectItem value="3Y">3 ans</SelectItem>
+                        <SelectItem value="MAX">Max</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -2215,13 +2411,14 @@ export function ProductDetail() {
                 {asset.alpha_vantage_symbol || asset.alphaVantageSymbol ? (
                   <div style={{ marginBottom: '20px' }}>
                     <StockChart
-                      assetId={asset.id}
+                      assetId={String(asset.id)}
                       assetName={asset.name || asset.reference}
                       width="100%"
                       height={isMobile ? 400 : 500}
                       chartType="area"
                       showVolume={false}
                       timeframe={selectedTimeframe}
+                      onPerformanceChange={setTimeframePerformance}
                     />
                   </div>
                 ) : (
@@ -2240,46 +2437,6 @@ export function ProductDetail() {
                     </div>
                   </div>
                 )}
-
-                {/* Timeframe Selector */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                  {['1D', '1W', '1M', '6M', '1Y', '3Y', 'MAX'].map((timeframe) => (
-                    <button
-                      key={timeframe}
-                      onClick={() => setSelectedTimeframe(timeframe as any)}
-                      style={{
-                        padding: '8px 16px',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        backgroundColor: selectedTimeframe === timeframe ? '#10b981' : 'white',
-                        color: selectedTimeframe === timeframe ? 'white' : '#111827',
-                        fontWeight: selectedTimeframe === timeframe ? '600' : '400',
-                        cursor: 'pointer',
-                        fontSize: '14px',
-                      }}
-                    >
-                      {timeframe}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Performance Info */}
-                <div style={{ fontSize: '18px', fontWeight: '600', color: priceChangePercent >= 0 ? '#10b981' : '#ef4444' }}>
-                  {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}% Semaine passée
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === 'chart' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Graphique</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div style={{ color: '#6b7280', textAlign: 'center', padding: '40px' }}>
-                  Le graphique est disponible dans l'onglet "Vue d'ensemble" ci-dessus.
-                </div>
               </CardContent>
             </Card>
           )}
@@ -2309,19 +2466,6 @@ export function ProductDetail() {
               </CardContent>
             </Card>
           )}
-
-          {activeTab === 'financials' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Données financières</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div style={{ color: '#6b7280' }}>
-                  Données financières détaillées à venir...
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* Sidebar */}
@@ -2335,32 +2479,6 @@ export function ProductDetail() {
           maxHeight: isMobile ? 'calc(100vh - 60px)' : 'calc(100vh - 80px)',
           overflowY: 'visible',
         }}>
-          {/* Why is it moving? */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Pourquoi {asset.reference || asset.name} bouge-t-il ?</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-                Découvrez les facteurs qui influencent le prix de cet actif.
-              </p>
-              <Button 
-                style={{
-                  width: '100%',
-                  backgroundColor: '#111827',
-                  color: 'white',
-                  fontWeight: '600',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                S'abonner au club
-              </Button>
-            </CardContent>
-          </Card>
-
           {/* Additional Info Cards */}
           <Card>
             <CardHeader>
@@ -2368,6 +2486,14 @@ export function ProductDetail() {
             </CardHeader>
             <CardContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {asset.description && (
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: 6 }}>Description</div>
+                    <div style={{ fontSize: '13px', color: '#111827', lineHeight: 1.4 }}>
+                      {asset.description}
+                    </div>
+                  </div>
+                )}
                 {asset.category && (
                   <div style={{ 
                     display: 'flex', 
@@ -2408,6 +2534,99 @@ export function ProductDetail() {
                       textAlign: 'right',
                       wordBreak: 'break-word',
                     }}>{asset.type}</span>
+                  </div>
+                )}
+                {(asset.exchange || asset.region) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Marché:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {[asset.exchange, asset.region].filter(Boolean).join(' • ')}
+                    </span>
+                  </div>
+                )}
+                {asset.currency && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Devise:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.currency}
+                    </span>
+                  </div>
+                )}
+                {asset.sector && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Secteur:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.sector}
+                    </span>
+                  </div>
+                )}
+                {asset.industry && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Industrie:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.industry}
+                    </span>
+                  </div>
+                )}
+                {asset.country && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Pays:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.country}
+                    </span>
+                  </div>
+                )}
+                {asset.headquarters && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Siège:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.headquarters}
+                    </span>
+                  </div>
+                )}
+                {(asset.marketCap || asset.market_cap) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Capitalisation:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {Number(asset.marketCap || asset.market_cap).toLocaleString('fr-FR')} {asset.marketCapCurrency || asset.market_cap_currency || 'USD'}
+                    </span>
+                  </div>
+                )}
+                {asset.employees && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Employés:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {Number(asset.employees).toLocaleString('fr-FR')}
+                    </span>
+                  </div>
+                )}
+                {asset.ceo && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>PDG:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.ceo}
+                    </span>
+                  </div>
+                )}
+                {asset.foundedYear && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Fondée en:</span>
+                    <span style={{ fontWeight: '600', flex: '0 1 auto', minWidth: 0, textAlign: 'right', wordBreak: 'break-word' }}>
+                      {asset.foundedYear}
+                    </span>
+                  </div>
+                )}
+                {asset.website && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? '4px' : '0' }}>
+                    <span style={{ color: '#6b7280', flex: '0 1 auto', minWidth: 0 }}>Site web:</span>
+                    <a
+                      href={asset.website}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontWeight: 600, textAlign: 'right', wordBreak: 'break-word', color: '#2563eb' }}
+                    >
+                      {asset.website}
+                    </a>
                   </div>
                 )}
               </div>

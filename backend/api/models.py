@@ -25,6 +25,7 @@ try:
     app_settings_storage = CloudinaryMediaStorage
     useful_link_storage = CloudinaryMediaStorage
     client_profile_storage = CloudinaryMediaStorage
+    user_profile_storage = CloudinaryMediaStorage
 except ImportError:
     # CloudinaryMediaStorage must be available
     raise ImportError(
@@ -123,10 +124,36 @@ class Client(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+class ClientConversation(models.Model):
+    """
+    Conversation (thread) between a client and their manager.
+    Used to support multiple requests with a subject.
+    """
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='conversations')
+    manager_user = models.ForeignKey(
+        DjangoUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_client_conversations',
+    )
+    subject = models.CharField(max_length=255, default="", blank=True)
+    closed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 class ClientChatMessage(models.Model):
     """Simple chat message between a client and their manager."""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='chat_messages')
+    conversation = models.ForeignKey(
+        ClientConversation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='messages',
+    )
     manager_user = models.ForeignKey(
         DjangoUser,
         on_delete=models.SET_NULL,
@@ -154,6 +181,7 @@ class Note(models.Model):
 class UserDetails(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     django_user = models.OneToOneField(DjangoUser, on_delete=models.CASCADE, related_name='user_details')
+    profile_photo = models.ImageField(upload_to='user_profiles/', storage=user_profile_storage, null=True, blank=True)
     role = models.CharField(max_length=12, default="0")
     phone = models.CharField(max_length=20, default="", blank=True)
     active = models.BooleanField(null=False, default=True)
@@ -238,6 +266,19 @@ class Asset(models.Model):
     last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last price update
     price_change = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Price change from previous close
     price_change_percent = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)  # Percentage change
+
+    # Company / asset information (persisted at import time)
+    description = models.TextField(default="", blank=True)  # Company/asset description
+    sector = models.CharField(max_length=200, default="", blank=True)  # Sector (e.g., Technology)
+    industry = models.CharField(max_length=200, default="", blank=True)  # Industry (e.g., Semiconductors)
+    headquarters = models.CharField(max_length=300, default="", blank=True)  # Headquarters / address
+    ceo = models.CharField(max_length=200, default="", blank=True)  # CEO (best-effort)
+    founded_year = models.IntegerField(null=True, blank=True)  # Founded year (best-effort)
+    employees = models.IntegerField(null=True, blank=True)  # Full-time employees (best-effort)
+    website = models.URLField(max_length=500, default="", blank=True)  # Company website
+    market_cap = models.BigIntegerField(null=True, blank=True)  # Market capitalization (best-effort)
+    market_cap_currency = models.CharField(max_length=10, default="USD", blank=True)  # Currency for market_cap
+    country = models.CharField(max_length=100, default="", blank=True)  # Country
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

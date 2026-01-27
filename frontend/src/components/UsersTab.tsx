@@ -117,6 +117,7 @@ export function UsersTab() {
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Photo</th>
                     <th>Nom</th>
                     <th>Email</th>
                     <th>Rôle</th>
@@ -132,6 +133,34 @@ export function UsersTab() {
                     return (
                       <tr key={user.id}>
                         <td className="users-teams-table-id">{user.id.substring(0, 8)}</td>
+                        <td>
+                          {user.profilePhoto ? (
+                            <img
+                              src={user.profilePhoto}
+                              alt={`${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Photo'}
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 9999,
+                                objectFit: 'cover',
+                                border: '1px solid #e5e7eb',
+                              }}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 9999,
+                                background: '#f3f4f6',
+                                border: '1px solid #e5e7eb',
+                              }}
+                            />
+                          )}
+                        </td>
                         <td>
                           {`${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || user.email || `Utilisateur ${user.id}`}
                         </td>

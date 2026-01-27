@@ -9,6 +9,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework.response import Response
 from .models import Client
+from .models import ClientConversation
 from .models import ClientChatMessage
 from .models import Note
 from .models import UserDetails
@@ -34,11 +35,12 @@ from .serializer import (
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
-    ClientChatMessageSerializer
+    ClientChatMessageSerializer, ClientConversationSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 import uuid
 import json
 import os
@@ -460,10 +462,27 @@ class UserCreateView(generics.CreateAPIView):
     queryset = DjangoUser.objects.all()
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def perform_create(self, serializer):
         # Save the user (this will trigger the serializer's create method)
         user = serializer.save()
+
+        # Optional: handle profile photo upload for UserDetails
+        try:
+            user_details = UserDetails.objects.filter(django_user=user).first()
+            profile_photo_file = self.request.FILES.get('profilePhoto')
+            if user_details and profile_photo_file:
+                # Build a stable filename for Cloudinary
+                original_filename = profile_photo_file.name or 'photo'
+                _, ext = os.path.splitext(original_filename)
+                ext = ext.lower() if ext else '.jpg'
+                custom_filename = f"user_{user_details.id}_{uuid.uuid4().hex[:8]}{ext}"
+                user_details.profile_photo.save(custom_filename, profile_photo_file, save=True)
+        except Exception as e:
+            # Don't block user creation if photo upload fails
+            import logging
+            logging.getLogger(__name__).warning(f"User profile photo upload failed: {str(e)}")
         
         # Get the user who created this (if authenticated, otherwise None)
         created_by_user = self.request.user if self.request.user.is_authenticated else None
@@ -1349,7 +1368,7 @@ def get_current_user(request):
             # Try to get the user details profile
             user_details = UserDetails.objects.get(django_user=django_user)
             # Use UserDetailsSerializer to ensure consistent format with other endpoints
-            serializer = UserDetailsSerializer(user_details)
+            serializer = UserDetailsSerializer(user_details, context={'request': request})
             return Response({
                 **serializer.data,
                 'userType': 'admin'  # admin, teamleader, or gestionnaire
@@ -1475,7 +1494,7 @@ def team_detail(request, team_id):
 @permission_classes([IsAuthenticated])
 def user_list(request):
     users = UserDetails.objects.all()
-    serializer = UserDetailsSerializer(users, many=True)
+    serializer = UserDetailsSerializer(users, many=True, context={'request': request})
     return Response({'users': serializer.data})
 
 
@@ -1555,6 +1574,7 @@ def user_reset_password(request, user_id):
     return Response({'message': 'Password reset successfully'}, status=status.HTTP_200_OK)
 
 @api_view(['PUT'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 @permission_classes([IsAuthenticated])
 def user_update(request, user_id):
     user_details = get_object_or_404(UserDetails, id=user_id)
@@ -1582,6 +1602,22 @@ def user_update(request, user_id):
         user_details.role = request.data['role']
     if 'phone' in request.data:
         user_details.phone = request.data['phone'] or ''
+
+    # Optional: update profile photo
+    if 'profilePhoto' in request.FILES:
+        try:
+            profile_photo_file = request.FILES['profilePhoto']
+            # Delete old photo if any
+            if user_details.profile_photo:
+                user_details.profile_photo.delete(save=False)
+            original_filename = profile_photo_file.name or 'photo'
+            _, ext = os.path.splitext(original_filename)
+            ext = ext.lower() if ext else '.jpg'
+            custom_filename = f"user_{user_details.id}_{uuid.uuid4().hex[:8]}{ext}"
+            user_details.profile_photo.save(custom_filename, profile_photo_file, save=False)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"User profile photo update failed: {str(e)}")
     
     # Update team membership using TeamMember table
     if 'teamId' in request.data:
@@ -1624,7 +1660,7 @@ def user_update(request, user_id):
     )
     
     # Return updated user data
-    serializer = UserDetailsSerializer(user_details)
+    serializer = UserDetailsSerializer(user_details, context={'request': request})
     return Response(serializer.data)
 
 # Events endpoints
@@ -2088,6 +2124,95 @@ def alpha_vantage_search(request):
         except Exception as e:
             logger.error(f"Error searching crypto: {str(e)}")
             return Response({'error': f'Error searching crypto: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Commodity "search" (best-effort): return curated symbols that work with our existing
+    # quote/chart pipeline (i.e., tradable tickers like commodity ETFs).
+    if asset_type in ['commodity', 'commodities', 'matiere_premiere', 'matiere-premiere', 'matiere premiere', 'matière première']:
+        kw = keywords.lower()
+        curated = [
+            {
+                'symbol': 'GLD',
+                'name': 'Or (ETF) - SPDR Gold Shares',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['gold', 'or', 'xau', 'gld'],
+            },
+            {
+                'symbol': 'IAU',
+                'name': 'Or (ETF) - iShares Gold Trust',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['gold', 'or', 'xau', 'iau'],
+            },
+            {
+                'symbol': 'SLV',
+                'name': 'Argent (ETF) - iShares Silver Trust',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['silver', 'argent', 'xag', 'slv'],
+            },
+            {
+                'symbol': 'USO',
+                'name': 'Pétrole (ETF) - United States Oil Fund',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['oil', 'petrole', 'pétrole', 'wti', 'uso'],
+            },
+            {
+                'symbol': 'UNG',
+                'name': 'Gaz naturel (ETF) - United States Natural Gas Fund',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['gas', 'gaz', 'natural gas', 'ung'],
+            },
+            {
+                'symbol': 'CPER',
+                'name': 'Cuivre (ETN) - United States Copper Index Fund',
+                'type': 'Commodity',
+                'region': 'United States',
+                'currency': 'USD',
+                'exchange': 'NYSEARCA',
+                'aliases': ['copper', 'cuivre', 'cper'],
+            },
+        ]
+
+        matches = []
+        for item in curated:
+            hay = " ".join(
+                [
+                    item.get('name', ''),
+                    item.get('symbol', ''),
+                    " ".join(item.get('aliases', []) or []),
+                ]
+            ).lower()
+            if kw in hay:
+                result = {k: v for k, v in item.items() if k != 'aliases'}
+                matches.append(result)
+
+        # Optionally add prices if Alpha Vantage is configured.
+        av_service = get_alpha_vantage_service()
+        if av_service:
+            for result in matches[:10]:
+                try:
+                    quote = av_service.get_quote(result['symbol'])
+                    if quote:
+                        result['price'] = quote['price']
+                        result['change'] = quote['change']
+                        result['change_percent'] = quote['change_percent']
+                except Exception:
+                    pass
+
+        return Response({'results': matches[:10], 'count': len(matches[:10])}, status=status.HTTP_200_OK)
     
     # Use Alpha Vantage for stocks, ETFs, etc.
     av_service = get_alpha_vantage_service()
@@ -2159,6 +2284,85 @@ def alpha_vantage_quote(request, symbol):
         return Response(quote, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@authentication_classes([])  # public endpoint (rate doesn't require auth)
+@permission_classes([AllowAny])
+def forex_quote(request):
+    """
+    Get a best-effort FX rate using Alpha Vantage.
+
+    Query params:
+      - from / from_currency (e.g. EUR)
+      - to / to_currency (e.g. USD)
+    """
+    from_currency = (request.GET.get('from') or request.GET.get('from_currency') or '').strip().upper()
+    to_currency = (request.GET.get('to') or request.GET.get('to_currency') or '').strip().upper()
+
+    if not from_currency or not to_currency:
+        return Response(
+            {'error': 'Missing required query params: from, to'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if from_currency == to_currency:
+        return Response(
+            {
+                'from_currency': from_currency,
+                'to_currency': to_currency,
+                'exchange_rate': 1.0,
+                'bid_price': 1.0,
+                'ask_price': 1.0,
+                'last_refreshed': '',
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # Prefer Alpha Vantage if configured, but it can be rate-limited.
+    av_service = get_alpha_vantage_service()
+    if av_service:
+        try:
+            quote = av_service.get_forex_quote(from_currency=from_currency, to_currency=to_currency)
+            if quote and quote.get('exchange_rate'):
+                return Response(quote, status=status.HTTP_200_OK)
+        except Exception:
+            # Fall through to public fallback sources
+            pass
+
+    # Fallback: Frankfurter (ECB-based) - no API key required.
+    # Docs: https://www.frankfurter.app/
+    try:
+        import requests
+        r = requests.get(
+            "https://api.frankfurter.app/latest",
+            params={"from": from_currency, "to": to_currency},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            payload = r.json() or {}
+            rates = payload.get("rates") or {}
+            rate = rates.get(to_currency)
+            if rate:
+                rate_f = float(rate)
+                return Response(
+                    {
+                        "from_currency": from_currency,
+                        "to_currency": to_currency,
+                        "exchange_rate": rate_f,
+                        "bid_price": rate_f,
+                        "ask_price": rate_f,
+                        "last_refreshed": payload.get("date", "") or "",
+                        "source": "frankfurter",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+    except Exception:
+        pass
+
+    return Response(
+        {'error': f'Unable to fetch forex quote for {from_currency}/{to_currency}'},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )
 
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
@@ -2284,11 +2488,12 @@ def asset_create_from_alpha_vantage(request):
     category = request.data.get('category', '')
     subcategory = request.data.get('subcategory', '')
     exchange = request.data.get('exchange', '')
-    currency = request.data.get('currency', 'USD')
+    currency = (request.data.get('currency', '') or '').strip()
     region = request.data.get('region', '')
     # Accept both logo_url (snake_case) and logoUrl (camelCase) from frontend
     logo_url = request.data.get('logo_url', '') or request.data.get('logoUrl', '')
     default = request.data.get('default', False)
+    manual_description = (request.data.get('description', '') or '').strip()
     
     if not symbol:
         return Response({'error': 'Symbol is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2302,6 +2507,19 @@ def asset_create_from_alpha_vantage(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
+        # Company overview fields are only available for equities/ETFs.
+        # Initialize defaults so crypto creation doesn't crash with NameError.
+        overview_name = ''
+        overview_description = ''
+        overview_sector = ''
+        overview_industry = ''
+        overview_address = ''
+        overview_employees = None
+        overview_website = ''
+        overview_market_cap = None
+        overview_currency = ''
+        overview_country = ''
+
         # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
         if asset_type.lower() == 'crypto':
             from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
@@ -2313,6 +2531,10 @@ def asset_create_from_alpha_vantage(request):
             # Get logo URL if not provided
             if not logo_url:
                 logo_url = get_crypto_logo(symbol) or ''
+
+            # Finnhub quotes for crypto are USD-based; ensure we store a sensible default.
+            if not currency:
+                currency = 'USD'
         else:
             av_service = get_alpha_vantage_service()
             if not av_service:
@@ -2327,6 +2549,37 @@ def asset_create_from_alpha_vantage(request):
             # Get logo URL if not provided
             if not logo_url:
                 logo_url = av_service.get_company_logo(symbol) or ''
+
+            # Best-effort company info (persisted on import)
+            overview = av_service.get_company_overview(symbol) or {}
+            overview_name = (overview.get('Name') or '').strip()
+            overview_description = (overview.get('Description') or '').strip()
+            overview_sector = (overview.get('Sector') or '').strip()
+            overview_industry = (overview.get('Industry') or '').strip()
+            overview_country = (overview.get('Country') or '').strip()
+            overview_website = (overview.get('Website') or '').strip()
+            overview_address = (overview.get('Address') or '').strip()
+            overview_employees_raw = (overview.get('FullTimeEmployees') or '').strip()
+            overview_market_cap_raw = (overview.get('MarketCapitalization') or '').strip()
+            overview_currency = (overview.get('Currency') or '').strip()
+
+            try:
+                overview_employees = int(overview_employees_raw) if overview_employees_raw else None
+            except Exception:
+                overview_employees = None
+
+            try:
+                overview_market_cap = int(overview_market_cap_raw) if overview_market_cap_raw else None
+            except Exception:
+                overview_market_cap = None
+
+            # If currency/exchange/region weren't passed from the UI, prefer OVERVIEW values.
+            if not currency:
+                currency = overview_currency or 'USD'
+            if not exchange:
+                exchange = (overview.get('Exchange') or '').strip() or exchange
+            if not region:
+                region = (overview.get('Country') or '').strip() or region
         
         # Generate asset ID
         asset_id = uuid.uuid4().hex[:12]
@@ -2337,7 +2590,7 @@ def asset_create_from_alpha_vantage(request):
         asset = Asset.objects.create(
             id=asset_id,
             type=asset_type,
-            name=request.data.get('name', symbol),
+            name=(request.data.get('name', '').strip() or overview_name or symbol),
             reference=symbol,
             category=category,
             subcategory=subcategory,
@@ -2350,7 +2603,16 @@ def asset_create_from_alpha_vantage(request):
             last_price=quote['price'],
             last_price_update=timezone.now(),
             price_change=quote['change'],
-            price_change_percent=float(quote['change_percent']) if quote['change_percent'] else None
+            price_change_percent=float(quote['change_percent']) if quote['change_percent'] else None,
+            description=manual_description or overview_description,
+            sector=overview_sector,
+            industry=overview_industry,
+            headquarters=overview_address,
+            employees=overview_employees,
+            website=overview_website,
+            market_cap=overview_market_cap,
+            market_cap_currency=overview_currency or currency or 'USD',
+            country=overview_country,
         )
         
         return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
@@ -3003,12 +3265,14 @@ def client_chat(request, client_id):
     if request.method == 'GET':
         qs = ClientChatMessage.objects.filter(client=client).order_by('created_at')
         serializer = ClientChatMessageSerializer(qs, many=True)
+        manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
         return Response({
             'messages': serializer.data,
             'manager': {
                 'id': str(manager_user.id) if manager_user else None,
                 'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
                 'email': (manager_user.email if manager_user else ''),
+                'profilePhoto': manager_photo,
             },
         })
 
@@ -3036,6 +3300,249 @@ def client_chat(request, client_id):
         read_by_client=(sender == 'client'),
         read_by_manager=(sender == 'manager'),
     )
+
+    return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
+
+
+def _resolve_client_manager_user(client: Client):
+    """Best-effort resolve manager user from client.managed_by."""
+    manager_user = None
+    if client.managed_by:
+        try:
+            manager_id = int(client.managed_by)
+            manager_user = DjangoUser.objects.filter(id=manager_id).first()
+        except (ValueError, TypeError):
+            manager_user = DjangoUser.objects.filter(username=client.managed_by).first()
+    return manager_user
+
+
+def _get_manager_profile_photo(manager_user: DjangoUser, request):
+    """Return manager profile photo URL if available (UserDetails.profile_photo)."""
+    if not manager_user:
+        return ''
+    try:
+        user_details = getattr(manager_user, 'user_details', None)
+        if not user_details or not getattr(user_details, 'profile_photo', None):
+            return ''
+        url = user_details.profile_photo.url
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url
+        return request.build_absolute_uri(url) if request and url else (url or '')
+    except Exception:
+        return ''
+
+
+def _client_or_admin_auth(request, client: Client, client_id: str):
+    """
+    Manual auth used by client endpoints to support:
+    - Client: Bearer client_<client_id>
+    - Admin/manager: JWT Bearer token
+    Returns tuple: (is_client_token: bool, is_admin_token: bool, token: str)
+    Raises Response on failure (callers should return it).
+    """
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+
+    is_client_token = bool(token and token.startswith('client_'))
+    is_admin_token = False
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+                is_admin_token = True
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    return is_client_token, is_admin_token, token
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([])  # Disable authentication - we check manually
+@permission_classes([AllowAny])
+def client_conversations(request, client_id):
+    """
+    Conversation threads between a client and their manager.
+    - GET: list conversations (includes a synthetic "legacy" thread for old chat messages).
+    - POST: create a new request with {subject, message}.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    auth_res = _client_or_admin_auth(request, client, client_id)
+    if isinstance(auth_res, Response):
+        return auth_res
+    is_client_token, is_admin_token, _token = auth_res
+
+    manager_user = _resolve_client_manager_user(client)
+    manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
+
+    if request.method == 'GET':
+        conversations = ClientConversation.objects.filter(client=client).order_by('-updated_at', '-created_at')
+        conv_data = ClientConversationSerializer(conversations, many=True).data
+
+        # Include legacy chat as a synthetic conversation if there are messages without a conversation.
+        legacy_qs = ClientChatMessage.objects.filter(client=client, conversation__isnull=True).order_by('created_at')
+        if legacy_qs.exists():
+            last_msg = legacy_qs.order_by('-created_at').first()
+            first_msg = legacy_qs.first()
+            preview = (last_msg.message or '').strip() if last_msg else ''
+            if len(preview) > 120:
+                preview = preview[:120] + '…'
+            legacy_item = {
+                'id': 'legacy',
+                'client': client.id,
+                'manager_user': str(manager_user.id) if manager_user else None,
+                'subject': 'Conversation précédente',
+                'closed': False,
+                'createdAt': first_msg.created_at if first_msg else None,
+                'updatedAt': last_msg.created_at if last_msg else None,
+                'lastMessageAt': last_msg.created_at if last_msg else None,
+                'lastMessagePreview': preview,
+            }
+            conv_data = [legacy_item] + list(conv_data)
+
+        return Response({
+            'conversations': conv_data,
+            'manager': {
+                'id': str(manager_user.id) if manager_user else None,
+                'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
+                'email': (manager_user.email if manager_user else ''),
+                'profilePhoto': manager_photo,
+            },
+        })
+
+    # POST: create a new conversation request
+    try:
+        payload = request.data or {}
+    except Exception:
+        payload = {}
+
+    subject = str(payload.get('subject', '') or '').strip()
+    message_text = str(payload.get('message', '') or '').strip()
+    if not subject:
+        return Response({'error': 'Sujet requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not message_text:
+        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    conversation_id = uuid.uuid4().hex[:12]
+    while ClientConversation.objects.filter(id=conversation_id).exists():
+        conversation_id = uuid.uuid4().hex[:12]
+
+    conversation = ClientConversation.objects.create(
+        id=conversation_id,
+        client=client,
+        manager_user=manager_user,
+        subject=subject,
+        closed=False,
+    )
+
+    message_id = uuid.uuid4().hex[:12]
+    while ClientChatMessage.objects.filter(id=message_id).exists():
+        message_id = uuid.uuid4().hex[:12]
+
+    sender = 'client' if is_client_token else 'manager'
+    msg = ClientChatMessage.objects.create(
+        id=message_id,
+        client=client,
+        conversation=conversation,
+        manager_user=manager_user,
+        sender=sender,
+        message=message_text,
+        read_by_client=(sender == 'client'),
+        read_by_manager=(sender == 'manager'),
+    )
+
+    return Response(
+        {
+            'conversation': ClientConversationSerializer(conversation).data,
+            'message': ClientChatMessageSerializer(msg).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([])  # Disable authentication - we check manually
+@permission_classes([AllowAny])
+def client_conversation_messages(request, client_id, conversation_id):
+    """
+    Messages for a given conversation.
+    Special conversation_id "legacy" maps to old chat messages where conversation is NULL.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    auth_res = _client_or_admin_auth(request, client, client_id)
+    if isinstance(auth_res, Response):
+        return auth_res
+    is_client_token, is_admin_token, _token = auth_res
+
+    manager_user = _resolve_client_manager_user(client)
+    manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
+
+    is_legacy = str(conversation_id) == 'legacy'
+    conversation = None
+    if not is_legacy:
+        conversation = get_object_or_404(ClientConversation, id=conversation_id, client=client)
+
+    if request.method == 'GET':
+        if is_legacy:
+            qs = ClientChatMessage.objects.filter(client=client, conversation__isnull=True).order_by('created_at')
+        else:
+            qs = ClientChatMessage.objects.filter(client=client, conversation=conversation).order_by('created_at')
+        serializer = ClientChatMessageSerializer(qs, many=True)
+        return Response({
+            'conversation': (ClientConversationSerializer(conversation).data if conversation else {'id': 'legacy', 'subject': 'Conversation précédente'}),
+            'messages': serializer.data,
+            'manager': {
+                'id': str(manager_user.id) if manager_user else None,
+                'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
+                'email': (manager_user.email if manager_user else ''),
+                'profilePhoto': manager_photo,
+            },
+        })
+
+    # POST: send message in a conversation
+    try:
+        payload = request.data or {}
+    except Exception:
+        payload = {}
+
+    message_text = str(payload.get('message', '') or '').strip()
+    if not message_text:
+        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    message_id = uuid.uuid4().hex[:12]
+    while ClientChatMessage.objects.filter(id=message_id).exists():
+        message_id = uuid.uuid4().hex[:12]
+
+    sender = 'client' if is_client_token else 'manager'
+    msg = ClientChatMessage.objects.create(
+        id=message_id,
+        client=client,
+        conversation=None if is_legacy else conversation,
+        manager_user=manager_user,
+        sender=sender,
+        message=message_text,
+        read_by_client=(sender == 'client'),
+        read_by_manager=(sender == 'manager'),
+    )
+
+    # Bump conversation updated_at so it sorts correctly in lists.
+    if conversation:
+        conversation.updated_at = timezone.now()
+        conversation.save(update_fields=['updated_at'])
 
     return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
 
@@ -4413,6 +4920,71 @@ Description:"""
     except Exception as e:
         return Response(
             {'error': f'Error generating description: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def asset_generate_description(request):
+    """Générer une description d'actif (entreprise/crypto) avec l'IA Gemini"""
+    try:
+        import google.generativeai as genai
+
+        if not settings.GEMINI_API_KEY:
+            return Response(
+                {'error': 'GEMINI_API_KEY not configured'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+
+        name = request.data.get('name', '')
+        symbol = request.data.get('symbol', '')
+        asset_type = request.data.get('type', '')
+        exchange = request.data.get('exchange', '')
+        currency = request.data.get('currency', '')
+        region = request.data.get('region', '')
+        sector = request.data.get('sector', '')
+        industry = request.data.get('industry', '')
+        country = request.data.get('country', '')
+
+        prompt = f"""Rédige une description professionnelle et attrayante en français pour un actif financier (action/ETF/crypto), destinée à une plateforme d'investissement.
+
+Contexte:
+- Nom: {name or 'Non spécifié'}
+- Symbole: {symbol or 'Non spécifié'}
+- Type: {asset_type or 'Non spécifié'}
+- Marché/Exchange: {exchange or 'Non spécifié'}
+- Devise: {currency or 'Non spécifiée'}
+- Région: {region or 'Non spécifiée'}
+- Pays: {country or 'Non spécifié'}
+- Secteur: {sector or 'Non spécifié'}
+- Industrie: {industry or 'Non spécifiée'}
+
+Contraintes:
+- 3 à 5 phrases
+- Ton clair, pédagogique et rassurant
+- En français
+- Sans markdown ni puces
+- Ne pas inventer de chiffres précis (ex: CA, bénéfices) si non fournis
+
+Description:"""
+
+        response = model.generate_content(prompt)
+        description = (response.text or '').strip()
+
+        return Response({'description': description, 'text': description})
+
+    except ImportError:
+        return Response(
+            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error generating description: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

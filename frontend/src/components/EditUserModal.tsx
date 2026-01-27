@@ -29,6 +29,8 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
   const { teams = [] as Team[], loading: teamsLoading } = useTeams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -48,6 +50,8 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
         role: user.role || '',
         teamId: user.teamId || '',
       });
+      setProfilePhoto(null);
+      setProfilePhotoPreview(user.profilePhoto || null);
     }
   }, [user, isOpen]);
 
@@ -61,16 +65,20 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
     setLoading(true);
 
     try {
+      const payload = new FormData();
+      payload.append('first_name', formData.firstName);
+      payload.append('last_name', formData.lastName);
+      payload.append('email', formData.email);
+      payload.append('phone', formData.phone || '');
+      payload.append('role', formData.role);
+      payload.append('teamId', formData.teamId || '');
+      if (profilePhoto) {
+        payload.append('profilePhoto', profilePhoto);
+      }
+
       await apiCall(`/api/users/${user.id}/update/`, {
         method: 'PUT',
-        body: JSON.stringify({
-          first_name: formData.firstName,
-          last_name: formData.lastName,
-          email: formData.email,
-          phone: formData.phone,
-          role: formData.role,
-          teamId: formData.teamId || null,
-        }),
+        body: payload,
       });
 
       toast.success('Utilisateur mis à jour avec succès');
@@ -106,6 +114,53 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
           </Button>
         </div>
         <form onSubmit={handleSubmit} className="modal-form">
+          <div className="modal-form-field">
+            <Label>Photo (optionnel)</Label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {profilePhotoPreview ? (
+                <img
+                  src={profilePhotoPreview}
+                  alt="Aperçu"
+                  style={{ width: 56, height: 56, borderRadius: 9999, objectFit: 'cover', border: '1px solid #e5e7eb' }}
+                />
+              ) : (
+                <div style={{ width: 56, height: 56, borderRadius: 9999, background: '#f3f4f6', border: '1px solid #e5e7eb' }} />
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  type="file"
+                  id="edit-user-profilePhoto"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (!file) return;
+                    if (!file.type.startsWith('image/')) {
+                      toast.error('Veuillez sélectionner une image');
+                      return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                      toast.error("L'image ne doit pas dépasser 5MB");
+                      return;
+                    }
+                    setProfilePhoto(file);
+                    const reader = new FileReader();
+                    reader.onloadend = () => setProfilePhotoPreview(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('edit-user-profilePhoto')?.click()}
+                >
+                  Changer la photo
+                </Button>
+              </div>
+            </div>
+          </div>
+
           <div className="modal-form-field">
             <Label htmlFor="edit-firstName">Prénom</Label>
             <Input

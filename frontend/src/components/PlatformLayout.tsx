@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { signOut } from '../utils/auth';
+import { clientSignOut } from '../utils/auth';
 import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -52,7 +52,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   }, [showBottomNav]);
 
   const handleLogout = async () => {
-    await signOut();
+    await clientSignOut();
     navigate('/login');
   };
 
@@ -176,23 +176,60 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
 
         {/* Sidebar */}
         <aside style={{
-          width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '500px',
-          backgroundColor: 'white',
-          borderRight: showBottomNav ? 'none' : '1px solid #e5e7eb',
-          minHeight: 'calc(100vh - 60px)',
-          padding: showBottomNav ? (sidebarOpen ? '20px 0' : '0') : '20px 0',
+          // Narrower to avoid horizontal overflow on some screens.
+          width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '360px',
+          height: 'calc(100vh - 60px)',
+          padding: 0,
+          // Keep drawer behavior on mobile bottom nav.
+          // On desktop we keep a spacer in flow and render the actual sidebar as fixed,
+          // to avoid sticky overflow issues while still reserving layout space.
           position: showBottomNav ? 'fixed' : 'relative',
           left: showBottomNav ? (sidebarOpen ? '0' : '-280px') : '0',
-          top: showBottomNav ? '60px' : '0',
-          bottom: 0,
+          // Keep the sidebar under the (sticky) header while scrolling.
+          top: showBottomNav ? '60px' : '60px',
           zIndex: showBottomNav ? 400 : 10,
           transition: 'left 0.3s ease, width 0.3s ease',
-          overflowY: 'auto',
-          overflowX: 'hidden',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}>
           {/* Logo */}
           {(sidebarOpen || !showBottomNav) && (
             <>
+              <div
+                style={
+                  showBottomNav
+                    ? {
+                        backgroundColor: 'white',
+                        borderRight: 'none',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                      }
+                    : {
+                        position: 'fixed',
+                        top: 60,
+                        left: 0,
+                        width: 360,
+                        height: 'calc(100vh - 60px)',
+                        backgroundColor: 'white',
+                        borderRight: '1px solid #e5e7eb',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
+                      }
+                }
+              >
+              {/* Scrollable area */}
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  padding: showBottomNav ? (sidebarOpen ? '20px 0' : '0') : '20px 0',
+                }}
+              >
               <div style={{ 
                 padding: isMobile ? '16px 20px' : '00px 30px', 
                 marginBottom: '20px', 
@@ -311,16 +348,25 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     </button>
                   );
                 })}
+              </nav>
+              </div>
 
-                {/* Funds shortcuts */}
-                <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb' }} />
+              {/* Bottom actions (fixed at bottom of sidebar) */}
+              <div
+                style={{
+                  flexShrink: 0,
+                  backgroundColor: 'white',
+                  paddingTop: 12,
+                  paddingBottom: 12,
+                  borderTop: '1px solid #e5e7eb',
+                }}
+              >
                 <div
                   style={{
                     display: 'flex',
                     gap: 10,
                     marginLeft: isMobile ? 20 : 30,
                     marginRight: isMobile ? 20 : 30,
-                    marginTop: 12,
                   }}
                 >
                   <button
@@ -340,7 +386,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       fontSize: isMobile ? '15px' : '16px',
                       color: 'white',
                       fontWeight: 500,
-                      borderRadius: 12,
+                      borderRadius: 9999,
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -364,7 +410,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       fontSize: isMobile ? '15px' : '16px',
                       color: 'white',
                       fontWeight: 500,
-                      borderRadius: 12,
+                      borderRadius: 9999,
                       whiteSpace: 'nowrap',
                     }}
                     aria-label="Retrait"
@@ -388,7 +434,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       border: '1px solid #fecaca',
                       cursor: 'pointer',
                       color: '#ef4444',
-                      borderRadius: 12,
+                      borderRadius: 9999,
                     }}
                     aria-label="Déconnexion"
                     title="Déconnexion"
@@ -396,10 +442,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     <LogOut size={isMobile ? 18 : 20} />
                   </button>
                 </div>
-
-                {/* Logout as a "page" in the sidebar */}
-                <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb' }} />
-              </nav>
+              </div>
+              </div>
             </>
           )}
         </aside>
