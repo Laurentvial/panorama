@@ -8,7 +8,9 @@ pytz
 sqlparse
 psycopg2-binary
 python-dotenv
-google-generativeai
+dj-database-url
+gunicorn
+google-genai
 django-cloudinary-storage
 cloudinary
 requests

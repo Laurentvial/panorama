@@ -1,6 +1,8 @@
 .sidebar {
   width: 18rem; /* w-64 */
-  background-color: var(--bg-pearl); /* Pearl beige */
+  /* Use the app's "couleur principale" */
+  background-color: var(--primary, #030213);
+  color: var(--primary-foreground, #ffffff);
   border-right: 1px solid rgba(0, 0, 0, 0.08); /* Softer border */
   min-height: calc(100vh - 73px);
 }

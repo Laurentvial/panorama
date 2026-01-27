@@ -20,3 +20,31 @@
   outline-offset: 3px;
 }
 
+/* Platform hover effects (used by PlatformLayout buttons) */
+.platform-root .platform-hoverable {
+  transition: filter 160ms ease, background-color 160ms ease;
+}
+
+/* Sidebar links */
+.platform-root .platform-sidebar-link[data-active='false']:hover {
+  background-color: color-mix(in srgb, var(--primary-foreground) 12%, transparent) !important;
+}
+
+/* Bottom action buttons */
+.platform-root .platform-action-btn:hover {
+  filter: brightness(0.96);
+}
+
+.platform-root .platform-action-icon:hover {
+  filter: brightness(0.98);
+}
+
+.platform-root .platform-action-logout:hover {
+  filter: brightness(0.95);
+}
+
+/* Mobile bottom nav */
+.platform-root .platform-bottomnav-btn[data-active='false']:hover {
+  background-color: rgba(2, 6, 23, 0.06) !important;
+}
+

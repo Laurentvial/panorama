@@ -1,6 +1,8 @@
 .header {
-  background-color: var(--bg-cream); /* Cream background */
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  /* Use the app's "couleur principale" */
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -48,7 +50,7 @@
 .header-platform-name {
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--foreground);
+  color: var(--primary-foreground);
   line-height: 1.1;
   margin: 0;
 }
@@ -56,14 +58,14 @@
 .header-title {
   font-size: 1.125rem;
   font-weight: var(--font-weight-medium);
-  color: var(--foreground);
+  color: var(--primary-foreground);
   margin: 0;
   line-height: 1.5;
 }
 
 .header-subtitle {
   font-size: 0.875rem;
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--primary-foreground) 75%, transparent);
   margin: 0;
   line-height: 1.5;
 }
@@ -79,26 +81,53 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 1rem;
-  background: transparent;
+  padding: 0.5rem;
   border: none;
-  background-color: var(--primary);
+  background: transparent;
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .header-button:hover {
-  background-color: var(--muted-foreground);
+  background-color: color-mix(in srgb, var(--primary-foreground) 12%, transparent);
 }
 
 .header-button-notifications {
   position: relative;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  justify-content: center;
+  /* White background like requested */
+  background-color: white;
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.header-icon {
+.header-button-notifications:hover {
+  background-color: rgba(255, 255, 255, 0.92);
+}
+
+.header-button-user {
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  background-color: transparent;
+  justify-content: center;
+}
+
+.header-button-user:hover {
+  background-color: transparent;
+}
+
+/* react-icons types in this project don't accept className; style via selector */
+.header-button svg {
   width: 1rem;
   height: 1rem;
-  color: var(--destructive-foreground);
+  color: var(--primary-foreground);
+}
+
+.header-button-notifications svg {
+  color: var(--primary);
 }
 
 .header-badge {
@@ -120,13 +149,30 @@
 
 .header-user-name {
   display: none;
-  color: var(--destructive-foreground);
+  color: var(--primary-foreground);
 }
 
 @media (min-width: 768px) {
   .header-user-name {
     display: inline;
   }
+}
+
+.header-user-avatar {
+  width: 3rem;
+  height: 3rem;
+  border: 2px solid color-mix(in srgb, var(--primary-foreground) 45%, transparent);
+}
+
+.header-user-avatar-fallback {
+  background: transparent;
+}
+
+.header-user-avatar-initials {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .header-dropdown {

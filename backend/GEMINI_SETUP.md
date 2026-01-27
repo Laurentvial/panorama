@@ -21,11 +21,11 @@ GEMINI_API_KEY=votre-clé-api-gemini-ici
 
 ### 3. Installer la dépendance
 
-Installez la bibliothèque Google Generative AI :
+Installez la bibliothèque Google GenAI (SDK officiel) :
 
 ```bash
 cd backend
-pip install google-generativeai
+pip install google-genai
 ```
 
 Ou avec `requirements.txt` :

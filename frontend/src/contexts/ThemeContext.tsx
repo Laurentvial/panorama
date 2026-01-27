@@ -26,6 +26,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const getReadableForeground = (hexColor: string): string | null => {
+    const hex = (hexColor || '').trim();
+    if (!hex.startsWith('#')) return null;
+    const raw = hex.slice(1);
+    const normalized =
+      raw.length === 3
+        ? raw.split('').map((c) => c + c).join('')
+        : raw.length === 6
+          ? raw
+          : null;
+    if (!normalized) return null;
+
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+
+    // Relative luminance (sRGB), then choose high-contrast foreground.
+    const toLinear = (v: number) => {
+      const s = v / 255;
+      return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+    return L > 0.55 ? '#030213' : '#ffffff';
+  };
+
   const loadSettings = async () => {
     try {
       setLoading(true);
@@ -67,6 +93,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Apply secondary color if provided
     if (appSettings.secondary_color) {
       root.style.setProperty('--secondary', appSettings.secondary_color);
+      const fg = getReadableForeground(appSettings.secondary_color);
+      if (fg) {
+        root.style.setProperty('--secondary-foreground', fg);
+      }
     }
     
     // Apply accent color if provided

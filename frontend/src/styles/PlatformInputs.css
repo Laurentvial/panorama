@@ -1,4 +1,7 @@
-.platform-root [data-slot='input'] {
+.platform-root [data-slot='input'],
+.platform-root [data-slot='textarea'],
+[data-slot='dialog-content'] [data-slot='input'],
+[data-slot='dialog-content'] [data-slot='textarea'] {
   background: transparent;
   border: none;
   border-bottom: 1px solid rgba(2, 6, 23, 0.22);
@@ -8,12 +11,37 @@
 }
 
 .platform-root [data-slot='input']:focus,
-.platform-root [data-slot='input']:focus-visible {
+.platform-root [data-slot='input']:focus-visible,
+.platform-root [data-slot='textarea']:focus,
+.platform-root [data-slot='textarea']:focus-visible,
+[data-slot='dialog-content'] [data-slot='input']:focus,
+[data-slot='dialog-content'] [data-slot='input']:focus-visible,
+[data-slot='dialog-content'] [data-slot='textarea']:focus,
+[data-slot='dialog-content'] [data-slot='textarea']:focus-visible {
   outline: none;
   border-bottom-color: var(--accent, var(--primary, #030213));
   box-shadow: none;
 }
 
-.platform-root [data-slot='input'][aria-invalid='true'] {
+.platform-root [data-slot='input'].platform-header-search {
+  /* Override the platform default underline-only input style for the header search */
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 9999px;
+  padding: 0.7rem 0.9rem;
+}
+
+.platform-root [data-slot='input'].platform-header-search::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.platform-root [data-slot='input'].platform-header-search:focus::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.platform-root [data-slot='input'][aria-invalid='true'],
+.platform-root [data-slot='textarea'][aria-invalid='true'],
+[data-slot='dialog-content'] [data-slot='input'][aria-invalid='true'],
+[data-slot='dialog-content'] [data-slot='textarea'][aria-invalid='true'] {
   border-bottom-color: rgb(220 38 38);
 }

@@ -314,6 +314,71 @@ class AlphaVantageService:
         except Exception as e:
             logger.error(f"Error fetching daily data for {symbol}: {str(e)}")
             return None
+
+    def get_fx_daily_data(self, from_currency: str, to_currency: str, outputsize: str = 'compact') -> Optional[Dict]:
+        """
+        Get daily FX time series data (e.g., XAU/USD, EUR/USD) using Alpha Vantage FX_DAILY.
+        Returns data formatted for charts (same shape as get_daily_data()).
+        """
+        try:
+            params = {
+                'function': 'FX_DAILY',
+                'from_symbol': from_currency,
+                'to_symbol': to_currency,
+                'outputsize': outputsize,
+                'apikey': self.api_key
+            }
+
+            response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json() or {}
+
+            if 'Error Message' in data:
+                logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+                return None
+
+            if 'Note' in data:
+                logger.warning(f"Alpha Vantage API note: {data['Note']}")
+                return None
+
+            if 'Information' in data:
+                info_msg = data['Information']
+                logger.warning(f"Alpha Vantage API information: {info_msg}")
+                if 'rate limit' in info_msg.lower():
+                    return None
+
+            time_series_key = 'Time Series FX (Daily)'
+            if time_series_key not in data:
+                return None
+
+            time_series = data[time_series_key]
+            meta_data = data.get('Meta Data', {}) or {}
+
+            chart_data = []
+            for date_str, values in time_series.items():
+                chart_data.append({
+                    'date': date_str,
+                    'open': float(values.get('1. open', 0)),
+                    'high': float(values.get('2. high', 0)),
+                    'low': float(values.get('3. low', 0)),
+                    'close': float(values.get('4. close', 0)),
+                    'volume': 0,
+                })
+
+            chart_data.sort(key=lambda x: x['date'])
+
+            return {
+                'data': chart_data,
+                'meta_data': {
+                    'from_symbol': meta_data.get('2. From Symbol', from_currency),
+                    'to_symbol': meta_data.get('3. To Symbol', to_currency),
+                    'last_refreshed': meta_data.get('5. Last Refreshed', ''),
+                    'timezone': meta_data.get('7. Time Zone', ''),
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error fetching FX daily data for {from_currency}/{to_currency}: {str(e)}")
+            return None
     
     def get_crypto_quote(self, symbol: str, market: str = 'USD') -> Optional[Dict]:
         """
@@ -384,6 +449,176 @@ class AlphaVantageService:
         except Exception as e:
             logger.error(f"Error fetching forex quote for {from_currency}/{to_currency}: {str(e)}")
             return None
+
+    def _get_fiat_fx_rate_best_effort(self, from_currency: str, to_currency: str) -> Optional[float]:
+        """
+        Best-effort fiat FX rate with a fallback to Frankfurter (ECB).
+        Intended for fiat currencies like USD/EUR. Not suitable for XAU/XAG.
+        """
+        from_ccy = (from_currency or '').strip().upper()
+        to_ccy = (to_currency or '').strip().upper()
+        if not from_ccy or not to_ccy:
+            return None
+        if from_ccy == to_ccy:
+            return 1.0
+
+        # Try Alpha Vantage first
+        quote = self.get_forex_quote(from_ccy, to_ccy)
+        if quote and quote.get('exchange_rate'):
+            return float(quote['exchange_rate'])
+
+        # Frankfurter fallback (fiat only)
+        try:
+            resp = requests.get(
+                "https://api.frankfurter.app/latest",
+                params={"from": from_ccy, "to": to_ccy},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json() or {}
+            rates = data.get("rates") or {}
+            rate = rates.get(to_ccy)
+            return float(rate) if rate is not None else None
+        except Exception:
+            return None
+
+    def get_forex_quote_with_fallback(self, from_currency: str, to_currency: str) -> Optional[Dict]:
+        """
+        Forex quote with cross-rate fallback for spot metals.
+
+        Some providers don't support XAU/EUR or XAG/EUR directly.
+        In that case, compute:
+          XAU/EUR = XAU/USD * USD/EUR
+          XAG/EUR = XAG/USD * USD/EUR
+        """
+        from_ccy = (from_currency or '').strip().upper()
+        to_ccy = (to_currency or '').strip().upper()
+        if not from_ccy or not to_ccy:
+            return None
+        if from_ccy == to_ccy:
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': 1.0,
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': '',
+            }
+
+        # Alpha Vantage's realtime CURRENCY_EXCHANGE_RATE does not reliably support metals like XAU/XAG.
+        # For those, prefer FX_DAILY latest close.
+        if from_ccy not in ['XAU', 'XAG']:
+            direct = self.get_forex_quote(from_ccy, to_ccy)
+            if direct and direct.get('exchange_rate'):
+                return direct
+
+        # Cross-rate fallback for spot metals
+        if from_ccy in ['XAU', 'XAG']:
+            # Get latest metal/USD from FX_DAILY (more reliable for metals)
+            metal_usd_series = self.get_fx_daily_data(from_ccy, 'USD', outputsize='compact')
+            series = (metal_usd_series or {}).get('data') or []
+            if not series:
+                return None
+            latest_usd = float(series[-1].get('close', 0) or 0)
+            if not latest_usd:
+                return None
+
+            if to_ccy == 'USD':
+                return {
+                    'from_currency': from_ccy,
+                    'to_currency': to_ccy,
+                    'exchange_rate': latest_usd,
+                    'bid_price': 0.0,
+                    'ask_price': 0.0,
+                    'last_refreshed': (metal_usd_series or {}).get('meta_data', {}).get('last_refreshed', ''),
+                }
+
+            usd_to = self._get_fiat_fx_rate_best_effort('USD', to_ccy)
+            if usd_to is None:
+                inv = self._get_fiat_fx_rate_best_effort(to_ccy, 'USD')
+                if inv:
+                    usd_to = 1.0 / inv
+            if usd_to is None:
+                return None
+
+            rate = latest_usd * float(usd_to)
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': rate,
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': (metal_usd_series or {}).get('meta_data', {}).get('last_refreshed', ''),
+            }
+
+        return None
+
+    def get_fx_daily_data_with_fallback(self, from_currency: str, to_currency: str, outputsize: str = 'compact') -> Optional[Dict]:
+        """
+        Daily FX series with cross-rate fallback for spot metals (XAU/XAG) to non-USD quote currencies.
+        Returns the same shape as get_fx_daily_data().
+        """
+        from_ccy = (from_currency or '').strip().upper()
+        to_ccy = (to_currency or '').strip().upper()
+        if not from_ccy or not to_ccy:
+            return None
+
+        direct = self.get_fx_daily_data(from_ccy, to_ccy, outputsize=outputsize)
+        if direct and direct.get('data'):
+            return direct
+
+        if from_ccy in ['XAU', 'XAG'] and to_ccy != 'USD':
+            metal_usd = self.get_fx_daily_data(from_ccy, 'USD', outputsize=outputsize)
+            if not metal_usd or not metal_usd.get('data'):
+                return None
+
+            usd_to = self.get_fx_daily_data('USD', to_ccy, outputsize=outputsize)
+            invert = False
+            if not usd_to or not usd_to.get('data'):
+                inv = self.get_fx_daily_data(to_ccy, 'USD', outputsize=outputsize)
+                if inv and inv.get('data'):
+                    usd_to = inv
+                    invert = True
+                else:
+                    return None
+
+            # Index USD->to by date
+            usd_to_by_date = {p['date']: p for p in (usd_to.get('data') or [])}
+            out = []
+            for p in (metal_usd.get('data') or []):
+                d = p.get('date')
+                fx = usd_to_by_date.get(d)
+                if not d or not fx:
+                    continue
+
+                def fx_field(name: str) -> float:
+                    v = float(fx.get(name, 0) or 0)
+                    if invert:
+                        return (1.0 / v) if v else 0.0
+                    return v
+
+                out.append({
+                    'date': d,
+                    'open': float(p.get('open', 0) or 0) * fx_field('open'),
+                    'high': float(p.get('high', 0) or 0) * fx_field('high'),
+                    'low': float(p.get('low', 0) or 0) * fx_field('low'),
+                    'close': float(p.get('close', 0) or 0) * fx_field('close'),
+                    'volume': 0,
+                })
+
+            out.sort(key=lambda x: x['date'])
+            return {
+                'data': out,
+                'meta_data': {
+                    'from_symbol': from_ccy,
+                    'to_symbol': to_ccy,
+                    'last_refreshed': '',
+                    'timezone': '',
+                }
+            }
+
+        return None
     
     def get_company_logo(self, symbol: str) -> Optional[str]:
         """
@@ -639,6 +874,122 @@ def get_crypto_candles_finnhub(symbol: str, resolution: str = 'D', days: int = 1
         return None
     except Exception as e:
         logger.error(f"Error fetching crypto candles from Finnhub for {symbol}: {str(e)}")
+        return None
+
+
+def get_oanda_quote_finnhub(from_symbol: str, to_symbol: str) -> Optional[Dict]:
+    """
+    Get forex/metal quote from Finnhub using OANDA symbols (e.g. OANDA:XAU_USD, OANDA:USD_EUR).
+    """
+    try:
+        from_ccy = (from_symbol or '').strip().upper()
+        to_ccy = (to_symbol or '').strip().upper()
+        if not from_ccy or not to_ccy:
+            return None
+
+        symbol_for_quote = f"OANDA:{from_ccy}_{to_ccy}"
+        params = {'symbol': symbol_for_quote}
+        if FINNHUB_API_KEY:
+            params['token'] = FINNHUB_API_KEY
+
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/quote",
+            params=params,
+            timeout=10
+        )
+        if response.status_code != 200:
+            return None
+
+        data = response.json() or {}
+        if data.get('c') is None:
+            return None
+
+        return {
+            'from_currency': from_ccy,
+            'to_currency': to_ccy,
+            'exchange_rate': float(data.get('c', 0) or 0),
+            'bid_price': 0.0,
+            'ask_price': 0.0,
+            'last_refreshed': data.get('t', ''),
+            'change': float(data.get('d', 0) or 0),
+            'change_percent': float(data.get('dp', 0) or 0),
+            'previous_close': float(data.get('pc', 0) or 0),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching OANDA quote from Finnhub for {from_symbol}/{to_symbol}: {str(e)}")
+        return None
+
+
+def get_oanda_candles_finnhub(from_symbol: str, to_symbol: str, resolution: str = 'D', days: int = 365) -> Optional[Dict]:
+    """
+    Get forex/metal historical candles from Finnhub using OANDA symbols.
+    Returns chart data in our normalized shape.
+    """
+    try:
+        import time
+        from datetime import datetime, timedelta
+
+        from_ccy = (from_symbol or '').strip().upper()
+        to_ccy = (to_symbol or '').strip().upper()
+        if not from_ccy or not to_ccy:
+            return None
+
+        symbol_for_quote = f"OANDA:{from_ccy}_{to_ccy}"
+
+        end_time = int(time.time())
+        start_time = int((datetime.now() - timedelta(days=days)).timestamp())
+
+        params = {
+            'symbol': symbol_for_quote,
+            'resolution': resolution,
+            'from': start_time,
+            'to': end_time
+        }
+        if FINNHUB_API_KEY:
+            params['token'] = FINNHUB_API_KEY
+
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/stock/candle",
+            params=params,
+            timeout=10
+        )
+        if response.status_code != 200:
+            return None
+
+        candle_data = response.json() or {}
+        if candle_data.get('s') != 'ok' or not candle_data.get('c'):
+            return None
+
+        closes = candle_data.get('c', [])
+        opens = candle_data.get('o', [])
+        highs = candle_data.get('h', [])
+        lows = candle_data.get('l', [])
+        timestamps = candle_data.get('t', [])
+
+        chart_data = []
+        for i in range(len(closes)):
+            date_str = datetime.fromtimestamp(timestamps[i]).strftime('%Y-%m-%d')
+            chart_data.append({
+                'date': date_str,
+                'open': float(opens[i]) if i < len(opens) else float(closes[i]),
+                'high': float(highs[i]) if i < len(highs) else float(closes[i]),
+                'low': float(lows[i]) if i < len(lows) else float(closes[i]),
+                'close': float(closes[i]),
+                'volume': 0,
+            })
+
+        chart_data.sort(key=lambda x: x['date'])
+        return {
+            'data': chart_data,
+            'meta_data': {
+                'from_symbol': from_ccy,
+                'to_symbol': to_ccy,
+                'resolution': resolution,
+                'last_refreshed': datetime.now().isoformat(),
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching OANDA candles from Finnhub for {from_symbol}/{to_symbol}: {str(e)}")
         return None
 
 

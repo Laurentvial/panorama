@@ -407,6 +407,11 @@ class Transaction(models.Model):
     # Subscription details for transfert transactions
     subscription_details = models.JSONField(default=dict, blank=True, null=True)  # Store subscription form data as JSON
     product = models.ForeignKey('Product', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')  # Link to product if transfert
+    # Trading orders: store the purchased asset directly on the transaction.
+    asset = models.ForeignKey(Asset, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+    # FX conversion snapshot for trading orders when asset currency != EUR
+    fx_rate_eur_to_asset = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    amount_in_asset_currency = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
     subscription_first_name = models.CharField(max_length=100, default="", blank=True)
     subscription_last_name = models.CharField(max_length=100, default="", blank=True)
     subscription_birth_date = models.CharField(max_length=20, default="", blank=True)
@@ -442,7 +447,9 @@ class Position(models.Model):
 
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='positions')
-    product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='positions')
+    # Product is optional for asset-only trades (client trading orders).
+    # For investment positions (legacy monthly) and smart-portfolio trade-like positions, product is set.
+    product = models.ForeignKey('Product', on_delete=models.CASCADE, null=True, blank=True, related_name='positions')
     transaction = models.ForeignKey('Transaction', on_delete=models.SET_NULL, null=True, blank=True, related_name='positions')
 
     # 0 = 1er mois, 1 = 2e mois, etc.
@@ -451,6 +458,12 @@ class Position(models.Model):
     period_date = models.DateField()
 
     invested_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    # Trading positions (asset orders): capture entry price + quantity bought
+    entry_price = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    quantity = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    # FX conversion snapshot (EUR -> asset currency) used at order placement
+    fx_rate_eur_to_asset = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    invested_amount_asset_currency = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
     expected_profit = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     expected_total = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     # For Smart Portfolio trade-like positions (optional for legacy monthly positions)
@@ -468,7 +481,7 @@ class Position(models.Model):
         ordering = ['period_date', 'created_at']
 
     def __str__(self):
-        return f"Position {self.client_id} - {self.product_id} - {self.period_date} (#{self.period_index})"
+        return f"Position {self.client_id} - {self.product_id or '-'} - {self.period_date} (#{self.period_index})"
 
 class ProductCategory(models.Model):
     """Table des catégories de produits financiers"""

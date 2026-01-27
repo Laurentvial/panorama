@@ -747,6 +747,8 @@ class TransactionSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     productId = serializers.CharField(source='product.id', read_only=True, allow_null=True)
+    assetId = serializers.CharField(source='asset.id', read_only=True, allow_null=True)
+    assetType = serializers.CharField(source='asset.type', read_only=True, allow_null=True)
     from_field = serializers.CharField(source='transfer_from', allow_null=True, required=False)
     to_field = serializers.CharField(source='transfer_to', allow_null=True, required=False)
     
@@ -754,7 +756,8 @@ class TransactionSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = [
             'id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 
-            'createdAt', 'updatedAt', 'productId', 'from_field', 'to_field',
+            'createdAt', 'updatedAt', 'productId', 'assetId', 'assetType', 'from_field', 'to_field',
+            'fx_rate_eur_to_asset', 'amount_in_asset_currency',
             'subscription_details', 'subscription_first_name', 'subscription_last_name',
             'subscription_birth_date', 'subscription_city', 'subscription_ip',
             'subscription_date', 'subscription_duration', 'subscription_interest_period',
@@ -774,19 +777,27 @@ class TransactionSerializer(serializers.ModelSerializer):
             ret['productId'] = instance.product.id
             ret['productName'] = instance.product.name
             ret['productReference'] = instance.product.reference
+        if getattr(instance, 'asset', None):
+            ret['assetId'] = instance.asset.id
+            ret['assetName'] = instance.asset.name
+            ret['assetReference'] = instance.asset.reference
+            ret['assetType'] = instance.asset.type
         return ret
 
 
 class PositionSerializer(serializers.ModelSerializer):
     clientId = serializers.CharField(source='client.id', read_only=True)
     clientName = serializers.SerializerMethodField()
-    productId = serializers.CharField(source='product.id', read_only=True)
-    productName = serializers.CharField(source='product.name', read_only=True)
-    productType = serializers.CharField(source='product.type', read_only=True)
-    productReference = serializers.CharField(source='product.reference', read_only=True)
+    productId = serializers.SerializerMethodField()
+    productName = serializers.SerializerMethodField()
+    productType = serializers.SerializerMethodField()
+    productReference = serializers.SerializerMethodField()
     transactionId = serializers.CharField(source='transaction.id', read_only=True, allow_null=True)
     assetId = serializers.CharField(source='asset.id', read_only=True, allow_null=True)
     assetName = serializers.CharField(source='asset.name', read_only=True, allow_null=True)
+    assetType = serializers.CharField(source='asset.type', read_only=True, allow_null=True)
+    assetReference = serializers.CharField(source='asset.reference', read_only=True, allow_null=True)
+    assetCurrency = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
 
@@ -797,9 +808,12 @@ class PositionSerializer(serializers.ModelSerializer):
             'clientId', 'clientName',
             'productId', 'productName', 'productType', 'productReference',
             'transactionId',
-            'assetId', 'assetName',
+            'assetId', 'assetName', 'assetType', 'assetReference', 'assetCurrency',
             'period_index', 'period_date',
-            'invested_amount', 'expected_profit', 'expected_total',
+            'invested_amount',
+            'entry_price', 'quantity',
+            'fx_rate_eur_to_asset', 'invested_amount_asset_currency',
+            'expected_profit', 'expected_total',
             'opened_at', 'closed_at', 'profit_loss',
             'status',
             'createdAt', 'updatedAt',
@@ -810,6 +824,36 @@ class PositionSerializer(serializers.ModelSerializer):
             return f"{obj.client.fname} {obj.client.lname}".strip()
         except Exception:
             return ''
+
+    def get_productId(self, obj):
+        try:
+            return obj.product.id if obj.product else None
+        except Exception:
+            return None
+
+    def get_productName(self, obj):
+        try:
+            return obj.product.name if obj.product else None
+        except Exception:
+            return None
+
+    def get_productType(self, obj):
+        try:
+            return obj.product.type if obj.product else None
+        except Exception:
+            return None
+
+    def get_productReference(self, obj):
+        try:
+            return obj.product.reference if obj.product else None
+        except Exception:
+            return None
+
+    def get_assetCurrency(self, obj):
+        try:
+            return obj.asset.currency if obj.asset else None
+        except Exception:
+            return None
 
 class ProductCategorySerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)

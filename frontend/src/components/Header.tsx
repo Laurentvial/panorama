@@ -8,9 +8,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from './ui/dropdown-menu';
-import { HiOutlineBell, HiOutlineUser, HiOutlineLogout } from 'react-icons/hi';
+import { HiOutlineBell, HiOutlineLogout, HiOutlineUser } from 'react-icons/hi';
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import '../styles/Header.css';
 
 interface HeaderProps {
@@ -42,6 +43,27 @@ export function Header({ user }: HeaderProps) {
   // Use full name if available, otherwise fallback to email/userId/'User' for User Menu label
   const fullName = getFullName();
   const mainUserDisplay = fullName || user?.email || user?.userId || 'User';
+  const profilePhotoUrl: string | undefined = typeof user?.profilePhoto === 'string' ? user.profilePhoto : undefined;
+  const fallbackInitials = (() => {
+    const source = (
+      fullName ||
+      (typeof user?.email === 'string' ? user.email : '') ||
+      (typeof user?.userId === 'string' ? user.userId : '') ||
+      ''
+    ).trim();
+    if (!source) return '';
+    if (source.toLowerCase() === 'user') return '';
+
+    const base = source.includes('@') ? source.split('@')[0] : source;
+    const parts = base
+      .replace(/[_\-.]+/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+    const first = parts[0]?.[0] || '';
+    const second = parts.length > 1 ? (parts[1]?.[0] || '') : (parts[0]?.[1] || '');
+    return (first + second).toUpperCase();
+  })();
 
   return (
     <header className="header">
@@ -67,7 +89,7 @@ export function Header({ user }: HeaderProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button className="header-button header-button-notifications">
-                  <HiOutlineBell className="header-icon" />
+                  <HiOutlineBell />
                   {/* Notifications badge logic could go here */}
                 </Button>
               </DropdownMenuTrigger>
@@ -84,11 +106,16 @@ export function Header({ user }: HeaderProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button className="header-button header-button-user">
-                  <HiOutlineUser className="header-icon" />
-                  <span className="header-user-name">
-                    {/* Show full name using Django Auth data (firstName/lastName from serializer) */}
-                    {mainUserDisplay}
-                  </span>
+                  <Avatar className="header-user-avatar">
+                    <AvatarImage src={profilePhotoUrl} alt={mainUserDisplay} />
+                    <AvatarFallback className="header-user-avatar-fallback" aria-label={mainUserDisplay}>
+                      {fallbackInitials ? (
+                        <span className="header-user-avatar-initials">{fallbackInitials}</span>
+                      ) : (
+                        <HiOutlineUser />
+                      )}
+                    </AvatarFallback>
+                  </Avatar>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="header-dropdown" align="end">

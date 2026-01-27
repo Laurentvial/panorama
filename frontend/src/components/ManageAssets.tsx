@@ -18,6 +18,9 @@ export function ManageAssets() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
+  // Used only for the Alpha Vantage search mode in the create dialog
+  // (separate from CRM "Type" stored in formData.type)
+  const [searchAssetType, setSearchAssetType] = useState('');
   const [formData, setFormData] = useState({
     type: '',
     name: '',
@@ -98,6 +101,7 @@ export function ManageAssets() {
       });
     }
     // Reset search when opening dialog
+    setSearchAssetType('');
     setAlphaVantageSearch('');
     setSearchResults([]);
     setValidationErrors([]);
@@ -113,6 +117,7 @@ export function ManageAssets() {
     
     setIsDialogOpen(false);
     setEditingAsset(null);
+    setSearchAssetType('');
     setFormData({
       type: '',
       name: '',
@@ -140,6 +145,11 @@ export function ManageAssets() {
       return { isValid: false, errors };
     }
     
+    const normalizedSymbol = (formData.alphaVantageSymbol || '').trim().toUpperCase();
+    const normalizedExchange = (formData.exchange || '').trim().toUpperCase();
+    const isSpotMetal = normalizedSymbol === 'XAU' || normalizedSymbol === 'XAG';
+    const isForexExchange = normalizedExchange === 'FOREX';
+
     // Check if alpha_vantage_symbol is provided
     if (!formData.alphaVantageSymbol || !formData.alphaVantageSymbol.trim()) {
       errors.push('⚠️ Le symbole Alpha Vantage est requis pour récupérer les prix en temps réel');
@@ -149,6 +159,7 @@ export function ManageAssets() {
     const assetType = formData.type?.toLowerCase() || '';
     const isCrypto = assetType.includes('crypto') || assetType.includes('cryptomonnaie');
     const isCommodity = assetType.includes('matière') || assetType.includes('matiere') || assetType.includes('commodity');
+    const isForexType = assetType.includes('devise') || assetType.includes('forex');
     
     if (!formData.exchange || !formData.exchange.trim()) {
       if (isCrypto) {
@@ -165,6 +176,13 @@ export function ManageAssets() {
           errors.push('⚠️ Pour les cryptos, l\'exchange "BINANCE" est généralement le plus compatible.');
         }
       } else {
+        // Spot FX-like assets (XAU/XAG, FX pairs) legitimately use FOREX.
+        if ((isSpotMetal || isForexType) && exchange === 'FOREX') {
+          // ok
+        } else if (isForexExchange) {
+          // If user selected FOREX but the asset isn't forex/spot, warn.
+          errors.push('⚠️ Exchange "FOREX" n\'est valide que pour les actifs Spot/Forex (ex: XAU, XAG, devises).');
+        } else {
         // For stocks, validate exchange is a known exchange (best-effort)
         const usExchanges = ['NASDAQ', 'NYSE', 'AMEX', 'NYSEARCA', 'BATS'];
         const internationalExchanges = ['EURONEXT', 'LSE', 'TSE', 'ASX', 'SSE', 'SZSE', 'HKEX', 'XETR', 'FWB', 'SWX'];
@@ -173,14 +191,19 @@ export function ManageAssets() {
         if (!validExchanges.includes(exchange)) {
           errors.push(`⚠️ Exchange "${exchange}" non reconnu. Exemples: ${validExchanges.slice(0, 10).join(', ')}...`);
         }
+        }
       }
     }
     
     // If we have alpha_vantage_symbol, validate it
     if (formData.alphaVantageSymbol && formData.alphaVantageSymbol.trim()) {
+      // Spot metals (XAU/XAG) are handled via FX endpoints; don't block on SYMBOL_SEARCH.
+      if (isSpotMetal || isForexExchange) {
+        // ok
+      } else {
       try {
         // Try to verify the symbol exists in Alpha Vantage
-        const symbol = formData.alphaVantageSymbol.trim().toUpperCase();
+        const symbol = normalizedSymbol;
         const apiType = isCrypto ? 'crypto' : isCommodity ? 'commodity' : '';
         const url = `/api/alpha-vantage/search/?keywords=${encodeURIComponent(symbol)}${apiType ? `&type=${apiType}` : ''}`;
         const response = await apiCall(url);
@@ -203,10 +226,12 @@ export function ManageAssets() {
         console.warn('Could not validate symbol:', error);
         errors.push(`⚠️ Impossible de vérifier le symbole Alpha Vantage (${error?.message || 'erreur API'})`);
       }
+      }
     }
     
     // Check logo URL (warning only, not blocking)
-    if (!formData.logoUrl || !formData.logoUrl.trim()) {
+    // Spot/FX assets typically won't have logos; don't warn for those.
+    if ((!formData.logoUrl || !formData.logoUrl.trim()) && !(isSpotMetal || isForexExchange)) {
       errors.push('⚠️ L\'URL du logo est manquante. Le logo peut être récupéré automatiquement depuis Finnhub lors de la recherche.');
     }
     
@@ -267,6 +292,7 @@ export function ManageAssets() {
           symbol: formData.alphaVantageSymbol,
           name: formData.name,
           type: formData.type,
+          reference: formData.reference,
           category: formData.category,
           subcategory: formData.subcategory,
           default: formData.default,
@@ -314,8 +340,8 @@ export function ManageAssets() {
       return;
     }
 
-    // Determine API type based on formData.type
-    const assetType = formData.type?.toLowerCase() || '';
+    // Determine API type based on the search mode (not CRM type)
+    const assetType = (searchAssetType || '').toLowerCase();
     const isCrypto = assetType === 'crypto' || assetType.includes('cryptomonnaie');
     const isCommodity =
       assetType.includes('matière') ||
@@ -358,10 +384,24 @@ export function ManageAssets() {
     setSelectedSearchResult(result);
     
     // Prefill form with selected result
-    const assetType = result.type === 'Crypto' ? 'Crypto' : 
-                      result.type === 'Equity' ? 'Action' : 
-                      result.type === 'ETF' ? 'ETF' : 
-                      formData.type || 'Action';
+    const isCommodityMode =
+      (searchAssetType || '').toLowerCase().includes('matière') ||
+      (searchAssetType || '').toLowerCase().includes('matiere') ||
+      (searchAssetType || '').toLowerCase().includes('commodity');
+
+    // CRM Type:
+    // - Spot commodities (XAU/XAG): use underlying ("Or"/"Argent") so it matches CRM options.
+    // - Commodity ETFs/proxies: keep "Matière première" and store underlying in subcategory.
+    // - Others: infer from Alpha Vantage type.
+    const assetType = isCommodityMode
+      ? (result.type === 'Spot' && result.commodity_underlying ? result.commodity_underlying : 'Matière première')
+      : result.type === 'Crypto'
+        ? 'Crypto'
+        : result.type === 'Equity'
+          ? 'Action'
+          : result.type === 'ETF'
+            ? 'ETF'
+            : (formData.type || 'Action');
     
     const isCrypto = assetType === 'Crypto' || assetType.toLowerCase().includes('crypto');
     
@@ -386,7 +426,8 @@ export function ManageAssets() {
     let logoUrl = result.logo_url || '';
     
     // If logo is missing, try to fetch it
-    if (!logoUrl && result.symbol) {
+    const isSpotForex = result.type === 'Spot' || result.exchange === 'FOREX';
+    if (!logoUrl && result.symbol && !isSpotForex) {
       try {
         const logoResponse = await apiCall(
           `/api/assets/get-logo/?symbol=${encodeURIComponent(result.symbol)}&type=${assetType.toLowerCase()}`
@@ -399,16 +440,26 @@ export function ManageAssets() {
         // Continue without logo if fetch fails
       }
     }
+
+    const nextSubcategory = isCommodityMode
+      ? (result.type === 'Spot'
+          ? 'Spot'
+          : (result.commodity_underlying || result.type || formData.subcategory))
+      : (result.type || formData.subcategory);
     
+    const referenceCode = isSpotForex
+      ? `${(result.symbol || '').toUpperCase()}/${(result.currency || 'USD').toUpperCase()}`
+      : (result.symbol || '');
+
     setFormData({
       ...formData,
       name: result.name || result.symbol,
-      reference: result.symbol,
+      reference: referenceCode,
       alphaVantageSymbol: result.symbol,
       exchange: exchange,
       type: assetType,
       category: result.region || formData.category,
-      subcategory: result.type || formData.subcategory,
+      subcategory: nextSubcategory,
       logoUrl: logoUrl
     });
   }
@@ -678,9 +729,9 @@ export function ManageAssets() {
                   <div className="modal-form-field">
                     <Label htmlFor="asset-type-select">Type d'actif</Label>
                     <Select
-                      value={formData.type}
+                      value={searchAssetType}
                       onValueChange={(value) => {
-                        setFormData({ ...formData, type: value });
+                        setSearchAssetType(value);
                         setSearchResults([]);
                         setAlphaVantageSearch('');
                         setSelectedSearchResult(null);
@@ -700,10 +751,10 @@ export function ManageAssets() {
                     </Select>
                   </div>
                   
-                  {formData.type && (
+                  {searchAssetType && (
                     <div className="modal-form-field">
                         <Label htmlFor="alpha-vantage-search">
-                          {formData.type === 'Crypto' 
+                          {searchAssetType === 'Crypto' 
                             ? 'Rechercher une crypto-monnaie (nom ou symbole)' 
                             : 'Rechercher un actif (nom ou symbole)'}
                         </Label>
@@ -714,7 +765,7 @@ export function ManageAssets() {
                             id="alpha-vantage-search"
                             className="pl-10"
                             placeholder={
-                              formData.type === 'Crypto' 
+                              searchAssetType === 'Crypto' 
                                 ? 'Ex: Bitcoin, BTC, Ethereum, ETH...' 
                                 : 'Ex: Apple, AAPL, Microsoft, MSFT...'
                             }
@@ -761,10 +812,14 @@ export function ManageAssets() {
                             >
                               {searchResults.map((result: any, index: number) => (
                                 <div
-                                  key={index}
+                                  key={`${result.symbol || 'sym'}-${result.exchange || 'ex'}-${result.currency || 'ccy'}-${index}`}
                                   onClick={() => handleSelectSearchResult(result)}
                                   className={`p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
-                                    selectedSearchResult?.symbol === result.symbol ? 'bg-blue-50 border-blue-200' : ''
+                                    selectedSearchResult?.symbol === result.symbol &&
+                                    selectedSearchResult?.exchange === result.exchange &&
+                                    selectedSearchResult?.currency === result.currency
+                                      ? 'bg-blue-50 border-blue-200'
+                                      : ''
                                   }`}
                                 >
                                   <div className="flex items-center justify-between">
@@ -772,7 +827,10 @@ export function ManageAssets() {
                                       <div className="font-semibold text-sm truncate">{result.name}</div>
                                       <div className="text-xs text-slate-500 font-mono">{result.symbol}</div>
                                       <div className="text-xs text-slate-400 mt-1">
-                                        {result.type} • {result.region} • {result.currency}
+                                        {result.type}
+                                        {result.commodity_underlying ? ` • Exposition: ${result.commodity_underlying}` : ''}
+                                        {result.region ? ` • ${result.region}` : ''}
+                                        {result.currency ? ` • ${result.currency}` : ''}
                                       </div>
                                     </div>
                                     {result.price && (

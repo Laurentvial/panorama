@@ -28,6 +28,15 @@ export function ProductDetail() {
   const [timeframePerformance, setTimeframePerformance] = useState<{ percent: number; absolute: number; start: number; end: number } | null>(null);
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [tradeAmountEur, setTradeAmountEur] = useState<string>('');
+  const [tradeOrderError, setTradeOrderError] = useState<string | null>(null);
+  const [isPlacingTradeOrder, setIsPlacingTradeOrder] = useState(false);
+  const [tradeOrderSuccess, setTradeOrderSuccess] = useState<{
+    amountEur: number;
+    assetCurrency: string;
+    estimatedShares: number;
+    fxRateEurToAsset: number;
+    transaction: any | null;
+  } | null>(null);
   const [fxRateEurToAsset, setFxRateEurToAsset] = useState<number>(1);
   const [fxLoading, setFxLoading] = useState(false);
   const [fxError, setFxError] = useState<string | null>(null);
@@ -81,10 +90,22 @@ export function ProductDetail() {
   });
   const [clientIP, setClientIP] = useState('');
   const isMobile = useIsMobile();
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+
+  const getTruncatedText = (text: string, limit: number) => {
+    const normalized = (text || '').toString();
+    if (normalized.length <= limit) return normalized;
+    return `${normalized.slice(0, limit).trimEnd()}…`;
+  };
+
+  useEffect(() => {
+    // Reset "Lire plus" when navigating to another item
+    setIsDescriptionExpanded(false);
+  }, [id, dataType]);
 
   // Keep a stable currency value for hooks (never behind conditional returns)
   const tradeAssetCurrency =
-    dataType === 'asset' ? (String(data?.currency || 'EUR').trim().toUpperCase() || 'EUR') : 'EUR';
+    dataType === 'asset' ? (String(data?.currency || 'USD').trim().toUpperCase() || 'USD') : 'EUR';
 
   // Helper function to convert date string to Date object
   const parseDateString = (dateString: string): Date | undefined => {
@@ -810,13 +831,16 @@ export function ProductDetail() {
     const isProductLinkedToAssets = product.linkToAssets === 'Oui' || product.link_to_assets === 'Oui';
     
     return (
-      <div style={{ 
-        padding: isMobile ? '16px' : '20px',
-        width: '100%',
-        maxWidth: '100%',
-        overflowX: 'hidden',
-        boxSizing: 'border-box',
-      }}>
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 1280,
+          margin: '0 auto',
+          padding: isMobile ? '16px' : '24px',
+          overflowX: 'hidden',
+          boxSizing: 'border-box',
+        }}
+      >
         {/* Breadcrumb */}
         <div style={{ 
           marginBottom: isMobile ? '16px' : '20px', 
@@ -1256,14 +1280,42 @@ export function ProductDetail() {
                   <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Description</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div style={{ 
-                    fontSize: isMobile ? '13px' : '14px', 
-                    color: '#374151', 
-                    lineHeight: '1.6',
-                    whiteSpace: 'pre-wrap',
-                  }}>
-                    {product.description}
-                  </div>
+                  {(() => {
+                    const limit = isMobile ? 280 : 520;
+                    const full = String(product.description || '');
+                    const shouldTruncate = full.length > limit;
+                    const text = isDescriptionExpanded ? full : getTruncatedText(full, limit);
+                    return (
+                      <>
+                        <div style={{ 
+                          fontSize: isMobile ? '13px' : '14px', 
+                          color: '#374151', 
+                          lineHeight: '1.6',
+                          whiteSpace: 'pre-wrap',
+                        }}>
+                          {text}
+                        </div>
+                        {shouldTruncate && (
+                          <button
+                            type="button"
+                            onClick={() => setIsDescriptionExpanded((v) => !v)}
+                            style={{
+                              marginTop: 10,
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              color: 'var(--platform-button-bg)',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            {isDescriptionExpanded ? 'Lire moins' : 'Lire plus'}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             )}
@@ -1964,6 +2016,56 @@ export function ProductDetail() {
       : priceChangePercent;
 
   const assetCurrency = tradeAssetCurrency;
+  const assetExchange = String(asset?.exchange || '').trim().toUpperCase();
+  const assetDisplayCurrency = (String(asset?.currency || assetCurrency || 'USD').trim().toUpperCase() || 'USD');
+
+  const getMarketOpenStatus = (): boolean | null => {
+    if (isCrypto) return true;
+
+    const exchange = assetExchange;
+    const region = String(asset?.region || '').toLowerCase();
+
+    type MarketSession = { timeZone: string; openMinutes: number; closeMinutes: number; weekendClosed: boolean };
+    const session: MarketSession | null =
+      exchange.includes('NASDAQ') || exchange.includes('NYSE') || exchange.includes('NYSEARCA') || exchange.includes('AMEX') || region.includes('united') || region === 'us'
+        ? { timeZone: 'America/New_York', openMinutes: 9 * 60 + 30, closeMinutes: 16 * 60, weekendClosed: true }
+        : exchange.includes('EURONEXT') || region.includes('france')
+          ? { timeZone: 'Europe/Paris', openMinutes: 9 * 60, closeMinutes: 17 * 60 + 30, weekendClosed: true }
+          : null;
+
+    if (!session) return null;
+
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: session.timeZone,
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date());
+
+      const map: Record<string, string> = {};
+      for (const p of parts) {
+        if (p.type !== 'literal') map[p.type] = p.value;
+      }
+
+      const weekday = map.weekday;
+      const hour = Number(map.hour);
+      const minute = Number(map.minute);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+      if (session.weekendClosed && (weekday === 'Sat' || weekday === 'Sun')) return false;
+
+      const minutes = hour * 60 + minute;
+      return minutes >= session.openMinutes && minutes < session.closeMinutes;
+    } catch {
+      return null;
+    }
+  };
+
+  const marketOpenStatus = getMarketOpenStatus();
+  const marketStatusText =
+    marketOpenStatus === null ? 'Marché' : marketOpenStatus ? 'Marché ouvert' : 'Marché fermé';
 
   const amountEurNum = parseFinancialValue(String(tradeAmountEur).replace(',', '.'));
   const amountInAssetCurrency = amountEurNum * (assetCurrency === 'EUR' ? 1 : fxRateEurToAsset || 0);
@@ -2080,7 +2182,16 @@ export function ProductDetail() {
   }
 
   return (
-    <div style={{ padding: '20px 120px' }}>
+    <div
+      style={{
+        width: '100%',
+        maxWidth: 1280,
+        margin: '0 auto',
+        padding: isMobile ? '16px' : '24px',
+        overflowX: 'hidden',
+        boxSizing: 'border-box',
+      }}
+    >
       {/* Breadcrumb */}
       <div style={{ marginBottom: '20px', fontSize: '14px', color: '#6b7280' }}>
         <span 
@@ -2193,12 +2304,12 @@ export function ProductDetail() {
               fontSize: isMobile ? '12px' : '14px', 
               color: '#6b7280'
             }}>
-              Marché ouvert • PRIX PAR xxx, EN EUR
+              {marketStatusText} • PRIX PAR {assetExchange || '—'}, EN {assetDisplayCurrency}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
           <Button 
             style={{
               backgroundColor: 'var(--platform-button-bg)',
@@ -2208,10 +2319,12 @@ export function ProductDetail() {
               borderRadius: 9999,
               border: 'none',
               cursor: 'pointer',
+              width: isMobile ? '100%' : 'auto',
             }}
           onClick={() => {
             setTradeAmountEur('');
             setFxError(null);
+            setTradeOrderSuccess(null);
             setShowTradeModal(true);
           }}
           >
@@ -2221,16 +2334,107 @@ export function ProductDetail() {
       </div>
 
       {/* Trade modal (client enters amount in EUR) */}
-      <Dialog open={showTradeModal} onOpenChange={setShowTradeModal}>
+      <Dialog
+        open={showTradeModal}
+        onOpenChange={(open) => {
+          setShowTradeModal(open);
+          if (open) {
+            setTradeOrderError(null);
+            setTradeOrderSuccess(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Trader {asset?.reference || asset?.name || ''}</DialogTitle>
+            <DialogTitle>
+              {tradeOrderSuccess ? 'Ordre placé' : `Trader ${asset?.reference || asset?.name || ''}`}
+            </DialogTitle>
             <DialogDescription>
-              Saisissez un montant en EUR. Le nombre d’actions est estimé en fonction du prix actuel{assetCurrency !== 'EUR' ? ` et du taux de change EUR/${assetCurrency}` : ''}.
+              {tradeOrderSuccess
+                ? "Votre ordre a été enregistré. Vous trouverez le récapitulatif ci-dessous."
+                : `Saisissez un montant en EUR. Le nombre d’actions est estimé en fonction du prix actuel${
+                    assetCurrency !== 'EUR' ? ` et du taux de change EUR/${assetCurrency}` : ''
+                  }.`}
             </DialogDescription>
           </DialogHeader>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {tradeOrderSuccess ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 9999,
+                    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Check size={22} color="#16a34a" />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>Ordre placé</div>
+                  <div style={{ fontSize: 13, color: '#6b7280' }}>
+                    {asset?.reference || asset?.name || 'Actif'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                  <span>Montant</span>
+                  <strong>
+                    {tradeOrderSuccess.amountEur.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginTop: 6 }}>
+                  <span>Actions estimées</span>
+                  <strong>
+                    {tradeOrderSuccess.estimatedShares > 0
+                      ? tradeOrderSuccess.estimatedShares.toLocaleString('fr-FR', { maximumFractionDigits: 6 })
+                      : '—'}
+                  </strong>
+                </div>
+                {tradeOrderSuccess.assetCurrency !== 'EUR' && tradeOrderSuccess.fxRateEurToAsset > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 13, color: '#6b7280' }}>
+                    Taux utilisé: <strong>1 EUR ≈ {tradeOrderSuccess.fxRateEurToAsset.toFixed(6)} {tradeOrderSuccess.assetCurrency}</strong>
+                  </div>
+                )}
+                {!!tradeOrderSuccess.transaction && (
+                  <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>
+                    Référence: <strong>{tradeOrderSuccess.transaction?.id || tradeOrderSuccess.transaction?.reference || '—'}</strong>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowTradeModal(false);
+                    setTradeOrderSuccess(null);
+                    setTradeAmountEur('');
+                  }}
+                >
+                  Fermer
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowTradeModal(false);
+                    setTradeOrderSuccess(null);
+                    setTradeAmountEur('');
+                    navigate('/platform/portfolio');
+                  }}
+                >
+                  Voir portefeuille
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
               <Label htmlFor="trade-amount-eur">Montant (EUR)</Label>
               <Input
@@ -2238,8 +2442,16 @@ export function ProductDetail() {
                 inputMode="decimal"
                 placeholder="Ex: 1000"
                 value={tradeAmountEur}
-                onChange={(e) => setTradeAmountEur(e.target.value)}
+                onChange={(e) => {
+                  setTradeAmountEur(e.target.value);
+                  if (tradeOrderError) setTradeOrderError(null);
+                }}
               />
+              {tradeOrderError && (
+                <div style={{ marginTop: 8, fontSize: 13, color: '#ef4444' }}>
+                  {tradeOrderError}
+                </div>
+              )}
             </div>
 
             {assetCurrency !== 'EUR' && (
@@ -2288,20 +2500,117 @@ export function ProductDetail() {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <Button variant="outline" onClick={() => setShowTradeModal(false)}>
+              <Button
+                variant="outline"
+                disabled={isPlacingTradeOrder}
+                onClick={() => setShowTradeModal(false)}
+              >
                 Fermer
               </Button>
               <Button
-                disabled={amountEurNum <= 0 || (assetCurrency !== 'EUR' && (fxLoading || fxRateEurToAsset <= 0))}
-                onClick={() => {
-                  toast.success('Ordre préparé (démo UI).');
-                  setShowTradeModal(false);
+                disabled={
+                  isPlacingTradeOrder ||
+                  amountEurNum <= 0 ||
+                  (assetCurrency !== 'EUR' && (fxLoading || fxRateEurToAsset <= 0))
+                }
+                onClick={async () => {
+                  try {
+                    if (!currentUser?.id) {
+                      toast.error('Utilisateur non connecté');
+                      return;
+                    }
+                    if (!asset?.id) {
+                      toast.error('Actif introuvable');
+                      return;
+                    }
+
+                    setTradeOrderError(null);
+                    setIsPlacingTradeOrder(true);
+
+                    const payload = {
+                      type: 'transfert',
+                      amount: Number(amountEurNum),
+                      description: `Ordre de trading: ${asset?.reference || asset?.name || asset?.id}`,
+                      datetime: new Date().toISOString(),
+                      status: 'termine',
+                      transfer_from: 'balance',
+                      transfer_to: 'trading',
+                      subscription_details: {
+                        tradeType: 'asset',
+                        assetId: asset.id,
+                        assetName: asset?.name || undefined,
+                        assetReference: asset?.reference || undefined,
+                        assetCurrency,
+                        price,
+                        estimatedShares,
+                        fxRateEurToAsset: assetCurrency !== 'EUR' ? fxRateEurToAsset : 1,
+                      },
+                    };
+
+                    const created = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+                      method: 'POST',
+                      body: JSON.stringify(payload),
+                    });
+
+                    // Prefer the created transaction if the API returns it, otherwise fetch the
+                    // latest matching transaction and display it in the modal.
+                    let createdTransaction: any | null =
+                      (created && (created as any).transaction) ? (created as any).transaction : created || null;
+
+                    try {
+                      const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/`);
+                      const list = (transactionsResponse?.transactions || []) as any[];
+                      setTransactions(list);
+
+                      if (!createdTransaction && Array.isArray(list) && list.length > 0) {
+                        const normalizedAmount = Number(amountEurNum);
+                        const sorted = [...list].sort(
+                          (a: any, b: any) => new Date(b?.datetime || 0).getTime() - new Date(a?.datetime || 0).getTime()
+                        );
+                        createdTransaction =
+                          sorted.find((t: any) => {
+                            const details = t?.subscription_details || t?.subscriptionDetails || {};
+                            const tAmount = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+                            return (
+                              t?.type === 'transfert' &&
+                              Number.isFinite(tAmount) &&
+                              Math.abs(tAmount - normalizedAmount) < 0.0001 &&
+                              (details?.assetId === asset.id ||
+                                details?.assetReference === asset?.reference ||
+                                String(t?.description || '').includes(String(asset?.reference || asset?.name || '')))
+                            );
+                          }) || sorted[0] || null;
+                      }
+                    } catch (e) {
+                      // If fetching fails, we still show the success state with the values we have.
+                      console.warn('Unable to refresh transactions after order placement:', e);
+                    }
+
+                    setTradeOrderSuccess({
+                      amountEur: Number(amountEurNum),
+                      assetCurrency,
+                      estimatedShares,
+                      fxRateEurToAsset: assetCurrency !== 'EUR' ? fxRateEurToAsset : 1,
+                      transaction: createdTransaction,
+                    });
+                  } catch (error: any) {
+                    console.error('Error placing trade order:', error);
+                    const msg = String(error?.error || error?.message || '').trim();
+                    if (msg.toLowerCase().includes('fonds insuffisants')) {
+                      setTradeOrderError(msg || 'Fonds insuffisants');
+                    } else {
+                      toast.error(msg || 'Erreur lors du placement de l’ordre');
+                    }
+                  } finally {
+                    setIsPlacingTradeOrder(false);
+                  }
                 }}
               >
-                Confirmer
+                {isPlacingTradeOrder ? 'Traitement…' : 'Confirmer'}
               </Button>
             </div>
           </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -2469,16 +2778,18 @@ export function ProductDetail() {
         </div>
 
         {/* Sidebar */}
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '20px',
-          position: 'sticky',
-          top: isMobile ? '76px' : '88px',
-          alignSelf: 'flex-start',
-          maxHeight: isMobile ? 'calc(100vh - 60px)' : 'calc(100vh - 80px)',
-          overflowY: 'visible',
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            position: isMobile ? 'static' : 'sticky',
+            top: isMobile ? undefined : '88px',
+            alignSelf: 'flex-start',
+            maxHeight: isMobile ? 'none' : 'calc(100vh - 80px)',
+            overflowY: 'visible',
+          }}
+        >
           {/* Additional Info Cards */}
           <Card>
             <CardHeader>
@@ -2489,9 +2800,37 @@ export function ProductDetail() {
                 {asset.description && (
                   <div>
                     <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: 6 }}>Description</div>
-                    <div style={{ fontSize: '13px', color: '#111827', lineHeight: 1.4 }}>
-                      {asset.description}
-                    </div>
+                    {(() => {
+                      const limit = isMobile ? 220 : 320;
+                      const full = String(asset.description || '');
+                      const shouldTruncate = full.length > limit;
+                      const text = isDescriptionExpanded ? full : getTruncatedText(full, limit);
+                      return (
+                        <>
+                          <div style={{ fontSize: '13px', color: '#111827', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
+                            {text}
+                          </div>
+                          {shouldTruncate && (
+                            <button
+                              type="button"
+                              onClick={() => setIsDescriptionExpanded((v) => !v)}
+                              style={{
+                                marginTop: 8,
+                                background: 'transparent',
+                                border: 'none',
+                                padding: 0,
+                                color: 'var(--platform-button-bg)',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                              }}
+                            >
+                              {isDescriptionExpanded ? 'Lire moins' : 'Lire plus'}
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
                 {asset.category && (

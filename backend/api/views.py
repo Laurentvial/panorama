@@ -2131,9 +2131,50 @@ def alpha_vantage_search(request):
         kw = keywords.lower()
         curated = [
             {
+                'symbol': 'XAU',
+                'name': 'Or spot (XAU/USD)',
+                'type': 'Spot',
+                'commodity_underlying': 'Or',
+                'region': 'Global',
+                'currency': 'USD',
+                'exchange': 'FOREX',
+                'aliases': ['xau', 'xauusd', 'gold', 'or', 'spot'],
+            },
+            {
+                'symbol': 'XAU',
+                'name': 'Or spot (XAU/EUR)',
+                'type': 'Spot',
+                'commodity_underlying': 'Or',
+                'region': 'Global',
+                'currency': 'EUR',
+                'exchange': 'FOREX',
+                'aliases': ['xau', 'xaueur', 'gold', 'or', 'spot', 'eur'],
+            },
+            {
+                'symbol': 'XAG',
+                'name': 'Argent spot (XAG/USD)',
+                'type': 'Spot',
+                'commodity_underlying': 'Argent',
+                'region': 'Global',
+                'currency': 'USD',
+                'exchange': 'FOREX',
+                'aliases': ['xag', 'xagusd', 'silver', 'argent', 'spot'],
+            },
+            {
+                'symbol': 'XAG',
+                'name': 'Argent spot (XAG/EUR)',
+                'type': 'Spot',
+                'commodity_underlying': 'Argent',
+                'region': 'Global',
+                'currency': 'EUR',
+                'exchange': 'FOREX',
+                'aliases': ['xag', 'xageur', 'silver', 'argent', 'spot', 'eur'],
+            },
+            {
                 'symbol': 'GLD',
                 'name': 'Or (ETF) - SPDR Gold Shares',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Or',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2142,7 +2183,8 @@ def alpha_vantage_search(request):
             {
                 'symbol': 'IAU',
                 'name': 'Or (ETF) - iShares Gold Trust',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Or',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2151,7 +2193,8 @@ def alpha_vantage_search(request):
             {
                 'symbol': 'SLV',
                 'name': 'Argent (ETF) - iShares Silver Trust',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Argent',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2160,7 +2203,8 @@ def alpha_vantage_search(request):
             {
                 'symbol': 'USO',
                 'name': 'Pétrole (ETF) - United States Oil Fund',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Pétrole',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2169,7 +2213,8 @@ def alpha_vantage_search(request):
             {
                 'symbol': 'UNG',
                 'name': 'Gaz naturel (ETF) - United States Natural Gas Fund',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Gaz naturel',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2178,7 +2223,8 @@ def alpha_vantage_search(request):
             {
                 'symbol': 'CPER',
                 'name': 'Cuivre (ETN) - United States Copper Index Fund',
-                'type': 'Commodity',
+                'type': 'ETF',
+                'commodity_underlying': 'Cuivre',
                 'region': 'United States',
                 'currency': 'USD',
                 'exchange': 'NYSEARCA',
@@ -2204,11 +2250,19 @@ def alpha_vantage_search(request):
         if av_service:
             for result in matches[:10]:
                 try:
-                    quote = av_service.get_quote(result['symbol'])
-                    if quote:
-                        result['price'] = quote['price']
-                        result['change'] = quote['change']
-                        result['change_percent'] = quote['change_percent']
+                    if result.get('type') == 'Spot' or result.get('exchange') == 'FOREX':
+                        # Metals/forex via Finnhub (OANDA), because Alpha Vantage FX endpoints don't support XAU/XAG reliably
+                        from api.alpha_vantage_service import get_oanda_quote_finnhub
+                        fx_quote = get_oanda_quote_finnhub(result['symbol'], result.get('currency') or 'USD')
+                        if fx_quote and fx_quote.get('exchange_rate'):
+                            result['price'] = fx_quote['exchange_rate']
+                            # change/change_percent are not provided by forex quote; keep empty
+                    else:
+                        quote = av_service.get_quote(result['symbol'])
+                        if quote:
+                            result['price'] = quote['price']
+                            result['change'] = quote['change']
+                            result['change_percent'] = quote['change_percent']
                 except Exception:
                     pass
 
@@ -2431,8 +2485,37 @@ def asset_chart_data(request, asset_id):
             av_service = get_alpha_vantage_service()
             if not av_service:
                 return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            chart_data = av_service.get_daily_data(asset.alpha_vantage_symbol, outputsize=outputsize)
+
+            # Spot commodities / FX pairs (e.g., XAU/USD, XAG/USD) use FX_DAILY.
+            symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
+            if symbol_upper in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
+                to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
+                from api.alpha_vantage_service import get_oanda_candles_finnhub
+                # Try direct OANDA pair first (XAU_EUR, XAG_EUR, etc.)
+                chart_data = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution='D', days=365 if outputsize == 'full' else 120)
+                # Cross via USD if direct pair isn't available
+                if not chart_data and to_ccy != 'USD':
+                    metal_usd = get_oanda_candles_finnhub(symbol_upper, 'USD', resolution='D', days=365 if outputsize == 'full' else 120)
+                    usd_to = get_oanda_candles_finnhub('USD', to_ccy, resolution='D', days=365 if outputsize == 'full' else 120)
+                    if metal_usd and usd_to:
+                        usd_to_by_date = {p['date']: p for p in (usd_to.get('data') or [])}
+                        out = []
+                        for p in (metal_usd.get('data') or []):
+                            fx = usd_to_by_date.get(p.get('date'))
+                            if not fx:
+                                continue
+                            out.append({
+                                'date': p['date'],
+                                'open': float(p.get('open', 0) or 0) * float(fx.get('open', 0) or 0),
+                                'high': float(p.get('high', 0) or 0) * float(fx.get('high', 0) or 0),
+                                'low': float(p.get('low', 0) or 0) * float(fx.get('low', 0) or 0),
+                                'close': float(p.get('close', 0) or 0) * float(fx.get('close', 0) or 0),
+                                'volume': 0,
+                            })
+                        out.sort(key=lambda x: x['date'])
+                        chart_data = {'data': out, 'meta_data': {'from_symbol': symbol_upper, 'to_symbol': to_ccy}}
+            else:
+                chart_data = av_service.get_daily_data(asset.alpha_vantage_symbol, outputsize=outputsize)
             
             if not chart_data:
                 return Response({
@@ -2484,6 +2567,7 @@ def asset_create_from_alpha_vantage(request):
     Create an asset from Alpha Vantage symbol data
     """
     symbol = request.data.get('symbol', '').strip().upper()
+    reference_input = (request.data.get('reference', '') or '').strip()
     asset_type = request.data.get('type', 'Action')
     category = request.data.get('category', '')
     subcategory = request.data.get('subcategory', '')
@@ -2497,9 +2581,77 @@ def asset_create_from_alpha_vantage(request):
     
     if not symbol:
         return Response({'error': 'Symbol is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Best-effort translation for country-like labels used in UI fields (category/region/country).
+    # We want stored labels to be French on import.
+    def _country_to_fr_import(value: str) -> str:
+        v = (value or '').strip()
+        if not v:
+            return v
+        mapping = {
+            'Global': 'Monde',
+            'World': 'Monde',
+            'United States': 'États-Unis',
+            'USA': 'États-Unis',
+            'U.S.A.': 'États-Unis',
+            'United Kingdom': 'Royaume-Uni',
+            'UK': 'Royaume-Uni',
+            'Great Britain': 'Royaume-Uni',
+            'Germany': 'Allemagne',
+            'France': 'France',
+            'Spain': 'Espagne',
+            'Italy': 'Italie',
+            'Netherlands': 'Pays-Bas',
+            'Switzerland': 'Suisse',
+            'Sweden': 'Suède',
+            'Norway': 'Norvège',
+            'Denmark': 'Danemark',
+            'Finland': 'Finlande',
+            'Ireland': 'Irlande',
+            'Belgium': 'Belgique',
+            'Austria': 'Autriche',
+            'Portugal': 'Portugal',
+            'Canada': 'Canada',
+            'Mexico': 'Mexique',
+            'Brazil': 'Brésil',
+            'China': 'Chine',
+            'Hong Kong': 'Hong Kong',
+            'Japan': 'Japon',
+            'South Korea': 'Corée du Sud',
+            'Korea': 'Corée',
+            'India': 'Inde',
+            'Singapore': 'Singapour',
+            'Australia': 'Australie',
+            'New Zealand': 'Nouvelle-Zélande',
+            'South Africa': 'Afrique du Sud',
+            'United Arab Emirates': 'Émirats arabes unis',
+            'Saudi Arabia': 'Arabie saoudite',
+            'Israel': 'Israël',
+        }
+        return mapping.get(v, v)
+
+    # Translate UI-provided "category" immediately (it often contains a country like "United States")
+    category = _country_to_fr_import(category)
     
+    # Normalize spot metals symbol (allow XAUUSD/XAGUSD inputs)
+    normalized_symbol = symbol
+    if len(symbol) == 6 and symbol[:3] in ['XAU', 'XAG']:
+        normalized_symbol = symbol[:3]
+        if not currency:
+            currency = symbol[3:]
+    symbol = normalized_symbol
+
     # Check if asset with this symbol already exists
-    existing_asset = Asset.objects.filter(alpha_vantage_symbol=symbol).first()
+    # - Equities/ETFs: symbol is unique
+    # - Spot FX-like assets (XAU/XAG): allow multiple assets per quote currency (USD vs EUR)
+    if symbol in ['XAU', 'XAG'] or (exchange or '').strip().upper() == 'FOREX':
+        existing_asset = Asset.objects.filter(
+            alpha_vantage_symbol=symbol,
+            exchange='FOREX',
+            currency=(currency or 'USD').strip().upper() or 'USD',
+        ).first()
+    else:
+        existing_asset = Asset.objects.filter(alpha_vantage_symbol=symbol).first()
     if existing_asset:
         return Response({
             'error': f'Asset with symbol {symbol} already exists',
@@ -2539,39 +2691,77 @@ def asset_create_from_alpha_vantage(request):
             av_service = get_alpha_vantage_service()
             if not av_service:
                 return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            # Spot metals / FX (XAU/XAG) use forex quote instead of stock quotes.
+            if symbol in ['XAU', 'XAG'] or (exchange or '').strip().upper() == 'FOREX':
+                if not currency:
+                    currency = 'USD'
+                if not exchange:
+                    exchange = 'FOREX'
+                if not region:
+                    region = 'Global'
+
+                from api.alpha_vantage_service import get_oanda_quote_finnhub
+                fx_quote = get_oanda_quote_finnhub(symbol, currency)
+                # Cross via USD if direct pair isn't available
+                if (not fx_quote or not fx_quote.get('exchange_rate')) and currency != 'USD':
+                    metal_usd = get_oanda_quote_finnhub(symbol, 'USD')
+                    usd_to = get_oanda_quote_finnhub('USD', currency)
+                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
+                        fx_quote = {
+                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
+                        }
+
+                # If we can't fetch a quote (e.g. FINNHUB_API_KEY missing), still allow import.
+                # Price will be updated later once the market data provider is configured.
+                quote_price = float(fx_quote['exchange_rate']) if (fx_quote and fx_quote.get('exchange_rate')) else None
+
+                quote = {
+                    'symbol': symbol,
+                    'price': quote_price,
+                    'change': 0,
+                    'change_percent': None,
+                }
+
+                # If no name provided, set a friendly one.
+                if not request.data.get('name', '').strip():
+                    request.data._mutable = True if hasattr(request.data, "_mutable") else False  # type: ignore
+                    # Don't rely on mutability; we set name in create() below.
+                    pass
+            else:
+                # Fetch quote to get current price and validate symbol
+                quote = av_service.get_quote(symbol)
+                
+                if not quote:
+                    return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
             
-            # Fetch quote to get current price and validate symbol
-            quote = av_service.get_quote(symbol)
-            
-            if not quote:
-                return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
-            
-            # Get logo URL if not provided
-            if not logo_url:
+            # Get logo URL if not provided (skip for spot FX)
+            if not logo_url and symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
                 logo_url = av_service.get_company_logo(symbol) or ''
 
-            # Best-effort company info (persisted on import)
-            overview = av_service.get_company_overview(symbol) or {}
-            overview_name = (overview.get('Name') or '').strip()
-            overview_description = (overview.get('Description') or '').strip()
-            overview_sector = (overview.get('Sector') or '').strip()
-            overview_industry = (overview.get('Industry') or '').strip()
-            overview_country = (overview.get('Country') or '').strip()
-            overview_website = (overview.get('Website') or '').strip()
-            overview_address = (overview.get('Address') or '').strip()
-            overview_employees_raw = (overview.get('FullTimeEmployees') or '').strip()
-            overview_market_cap_raw = (overview.get('MarketCapitalization') or '').strip()
-            overview_currency = (overview.get('Currency') or '').strip()
+            # Best-effort company info (persisted on import) - equities/ETFs only.
+            if symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
+                overview = av_service.get_company_overview(symbol) or {}
+                overview_name = (overview.get('Name') or '').strip()
+                overview_description = (overview.get('Description') or '').strip()
+                overview_sector = (overview.get('Sector') or '').strip()
+                overview_industry = (overview.get('Industry') or '').strip()
+                overview_country = (overview.get('Country') or '').strip()
+                overview_website = (overview.get('Website') or '').strip()
+                overview_address = (overview.get('Address') or '').strip()
+                overview_employees_raw = (overview.get('FullTimeEmployees') or '').strip()
+                overview_market_cap_raw = (overview.get('MarketCapitalization') or '').strip()
+                overview_currency = (overview.get('Currency') or '').strip()
 
-            try:
-                overview_employees = int(overview_employees_raw) if overview_employees_raw else None
-            except Exception:
-                overview_employees = None
+                try:
+                    overview_employees = int(overview_employees_raw) if overview_employees_raw else None
+                except Exception:
+                    overview_employees = None
 
-            try:
-                overview_market_cap = int(overview_market_cap_raw) if overview_market_cap_raw else None
-            except Exception:
-                overview_market_cap = None
+                try:
+                    overview_market_cap = int(overview_market_cap_raw) if overview_market_cap_raw else None
+                except Exception:
+                    overview_market_cap = None
 
             # If currency/exchange/region weren't passed from the UI, prefer OVERVIEW values.
             if not currency:
@@ -2580,6 +2770,82 @@ def asset_create_from_alpha_vantage(request):
                 exchange = (overview.get('Exchange') or '').strip() or exchange
             if not region:
                 region = (overview.get('Country') or '').strip() or region
+
+            # Translate imported informational fields to French (best-effort).
+            # - Keep manual description as-is (assumed already curated by admin).
+            # - Translate Alpha Vantage Overview fields (mostly English) when Gemini is configured.
+            overview_country = _country_to_fr_import(overview_country)
+            # region is often a country name in our UI; translate the common cases too.
+            region = _country_to_fr_import(region)
+
+            def _translate_to_fr_best_effort(payload: dict) -> dict:
+                """
+                Translate provided fields to French using Gemini, if configured.
+                Returns the original payload on any failure.
+                """
+                try:
+                    import json
+                    import re
+                    from google import genai
+
+                    if not getattr(settings, 'GEMINI_API_KEY', None):
+                        return payload
+
+                    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+                    prompt = f"""Tu es un traducteur professionnel (FR).
+Traduis en français les champs ci-dessous.
+
+Règles:
+- Ne traduis pas les noms propres (noms d’entreprise, marques), ni les tickers/symboles.
+- Garde les URL inchangées.
+- Ne rajoute pas d’informations.
+- Retourne un JSON STRICT (pas de texte autour), avec EXACTEMENT ces clés: description, sector, industry, headquarters, country.
+
+Entrée (JSON):
+{json.dumps(payload, ensure_ascii=False)}
+"""
+                    resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                    text = (resp.text or '').strip()
+
+                    # Extract the first JSON object if the model wrapped it.
+                    m = re.search(r'\{[\s\S]*\}\s*$', text)
+                    if not m:
+                        m = re.search(r'\{[\s\S]*\}', text)
+                    if not m:
+                        return payload
+
+                    data = json.loads(m.group(0))
+                    if not isinstance(data, dict):
+                        return payload
+
+                    out = {}
+                    for k in ['description', 'sector', 'industry', 'headquarters', 'country']:
+                        v = data.get(k)
+                        out[k] = (v.strip() if isinstance(v, str) else payload.get(k, ''))
+                    return out
+                except Exception:
+                    return payload
+
+            # Only attempt Gemini translation when we actually have overview fields to translate.
+            if any([overview_description, overview_sector, overview_industry, overview_address, overview_country]) and symbol not in ['XAU', 'XAG']:
+                to_translate = {
+                    'description': overview_description if not manual_description else manual_description,
+                    'sector': overview_sector,
+                    'industry': overview_industry,
+                    'headquarters': overview_address,
+                    'country': overview_country,
+                }
+                translated = _translate_to_fr_best_effort(to_translate)
+
+                # Keep manual description untouched (admin-provided).
+                if not manual_description:
+                    overview_description = translated.get('description', overview_description) or overview_description
+                overview_sector = translated.get('sector', overview_sector) or overview_sector
+                overview_industry = translated.get('industry', overview_industry) or overview_industry
+                overview_address = translated.get('headquarters', overview_address) or overview_address
+                overview_country = translated.get('country', overview_country) or overview_country
+                region = _country_to_fr_import(region)
         
         # Generate asset ID
         asset_id = uuid.uuid4().hex[:12]
@@ -2587,11 +2853,21 @@ def asset_create_from_alpha_vantage(request):
             asset_id = uuid.uuid4().hex[:12]
         
         # Create asset
+        default_name = request.data.get('name', '').strip()
+        if not default_name and symbol == 'XAU':
+            default_name = f"Or spot ({(currency or 'USD').strip().upper()})"
+        if not default_name and symbol == 'XAG':
+            default_name = f"Argent spot ({(currency or 'USD').strip().upper()})"
+
+        # Ensure final stored UI labels are French when they represent countries/regions.
+        category = _country_to_fr_import(category)
+        region = _country_to_fr_import(region)
+
         asset = Asset.objects.create(
             id=asset_id,
             type=asset_type,
-            name=(request.data.get('name', '').strip() or overview_name or symbol),
-            reference=symbol,
+            name=(default_name or overview_name or symbol),
+            reference=(reference_input or symbol),
             category=category,
             subcategory=subcategory,
             default=default,
@@ -2601,9 +2877,9 @@ def asset_create_from_alpha_vantage(request):
             region=region,
             logo_url=logo_url,
             last_price=quote['price'],
-            last_price_update=timezone.now(),
-            price_change=quote['change'],
-            price_change_percent=float(quote['change_percent']) if quote['change_percent'] else None,
+            last_price_update=timezone.now() if quote.get('price') is not None else None,
+            price_change=quote['change'] if quote.get('price') is not None else None,
+            price_change_percent=float(quote['change_percent']) if (quote.get('price') is not None and quote.get('change_percent')) else None,
             description=manual_description or overview_description,
             sector=overview_sector,
             industry=overview_industry,
@@ -2653,21 +2929,70 @@ def asset_update_price(request, asset_id):
             av_service = get_alpha_vantage_service()
             if not av_service:
                 return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            quote = av_service.get_quote(asset.alpha_vantage_symbol)
-            
-            if not quote:
-                return Response({
-                    'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
-                    'rate_limit_reached': True
-                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            # Update asset price data
-            asset.last_price = quote['price']
-            asset.last_price_update = timezone.now()
-            asset.price_change = quote['change']
-            asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
-            asset.save()
+
+            symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
+            if symbol_upper in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
+                to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
+                from api.alpha_vantage_service import get_oanda_quote_finnhub, get_oanda_candles_finnhub
+                fx_quote = get_oanda_quote_finnhub(symbol_upper, to_ccy)
+                if (not fx_quote or not fx_quote.get('exchange_rate')) and to_ccy != 'USD':
+                    metal_usd = get_oanda_quote_finnhub(symbol_upper, 'USD')
+                    usd_to = get_oanda_quote_finnhub('USD', to_ccy)
+                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
+                        fx_quote = {
+                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
+                        }
+                if not fx_quote or not fx_quote.get('exchange_rate'):
+                    return Response({
+                        'error': f'FX quote {symbol_upper}/{to_ccy} not found or API rate limit reached',
+                        'rate_limit_reached': True
+                    }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+                asset.last_price = fx_quote['exchange_rate']
+                asset.last_price_update = timezone.now()
+
+                # Best-effort change from last 2 daily closes
+                fx_daily = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution='D', days=30)
+                if not fx_daily and to_ccy != 'USD':
+                    metal_usd = get_oanda_candles_finnhub(symbol_upper, 'USD', resolution='D', days=30)
+                    usd_to = get_oanda_candles_finnhub('USD', to_ccy, resolution='D', days=30)
+                    if metal_usd and usd_to:
+                        usd_to_by_date = {p['date']: p for p in (usd_to.get('data') or [])}
+                        out = []
+                        for p in (metal_usd.get('data') or []):
+                            fx = usd_to_by_date.get(p.get('date'))
+                            if not fx:
+                                continue
+                            out.append({'date': p['date'], 'close': float(p.get('close', 0) or 0) * float(fx.get('close', 0) or 0)})
+                        out.sort(key=lambda x: x['date'])
+                        fx_daily = {'data': out}
+                try:
+                    series = (fx_daily or {}).get('data') or []
+                    if len(series) >= 2:
+                        prev_close = float(series[-2]['close'])
+                        last_close = float(series[-1]['close'])
+                        delta = last_close - prev_close
+                        asset.price_change = delta
+                        asset.price_change_percent = (delta / prev_close * 100) if prev_close else None
+                except Exception:
+                    pass
+
+                asset.save()
+            else:
+                quote = av_service.get_quote(asset.alpha_vantage_symbol)
+                
+                if not quote:
+                    return Response({
+                        'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                        'rate_limit_reached': True
+                    }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                
+                # Update asset price data
+                asset.last_price = quote['price']
+                asset.last_price_update = timezone.now()
+                asset.price_change = quote['change']
+                asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                asset.save()
         
         return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -3778,8 +4103,13 @@ def client_transaction_create(request, client_id):
         transfer_to=transfer_to,
     )
 
-    # If this transfert starts an investment (to -> product), create monthly positions immediately.
-    if transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'balance':
+    # If this transfert starts an investment (balance -> product), create monthly positions immediately.
+    # Exclude client trading orders where transfer_to == 'trading'.
+    if (
+        transaction.type == 'transfert'
+        and transaction.transfer_to
+        and transaction.transfer_to not in ['balance', 'trading']
+    ):
         try:
             create_positions_for_investment(transaction)
         except Exception as pos_err:
@@ -3789,6 +4119,180 @@ def client_transaction_create(request, client_id):
             logger.error(f"Failed to create positions for transaction {transaction.id}: {str(pos_err)}")
             import traceback
             logger.error(traceback.format_exc())
+
+    # If this transfert is a client trading order (balance -> trading wallet), create a Position (ordre).
+    # The trading order is represented by:
+    # - a transfert transaction (keeps a trace of funds moved from available funds to trading portfolio)
+    # - a Position linked to the Asset (the order itself)
+    try:
+        is_trade_order = (
+            transaction.type == 'transfert'
+            and (transaction.transfer_to == 'trading'
+                 or (isinstance(subscription_details_data, dict) and subscription_details_data.get('tradeType') == 'asset'))
+        )
+        trade_asset_id = None
+        if is_trade_order and isinstance(subscription_details_data, dict):
+            trade_asset_id = subscription_details_data.get('assetId') or subscription_details_data.get('asset_id')
+
+        if is_trade_order and trade_asset_id:
+            asset_obj = Asset.objects.filter(id=str(trade_asset_id)).first()
+            if not asset_obj:
+                # Rollback best-effort (keep data consistent for clients)
+                transaction.delete()
+                return Response({'error': 'Asset not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Store the purchased asset on the transaction (instead of TRADING_WALLET product).
+            try:
+                transaction.asset = asset_obj
+                # Keep product empty for trades (product is for investment products).
+                transaction.product = None
+                # Save FX conversion snapshot when available
+                fx_rate = None
+                amount_asset_ccy = None
+                try:
+                    if isinstance(subscription_details_data, dict):
+                        raw_fx = subscription_details_data.get('fxRateEurToAsset')
+                        if raw_fx is not None and raw_fx != '':
+                            fx_rate = Decimal(str(raw_fx))
+                        asset_ccy = (subscription_details_data.get('assetCurrency') or '').strip().upper()
+                        amount_eur = Decimal(str(request.data.get('amount') or 0))
+                        if asset_ccy and asset_ccy != 'EUR' and fx_rate is not None:
+                            amount_asset_ccy = (amount_eur * fx_rate).quantize(Decimal('0.00000001'))
+                        else:
+                            amount_asset_ccy = None
+                except Exception:
+                    fx_rate = None
+                    amount_asset_ccy = None
+
+                transaction.fx_rate_eur_to_asset = fx_rate
+                transaction.amount_in_asset_currency = amount_asset_ccy
+                transaction.save(update_fields=['asset', 'product', 'fx_rate_eur_to_asset', 'amount_in_asset_currency'])
+            except Exception:
+                # If migration isn't applied yet, ignore (trade still works, asset is in subscription_details).
+                pass
+
+            # Ensure a single Position per transaction (idempotency)
+            if not Position.objects.filter(transaction_id=transaction.id).exists():
+                position_id = uuid.uuid4().hex[:12]
+                while Position.objects.filter(id=position_id).exists():
+                    position_id = uuid.uuid4().hex[:12]
+
+                # Capture entry price + quantity from payload (best effort).
+                # Frontend sends: subscription_details.price and subscription_details.estimatedShares.
+                entry_price = None
+                quantity = None
+                try:
+                    if isinstance(subscription_details_data, dict):
+                        raw_price = subscription_details_data.get('price')
+                        if raw_price is not None and raw_price != '':
+                            entry_price = Decimal(str(raw_price))
+                        raw_qty = (
+                            subscription_details_data.get('estimatedShares')
+                            or subscription_details_data.get('quantity')
+                        )
+                        if raw_qty is not None and raw_qty != '':
+                            quantity = Decimal(str(raw_qty))
+                except Exception:
+                    entry_price = None
+                    quantity = None
+
+                if entry_price is None:
+                    try:
+                        if getattr(asset_obj, 'last_price', None) is not None:
+                            entry_price = Decimal(str(asset_obj.last_price))
+                    except Exception:
+                        entry_price = None
+
+                # Conversion snapshot for the position
+                fx_rate_eur_to_asset = None
+                invested_amount_asset_currency = None
+                try:
+                    if isinstance(subscription_details_data, dict):
+                        raw_fx = subscription_details_data.get('fxRateEurToAsset')
+                        if raw_fx is not None and raw_fx != '':
+                            fx_rate_eur_to_asset = Decimal(str(raw_fx))
+                        asset_ccy = (subscription_details_data.get('assetCurrency') or '').strip().upper()
+                        amount_eur = Decimal(str(request.data.get('amount') or 0))
+                        if asset_ccy and asset_ccy != 'EUR' and fx_rate_eur_to_asset is not None:
+                            invested_amount_asset_currency = (amount_eur * fx_rate_eur_to_asset).quantize(Decimal('0.00000001'))
+                except Exception:
+                    fx_rate_eur_to_asset = None
+                    invested_amount_asset_currency = None
+
+                # Try to create asset-only Position (preferred).
+                # If DB schema hasn't been migrated yet and product_id is still NOT NULL,
+                # fallback to a hidden "Trading Wallet" product.
+                try:
+                    Position.objects.create(
+                        id=position_id,
+                        client=client,
+                        product=None,
+                        transaction=transaction,
+                        asset=asset_obj,
+                        period_index=0,
+                        period_date=transaction_datetime.date(),
+                        invested_amount=Decimal(str(request.data.get('amount') or 0)),
+                        entry_price=entry_price,
+                        quantity=quantity,
+                        fx_rate_eur_to_asset=fx_rate_eur_to_asset,
+                        invested_amount_asset_currency=invested_amount_asset_currency,
+                        opened_at=transaction_datetime,
+                        closed_at=None,
+                        profit_loss=None,
+                        status='pending',
+                    )
+                except Exception as pos_create_err:
+                    # Only fallback on the known "product_id cannot be null" constraint
+                    msg = str(pos_create_err).lower()
+                    if 'product' not in msg or 'null' not in msg:
+                        raise
+
+                    trading_product = Product.objects.filter(reference='TRADING_WALLET').first()
+                    if not trading_product:
+                        trading_product_id = uuid.uuid4().hex[:12]
+                        while Product.objects.filter(id=trading_product_id).exists():
+                            trading_product_id = uuid.uuid4().hex[:12]
+                        trading_product = Product.objects.create(
+                            id=trading_product_id,
+                            name='Trading wallet',
+                            reference='TRADING_WALLET',
+                            type='Trading',
+                            subcategory='',
+                            status='Inactif',
+                            price=Decimal('0'),
+                            profitability=Decimal('0'),
+                            duration='',
+                            description='Produit technique (ne pas afficher).',
+                            active=False,
+                            show_on_launch='Non',
+                        )
+
+                    Position.objects.create(
+                        id=position_id,
+                        client=client,
+                        product=trading_product,
+                        transaction=transaction,
+                        asset=asset_obj,
+                        period_index=0,
+                        period_date=transaction_datetime.date(),
+                        invested_amount=Decimal(str(request.data.get('amount') or 0)),
+                        entry_price=entry_price,
+                        quantity=quantity,
+                        fx_rate_eur_to_asset=fx_rate_eur_to_asset,
+                        invested_amount_asset_currency=invested_amount_asset_currency,
+                        opened_at=transaction_datetime,
+                        closed_at=None,
+                        profit_loss=None,
+                        status='pending',
+                    )
+    except Exception as trade_err:
+        # Don't silently succeed if we can't create the Position for a trade order.
+        # Rollback the transaction so we don't debit funds without an order trace.
+        try:
+            transaction.delete()
+        except Exception:
+            pass
+        return Response({'error': f'Erreur lors de la création de la position: {str(trade_err)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     # Log transaction creation
     # Determine user_id - could be Django user or None (if client token)
@@ -4867,7 +5371,7 @@ def product_toggle_active(request, product_id):
 def product_generate_description(request):
     """Générer une description de produit avec l'IA Gemini"""
     try:
-        import google.generativeai as genai
+        from google import genai
         
         if not settings.GEMINI_API_KEY:
             return Response(
@@ -4875,8 +5379,7 @@ def product_generate_description(request):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
@@ -4907,14 +5410,14 @@ La description doit être:
 
 Description:"""
         
-        response = model.generate_content(prompt)
-        description = response.text.strip()
+        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        description = (response.text or '').strip()
         
         return Response({'description': description, 'text': description})
     
     except ImportError:
         return Response(
-            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'}, 
+            {'error': 'google-genai package not installed. Run: pip install google-genai'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     except Exception as e:
@@ -4929,7 +5432,7 @@ Description:"""
 def asset_generate_description(request):
     """Générer une description d'actif (entreprise/crypto) avec l'IA Gemini"""
     try:
-        import google.generativeai as genai
+        from google import genai
 
         if not settings.GEMINI_API_KEY:
             return Response(
@@ -4937,8 +5440,7 @@ def asset_generate_description(request):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
         name = request.data.get('name', '')
         symbol = request.data.get('symbol', '')
@@ -4972,14 +5474,14 @@ Contraintes:
 
 Description:"""
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         description = (response.text or '').strip()
 
         return Response({'description': description, 'text': description})
 
     except ImportError:
         return Response(
-            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'},
+            {'error': 'google-genai package not installed. Run: pip install google-genai'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     except Exception as e:
@@ -4993,7 +5495,7 @@ Description:"""
 def product_generate_cgv(request):
     """Générer des CGV (Conditions Générales de Vente) avec l'IA Gemini"""
     try:
-        import google.generativeai as genai
+        from google import genai
         
         if not settings.GEMINI_API_KEY:
             return Response(
@@ -5001,8 +5503,7 @@ def product_generate_cgv(request):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
@@ -5034,14 +5535,14 @@ Style: Professionnel et conforme à la réglementation financière française
 
 CGV:"""
         
-        response = model.generate_content(prompt)
-        cgv = response.text.strip()
+        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        cgv = (response.text or '').strip()
         
         return Response({'cgv': cgv, 'text': cgv})
     
     except ImportError:
         return Response(
-            {'error': 'google-generativeai package not installed. Run: pip install google-generativeai'}, 
+            {'error': 'google-genai package not installed. Run: pip install google-genai'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     except Exception as e:

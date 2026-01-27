@@ -9,6 +9,8 @@ import { useIsMobile } from './ui/use-mobile';
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
   const isMobile = useIsMobile();
+  const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
+  const [productsIndex, setProductsIndex] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,9 +69,11 @@ export function PlatformPortfolio() {
   const loadPortfolioData = async () => {
     try {
       setLoading(true);
-      const [positionsResponse, transactionsResponse] = await Promise.all([
+      const [positionsResponse, transactionsResponse, assetsResponse, productsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/positions/`),
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
+        apiCall('/api/assets/').catch(() => ({ assets: [] })),
+        apiCall('/api/products/').catch(() => ({ products: [] })),
       ]);
       setPositions((positionsResponse as any)?.positions || []);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
@@ -84,6 +88,8 @@ export function PlatformPortfolio() {
         return !isFuture && !isUpcomingStatus;
       });
       setTransactions(filteredTransactions);
+      setAssetsIndex((assetsResponse as any)?.assets || []);
+      setProductsIndex((productsResponse as any)?.products || productsResponse || []);
     } catch (error) {
       console.error('Error loading portfolio data:', error);
     } finally {
@@ -95,6 +101,14 @@ export function PlatformPortfolio() {
     const n = typeof value === 'string' ? parseFloat(value) : Number(value);
     if (!Number.isFinite(n)) return '-';
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+  };
+
+  const formatMoney = (value: any, currency: string | undefined, opts?: Intl.NumberFormatOptions) => {
+    const n = typeof value === 'string' ? parseFloat(value) : Number(value);
+    if (!Number.isFinite(n)) return '-';
+    const cur = String(currency || '').trim().toUpperCase();
+    if (!cur || cur === 'EUR') return formatCurrency(n);
+    return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 8, ...opts })} ${cur}`;
   };
 
   const formatDateTime = (iso: string) => {
@@ -130,8 +144,131 @@ export function PlatformPortfolio() {
     return '-';
   };
 
-  const holdingsByProduct = useMemo(() => {
-    // Aggregate by product to give a quick "produits détenus" overview
+  const assetHoldings = useMemo(() => {
+    // All assets the client owns = open positions that are linked to an Asset.
+    // We aggregate by asset id for a clean "Actifs détenus" list.
+    const map = new Map<
+      string,
+      {
+        assetId: string;
+        assetName: string;
+        assetType: string;
+        assetReference: string;
+        assetCurrency: string;
+        logoUrl: string;
+        totalInvested: number;
+        totalInvestedAssetCurrency: number;
+        totalQuantity: number;
+        totalEntryValue: number; // sum(entry_price * qty) in asset currency
+        totalEntryQty: number; // sum(qty) used for avg entry price
+        totalFxWeightedAsset: number; // sum(invested_amount_asset_currency) for avg FX
+        totalFxWeightedEur: number; // sum(invested_amount_asset_currency / fx) for avg FX
+        latestOpenedAtIso: string | null;
+      }
+    >();
+
+    const pickLatestIso = (a: string | null, b: string | null) => {
+      if (!a) return b;
+      if (!b) return a;
+      const ta = new Date(a).getTime();
+      const tb = new Date(b).getTime();
+      if (!Number.isFinite(ta)) return b;
+      if (!Number.isFinite(tb)) return a;
+      return tb > ta ? b : a;
+    };
+
+    for (const p of positions || []) {
+      if (!p) continue;
+      if (String(p.status || '') !== 'open') continue; // open positions only
+
+      const assetId = p.assetId || p.asset_id || p.asset?.id || null;
+      if (!assetId) continue;
+
+      const assetName = p.assetName || p.asset_name || p.asset?.name || String(assetId);
+      const assetType = p.assetType || p.asset_type || p.asset?.type || '';
+      const assetReference = p.assetReference || p.asset_reference || p.asset?.reference || '';
+      const assetCurrency = p.assetCurrency || p.asset_currency || p.asset?.currency || '';
+      const logoUrl = String(p?.asset?.logoUrl || p?.asset?.logo_url || p?.assetLogoUrl || p?.asset_logo_url || '').trim();
+
+      const investedNum = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const invested = Number.isFinite(investedNum) ? investedNum : 0;
+
+      const investedAssetNum =
+        p.invested_amount_asset_currency == null
+          ? null
+          : typeof p.invested_amount_asset_currency === 'string'
+            ? parseFloat(p.invested_amount_asset_currency)
+            : Number(p.invested_amount_asset_currency);
+      const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) ? investedAssetNum : 0;
+
+      const fxNum =
+        p.fx_rate_eur_to_asset == null
+          ? null
+          : typeof p.fx_rate_eur_to_asset === 'string'
+            ? parseFloat(p.fx_rate_eur_to_asset)
+            : Number(p.fx_rate_eur_to_asset);
+      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+      // Correct direction: EUR = asset_ccy / fx_rate_eur_to_asset
+      const investedEurFromFx = investedAsset > 0 && fxRate != null ? investedAsset / fxRate : null;
+
+      const entryPriceNum =
+        p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+      const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+
+      const qtyNum = p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+      let qty = qtyNum != null && Number.isFinite(qtyNum) ? qtyNum : 0;
+      if (!qty) {
+        // Best-effort fallback: qty ≈ invested_amount_asset_currency / entry_price (or invested_amount / entry_price)
+        const investedAssetFallback = investedAssetNum != null && Number.isFinite(investedAssetNum) ? investedAssetNum : null;
+        if (entryPrice != null) {
+          const base = investedAssetFallback != null ? investedAssetFallback : invested;
+          if (Number.isFinite(base) && base > 0) qty = base / entryPrice;
+        }
+      }
+
+      const prev =
+        map.get(String(assetId)) || ({
+          assetId: String(assetId),
+          assetName,
+          assetType,
+          assetReference,
+          assetCurrency,
+          logoUrl,
+          totalInvested: 0,
+          totalInvestedAssetCurrency: 0,
+          totalQuantity: 0,
+          totalEntryValue: 0,
+          totalEntryQty: 0,
+          totalFxWeightedAsset: 0,
+          totalFxWeightedEur: 0,
+          latestOpenedAtIso: null,
+        } as const);
+
+      map.set(String(assetId), {
+        ...prev,
+        assetName,
+        assetType,
+        assetReference,
+        assetCurrency: assetCurrency || prev.assetCurrency,
+        logoUrl: logoUrl || prev.logoUrl,
+        totalInvested: prev.totalInvested + invested,
+        totalInvestedAssetCurrency: prev.totalInvestedAssetCurrency + (investedAsset || 0),
+        totalQuantity: prev.totalQuantity + (Number.isFinite(qty) ? qty : 0),
+        totalEntryValue:
+          prev.totalEntryValue + (entryPrice != null && Number.isFinite(qty) && qty > 0 ? entryPrice * qty : 0),
+        totalEntryQty: prev.totalEntryQty + (entryPrice != null && Number.isFinite(qty) && qty > 0 ? qty : 0),
+        totalFxWeightedAsset: prev.totalFxWeightedAsset + (investedAsset || 0),
+        totalFxWeightedEur: prev.totalFxWeightedEur + (investedEurFromFx != null ? investedEurFromFx : 0),
+        latestOpenedAtIso: pickLatestIso(prev.latestOpenedAtIso, p.opened_at || null),
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.totalInvested - a.totalInvested);
+  }, [positions]);
+
+  const investedProducts = useMemo(() => {
+    // Products the client is invested in = completed "transfert" transactions
+    // that moved funds into a product (balance -> product), net of withdrawals (product -> balance).
     const map = new Map<
       string,
       {
@@ -139,8 +276,7 @@ export function PlatformPortfolio() {
         productName: string;
         productType: string;
         productReference: string;
-        totalInvested: number;
-        realizedPnl: number;
+        netInvested: number;
         latestDateIso: string | null;
       }
     >();
@@ -155,106 +291,283 @@ export function PlatformPortfolio() {
       return tb > ta ? b : a;
     };
 
-    // Invested amount must be based on transactions (not positions)
-    // Strategy: use completed transactions only, and sum amounts that represent
-    // "balance -> product" investments per product.
-    const investedByProduct = new Map<string, number>();
     const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
     for (const t of completedTransactions) {
+      if (!t) continue;
+      if (String(t.type || '') !== 'transfert') continue;
+
+      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+
+      // Exclude trading orders (balance -> trading wallet)
+      if (to != null && String(to) === 'trading') continue;
+
+      const productId =
+        (t?.productId != null ? String(t.productId) : null) ||
+        (to != null ? String(to) : null) ||
+        (t?.subscription_details?.productId != null ? String(t.subscription_details.productId) : null);
+
+      if (!productId || productId === 'balance' || productId === 'trading') continue;
+
+      // Skip technical product if it ever leaks here
+      const productReference = String(t?.productReference || t?.product_reference || '').trim();
+      if (productReference === 'TRADING_WALLET') continue;
+
       const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
       const amt = Number.isFinite(amountNum) ? amountNum : 0;
       if (!amt) continue;
 
-      const type = String(t?.type || '');
+      const toIsBalance = to != null && String(to) === 'balance';
+      const fromIsBalance = from != null && String(from) === 'balance';
 
-      // Transfer direction fields can come from several aliases (serializer exposes from/to and from_field/to_field)
-      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
-      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
-
-      // product id can be on productId, to_field/to, from_field/from, or subscription_details.productId
-      const productId =
-        (t?.productId != null ? String(t.productId) : null) ||
-        (to != null ? String(to) : null) ||
-        (from != null ? String(from) : null) ||
-        (t?.subscription_details?.productId != null ? String(t.subscription_details.productId) : null);
-
-      if (!productId || productId === 'balance') continue;
-
-      // Invested amount per product should reflect net investment based on completed transactions:
-      // - achat / investissement: +amount
-      // - transfert: balance -> product: +amount ; product -> balance: -amount
-      // Note: we intentionally don't adjust for 'vente' here because the current UI expects
-      // "Investi" based on cash movements into/out of the product.
-      if (type === 'achat' || type === 'investissement') {
-        investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
-      } else if (type === 'transfert') {
-        const toIsBalance = to != null && String(to) === 'balance';
-        const fromIsBalance = from != null && String(from) === 'balance';
-
-        if (!toIsBalance && fromIsBalance) {
-          // balance -> product
-          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
-        } else if (toIsBalance && !fromIsBalance) {
-          // product -> balance (disinvestment)
-          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) - amt);
-        } else if (!toIsBalance && !fromIsBalance) {
-          // product -> product: keep direction as "invested into destination"
-          investedByProduct.set(productId, (investedByProduct.get(productId) || 0) + amt);
-        }
-      }
-    }
-
-    for (const p of visiblePositions || []) {
-      const productId = String(p.productId || p.product_id || '—');
-      const productName = p.productName || p.product_name || productId;
-      const productType = p.productType || p.product_type || p.product?.type || '';
-      const productReference = p.productReference || p.product_reference || p.product?.reference || '';
-
-      const profitLossNum =
-        p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
-      const investedNum = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
-      const expectedTotalNum =
-        p.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
-
-      // P&L par position:
-      // - si profit_loss existe: utiliser
-      // - sinon, si position terminée et expected_total existe: expected_total - invested_amount
-      // - sinon: 0
-      let positionPnl = 0;
-      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
-        positionPnl = profitLossNum;
-      } else if (p.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
-        positionPnl = expectedTotalNum - investedNum;
-      }
-
-      const latestIso = pickLatestIso(p.closed_at || null, pickLatestIso(p.opened_at || null, p.period_date || null));
+      // Net invested: + when funds go into the product, - when funds exit to balance.
+      const delta = toIsBalance ? -amt : fromIsBalance ? amt : amt;
 
       const prev =
         map.get(productId) || ({
           productId,
-          productName,
-          productType,
+          productName: t?.productName || t?.product_name || productId,
+          productType: t?.productType || t?.product_type || '',
           productReference,
-          totalInvested: 0,
-          realizedPnl: 0,
+          netInvested: 0,
           latestDateIso: null,
         } as const);
 
-      const next = {
+      map.set(productId, {
         ...prev,
-        productName,
-        productType,
-        productReference,
-        totalInvested: investedByProduct.get(productId) || prev.totalInvested || 0,
-        realizedPnl: prev.realizedPnl + (p.status === 'open' || p.status === 'done' ? positionPnl : 0),
-        latestDateIso: pickLatestIso(prev.latestDateIso, latestIso),
-      };
-
-      map.set(productId, next);
+        productName: t?.productName || prev.productName,
+        productReference: productReference || prev.productReference,
+        netInvested: prev.netInvested + delta,
+        latestDateIso: pickLatestIso(prev.latestDateIso, t?.datetime || null),
+      });
     }
 
-    return Array.from(map.values()).sort((a, b) => b.totalInvested - a.totalInvested);
-  }, [visiblePositions, transactions]);
+    return Array.from(map.values())
+      .filter((p) => p.netInvested > 0.009)
+      .sort((a, b) => b.netInvested - a.netInvested);
+  }, [transactions]);
+
+  const assetsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const a of assetsIndex || []) {
+      const id = a?.id != null ? String(a.id) : '';
+      if (id) map.set(id, a);
+    }
+    return map;
+  }, [assetsIndex]);
+
+  const productsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const p of productsIndex || []) {
+      const id = p?.id != null ? String(p.id) : '';
+      if (id) map.set(id, p);
+    }
+    return map;
+  }, [productsIndex]);
+
+  const investedByAssetFromTransactions = useMemo(() => {
+    // Prefer calculating "valeur investie" from completed trade transactions.
+    // ProductDetail creates "transfert" transactions with subscription_details.tradeType='asset'
+    // and subscription_details.assetId + fxRateEurToAsset.
+    const map = new Map<
+      string,
+      {
+        investedEur: number;
+        investedAsset: number; // invested in asset currency (sum(amount_eur * fxRateEurToAsset))
+      }
+    >();
+
+    const completed = (transactions || []).filter((t: any) => String(t?.status || '').toLowerCase() === 'termine');
+    for (const t of completed) {
+      if (!t) continue;
+      if (String(t?.type || '') !== 'transfert') continue;
+
+      const details = t?.subscription_details || t?.subscriptionDetails || {};
+      if (String(details?.tradeType || '') !== 'asset') continue;
+
+      const assetId =
+        (t?.assetId != null ? String(t.assetId) : null) ||
+        (details?.assetId != null ? String(details.assetId) : null);
+      if (!assetId) continue;
+
+      const fxNum =
+        t?.fx_rate_eur_to_asset == null
+          ? (details?.fxRateEurToAsset == null
+              ? null
+              : typeof details.fxRateEurToAsset === 'string'
+                ? parseFloat(details.fxRateEurToAsset)
+                : Number(details.fxRateEurToAsset))
+          : typeof t.fx_rate_eur_to_asset === 'string'
+            ? parseFloat(t.fx_rate_eur_to_asset)
+            : Number(t.fx_rate_eur_to_asset);
+      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+
+      const amountAssetNum =
+        t?.amount_in_asset_currency == null
+          ? null
+          : typeof t.amount_in_asset_currency === 'string'
+            ? parseFloat(t.amount_in_asset_currency)
+            : Number(t.amount_in_asset_currency);
+      const amountAsset = amountAssetNum != null && Number.isFinite(amountAssetNum) ? amountAssetNum : null;
+
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amountField = Number.isFinite(amountNum) ? amountNum : 0;
+
+      // Correct direction:
+      // - If we have amount_in_asset_currency + fx, then EUR = asset_ccy / fx.
+      // - Else assume `amount` is already in EUR (frontend sends EUR), and derive asset_ccy = EUR * fx.
+      const amountEur =
+        amountAsset != null && fxRate != null ? amountAsset / fxRate : amountField;
+      const derivedAsset = fxRate != null ? amountEur * fxRate : 0;
+      const amountAssetFinal = amountAsset != null ? amountAsset : derivedAsset;
+
+      if (!amountEur) continue;
+
+      const prev = map.get(assetId) || { investedEur: 0, investedAsset: 0 };
+      map.set(assetId, {
+        investedEur: prev.investedEur + amountEur,
+        investedAsset: prev.investedAsset + (amountAssetFinal || 0),
+      });
+    }
+
+    return map;
+  }, [transactions]);
+
+  const mergedHoldingsTableRows = useMemo(() => {
+    type Row =
+      | {
+          kind: 'asset';
+          key: string;
+          name: string;
+          logoUrl: string;
+          type: string;
+          reference: string;
+          lastIso: string | null;
+          quantity: number;
+          currency: string;
+          avgPaid: number | null;
+          currentPrice: number | null;
+          investedEur: number | null; // valeur investie en EUR
+          investedAsset: number | null; // valeur investie en devise de l'actif (si dispo)
+          pnl: number | null; // P&L (asset currency if possible, else EUR)
+          pnlPct: number | null;
+        }
+      | {
+          kind: 'product';
+          key: string;
+          name: string;
+          logoUrl: string;
+          type: string;
+          reference: string;
+          lastIso: string | null;
+          quantity: null;
+          currency: string;
+          avgPaid: null;
+          currentPrice: null;
+          investedEur: null;
+          investedAsset: null;
+          pnl: null;
+          pnlPct: null;
+        };
+
+    const rows: Row[] = [];
+
+    for (const h of assetHoldings || []) {
+      const asset = assetsById.get(String(h.assetId)) || null;
+      const logoUrl = String(asset?.logoUrl || asset?.logo_url || h.logoUrl || '').trim();
+      const currency = String(asset?.currency || h.assetCurrency || '').trim().toUpperCase();
+      const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+      const currentPriceNum =
+        currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+      const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+
+      const qty = Number.isFinite(h.totalQuantity) ? h.totalQuantity : 0;
+
+      const investedFromTx = investedByAssetFromTransactions.get(String(h.assetId)) || null;
+      const investedAssetFromPos =
+        Number.isFinite(h.totalInvestedAssetCurrency) && h.totalInvestedAssetCurrency > 0 ? h.totalInvestedAssetCurrency : null;
+      const investedEurFromPosFx =
+        h.totalFxWeightedEur > 0 ? h.totalFxWeightedEur : (Number.isFinite(h.totalInvested) ? h.totalInvested : 0);
+
+      const investedEur = investedFromTx?.investedEur ?? investedEurFromPosFx;
+      const investedAsset =
+        investedFromTx && investedFromTx.investedAsset > 0 ? investedFromTx.investedAsset : investedAssetFromPos;
+
+      const avgPaid =
+        h.totalEntryQty > 0 && h.totalEntryValue > 0
+          ? h.totalEntryValue / h.totalEntryQty
+          : investedAsset != null && investedAsset > 0 && qty > 0
+            ? investedAsset / qty
+            : null;
+
+      // P&L: when we have investedAsset and currentPrice we compute in asset currency.
+      // Otherwise, fallback to EUR only (but without FX conversion we can't compute market value reliably).
+      const marketValueAsset = currentPrice != null && qty > 0 ? qty * currentPrice : null;
+      const pnlAsset = marketValueAsset != null && investedAsset != null && investedAsset > 0 ? marketValueAsset - investedAsset : null;
+      const pnlPct = pnlAsset != null && investedAsset != null && investedAsset > 0 ? (pnlAsset / investedAsset) * 100 : null;
+
+      // If we can infer average FX from transactions, also provide EUR P&L implicitly via displayed investedEur and inferred FX.
+      // (We keep pnl in asset currency for correctness when asset currency != EUR.)
+      const pnl = pnlAsset;
+
+      rows.push({
+        kind: 'asset',
+        key: `asset-${h.assetId}`,
+        name: h.assetName,
+        logoUrl,
+        type: String(h.assetType || asset?.type || asset?.category || asset?.subcategory || '').trim(),
+        reference: h.assetReference || String(asset?.reference || asset?.symbol || ''),
+        lastIso: h.latestOpenedAtIso,
+        quantity: qty,
+        currency,
+        avgPaid,
+        currentPrice,
+        investedEur: Number.isFinite(investedEur) ? investedEur : null,
+        investedAsset: investedAsset != null && Number.isFinite(investedAsset) ? investedAsset : null,
+        pnl,
+        pnlPct,
+      });
+    }
+
+    for (const p of investedProducts || []) {
+      const product = productsById.get(String(p.productId)) || null;
+      const imageUrl = String(product?.imageUrl || product?.image_url || '').trim();
+      const productTypeFromProduct = String(
+        product?.type || product?.subcategory || product?.categoryName || product?.category || ''
+      ).trim();
+      const productReferenceFromProduct = String(product?.reference || '').trim();
+      rows.push({
+        kind: 'product',
+        key: `product-${p.productId}`,
+        name: p.productName,
+        logoUrl: imageUrl,
+        type: productTypeFromProduct || p.productType || '',
+        reference: productReferenceFromProduct || p.productReference,
+        lastIso: p.latestDateIso,
+        quantity: null,
+        currency: 'EUR',
+        avgPaid: null,
+        currentPrice: null,
+        investedEur: null,
+        investedAsset: null,
+        pnl: null,
+        pnlPct: null,
+      });
+    }
+
+    const timeOf = (iso: string | null) => {
+      if (!iso) return -1;
+      const t = new Date(iso).getTime();
+      return Number.isFinite(t) ? t : -1;
+    };
+
+    return rows.sort((a, b) => {
+      const ta = timeOf(a.lastIso);
+      const tb = timeOf(b.lastIso);
+      if (ta !== tb) return tb - ta;
+      return a.kind === b.kind ? 0 : a.kind === 'asset' ? -1 : 1;
+    });
+  }, [assetHoldings, investedProducts, assetsById, productsById, investedByAssetFromTransactions]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -454,61 +767,111 @@ export function PlatformPortfolio() {
           <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
               <CardTitle>Actifs détenus</CardTitle>
-              <CardDescription>Produits détenus</CardDescription>
+              <CardDescription>Vos actifs (ordres ouverts) et vos produits en cours d’investissement</CardDescription>
             </CardHeader>
             <CardContent>
-              {visiblePositions.length === 0 ? (
-                <p>Aucune position</p>
-              ) : (
-                <>
-                  {holdingsByProduct.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {holdingsByProduct.map((h) => {
-                          const pnlColor = h.realizedPnl >= 0 ? '#10b981' : '#ef4444';
-                          return (
-                            <div
-                              key={h.productId}
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                gap: 12,
-                                padding: '12px 14px',
-                                border: '1px solid #e5e7eb',
-                                borderRadius: 10,
-                                backgroundColor: 'white',
-                                flexWrap: 'wrap',
-                              }}
-                            >
-                              <div style={{ minWidth: 260 }}>
-                                <div style={{ fontWeight: 700 }}>{h.productName}</div>
-                                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                                  {h.productType ? `Type: ${h.productType}` : 'Type: -'}
-                                  {h.productReference ? ` • Réf: ${h.productReference}` : ''}
-                                </div>
-                                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                                  Date: {h.latestDateIso ? formatDateTime(h.latestDateIso) : '-'}
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
-                                <div style={{ textAlign: 'right' }}>
-                                  <div style={{ fontSize: 12, color: '#6b7280' }}>Investi</div>
-                                  <div style={{ fontWeight: 700 }}>{formatCurrency(h.totalInvested)}</div>
-                                </div>
-                                <div style={{ textAlign: 'right' }}>
-                                  <div style={{ fontSize: 12, color: '#6b7280' }}>P&amp;L</div>
-                                  <div style={{ fontWeight: 700, color: pnlColor }}>{formatCurrency(h.realizedPnl)}</div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+              <div style={{ display: 'grid', gap: 18 }}>
+                <div>
+                  <div style={{ fontWeight: 800, marginBottom: 8 }}>Mes actifs</div>
+                  {mergedHoldingsTableRows.length === 0 ? (
+                    <p>Aucun actif détenu</p>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actifs</th>
+                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
+                            <th style={{ textAlign: 'left', padding: '10px 8px', whiteSpace: 'nowrap' }}>Dernière ouverture</th>
+                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Quantité</th>
+                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix moyen d&apos;achat</th>
+                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Valeur investie</th>
+                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix</th>
+                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mergedHoldingsTableRows.map((r) => {
+                            const qtyLabel =
+                              r.kind === 'asset'
+                                ? r.quantity.toLocaleString('fr-FR', { maximumFractionDigits: 8 })
+                                : '—';
+                            const avgLabel =
+                              r.kind === 'asset' && r.avgPaid != null
+                                ? formatMoney(r.avgPaid, r.currency, { maximumFractionDigits: 8 })
+                                : '—';
+                            const priceLabel =
+                              r.kind === 'asset' && r.currentPrice != null
+                                ? formatMoney(r.currentPrice, r.currency, { maximumFractionDigits: 8 })
+                                : '—';
+                            const investedLabelMain =
+                              r.kind === 'asset' && r.investedEur != null ? formatCurrency(r.investedEur) : '—';
+                            const investedLabelSub =
+                              r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null
+                                ? `≈ ${formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 })}`
+                                : null;
+                            const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
+                            const pnlLabel =
+                              r.kind === 'asset' && r.pnl != null
+                                ? `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`
+                                : '—';
+
+                            return (
+                              <tr key={r.key} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                <td style={{ padding: '10px 8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
+                                    {r.logoUrl ? (
+                                      <img
+                                        src={r.logoUrl}
+                                        alt=""
+                                        style={{
+                                          width: 28,
+                                          height: 28,
+                                          borderRadius: 8,
+                                          objectFit: r.kind === 'product' ? 'cover' : 'contain',
+                                          background: r.kind === 'product' ? 'transparent' : 'rgba(255,255,255,0.9)',
+                                        }}
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                        }}
+                                      />
+                                    ) : (
+                                      <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f3f4f6' }} />
+                                    )}
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {r.name}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '10px 8px' }}>{r.type || '—'}</td>
+                                <td style={{ padding: '10px 8px' }}>{r.reference || '—'}</td>
+                                <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
+                                  {r.lastIso ? formatDateTime(r.lastIso) : '—'}
+                                </td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{qtyLabel}</td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{avgLabel}</td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                                  <div style={{ fontWeight: 800 }}>{investedLabelMain}</div>
+                                  {investedLabelSub && (
+                                    <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{investedLabelSub}</div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{priceLabel}</td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
+                                  {pnlLabel}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
-                </>
-              )}
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -535,6 +898,10 @@ export function PlatformPortfolio() {
                     </thead>
                     <tbody>
                       {transactionsPagination.items.map((t: any) => {
+                        const isTradingTransfer =
+                          t.type === 'transfert' &&
+                          (t.to === 'trading' || t.to_field === 'trading' || t.transfer_to === 'trading');
+
                         const typeLabel =
                           t.type === 'depot'
                             ? 'Dépôt'
@@ -545,7 +912,7 @@ export function PlatformPortfolio() {
                                 : t.type === 'vente'
                                   ? 'Vente'
                                   : t.type === 'transfert'
-                                    ? 'Investissement'
+                                    ? (isTradingTransfer ? (t.assetType || 'Trading') : 'Investissement')
                                     : t.type === 'investissement'
                                       ? 'Investissement'
                                   : t.type === 'bonus'
@@ -555,7 +922,10 @@ export function PlatformPortfolio() {
                                       : t.type;
                         const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
                         const amountColor = Number.isFinite(amountNum) ? (amountNum >= 0 ? '#10b981' : '#ef4444') : '#111827';
-                        const productLabel = t.productName || '-';
+                        const productLabel =
+                          t.assetName ||
+                          t.productName ||
+                          (isTradingTransfer ? (t.assetType || 'Trading') : '-');
                         return (
                           <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatDateTime(t.datetime)}</td>
@@ -617,7 +987,10 @@ export function PlatformPortfolio() {
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix d'achat</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Quantité</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date d'ouverture</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date de fermeture</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
@@ -640,8 +1013,24 @@ export function PlatformPortfolio() {
                               : p.status === 'cancelled'
                                 ? 'Annulée'
                                 : p.status || '-';
-                        const productLabel = p.productName || p.productId || '-';
+                        const hasAsset = Boolean(p.assetName || p.assetReference || p.assetId || p.asset_id || p.asset?.id);
+                        const productLabel = p.productName || p.productId || (hasAsset ? 'Trading' : '-');
+                        const assetLabel = p.assetName || p.assetReference || p.assetId || '-';
                         const productType = p.productType || p.product_type || '';
+                        const typeLabel = productType || (hasAsset ? 'Trading' : '-');
+                        const entryPriceNum =
+                          p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+                        const qtyNum =
+                          p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+                        const assetCurrency = p.assetCurrency || p.asset_currency || '';
+                        const entryPriceLabel =
+                          entryPriceNum != null && Number.isFinite(entryPriceNum)
+                            ? `${entryPriceNum.toLocaleString('fr-FR', { maximumFractionDigits: 8 })}${assetCurrency ? ` ${assetCurrency}` : ''}`
+                            : '-';
+                        const qtyLabel =
+                          qtyNum != null && Number.isFinite(qtyNum)
+                            ? qtyNum.toLocaleString('fr-FR', { maximumFractionDigits: 8 })
+                            : '-';
                         const openedLabel = p.opened_at
                           ? formatDateTime(p.opened_at)
                           : p.period_date
@@ -651,7 +1040,10 @@ export function PlatformPortfolio() {
                         return (
                           <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '10px 8px' }}>{productLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{productType || '-'}</td>
+                            <td style={{ padding: '10px 8px' }}>{assetLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{typeLabel}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>{entryPriceLabel}</td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>{qtyLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{openedLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{closedLabel}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>

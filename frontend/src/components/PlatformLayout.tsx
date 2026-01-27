@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
+import { apiCall } from '../utils/api';
 import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -35,6 +36,11 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showBottomNav, setShowBottomNav] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [productsIndex, setProductsIndex] = useState<any[]>([]);
+  const [productsIndexLoading, setProductsIndexLoading] = useState(false);
+  const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
+  const [assetsIndexLoading, setAssetsIndexLoading] = useState(false);
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);
@@ -50,6 +56,52 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       setSidebarOpen(false);
     }
   }, [showBottomNav]);
+
+  // Load product index once so the header search can show results.
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSearchIndex = async () => {
+      try {
+        setProductsIndexLoading(true);
+        setAssetsIndexLoading(true);
+
+        const [productsRes, assetsRes] = await Promise.all([
+          apiCall('/api/products/').catch(() => null),
+          apiCall('/api/assets/').catch(() => null),
+        ]);
+
+        const productsList = ((productsRes as any)?.products || productsRes || []) as any[];
+        const activeProducts = Array.isArray(productsList)
+          ? productsList.filter((p: any) => p?.status === 'Actif' && p?.active !== false)
+          : [];
+
+        const assetsList = ((assetsRes as any)?.assets || assetsRes || []) as any[];
+        const normalizedAssets = Array.isArray(assetsList) ? assetsList : [];
+
+        if (!cancelled) {
+          setProductsIndex(activeProducts);
+          setAssetsIndex(normalizedAssets);
+        }
+      } catch (e) {
+        console.warn('Unable to load search index for header search:', e);
+        if (!cancelled) {
+          setProductsIndex([]);
+          setAssetsIndex([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setProductsIndexLoading(false);
+          setAssetsIndexLoading(false);
+        }
+      }
+    };
+
+    loadSearchIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleLogout = async () => {
     await clientSignOut();
@@ -77,6 +129,27 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     }
   };
 
+  const normalizedSearch = (searchTerm || '').trim().toLowerCase();
+  const assetMatches = useMemo(() => {
+    if (!normalizedSearch) return [];
+    const matches = (assetsIndex || []).filter((a: any) => {
+      const name = String(a?.name || '').toLowerCase();
+      const reference = String(a?.reference || a?.symbol || '').toLowerCase();
+      return name.includes(normalizedSearch) || reference.includes(normalizedSearch);
+    });
+    return matches.slice(0, 8);
+  }, [assetsIndex, normalizedSearch]);
+
+  const productMatches = useMemo(() => {
+    if (!normalizedSearch) return [];
+    const matches = (productsIndex || []).filter((p: any) => {
+      const name = String(p?.name || '').toLowerCase();
+      const reference = String(p?.reference || '').toLowerCase();
+      return name.includes(normalizedSearch) || reference.includes(normalizedSearch);
+    });
+    return matches.slice(0, 8);
+  }, [productsIndex, normalizedSearch]);
+
   return (
     <div
       className="platform-root"
@@ -88,8 +161,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     >
       {/* Header */}
       <header style={{
-        backgroundColor: 'white',
-        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: 'var(--primary)',
+        color: 'var(--primary-foreground)',
+        borderBottom: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
         padding: isMobile ? '12px 16px' : '15px 20px',
         display: 'flex',
         justifyContent: 'space-between',
@@ -132,20 +206,156 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
             <Search size={isMobile ? 18 : 20} color="#9ca3af" />
           </div>
           <Input
+            className="platform-header-search"
             placeholder="Rechercher..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => {
+              // Allow click on dropdown items before closing.
+              window.setTimeout(() => setSearchOpen(false), 120);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setSearchOpen(false);
+                (e.currentTarget as HTMLInputElement).blur();
+              }
+            }}
             style={{
               paddingLeft: isMobile ? '40px' : '55px',
               paddingRight: isMobile ? '12px' : '20px',
-              height: isMobile ? '40px' : '48px',
-              fontSize: isMobile ? '14px' : '16px',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              backgroundColor: 'white',
+              height: isMobile ? '34px' : '40px',
+              fontSize: isMobile ? '13px' : '14px',
+              borderRadius: 9999,
+              border: '1px solid rgba(255, 255, 255, 0.28)',
+              backgroundColor: 'rgba(255, 255, 255, 0.18)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              color: 'var(--primary-foreground)',
+              caretColor: 'var(--primary-foreground)',
               width: '100%',
             }}
           />
+
+          {searchOpen && (normalizedSearch.length > 0) && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                left: 0,
+                right: 0,
+                background: 'rgba(255, 255, 255, 0.92)',
+                border: '1px solid rgba(0, 0, 0, 0.10)',
+                borderRadius: 16,
+                boxShadow: '0 18px 50px rgba(2, 6, 23, 0.18)',
+                overflow: 'hidden',
+                zIndex: 999,
+              }}
+              role="listbox"
+              aria-label="Résultats de recherche"
+            >
+              <div style={{ padding: '10px 12px', fontSize: 12, color: '#6b7280', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                {(productsIndexLoading || assetsIndexLoading) ? 'Recherche…' : `Actifs (${assetMatches.length}) • Produits (${productMatches.length})`}
+              </div>
+
+              {!productsIndexLoading && !assetsIndexLoading && assetMatches.length === 0 && productMatches.length === 0 ? (
+                <div style={{ padding: '12px', fontSize: 13, color: '#6b7280' }}>
+                  Aucun résultat
+                </div>
+              ) : (
+                <>
+                  {assetMatches.length > 0 && (
+                    <>
+                      <div style={{ padding: '8px 12px', fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: '#6b7280', background: 'rgba(0,0,0,0.03)' }}>
+                        Actifs
+                      </div>
+                      {assetMatches.map((a: any) => (
+                        <button
+                          key={`asset-${a.id}`}
+                          type="button"
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setSearchOpen(false);
+                            setSearchTerm('');
+                            navigate(`/platform/product/${a.id}`);
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {a?.name || 'Actif'}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {a?.reference || a?.symbol || '—'}
+                            </div>
+                          </div>
+                          <div style={{ flexShrink: 0, color: '#9ca3af', fontSize: 12 }}>↵</div>
+                        </button>
+                      ))}
+                    </>
+                  )}
+
+                  {productMatches.length > 0 && (
+                    <>
+                      <div style={{ padding: '8px 12px', fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: '#6b7280', background: 'rgba(0,0,0,0.03)' }}>
+                        Produits
+                      </div>
+                      {productMatches.map((p: any) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                    onMouseDown={(e) => {
+                      // Prevent blur before click handler runs
+                      e.preventDefault();
+                    }}
+                    onClick={() => {
+                      setSearchOpen(false);
+                      setSearchTerm('');
+                      navigate(`/platform/product/${p.id}`);
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {p?.name || 'Produit'}
+                      </div>
+                      {!!p?.reference && (
+                        <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {p.reference}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ flexShrink: 0, color: '#9ca3af', fontSize: 12 }}>↵</div>
+                  </button>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div style={{ 
           display: 'flex', 
@@ -200,7 +410,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 style={
                   showBottomNav
                     ? {
-                        backgroundColor: 'white',
+                        backgroundColor: 'var(--primary)',
+                        color: 'var(--primary-foreground)',
                         borderRight: 'none',
                         height: '100%',
                         display: 'flex',
@@ -213,8 +424,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                         left: 0,
                         width: 360,
                         height: 'calc(100vh - 60px)',
-                        backgroundColor: 'white',
-                        borderRight: '1px solid #e5e7eb',
+                        backgroundColor: 'var(--primary)',
+                        color: 'var(--primary-foreground)',
+                        borderRight: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
                         display: 'flex',
                         flexDirection: 'column',
                         overflow: 'hidden',
@@ -266,8 +478,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 display: 'flex', 
                 alignItems: 'center', 
                 gap: '12px',
-                borderTop: '1px solid #e5e7eb',
-                borderBottom: '1px solid #e5e7eb',
+                borderTop: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
+                borderBottom: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
               }}>
                 {currentUser?.profilePhoto ? (
                   <img 
@@ -299,7 +511,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   <div style={{ 
                     fontSize: isMobile ? '14px' : '16px', 
                     fontWeight: '600', 
-                    color: '#111827',
+                    color: 'var(--primary-foreground)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis'
@@ -309,7 +521,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   {currentUser?.email && (
                     <div style={{ 
                       fontSize: isMobile ? '12px' : '14px', 
-                      color: '#6b7280',
+                      color: 'color-mix(in srgb, var(--primary-foreground) 75%, transparent)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis'
@@ -328,18 +540,24 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     <button
                       key={item.id}
                       onClick={() => handleMenuClick(item.path)}
+                      className="platform-hoverable platform-sidebar-link"
+                      data-active={isActive ? 'true' : 'false'}
                       style={{
                         width: '100%',
                         padding: isMobile ? '12px 20px' : '16px 30px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: isMobile ? '12px' : '16px',
-                        backgroundColor: isActive ? '#f3f4f6' : 'transparent',
+                        backgroundColor: isActive
+                          ? 'color-mix(in srgb, var(--primary-foreground) 12%, transparent)'
+                          : 'transparent',
                         border: 'none',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: isMobile ? '16px' : '18px',
-                        color: isActive ? '#111827' : '#6b7280',
+                        color: isActive
+                          ? 'var(--primary-foreground)'
+                          : 'color-mix(in srgb, var(--primary-foreground) 75%, transparent)',
                         fontWeight: isActive ? '600' : '400',
                       }}
                     >
@@ -355,22 +573,24 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               <div
                 style={{
                   flexShrink: 0,
-                  backgroundColor: 'white',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-foreground)',
                   paddingTop: 12,
                   paddingBottom: 12,
-                  borderTop: '1px solid #e5e7eb',
+                  borderTop: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
                 }}
               >
                 <div
                   style={{
                     display: 'flex',
                     gap: 10,
-                    marginLeft: isMobile ? 20 : 30,
-                    marginRight: isMobile ? 20 : 30,
+                    marginLeft: isMobile ? 20 : 20,
+                    marginRight: isMobile ? 20 : 20,
                   }}
                 >
                   <button
                     onClick={() => handleFundsAction('depot')}
+                    className="platform-hoverable platform-action-btn"
                     style={{
                       flex: 1,
                       height: 44,
@@ -395,20 +615,21 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   </button>
                   <button
                     onClick={() => handleFundsAction('retrait')}
+                    className="platform-hoverable platform-action-icon"
                     style={{
-                      width: 48,
+                      width: 55,
                       height: 44,
                       padding: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 10,
-                      backgroundColor: platformPrimaryBg,
-                      border: 'none',
+                      backgroundColor: 'white',
+                      border: `1px solid color-mix(in srgb, ${platformPrimaryBg} 35%, transparent)`,
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontSize: isMobile ? '15px' : '16px',
-                      color: 'white',
+                      color: platformPrimaryBg,
                       fontWeight: 500,
                       borderRadius: 9999,
                       whiteSpace: 'nowrap',
@@ -423,17 +644,18 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       if (showBottomNav) setSidebarOpen(false);
                       await handleLogout();
                     }}
+                    className="platform-hoverable platform-action-icon platform-action-logout"
                     style={{
-                      width: 48,
+                      width: 55,
                       height: 44,
                       padding: 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      backgroundColor: 'transparent',
-                      border: '1px solid #fecaca',
+                      backgroundColor: '#ef4444',
+                      border: '1px solid #ef4444',
                       cursor: 'pointer',
-                      color: '#ef4444',
+                      color: 'white',
                       borderRadius: 9999,
                     }}
                     aria-label="Déconnexion"
@@ -491,6 +713,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               <button
                 key={item.id}
                 onClick={() => handleMenuClick(item.path)}
+                className="platform-hoverable platform-bottomnav-btn"
+                data-active={isActive ? 'true' : 'false'}
                 style={{
                   flex: 1,
                   border: 'none',

@@ -50,6 +50,8 @@ urlpatterns = [
     path('assets/', api_views.asset_list, name='asset-list'),
     path('assets/create/', api_views.asset_create, name='asset-create'),
     path('assets/create-from-alpha-vantage/', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage'),
+    # Accept missing trailing slash (CommonMiddleware + POST can otherwise 404)
+    path('assets/create-from-alpha-vantage', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage-no-slash'),
     # AI (assets) - must be BEFORE the generic assets/<asset_id>/ route
     path('assets/generate-description/', api_views.asset_generate_description, name='asset-generate-description'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
