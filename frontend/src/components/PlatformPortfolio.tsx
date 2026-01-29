@@ -1052,17 +1052,50 @@ export function PlatformPortfolio() {
                               r.kind === 'asset' && r.currentPrice != null
                                 ? formatMoney(r.currentPrice, r.currency, { maximumFractionDigits: 8 })
                                 : '—';
-                            const investedLabelMain =
-                              r.kind === 'asset' && r.investedEur != null ? formatCurrency(r.investedEur) : '—';
-                            const investedLabelSub =
-                              r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null
-                                ? `≈ ${formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 })}`
-                                : null;
+                            // Pour les positions non-EUR : afficher devise de l'actif en principal, EUR en secondaire
+                            // Pour les positions EUR : afficher EUR uniquement
+                            let investedLabelMain: string;
+                            let investedLabelSub: string | null = null;
+                            
+                            if (r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null && Number.isFinite(r.investedAsset)) {
+                              // Position non-EUR : devise de l'actif en principal
+                              investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
+                              // EUR en secondaire (estimation)
+                              if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                                // Calculer le taux de change implicite pour l'estimation EUR
+                                const fxRate = r.investedAsset / r.investedEur;
+                                if (fxRate > 0) {
+                                  investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
+                                }
+                              }
+                            } else {
+                              // Position EUR : EUR uniquement
+                              investedLabelMain = r.kind === 'asset' && r.investedEur != null ? formatCurrency(r.investedEur) : '—';
+                            }
+                            
+                            // P&L : pour les positions non-EUR, afficher devise de l'actif en principal, EUR en secondaire
                             const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
-                            const pnlLabel =
-                              r.kind === 'asset' && r.pnl != null
-                                ? `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`
-                                : '—';
+                            let pnlLabelMain: string;
+                            let pnlLabelSub: string | null = null;
+                            
+                            if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
+                              if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null && 
+                                  Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                                // Position non-EUR : devise de l'actif en principal
+                                pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                                // EUR en secondaire (estimation avec taux de change implicite)
+                                const fxRate = r.investedAsset / r.investedEur;
+                                if (fxRate > 0) {
+                                  const pnlEur = r.pnl / fxRate;
+                                  pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
+                                }
+                              } else {
+                                // Position EUR : EUR uniquement
+                                pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                              }
+                            } else {
+                              pnlLabelMain = '—';
+                            }
 
                             return (
                               <tr key={r.key} style={{ borderBottom: '1px solid #f3f4f6' }}>
@@ -1128,7 +1161,10 @@ export function PlatformPortfolio() {
                                 </td>
                                 <td style={{ padding: '10px 8px', textAlign: 'right' }}>{priceLabel}</td>
                                 <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
-                                  {pnlLabel}
+                                  <div>{pnlLabelMain}</div>
+                                  {pnlLabelSub && (
+                                    <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{pnlLabelSub}</div>
+                                  )}
                                 </td>
                               </tr>
                             );
