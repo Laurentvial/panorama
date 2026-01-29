@@ -340,7 +340,13 @@ export function Placements({ user }: PlacementsProps) {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleToggleProductActive(product.id)}
-                                className={product.status === 'Actif' ? 'text-green-600' : 'text-red-600'}
+                                className={
+                                  product.status === 'Actif' 
+                                    ? 'text-green-600' 
+                                    : product.status === 'Inactif' 
+                                    ? 'text-red-600' 
+                                    : 'text-slate-500'
+                                }
                               >
                                 {product.status === 'Actif' ? 'Actif' : product.status === 'Inactif' ? 'Inactif' : 'Brouillon'}
                               </Button>

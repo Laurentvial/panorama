@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
 import { DateInput } from './ui/date-input';
 import '../styles/PageHeader.css';
+import '../styles/Modal.css';
 
 export function EditProduct() {
   const navigate = useNavigate();
@@ -26,9 +27,10 @@ export function EditProduct() {
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [assets, setAssets] = useState<any[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
-  const [assetAllocations, setAssetAllocations] = useState<Array<{ assetId: string; proportion: string }>>([
-    { assetId: '', proportion: '' }
-  ]);
+  const [assetAllocations, setAssetAllocations] = useState<Array<{ assetId: string; proportion: string; asset?: any }>>([]);
+  const [showAssetModal, setShowAssetModal] = useState(false);
+  const [assetSearchQuery, setAssetSearchQuery] = useState('');
+  const [selectedAssetsInModal, setSelectedAssetsInModal] = useState<string[]>([]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -51,18 +53,12 @@ export function EditProduct() {
     interestPeriod: [] as string[],
     capitalisationFonds: 'Non',
     // Gestion du produit
-    showOnLaunch: 'Non',
     availabilityStart: '',
     availabilityEnd: '',
-    isSavings: false,
-    linkToAssets: 'Non',
+    linkToAssets: false,
     // Gestion des prix
-    enablePriceVariation: 'Non',
     minEntryValue: '',
-    maxEntryValue: '',
-    minPriceVariation: '',
-    maxPriceVariation: '',
-    currentPriceVariation: ''
+    maxEntryValue: ''
   });
 
   useEffect(() => {
@@ -73,18 +69,9 @@ export function EditProduct() {
   }, [id]);
 
   useEffect(() => {
-    loadAssets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (formData.linkToAssets === 'Oui') {
-      if (assetAllocations.length === 0) {
-        setAssetAllocations([{ assetId: '', proportion: '' }]);
-      }
-    } else {
+    if (!formData.linkToAssets || formData.linkToAssets === 'Non') {
       // Reset allocations when disabled
-      setAssetAllocations([{ assetId: '', proportion: '' }]);
+      setAssetAllocations([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.linkToAssets]);
@@ -99,10 +86,13 @@ export function EditProduct() {
     }
   }
 
-  async function loadAssets() {
+  const loadAssets = useCallback(async (searchQuery?: string) => {
     try {
       setLoadingAssets(true);
-      const data = await apiCall('/api/assets/');
+      const url = searchQuery && searchQuery.trim() 
+        ? `/api/assets/?search=${encodeURIComponent(searchQuery.trim())}`
+        : '/api/assets/';
+      const data = await apiCall(url);
       setAssets((data as any)?.assets || []);
     } catch (error) {
       console.error('Error loading assets:', error);
@@ -111,7 +101,26 @@ export function EditProduct() {
     } finally {
       setLoadingAssets(false);
     }
-  }
+  }, []);
+
+  // Debounce search query
+  useEffect(() => {
+    if (!showAssetModal) {
+      setAssets([]);
+      setAssetSearchQuery('');
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (assetSearchQuery.trim().length >= 2) {
+        loadAssets(assetSearchQuery);
+      } else if (assetSearchQuery.trim().length === 0) {
+        setAssets([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [assetSearchQuery, showAssetModal, loadAssets]);
 
   async function loadProduct(productId: string) {
     try {
@@ -241,32 +250,27 @@ export function EditProduct() {
         profitabilityPeriod: product.profitabilityPeriod || '',
         interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
         capitalisationFonds: product.capitalisationFonds || 'Non',
-        showOnLaunch: product.showOnLaunch || 'Non',
         availabilityStart: formatDate(product.availabilityStart),
         availabilityEnd: formatDate(product.availabilityEnd),
-        isSavings: product.isSavings || false,
-        linkToAssets: product.linkToAssets || 'Non',
-        enablePriceVariation: product.enablePriceVariation || 'Non',
+        linkToAssets: product.linkToAssets === 'Oui' || product.linkToAssets === true,
         minEntryValue: product.minEntryValue?.toString() || '',
-        maxEntryValue: product.maxEntryValue?.toString() || '',
-        minPriceVariation: product.minPriceVariation?.toString() || '',
-        maxPriceVariation: product.maxPriceVariation?.toString() || '',
-        currentPriceVariation: product.currentPriceVariation?.toString() || ''
+        maxEntryValue: product.maxEntryValue?.toString() || ''
       });
 
       // Asset allocations (if product is linked to assets)
       const allocationsFromProduct = Array.isArray((product as any).assetAllocations) ? (product as any).assetAllocations : [];
-      if ((product.linkToAssets || 'Non') === 'Oui') {
+      if (product.linkToAssets === 'Oui' || product.linkToAssets === true) {
         setAssetAllocations(
           allocationsFromProduct.length > 0
             ? allocationsFromProduct.map((a: any) => ({
                 assetId: a.assetId || '',
-                proportion: (a.proportion ?? '').toString()
+                proportion: (a.proportion ?? '').toString(),
+                asset: a.asset || null
               }))
-            : [{ assetId: '', proportion: '' }]
+            : []
         );
       } else {
-        setAssetAllocations([{ assetId: '', proportion: '' }]);
+        setAssetAllocations([]);
       }
       
       // Set image preview if product has an image
@@ -414,7 +418,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
     setLoading(true);
 
     // Validation: allocations si produit lié à des actifs
-    if (formData.linkToAssets === 'Oui') {
+    if (formData.linkToAssets) {
       const cleaned = assetAllocations
         .map((row) => ({
           assetId: (row.assetId || '').trim(),
@@ -544,29 +548,25 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         // Always send interestPeriod, even if empty - join array with comma and space
         formDataToSend.append('interestPeriod', Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : '');
         formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
-        formDataToSend.append('showOnLaunch', formData.showOnLaunch);
         // Always send availability dates, even if empty
         formDataToSend.append('availabilityStart', formData.availabilityStart || '');
         formDataToSend.append('availabilityEnd', formData.availabilityEnd || '');
-        formDataToSend.append('isSavings', formData.isSavings.toString());
-        formDataToSend.append('linkToAssets', formData.linkToAssets);
-        if (formData.linkToAssets === 'Oui') {
+        const linkToAssetsValue = formData.linkToAssets ? 'Oui' : 'Non';
+        formDataToSend.append('linkToAssets', linkToAssetsValue);
+        if (formData.linkToAssets) {
           const allocationsPayload = assetAllocations
             .map((row) => ({
               assetId: (row.assetId || '').trim(),
-              proportion: parseFloat(String(row.proportion))
+              proportion: parseFloat(String(row.proportion || '0'))
             }))
-            .filter((row) => row.assetId && !isNaN(row.proportion));
-          formDataToSend.append('assetAllocations', JSON.stringify(allocationsPayload));
+            .filter((row) => row.assetId && !isNaN(row.proportion) && row.proportion > 0);
+          if (allocationsPayload.length > 0) {
+            formDataToSend.append('assetAllocations', JSON.stringify(allocationsPayload));
+          }
         }
-        formDataToSend.append('enablePriceVariation', formData.enablePriceVariation);
         // Always send entry values, even if empty
         formDataToSend.append('minEntryValue', formData.minEntryValue || '');
         formDataToSend.append('maxEntryValue', formData.maxEntryValue || '');
-        // Always send price variation fields, even if empty or enablePriceVariation is 'Non'
-        formDataToSend.append('minPriceVariation', formData.minPriceVariation || '');
-        formDataToSend.append('maxPriceVariation', formData.maxPriceVariation || '');
-        formDataToSend.append('currentPriceVariation', formData.currentPriceVariation || '');
         if (productImage) {
           formDataToSend.append('image', productImage);
         }
@@ -613,26 +613,20 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           capitalisationFonds: formData.capitalisationFonds,
           duration: formData.duration || undefined,
           // Gestion du produit
-          showOnLaunch: formData.showOnLaunch,
           availabilityStart: formData.availabilityStart || undefined,
           availabilityEnd: formData.availabilityEnd || undefined,
-          isSavings: formData.isSavings,
-          linkToAssets: formData.linkToAssets,
-          assetAllocations: formData.linkToAssets === 'Oui'
+          linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
+          assetAllocations: formData.linkToAssets && assetAllocations.length > 0
             ? assetAllocations
                 .map((row) => ({
                   assetId: (row.assetId || '').trim(),
-                  proportion: parseFloat(String(row.proportion))
+                  proportion: parseFloat(String(row.proportion || '0'))
                 }))
-                .filter((row) => row.assetId && !isNaN(row.proportion))
+                .filter((row) => row.assetId && !isNaN(row.proportion) && row.proportion > 0)
             : undefined,
           // Gestion des prix
-          enablePriceVariation: formData.enablePriceVariation,
           minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
-          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined,
-          minPriceVariation: formData.enablePriceVariation === 'Oui' && formData.minPriceVariation ? parseFloat(formData.minPriceVariation) : undefined,
-          maxPriceVariation: formData.enablePriceVariation === 'Oui' && formData.maxPriceVariation ? parseFloat(formData.maxPriceVariation) : undefined,
-          currentPriceVariation: formData.enablePriceVariation === 'Oui' && formData.currentPriceVariation ? parseFloat(formData.currentPriceVariation) : undefined
+          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined
         };
         
         // Toujours inclure profitability si une valeur existe
@@ -1000,66 +994,6 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                 </div>
               </div>
 
-              <div className="space-y-4 pt-4 border-t border-slate-300">
-                <h4 className="text-md font-medium text-slate-700">Gestion des variations (en développement)</h4>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="product-enable-price-variation">Activer variation du prix sur le produit</Label>
-                  <Select 
-                    value={formData.enablePriceVariation} 
-                    onValueChange={(value) => setFormData({ ...formData, enablePriceVariation: value })}
-                  >
-                    <SelectTrigger id="product-enable-price-variation">
-                      <SelectValue placeholder="Sélectionner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Oui">Oui</SelectItem>
-                      <SelectItem value="Non">Non</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {formData.enablePriceVariation === 'Oui' && (
-                  <div className="grid grid-cols-3 gap-4 pl-4 border-l-2 border-slate-200">
-                    <div className="space-y-2">
-                      <Label htmlFor="product-min-price-variation">Variation Minimum (€)</Label>
-                      <Input
-                        id="product-min-price-variation"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={formData.minPriceVariation}
-                        onChange={(e) => setFormData({ ...formData, minPriceVariation: e.target.value })}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="product-max-price-variation">Variation Maximum (€)</Label>
-                      <Input
-                        id="product-max-price-variation"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={formData.maxPriceVariation}
-                        onChange={(e) => setFormData({ ...formData, maxPriceVariation: e.target.value })}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="product-current-price-variation">Variation actuelle (€)</Label>
-                      <Input
-                        id="product-current-price-variation"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={formData.currentPriceVariation}
-                        onChange={(e) => setFormData({ ...formData, currentPriceVariation: e.target.value })}
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Gestion de la rentabilité */}
@@ -1204,7 +1138,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                         <SelectValue placeholder="Sélectionner une période" />
                       </SelectTrigger>
                       <SelectContent>
-                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat']
+                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds']
                           .filter(option => {
                             const currentArray = Array.isArray(formData.interestPeriod) 
                               ? formData.interestPeriod 
@@ -1248,7 +1182,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="product-capitalisation-fonds">Capitalisation des fonds</Label>
+                    <Label htmlFor="product-capitalisation-fonds">Cumuler les intérêts ?</Label>
                     <Select 
                       value={formData.capitalisationFonds} 
                       onValueChange={(value) => setFormData({ ...formData, capitalisationFonds: value })}
@@ -1270,22 +1204,6 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
               <h3 className="text-lg font-semibold text-slate-800">Gestion du produit (en développement)</h3>
               
-              <div className="space-y-2">
-                <Label htmlFor="product-show-on-launch">Afficher au lancement du produit</Label>
-                <Select 
-                  value={formData.showOnLaunch} 
-                  onValueChange={(value) => setFormData({ ...formData, showOnLaunch: value })}
-                >
-                  <SelectTrigger id="product-show-on-launch">
-                    <SelectValue placeholder="Sélectionner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Oui">Oui</SelectItem>
-                    <SelectItem value="Non">Non</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="product-availability-start">Début de disponibilité</Label>
@@ -1307,120 +1225,108 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   />
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="product-is-savings">Ce produit est une épargne</Label>
-                <Select 
-                  value={formData.isSavings ? 'Oui' : 'Non'} 
-                  onValueChange={(value) => setFormData({ ...formData, isSavings: value === 'Oui' })}
-                >
-                  <SelectTrigger id="product-is-savings">
-                    <SelectValue placeholder="Sélectionner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Oui">Oui</SelectItem>
-                    <SelectItem value="Non">Non</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             {/* Lier le produit à des actifs */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Lier le produit à des actifs</h3>
-              
-              <div className="space-y-2">
-                <Label htmlFor="product-link-to-assets">Lie le produit à des actifs</Label>
-                <Select 
-                  value={formData.linkToAssets} 
-                  onValueChange={(value) => setFormData({ ...formData, linkToAssets: value })}
-                >
-                  <SelectTrigger id="product-link-to-assets">
-                    <SelectValue placeholder="Sélectionner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Oui">Oui</SelectItem>
-                    <SelectItem value="Non">Non</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="product-link-to-assets"
+                  checked={formData.linkToAssets}
+                  onCheckedChange={(checked) => setFormData({ ...formData, linkToAssets: checked as boolean })}
+                />
+                <Label htmlFor="product-link-to-assets" className="text-base font-semibold cursor-pointer">
+                  Lier le produit à des actifs
+                </Label>
               </div>
 
-              {formData.linkToAssets === 'Oui' && (
-                <div className="space-y-4 pl-4 border-l-2 border-slate-200">
+              {formData.linkToAssets && (
+                <div className="space-y-4 pl-4 border-l-2 border-slate-200 mt-4">
                   <div className="text-sm text-slate-600">
                     Sélectionnez les actifs composant le produit et définissez leur proportion (la somme doit faire 100%).
                   </div>
 
-                  {assetAllocations.map((row, idx) => {
-                    const selectedIds = new Set(assetAllocations.map(r => r.assetId).filter(Boolean));
-                    const options = assets.filter((a) => !selectedIds.has(a.id) || a.id === row.assetId);
-                    return (
-                      <div key={idx} className="grid grid-cols-12 gap-3 items-end">
-                        <div className="col-span-8 space-y-2">
-                          <Label>Actif</Label>
-                          <Select
-                            value={row.assetId || 'none'}
-                            onValueChange={(value) => {
-                              const next = [...assetAllocations];
-                              next[idx] = { ...next[idx], assetId: value === 'none' ? '' : value };
-                              setAssetAllocations(next);
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder={loadingAssets ? 'Chargement...' : 'Sélectionner un actif'} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Sélectionner un actif</SelectItem>
-                              {options.map((asset: any) => (
-                                <SelectItem key={asset.id} value={asset.id}>
-                                  {asset.name} ({asset.type}){asset.reference ? ` - ${asset.reference}` : ''}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="col-span-3 space-y-2">
-                          <Label>Proportion (%)</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="100"
-                            value={row.proportion}
-                            onChange={(e) => {
-                              const next = [...assetAllocations];
-                              next[idx] = { ...next[idx], proportion: e.target.value };
-                              setAssetAllocations(next);
-                            }}
-                            placeholder="0"
-                          />
-                        </div>
-
-                        <div className="col-span-1 flex justify-end">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              if (assetAllocations.length === 1) return;
-                              setAssetAllocations(assetAllocations.filter((_, i) => i !== idx));
-                            }}
-                            title="Supprimer"
-                            disabled={assetAllocations.length === 1}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {assetAllocations.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-200">
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Logo</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Nom</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Référence</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Proportion (%)</th>
+                            <th className="text-right py-2 px-3 text-sm font-semibold text-slate-700">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {assetAllocations.map((row, idx) => {
+                            const asset = assets.find(a => a.id === row.assetId) || row.asset;
+                            return (
+                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-3 px-3">
+                                  {asset?.logoUrl ? (
+                                    <img 
+                                      src={asset.logoUrl} 
+                                      alt={asset.name || ''} 
+                                      className="w-8 h-8 object-contain rounded"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none';
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-xs text-slate-500">
+                                      {asset?.name?.charAt(0)?.toUpperCase() || '?'}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 text-sm text-slate-900">{asset?.name || '-'}</td>
+                                <td className="py-3 px-3 text-sm text-slate-600">{asset?.reference || '-'}</td>
+                                <td className="py-3 px-3">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    max="100"
+                                    value={row.proportion}
+                                    onChange={(e) => {
+                                      const next = [...assetAllocations];
+                                      next[idx] = { ...next[idx], proportion: e.target.value };
+                                      setAssetAllocations(next);
+                                    }}
+                                    placeholder="0"
+                                    className="w-24"
+                                  />
+                                </td>
+                                <td className="py-3 px-3 text-right">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => {
+                                      setAssetAllocations(assetAllocations.filter((_, i) => i !== idx));
+                                    }}
+                                    title="Supprimer"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-red-600" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between gap-4">
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setAssetAllocations([...assetAllocations, { assetId: '', proportion: '' }])}
+                      onClick={() => {
+                        setSelectedAssetsInModal([]);
+                        setAssetSearchQuery('');
+                        setShowAssetModal(true);
+                      }}
                     >
                       <Plus className="w-4 h-4 mr-2" />
                       Ajouter un actif
@@ -1439,6 +1345,132 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                 </div>
               )}
             </div>
+
+            {/* Modal pour sélectionner des actifs */}
+            {showAssetModal && (
+              <div className="modal-overlay" onClick={() => setShowAssetModal(false)}>
+                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh' }}>
+                  <div className="modal-header">
+                    <h2 className="modal-title">Sélectionner des actifs</h2>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="modal-close"
+                      onClick={() => setShowAssetModal(false)}
+                    >
+                      <X className="planning-icon-md" />
+                    </Button>
+                  </div>
+                  <div className="modal-form-field">
+                    <Input
+                      type="text"
+                      placeholder="Rechercher un actif... (minimum 2 caractères)"
+                      value={assetSearchQuery}
+                      onChange={(e) => setAssetSearchQuery(e.target.value)}
+                      className="w-full"
+                    />
+                  </div>
+                  <div style={{ maxHeight: '60vh', overflowY: 'auto', marginTop: '1rem' }}>
+                    {!assetSearchQuery || assetSearchQuery.trim().length < 2 ? (
+                      <div className="text-center py-8 text-slate-500">
+                        Tapez au moins 2 caractères pour rechercher des actifs
+                      </div>
+                    ) : loadingAssets ? (
+                      <div className="text-center py-8 text-slate-500">Chargement...</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {assets.map((asset: any) => {
+                            const isSelected = selectedAssetsInModal.includes(asset.id);
+                            const isAlreadyAdded = assetAllocations.some(a => a.assetId === asset.id);
+                            return (
+                              <div
+                                key={asset.id}
+                                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                  isSelected
+                                    ? 'border-blue-500 bg-blue-50'
+                                    : isAlreadyAdded
+                                    ? 'border-slate-200 bg-slate-50 opacity-50'
+                                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={(checked) => {
+                                    if (isAlreadyAdded) return;
+                                    if (checked) {
+                                      setSelectedAssetsInModal(prev => [...prev, asset.id]);
+                                    } else {
+                                      setSelectedAssetsInModal(prev => prev.filter(id => id !== asset.id));
+                                    }
+                                  }}
+                                  disabled={isAlreadyAdded}
+                                />
+                                {asset.logoUrl ? (
+                                  <img 
+                                    src={asset.logoUrl} 
+                                    alt={asset.name || ''} 
+                                    className="w-10 h-10 object-contain rounded"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 bg-slate-200 rounded flex items-center justify-center text-sm text-slate-500">
+                                    {asset.name?.charAt(0)?.toUpperCase() || '?'}
+                                  </div>
+                                )}
+                                <div className="flex-1">
+                                  <div className="font-medium text-slate-900">{asset.name}</div>
+                                  <div className="text-sm text-slate-500">
+                                    {asset.reference && `${asset.reference} • `}
+                                    {asset.type}
+                                  </div>
+                                </div>
+                                {isAlreadyAdded && (
+                                  <span className="text-xs text-slate-500">Déjà ajouté</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        {assets.length === 0 && !loadingAssets && (
+                          <div className="text-center py-8 text-slate-500">Aucun actif trouvé</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowAssetModal(false)}
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const newAllocations = selectedAssetsInModal.map(assetId => {
+                          const asset = assets.find(a => a.id === assetId);
+                          return {
+                            assetId,
+                            proportion: '',
+                            asset
+                          };
+                        });
+                        setAssetAllocations([...assetAllocations, ...newAllocations]);
+                        setSelectedAssetsInModal([]);
+                        setAssetSearchQuery('');
+                        setShowAssetModal(false);
+                      }}
+                      disabled={selectedAssetsInModal.length === 0}
+                    >
+                      Ajouter ({selectedAssetsInModal.length})
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-4 pt-4 border-t">
               <Button

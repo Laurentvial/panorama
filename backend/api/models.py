@@ -531,10 +531,8 @@ class Product(models.Model):
     capitalisation_fonds = models.CharField(max_length=10, default='Non')  # Capitalisation des fonds (Oui/Non)
     
     # Gestion du produit
-    show_on_launch = models.CharField(max_length=10, default='Non')  # Afficher au lancement (Oui/Non)
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité
     availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité
-    is_savings = models.BooleanField(default=False)  # Ce produit est une épargne
     link_to_assets = models.CharField(max_length=10, default='Non')  # Lie le produit à des actifs (Oui/Non)
     
     # Gestion des prix

@@ -889,7 +889,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
             'interest_period', 'capitalisation_fonds',
-            'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
+            'availability_start', 'availability_end',
             'link_to_assets', 'min_entry_value', 'max_entry_value',
             'assetAllocations',
             'createdAt', 'updatedAt'
@@ -934,7 +934,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_assetAllocations(self, obj):
         allocations = ProductAssetAllocation.objects.filter(product=obj).select_related('asset').order_by('created_at')
-        # Keep payload simple + consistent for frontend forms
+        # Include full asset details for frontend display
         return [
             {
                 'id': alloc.id,
@@ -942,6 +942,13 @@ class ProductSerializer(serializers.ModelSerializer):
                 'assetName': alloc.asset.name,
                 'assetType': alloc.asset.type,
                 'proportion': float(alloc.proportion) if alloc.proportion is not None else 0,
+                'asset': {
+                    'id': alloc.asset.id,
+                    'name': alloc.asset.name,
+                    'reference': alloc.asset.reference or '',
+                    'type': alloc.asset.type,
+                    'logoUrl': alloc.asset.logo_url or '',
+                }
             }
             for alloc in allocations
         ]
@@ -956,17 +963,11 @@ class ProductSerializer(serializers.ModelSerializer):
             'profitabilityPeriod': 'profitability_period',
             'interestPeriod': 'interest_period',
             'capitalisationFonds': 'capitalisation_fonds',
-            'showOnLaunch': 'show_on_launch',
             'availabilityStart': 'availability_start',
             'availabilityEnd': 'availability_end',
-            'isSavings': 'is_savings',
             'linkToAssets': 'link_to_assets',
-            'enablePriceVariation': 'enable_price_variation',
             'minEntryValue': 'min_entry_value',
             'maxEntryValue': 'max_entry_value',
-            'minPriceVariation': 'min_price_variation',
-            'maxPriceVariation': 'max_price_variation',
-            'currentPriceVariation': 'current_price_variation',
         }
         
         # Create a copy to avoid modifying the original
@@ -993,17 +994,11 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['profitabilityPeriod'] = ret.pop('profitability_period', '')
         ret['interestPeriod'] = ret.pop('interest_period', '')
         ret['capitalisationFonds'] = ret.pop('capitalisation_fonds', 'Non')
-        ret['showOnLaunch'] = ret.pop('show_on_launch', 'Non')
         ret['availabilityStart'] = ret.pop('availability_start', None)
         ret['availabilityEnd'] = ret.pop('availability_end', None)
-        ret['isSavings'] = ret.pop('is_savings', False)
         ret['linkToAssets'] = ret.pop('link_to_assets', 'Non')
-        ret['enablePriceVariation'] = ret.pop('enable_price_variation', 'Non')
         ret['minEntryValue'] = ret.pop('min_entry_value', None)
         ret['maxEntryValue'] = ret.pop('max_entry_value', None)
-        ret['minPriceVariation'] = ret.pop('min_price_variation', None)
-        ret['maxPriceVariation'] = ret.pop('max_price_variation', None)
-        ret['currentPriceVariation'] = ret.pop('current_price_variation', None)
         # Type is now a real field in the model, so it's already in ret
         # Handle image URL - get_imageUrl already handles proxy URL conversion
         # Just ensure None values are handled correctly

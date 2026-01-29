@@ -213,7 +213,8 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     // For endpoints that allow public access, try without token if refresh fails
     const isPublicEndpoint = endpoint.includes('/api/news/') || 
                              endpoint.includes('/api/settings/') ||
-                             endpoint.includes('/api/clients/') && endpoint.includes('/assets/');
+                             endpoint.includes('/api/assets/') ||
+                             (endpoint.includes('/api/clients/') && endpoint.includes('/assets/'));
     
     const newToken = await refreshAccessToken();
     if (newToken) {

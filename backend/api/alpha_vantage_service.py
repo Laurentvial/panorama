@@ -106,15 +106,72 @@ class AlphaVantageService:
             
             for match in matches:
                 symbol = match.get('1. symbol', '')
+                region = match.get('4. region', '')
+                currency = match.get('8. currency', '')
+                
+                # Infer currency from region/exchange if Alpha Vantage returns USD incorrectly
+                # This is especially important for European stocks that might show USD
+                if not currency or currency.upper() == 'USD':
+                    region_lower = region.lower()
+                    # Check if it's a European exchange/region
+                    if any(euro_term in region_lower for euro_term in ['france', 'germany', 'italy', 'spain', 'netherlands', 'belgium', 'portugal', 'austria', 'ireland', 'finland', 'greece', 'europe', 'euro']):
+                        currency = 'EUR'
+                    elif 'united kingdom' in region_lower or 'uk' in region_lower or 'great britain' in region_lower:
+                        currency = 'GBP'
+                    elif 'japan' in region_lower:
+                        currency = 'JPY'
+                    elif 'switzerland' in region_lower:
+                        currency = 'CHF'
+                    elif 'canada' in region_lower:
+                        currency = 'CAD'
+                    elif 'australia' in region_lower:
+                        currency = 'AUD'
+                    elif not currency:
+                        currency = 'USD'  # Default fallback
+                
+                # Infer exchange from region if not provided by Alpha Vantage
+                # Alpha Vantage SYMBOL_SEARCH doesn't return exchange directly
+                exchange = ''
+                if region:
+                    region_lower = region.lower()
+                    # France - Paris stock exchange is EURONEXT
+                    if 'france' in region_lower or 'paris' in region_lower:
+                        exchange = 'EURONEXT'
+                    # Other European countries - also likely EURONEXT
+                    elif any(euro_term in region_lower for euro_term in ['belgium', 'netherlands', 'portugal', 'ireland', 'europe', 'euro']):
+                        exchange = 'EURONEXT'
+                    # Germany - XETR or FWB
+                    elif 'germany' in region_lower:
+                        exchange = 'XETR'
+                    # United States
+                    elif any(us_term in region_lower for us_term in ['united states', 'usa', 'us']):
+                        exchange = 'NASDAQ'  # Default for US stocks
+                    # United Kingdom
+                    elif any(uk_term in region_lower for uk_term in ['united kingdom', 'uk', 'great britain']):
+                        exchange = 'LSE'
+                    # Switzerland
+                    elif 'switzerland' in region_lower:
+                        exchange = 'SWX'
+                    # Japan
+                    elif 'japan' in region_lower:
+                        exchange = 'TSE'
+                    # Canada
+                    elif 'canada' in region_lower:
+                        exchange = 'TSX'
+                    # Australia
+                    elif 'australia' in region_lower:
+                        exchange = 'ASX'
+                
                 result = {
                     'symbol': symbol,
                     'name': match.get('2. name', ''),
                     'type': match.get('3. type', ''),
-                    'region': match.get('4. region', ''),
+                    'region': region,
+                    'exchange': exchange,
                     'market_open': match.get('5. marketOpen', ''),
                     'market_close': match.get('6. marketClose', ''),
                     'timezone': match.get('7. timezone', ''),
-                    'currency': match.get('8. currency', ''),
+                    'currency': currency,
                     'match_score': float(match.get('9. matchScore', 0))
                 }
                 

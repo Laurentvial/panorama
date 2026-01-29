@@ -12,6 +12,39 @@ import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
 
+// Helper function to get currency symbol
+function getCurrencySymbol(currency?: string): string {
+  if (!currency) return '$';
+  const currencyUpper = currency.toUpperCase();
+  const currencyMap: { [key: string]: string } = {
+    'USD': '$',
+    'EUR': '€',
+    'GBP': '£',
+    'JPY': '¥',
+    'CHF': 'CHF',
+    'CAD': 'C$',
+    'AUD': 'A$',
+    'CNY': '¥',
+    'INR': '₹',
+    'BRL': 'R$',
+    'MXN': '$',
+    'KRW': '₩',
+    'SGD': 'S$',
+    'HKD': 'HK$',
+    'NZD': 'NZ$',
+    'ZAR': 'R',
+    'SEK': 'kr',
+    'NOK': 'kr',
+    'DKK': 'kr',
+    'PLN': 'zł',
+    'CZK': 'Kč',
+    'HUF': 'Ft',
+    'RUB': '₽',
+    'TRY': '₺',
+  };
+  return currencyMap[currencyUpper] || currencyUpper;
+}
+
 export function ManageAssets() {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +63,7 @@ export function ManageAssets() {
     default: false,
     alphaVantageSymbol: '',
     exchange: '',
+    currency: '',
     logoUrl: '',
     description: '',
   });
@@ -82,6 +116,7 @@ export function ManageAssets() {
         default: asset.default || false,
         alphaVantageSymbol: asset.alphaVantageSymbol || '',
         exchange: asset.exchange || '',
+        currency: asset.currency || '',
         logoUrl: asset.logoUrl || '',
         description: asset.description || '',
       });
@@ -158,8 +193,8 @@ export function ManageAssets() {
     // Best-effort checks for external market data
     const assetType = formData.type?.toLowerCase() || '';
     const isCrypto = assetType.includes('crypto') || assetType.includes('cryptomonnaie');
-    const isCommodity = assetType.includes('matière') || assetType.includes('matiere') || assetType.includes('commodity');
-    const isForexType = assetType.includes('devise') || assetType.includes('forex');
+    const isCommodity = assetType.includes('matière') || assetType.includes('matiere');
+    const isForexType = assetType.includes('devise');
     
     if (!formData.exchange || !formData.exchange.trim()) {
       if (isCrypto) {
@@ -297,7 +332,7 @@ export function ManageAssets() {
           subcategory: formData.subcategory,
           default: formData.default,
           exchange: formData.exchange,
-          currency: selectedSearchResult?.currency || undefined,
+          currency: formData.currency || selectedSearchResult?.currency || undefined,
           region: selectedSearchResult?.region || undefined,
           logoUrl: formData.logoUrl,
           description: formData.description,
@@ -342,11 +377,10 @@ export function ManageAssets() {
 
     // Determine API type based on the search mode (not CRM type)
     const assetType = (searchAssetType || '').toLowerCase();
-    const isCrypto = assetType === 'crypto' || assetType.includes('cryptomonnaie');
+    const isCrypto = assetType === 'cryptomonnaie' || assetType.includes('crypto');
     const isCommodity =
       assetType.includes('matière') ||
       assetType.includes('matiere') ||
-      assetType.includes('commodity') ||
       assetType === 'or' ||
       assetType === 'argent' ||
       assetType.includes('pétrole') ||
@@ -386,8 +420,7 @@ export function ManageAssets() {
     // Prefill form with selected result
     const isCommodityMode =
       (searchAssetType || '').toLowerCase().includes('matière') ||
-      (searchAssetType || '').toLowerCase().includes('matiere') ||
-      (searchAssetType || '').toLowerCase().includes('commodity');
+      (searchAssetType || '').toLowerCase().includes('matiere');
 
     // CRM Type:
     // - Spot commodities (XAU/XAG): use underlying ("Or"/"Argent") so it matches CRM options.
@@ -396,14 +429,14 @@ export function ManageAssets() {
     const assetType = isCommodityMode
       ? (result.type === 'Spot' && result.commodity_underlying ? result.commodity_underlying : 'Matière première')
       : result.type === 'Crypto'
-        ? 'Crypto'
+        ? 'Cryptomonnaie'
         : result.type === 'Equity'
           ? 'Action'
           : result.type === 'ETF'
             ? 'ETF'
             : (formData.type || 'Action');
     
-    const isCrypto = assetType === 'Crypto' || assetType.toLowerCase().includes('crypto');
+    const isCrypto = assetType === 'Cryptomonnaie' || assetType.toLowerCase().includes('crypto');
     
     // Determine exchange from result or infer from type
     let exchange = result.exchange || '';
@@ -413,12 +446,42 @@ export function ManageAssets() {
       } else if (result.region) {
         // Try to infer from region
         const region = result.region.toLowerCase();
-        if (region.includes('united states') || region.includes('usa') || region.includes('us')) {
-          exchange = 'NASDAQ'; // Default for US stocks
-        } else if (region.includes('france') || region.includes('europe')) {
+        // France - Paris stock exchange is EURONEXT
+        if (region.includes('france') || region.includes('paris')) {
           exchange = 'EURONEXT';
-        } else if (region.includes('uk') || region.includes('united kingdom')) {
+        }
+        // Other European countries - also likely EURONEXT
+        else if (region.includes('belgium') || region.includes('netherlands') || region.includes('portugal') || 
+                 region.includes('ireland') || region.includes('europe') || region.includes('euro')) {
+          exchange = 'EURONEXT';
+        }
+        // Germany - XETR or FWB
+        else if (region.includes('germany')) {
+          exchange = 'XETR';
+        }
+        // United States
+        else if (region.includes('united states') || region.includes('usa') || region.includes('us')) {
+          exchange = 'NASDAQ'; // Default for US stocks
+        }
+        // United Kingdom
+        else if (region.includes('uk') || region.includes('united kingdom') || region.includes('great britain')) {
           exchange = 'LSE';
+        }
+        // Switzerland
+        else if (region.includes('switzerland')) {
+          exchange = 'SWX';
+        }
+        // Japan
+        else if (region.includes('japan')) {
+          exchange = 'TSE';
+        }
+        // Canada
+        else if (region.includes('canada')) {
+          exchange = 'TSX';
+        }
+        // Australia
+        else if (region.includes('australia')) {
+          exchange = 'ASX';
         }
       }
     }
@@ -457,6 +520,7 @@ export function ManageAssets() {
       reference: referenceCode,
       alphaVantageSymbol: result.symbol,
       exchange: exchange,
+      currency: result.currency || formData.currency || 'USD',
       type: assetType,
       category: result.region || formData.category,
       subcategory: nextSubcategory,
@@ -743,8 +807,7 @@ export function ManageAssets() {
                       <SelectContent>
                         <SelectItem value="Action">Action</SelectItem>
                         <SelectItem value="ETF">ETF</SelectItem>
-                        <SelectItem value="Crypto">Crypto</SelectItem>
-                        <SelectItem value="Obligation">Obligation</SelectItem>
+                        <SelectItem value="Cryptomonnaie">Cryptomonnaie</SelectItem>
                         <SelectItem value="Matière première">Matière première</SelectItem>
                         <SelectItem value="Autre">Autre</SelectItem>
                       </SelectContent>
@@ -754,7 +817,7 @@ export function ManageAssets() {
                   {searchAssetType && (
                     <div className="modal-form-field">
                         <Label htmlFor="alpha-vantage-search">
-                          {searchAssetType === 'Crypto' 
+                          {searchAssetType === 'Cryptomonnaie' 
                             ? 'Rechercher une crypto-monnaie (nom ou symbole)' 
                             : 'Rechercher un actif (nom ou symbole)'}
                         </Label>
@@ -765,7 +828,7 @@ export function ManageAssets() {
                             id="alpha-vantage-search"
                             className="pl-10"
                             placeholder={
-                              searchAssetType === 'Crypto' 
+                              searchAssetType === 'Cryptomonnaie' 
                                 ? 'Ex: Bitcoin, BTC, Ethereum, ETH...' 
                                 : 'Ex: Apple, AAPL, Microsoft, MSFT...'
                             }
@@ -835,10 +898,12 @@ export function ManageAssets() {
                                     </div>
                                     {result.price && (
                                       <div className="text-right ml-4 flex-shrink-0">
-                                        <div className="font-semibold text-sm">${parseFloat(result.price).toFixed(2)}</div>
+                                        <div className="font-semibold text-sm">
+                                          {getCurrencySymbol(result.currency)}{parseFloat(result.price).toFixed(2)}
+                                        </div>
                                         {result.change !== undefined && (
                                           <div className={`text-xs ${parseFloat(result.change) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            {parseFloat(result.change) >= 0 ? '+' : ''}{parseFloat(result.change).toFixed(2)}
+                                            {parseFloat(result.change) >= 0 ? '+' : ''}{getCurrencySymbol(result.currency)}{parseFloat(result.change).toFixed(2)}
                                             {result.change_percent && ` (${parseFloat(result.change_percent) >= 0 ? '+' : ''}${parseFloat(result.change_percent)}%)`}
                                           </div>
                                         )}
@@ -874,21 +939,15 @@ export function ManageAssets() {
                     
                     {/* Cryptomonnaies - Actifs externes du marché */}
                     <SelectItem value="Cryptomonnaie">Cryptomonnaie</SelectItem>
-                    <SelectItem value="Crypto">Crypto</SelectItem>
                     
                     {/* Fonds et ETF - Actifs externes du marché */}
                     <SelectItem value="ETF">ETF</SelectItem>
-                    <SelectItem value="SICAV">SICAV</SelectItem>
-                    <SelectItem value="FCP">FCP</SelectItem>
-                    <SelectItem value="Fonds">Fonds</SelectItem>
-                    <SelectItem value="Tracker">Tracker</SelectItem>
                     
                     {/* Obligations - Actifs externes du marché */}
                     <SelectItem value="Obligation">Obligation</SelectItem>
                     
                     {/* Matières premières - Actifs externes du marché */}
                     <SelectItem value="Matière première">Matière première</SelectItem>
-                    <SelectItem value="Commodity">Commodity</SelectItem>
                     <SelectItem value="Or">Or</SelectItem>
                     <SelectItem value="Argent">Argent</SelectItem>
                     <SelectItem value="Pétrole">Pétrole</SelectItem>
@@ -896,24 +955,11 @@ export function ManageAssets() {
                     
                     {/* Devises - Actifs externes du marché */}
                     <SelectItem value="Devise">Devise</SelectItem>
-                    <SelectItem value="Forex">Forex</SelectItem>
                     
                     {/* Indices - Actifs externes du marché */}
                     <SelectItem value="Indice">Indice</SelectItem>
                     
-                    {/* Dérivés - Actifs externes du marché */}
-                    <SelectItem value="Warrant">Warrant</SelectItem>
-                    <SelectItem value="Option">Option</SelectItem>
-                    <SelectItem value="Future">Future</SelectItem>
-                    <SelectItem value="Dérivé">Dérivé</SelectItem>
-                    
-                    {/* Immobilier - Actifs externes du marché */}
-                    <SelectItem value="REIT">REIT</SelectItem>
-                    <SelectItem value="SCPI">SCPI</SelectItem>
-                    <SelectItem value="OPCI">OPCI</SelectItem>
-                    
                     {/* Autres actifs externes */}
-                    <SelectItem value="Bourse">Bourse</SelectItem>
                     <SelectItem value="Autre">Autre</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1010,7 +1056,7 @@ export function ManageAssets() {
                             symbol: formData.alphaVantageSymbol,
                             type: formData.type,
                             exchange: formData.exchange,
-                            currency: selectedSearchResult?.currency || '',
+                            currency: formData.currency || '',
                             region: selectedSearchResult?.region || '',
                           }),
                         });

@@ -1864,7 +1864,19 @@ def asset_list(request):
         # (This endpoint can be public for discover page)
         pass
     
-    assets = Asset.objects.all().order_by('type', 'name')
+    # Support search parameter
+    search_query = request.GET.get('search', '').strip()
+    assets = Asset.objects.all()
+    
+    if search_query:
+        # Search in name, reference, and type
+        assets = assets.filter(
+            Q(name__icontains=search_query) |
+            Q(reference__icontains=search_query) |
+            Q(type__icontains=search_query)
+        )
+    
+    assets = assets.order_by('type', 'name')
     serializer = AssetSerializer(assets, many=True)
     return Response({'assets': serializer.data})
 
@@ -4701,18 +4713,17 @@ def product_create(request):
             profitability = None
     
     # Handle no_profitability boolean conversion
-    no_profitability_value = request.data.get('noProfitability', True)
-    if isinstance(no_profitability_value, str):
-        # Convert 'Oui'/'Non' or 'true'/'false' to boolean
-        no_profitability_value = no_profitability_value.lower() in ['oui', 'true', '1']
+    # Support both string ('Oui'/'Non') and boolean values from frontend
+    if 'noProfitability' in request.data:
+        no_profitability_value = request.data['noProfitability']
+        # Handle both string ('Oui'/'Non') and boolean values
+        if isinstance(no_profitability_value, str):
+            no_profitability_value = no_profitability_value.lower() in ['oui', 'true', '1']
+        else:
+            no_profitability_value = bool(no_profitability_value)
     else:
-        no_profitability_value = bool(no_profitability_value)
-    
-    is_savings_value = request.data.get('isSavings', False)
-    if isinstance(is_savings_value, str):
-        is_savings_value = is_savings_value.lower() == 'true'
-    else:
-        is_savings_value = bool(is_savings_value)
+        # Default to True if not provided
+        no_profitability_value = True
     
     # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
     subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
@@ -4737,18 +4748,12 @@ def product_create(request):
         interest_period=request.data.get('interestPeriod', ''),
         capitalisation_fonds=request.data.get('capitalisationFonds', 'Non'),
         # Gestion du produit
-        show_on_launch=request.data.get('showOnLaunch', 'Non'),
         availability_start=availability_start,
         availability_end=availability_end,
-        is_savings=is_savings_value,
         link_to_assets=request.data.get('linkToAssets', 'Non'),
         # Gestion des prix
-        enable_price_variation=request.data.get('enablePriceVariation', 'Non'),
         min_entry_value=request.data.get('minEntryValue'),
-        max_entry_value=request.data.get('maxEntryValue'),
-        min_price_variation=request.data.get('minPriceVariation'),
-        max_price_variation=request.data.get('maxPriceVariation'),
-        current_price_variation=request.data.get('currentPriceVariation')
+        max_entry_value=request.data.get('maxEntryValue')
     )
 
     # Handle product-asset allocations (assetAllocations) when linkToAssets is "Oui"
@@ -5026,9 +5031,12 @@ def product_update(request, product_id):
         # Si profitability est explicitement null/undefined et noProfitability est True, mettre à None
         elif profitability is None:
             no_prof_value = request.data.get('noProfitability', True)
+            # Handle both string ('Oui'/'Non') and boolean values
             if isinstance(no_prof_value, str):
                 no_prof_value = no_prof_value.lower() in ['oui', 'true', '1']
-            if bool(no_prof_value):
+            else:
+                no_prof_value = bool(no_prof_value)
+            if no_prof_value:
                 product.profitability = None
     if 'duration' in request.data:
         product.duration = request.data['duration']
@@ -5191,8 +5199,6 @@ def product_update(request, product_id):
         product.capitalisation_fonds = request.data['capitalisationFonds']
     
     # Gestion du produit
-    if 'showOnLaunch' in request.data:
-        product.show_on_launch = request.data['showOnLaunch']
     if 'availabilityStart' in request.data:
         if request.data['availabilityStart']:
             try:
@@ -5209,34 +5215,16 @@ def product_update(request, product_id):
                 pass
         else:
             product.availability_end = None
-    if 'isSavings' in request.data:
-        is_savings_value = request.data['isSavings']
-        # Handle both string and boolean values (FormData sends strings)
-        if isinstance(is_savings_value, str):
-            product.is_savings = is_savings_value.lower() == 'true'
-        else:
-            product.is_savings = bool(is_savings_value)
     if 'linkToAssets' in request.data:
         product.link_to_assets = request.data['linkToAssets']
     
     # Gestion des prix
-    if 'enablePriceVariation' in request.data:
-        product.enable_price_variation = request.data['enablePriceVariation']
     if 'minEntryValue' in request.data:
         min_entry = request.data['minEntryValue']
         product.min_entry_value = float(min_entry) if min_entry is not None and min_entry != '' else None
     if 'maxEntryValue' in request.data:
         max_entry = request.data['maxEntryValue']
         product.max_entry_value = float(max_entry) if max_entry is not None and max_entry != '' else None
-    if 'minPriceVariation' in request.data:
-        min_var = request.data['minPriceVariation']
-        product.min_price_variation = float(min_var) if min_var is not None and min_var != '' else None
-    if 'maxPriceVariation' in request.data:
-        max_var = request.data['maxPriceVariation']
-        product.max_price_variation = float(max_var) if max_var is not None and max_var != '' else None
-    if 'currentPriceVariation' in request.data:
-        current_var = request.data['currentPriceVariation']
-        product.current_price_variation = float(current_var) if current_var is not None and current_var != '' else None
     
     # Handle product-asset allocations (assetAllocations)
     try:
@@ -5373,7 +5361,7 @@ def product_generate_description(request):
         
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
-        price = request.data.get('price', '')
+        min_entry_value = request.data.get('minEntryValue', '')
         profitability = request.data.get('profitability', '')
         
         # Get category name if available
@@ -5388,7 +5376,7 @@ def product_generate_description(request):
         prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
 - Nom: {name or 'Non spécifié'}
 - Catégorie: {category_name or 'Non spécifiée'}
-- Prix: {price or 'Non spécifié'}€
+- Investissement minimum: {min_entry_value or 'Non spécifié'}€
 - Rentabilité: {profitability or 'Non spécifiée'}%
 
 La description doit être:

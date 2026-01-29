@@ -299,7 +299,6 @@ def get_or_create_product_for_asset(asset: Asset) -> Product:
         profitability=Decimal('0'),
         duration='',
         description=f'Produit technique pour actif: {asset.name}',
-        show_on_launch='Non',
     )
     return product
 
