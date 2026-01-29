@@ -115,6 +115,9 @@ class Client(models.Model):
     # Note: available_funds is calculated on frontend (invested_capital - trading_portfolio - bonus)
     # Note: Le "portefeuille" d'actifs est géré via ClientAsset, pas ici
     
+    # Méthodes de paiement disponibles pour le dépôt des fonds
+    payment_methods = models.JSONField(default=list, blank=True)  # ex: ["virement", "carte_bancaire"]
+    
     # Relations
     managed_by = models.CharField(max_length=50, default="", blank=True)  # ID ou username du gestionnaire
     source = models.CharField(max_length=100, default="", blank=True)  # Source du client
@@ -452,10 +455,10 @@ class Position(models.Model):
     product = models.ForeignKey('Product', on_delete=models.CASCADE, null=True, blank=True, related_name='positions')
     transaction = models.ForeignKey('Transaction', on_delete=models.SET_NULL, null=True, blank=True, related_name='positions')
 
-    # 0 = 1er mois, 1 = 2e mois, etc.
-    period_index = models.PositiveIntegerField(default=0)
-    # Date représentant le mois/période (ex: 2026-01-01)
-    period_date = models.DateField()
+    # 0 = 1er mois, 1 = 2e mois, etc. (NULL for manual trading positions)
+    period_index = models.PositiveIntegerField(null=True, blank=True, default=None)
+    # Date représentant le mois/période (ex: 2026-01-01). NULL for manual trading positions.
+    period_date = models.DateField(null=True, blank=True)
 
     invested_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     # Trading positions (asset orders): capture entry price + quantity bought
@@ -477,11 +480,14 @@ class Position(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        # unique_together allows NULL period_index (multiple trading positions per transaction)
         unique_together = ['transaction', 'period_index']
+        # Order by period_date when available, otherwise by created_at
         ordering = ['period_date', 'created_at']
 
     def __str__(self):
-        return f"Position {self.client_id} - {self.product_id or '-'} - {self.period_date} (#{self.period_index})"
+        period_info = f" - {self.period_date} (#{self.period_index})" if self.period_date else ""
+        return f"Position {self.client_id} - {self.product_id or '-'}{period_info}"
 
 class ProductCategory(models.Model):
     """Table des catégories de produits financiers"""

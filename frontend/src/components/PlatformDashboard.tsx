@@ -200,27 +200,107 @@ export function PlatformDashboard() {
   );
 
   const profitLoss = React.useMemo(() => {
+    // Profit/Loss basé sur:
+    // 1. Les transactions (interets, frais, perte) - pas de calculatedValues ici car pas de transactions chargées
+    // 2. Toutes les positions de trading (open, done, et cancelled si elles ont un profit_loss)
+    
+    // Commencer avec 0 (pas de calculatedValues dans Dashboard)
     let total = 0;
+    
+    // Créer un map des actifs pour accès rapide
+    const assetsMap = new Map<string, any>();
+    for (const a of assets || []) {
+      const id = a?.id != null ? String(a.id) : '';
+      if (id) assetsMap.set(id, a);
+    }
+    
+    // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      if (p?.status !== 'open' && p?.status !== 'done') continue;
+      // Inclure les positions ouvertes, terminées, et annulées (si elles ont un profit_loss)
+      // Exclure seulement les positions pending sans profit_loss
+      if (p?.status === 'pending' && (p?.profit_loss == null || p?.profit_loss === '')) continue;
+      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
       const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
       const expectedTotalNum =
         p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+      
+      // Récupérer la devise de l'actif et le taux de change
+      const assetId = p?.assetId || p?.asset_id || p?.asset?.id || null;
+      const asset = assetId ? assetsMap.get(String(assetId)) : null;
+      const assetCurrency = (p?.assetCurrency || p?.asset_currency || p?.asset?.currency || asset?.currency || 'EUR').trim().toUpperCase();
+      const fxNum =
+        p?.fx_rate_eur_to_asset == null
+          ? null
+          : typeof p.fx_rate_eur_to_asset === 'string'
+            ? parseFloat(p.fx_rate_eur_to_asset)
+            : Number(p.fx_rate_eur_to_asset);
+      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
 
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
-        positionPnl = profitLossNum;
+        // Si le profit_loss est dans une devise différente de EUR, convertir en EUR
+        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+          // profit_loss est en devise de l'actif, convertir en EUR: EUR = asset_ccy / fx_rate_eur_to_asset
+          positionPnl = profitLossNum / fxRate;
+        } else {
+          // Déjà en EUR ou pas de taux de change disponible
+          positionPnl = profitLossNum;
+        }
       } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        // Calculer le P&L à partir de expected_total et invested_amount
+        // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
         positionPnl = expectedTotalNum - investedNum;
+      } else if (p?.status === 'open' && assetId && asset) {
+        // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
+        const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+        const qtyNum = p?.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+        const investedAssetNum =
+          p?.invested_amount_asset_currency == null
+            ? null
+            : typeof p.invested_amount_asset_currency === 'string'
+              ? parseFloat(p.invested_amount_asset_currency)
+              : Number(p.invested_amount_asset_currency);
+        
+        const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+        const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
+        const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) && investedAssetNum > 0 ? investedAssetNum : null;
+        
+        // Prix actuel de l'actif
+        const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+        const currentPriceNum =
+          currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+        const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+        
+        if (currentPrice != null && qty > 0) {
+          // Calculer le P&L en devise de l'actif
+          let pnlAsset = 0;
+          if (investedAsset != null && investedAsset > 0) {
+            // Utiliser invested_amount_asset_currency si disponible
+            const marketValue = qty * currentPrice;
+            pnlAsset = marketValue - investedAsset;
+          } else if (entryPrice != null && entryPrice > 0) {
+            // Sinon utiliser entry_price
+            const marketValue = qty * currentPrice;
+            const costBasis = qty * entryPrice;
+            pnlAsset = marketValue - costBasis;
+          }
+          
+          // Convertir en EUR si nécessaire
+          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+            positionPnl = pnlAsset / fxRate;
+          } else {
+            positionPnl = pnlAsset;
+          }
+        }
       }
 
       total += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
     return total;
-  }, [positions]);
+  }, [positions, assets]);
 
   const availableFunds = React.useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
@@ -748,11 +828,25 @@ export function PlatformDashboard() {
                                   />
                                 ) : null}
                                 <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                                  <div style={{ 
-                                    fontWeight: '600', 
-                                    fontSize: isMobile ? '13px' : '14px',
-                                    wordBreak: 'break-word',
-                                  }}>{asset.name}</div>
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/platform/product/${asset.id}`);
+                                    }}
+                                    style={{ 
+                                      fontWeight: '600', 
+                                      fontSize: isMobile ? '13px' : '14px',
+                                      wordBreak: 'break-word',
+                                      cursor: 'pointer',
+                                      color: '#2563eb',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.textDecoration = 'underline';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.textDecoration = 'none';
+                                    }}
+                                  >{asset.name}</div>
                                   <div style={{ 
                                     fontSize: isMobile ? '11px' : '12px', 
                                     color: '#6b7280',
@@ -844,11 +938,25 @@ export function PlatformDashboard() {
                                   />
                                 ) : null}
                                 <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                                  <div style={{ 
-                                    fontWeight: '600', 
-                                    fontSize: isMobile ? '13px' : '14px',
-                                    wordBreak: 'break-word',
-                                  }}>{asset.name}</div>
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/platform/product/${asset.id}`);
+                                    }}
+                                    style={{ 
+                                      fontWeight: '600', 
+                                      fontSize: isMobile ? '13px' : '14px',
+                                      wordBreak: 'break-word',
+                                      cursor: 'pointer',
+                                      color: '#2563eb',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.textDecoration = 'underline';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.textDecoration = 'none';
+                                    }}
+                                  >{asset.name}</div>
                                   <div style={{ 
                                     fontSize: isMobile ? '11px' : '12px', 
                                     color: '#6b7280',

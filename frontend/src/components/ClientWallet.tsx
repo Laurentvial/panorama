@@ -1,45 +1,181 @@
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import React, { useMemo } from 'react';
+import { Card, CardContent } from './ui/card';
 import { Label } from './ui/label';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Wallet } from 'lucide-react';
 
 interface ClientWalletProps {
   client: any;
+  transactions?: any[];
+  positions?: any[];
 }
 
-// Mock data for wallet evolution - in production, this would come from the API
-const generateMockEvolutionData = (): { date: string; value: number }[] => {
-  const data: { date: string; value: number }[] = [];
-  const today = new Date();
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    data.push({
-      date: date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
-      value: 50000 + Math.random() * 10000 + i * 100
+export function ClientWallet({ client, transactions = [], positions = [] }: ClientWalletProps) {
+  // Calculate current profitLoss from positions
+  const currentProfitLoss = useMemo(() => {
+    let total = 0;
+    for (const p of positions || []) {
+      if (p?.status !== 'open' && p?.status !== 'done') continue;
+
+      const profitLossNum =
+        p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+      
+      // Récupérer la devise de l'actif et le taux de change
+      const assetCurrency = (p?.assetCurrency || p?.asset_currency || p?.asset?.currency || 'EUR').trim().toUpperCase();
+      const fxNum =
+        p?.fx_rate_eur_to_asset == null
+          ? null
+          : typeof p.fx_rate_eur_to_asset === 'string'
+            ? parseFloat(p.fx_rate_eur_to_asset)
+            : Number(p.fx_rate_eur_to_asset);
+      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+
+      let positionPnl = 0;
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        // Si le profit_loss est dans une devise différente de EUR, convertir en EUR
+        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+          // profit_loss est en devise de l'actif, convertir en EUR: EUR = asset_ccy / fx_rate_eur_to_asset
+          positionPnl = profitLossNum / fxRate;
+        } else {
+          // Déjà en EUR ou pas de taux de change disponible
+          positionPnl = profitLossNum;
+        }
+      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        // Calculer le P&L à partir de expected_total et invested_amount
+        // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
+        positionPnl = expectedTotalNum - investedNum;
+      }
+
+      total += Number.isFinite(positionPnl) ? positionPnl : 0;
+    }
+    return total;
+  }, [positions]);
+
+  // Calculate wallet evolution from transactions
+  const evolutionData = useMemo(() => {
+    // Only consider completed transactions
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    
+    if (completedTransactions.length === 0) {
+      return [];
+    }
+
+    // Sort transactions by date
+    const sortedTransactions = [...completedTransactions].sort(
+      (a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
+    );
+
+    // Calculate cumulative wallet value over time
+    let runningInvestedCapital = 0;
+    let runningTradingPortfolio = 0;
+    let runningBonus = 0;
+    let runningProfitLoss = 0;
+
+    const dateMap = new Map<string, number>();
+
+    sortedTransactions.forEach((transaction: any) => {
+      const amountNum = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
+      const amount = Number.isFinite(amountNum) ? amountNum : 0;
+
+      // Update running totals based on transaction type
+      switch (transaction.type) {
+        case 'depot':
+          runningInvestedCapital += amount;
+          break;
+        case 'retrait':
+          runningInvestedCapital -= amount;
+          break;
+        case 'bonus':
+          runningBonus += amount;
+          runningInvestedCapital += amount;
+          break;
+        case 'achat':
+        case 'investissement':
+          runningTradingPortfolio += amount;
+          break;
+        case 'vente':
+          runningTradingPortfolio -= amount;
+          break;
+        case 'interets':
+          runningProfitLoss += amount;
+          break;
+        case 'frais':
+        case 'perte':
+          runningProfitLoss -= amount;
+          break;
+        case 'transfert': {
+          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
+          if (transferTo && transferTo !== 'balance') {
+            runningTradingPortfolio += amount;
+          } else if (transferTo === 'balance') {
+            runningTradingPortfolio -= amount;
+          } else if (transaction.productId) {
+            runningTradingPortfolio += amount;
+          }
+          break;
+        }
+      }
+
+      // Calculate wallet value at this point: availableFunds + tradingPortfolio + profitLoss
+      const availableFunds = runningInvestedCapital - runningTradingPortfolio;
+      const walletValue = Math.max(0, availableFunds) + runningTradingPortfolio + runningProfitLoss;
+
+      // Use date as key (format: YYYY-MM-DD)
+      const transactionDate = new Date(transaction.datetime);
+      const dateKey = transactionDate.toISOString().split('T')[0];
+      
+      // Store the latest value for each date
+      dateMap.set(dateKey, walletValue);
     });
-  }
-  return data;
-};
 
-export function ClientWallet({ client }: ClientWalletProps) {
-  // Get wallet data from client object or use defaults
-  const investedCapital = client?.investedCapital || 0;
-  const tradingPortfolio = client?.tradingPortfolio || 0;
-  const bonus = client?.bonus || 0;
-  
-  // Calculate available funds on frontend
-  const availableFunds = investedCapital - tradingPortfolio - bonus;
-  
-  const walletData = {
-    investedCapital,
-    availableFunds: Math.max(0, availableFunds), // Ensure non-negative
-    tradingPortfolio,
-    bonus,
-  };
+    // Convert map to array and sort by date
+    const data = Array.from(dateMap.entries())
+      .map(([dateKey, value]) => {
+        const date = new Date(dateKey);
+        return {
+          date: date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+          value: value,
+          fullDate: dateKey
+        };
+      })
+      .sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime())
+      .map(({ date, value }) => ({ date, value }));
 
-  const evolutionData = generateMockEvolutionData();
+    // If we have data, add current value as last point (including current profitLoss from positions)
+    if (data.length > 0) {
+      const lastTransactionDate = Array.from(dateMap.keys()).sort().pop();
+      if (lastTransactionDate) {
+        const lastDate = new Date(lastTransactionDate);
+        const today = new Date();
+        
+        // Calculate current wallet value
+        const lastRunningInvestedCapital = runningInvestedCapital;
+        const lastRunningTradingPortfolio = runningTradingPortfolio;
+        const lastAvailableFunds = lastRunningInvestedCapital - lastRunningTradingPortfolio;
+        const currentWalletValue = Math.max(0, lastAvailableFunds) + lastRunningTradingPortfolio + currentProfitLoss;
+        
+        // Only add today's point if it's different from the last transaction date
+        const lastDateKey = lastDate.toISOString().split('T')[0];
+        const todayKey = today.toISOString().split('T')[0];
+        
+        if (lastDateKey !== todayKey) {
+          data.push({
+            date: today.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+            value: currentWalletValue
+          });
+        } else {
+          // Update last point with current profitLoss
+          if (data.length > 0) {
+            data[data.length - 1].value = currentWalletValue;
+          }
+        }
+      }
+    }
+
+    return data;
+  }, [transactions, currentProfitLoss]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('fr-FR', {
@@ -52,43 +188,9 @@ export function ClientWallet({ client }: ClientWalletProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Wallet className="w-5 h-5" />
-          <CardTitle>Wallet</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Wallet Summary */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <Label className="text-slate-600 text-sm">Capital investi</Label>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(walletData.investedCapital)}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-slate-600 text-sm">Fonds disponible</Label>
-            <p className="text-lg font-semibold text-green-600">
-              {formatCurrency(walletData.availableFunds)}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-slate-600 text-sm">Wallet trading</Label>
-            <p className="text-lg font-semibold text-blue-600">
-              {formatCurrency(walletData.tradingPortfolio)}
-            </p>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-slate-600 text-sm">Bonus</Label>
-            <p className="text-lg font-semibold text-purple-600">
-              {formatCurrency(walletData.bonus)}
-            </p>
-          </div>
-        </div>
-
+      <CardContent>
         {/* Evolution Chart */}
-        <div className="mt-6">
+        <div>
           <Label className="text-slate-700 font-semibold mb-4 block">
             Évolution au cours du temps
           </Label>

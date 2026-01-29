@@ -68,13 +68,23 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const clientData = storage.getItem('clientData');
         if (clientData) {
           try {
-            setCurrentUser({
-              ...JSON.parse(clientData),
-              userType: 'client'
-            });
-            // Show cached data immediately, then refresh from API to keep server-derived
-            // flags (like accountVerified) consistent.
-            setLoading(false);
+            const cachedClient = JSON.parse(clientData);
+            // Check cached data - if client is disabled, don't use cached data
+            if (!cachedClient.active || !cachedClient.platform_access) {
+              // Clear invalid cached data
+              storage.removeItem('clientData');
+              storage.removeItem(ACCESS_TOKEN);
+              storage.removeItem(CLIENT_ACCESS_TOKEN);
+              storage.removeItem('userType');
+            } else {
+              setCurrentUser({
+                ...cachedClient,
+                userType: 'client'
+              });
+              // Show cached data immediately, then refresh from API to keep server-derived
+              // flags (like accountVerified) consistent.
+              setLoading(false);
+            }
           } catch (e) {
             // ignore parse errors; we'll fetch below
           }
@@ -91,11 +101,42 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         if (response.ok) {
           const data = await response.json();
+          const client = data.client;
+          
+          // Check if client is active and has platform access
+          if (!client.active || !client.platform_access) {
+            // Client is disabled or doesn't have platform access - sign out
+            storage.removeItem(ACCESS_TOKEN);
+            storage.removeItem(CLIENT_ACCESS_TOKEN);
+            storage.removeItem('userType');
+            storage.removeItem('clientData');
+            setCurrentUser(null);
+            setLoading(false);
+            // Redirect to login if on platform route
+            if (typeof window !== 'undefined' && window.location.pathname.startsWith('/platform')) {
+              window.location.href = '/login';
+            }
+            return;
+          }
+          
           setCurrentUser({
-            ...data.client,
+            ...client,
             userType: 'client'
           });
-          storage.setItem('clientData', JSON.stringify(data.client));
+          storage.setItem('clientData', JSON.stringify(client));
+        } else if (response.status === 403) {
+          // Client is disabled or access denied - sign out
+          storage.removeItem(ACCESS_TOKEN);
+          storage.removeItem(CLIENT_ACCESS_TOKEN);
+          storage.removeItem('userType');
+          storage.removeItem('clientData');
+          setCurrentUser(null);
+          setLoading(false);
+          // Redirect to login if on platform route
+          if (typeof window !== 'undefined' && window.location.pathname.startsWith('/platform')) {
+            window.location.href = '/login';
+          }
+          return;
         } else if (!clientData) {
           // Only fail hard if we had no cached clientData at all
           throw new Error('Failed to get client data');

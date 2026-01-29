@@ -1120,6 +1120,11 @@ def client_detail(request, client_id):
         if 'annualHouseholdIncome' in request.data:
             client.annual_household_income = to_decimal(request.data.get('annualHouseholdIncome'))
         
+        # Update payment methods
+        if 'paymentMethods' in request.data:
+            payment_methods = get_list(request.data.get('paymentMethods'))
+            client.payment_methods = payment_methods
+        
         client.save()
         serializer = ClientSerializer(client, context={'request': request})
         return Response({'client': serializer.data})
@@ -3093,10 +3098,39 @@ def rib_delete(request, rib_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
 def client_ribs(request, client_id):
     """Liste les RIBs d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    
+    # Check authentication manually
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    if token and token.startswith('client_'):
+        # Client token validation
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
     client_ribs = ClientRIB.objects.filter(client=client).select_related('rib')
     serializer = ClientRIBSerializer(client_ribs, many=True)
     return Response({'ribs': serializer.data})
@@ -4219,72 +4253,25 @@ def client_transaction_create(request, client_id):
                     fx_rate_eur_to_asset = None
                     invested_amount_asset_currency = None
 
-                # Try to create asset-only Position (preferred).
-                # If DB schema hasn't been migrated yet and product_id is still NOT NULL,
-                # fallback to a hidden "Trading Wallet" product.
-                try:
-                    Position.objects.create(
-                        id=position_id,
-                        client=client,
-                        product=None,
-                        transaction=transaction,
-                        asset=asset_obj,
-                        period_index=0,
-                        period_date=transaction_datetime.date(),
-                        invested_amount=Decimal(str(request.data.get('amount') or 0)),
-                        entry_price=entry_price,
-                        quantity=quantity,
-                        fx_rate_eur_to_asset=fx_rate_eur_to_asset,
-                        invested_amount_asset_currency=invested_amount_asset_currency,
-                        opened_at=transaction_datetime,
-                        closed_at=None,
-                        profit_loss=None,
-                        status='pending',
-                    )
-                except Exception as pos_create_err:
-                    # Only fallback on the known "product_id cannot be null" constraint
-                    msg = str(pos_create_err).lower()
-                    if 'product' not in msg or 'null' not in msg:
-                        raise
-
-                    trading_product = Product.objects.filter(reference='TRADING_WALLET').first()
-                    if not trading_product:
-                        trading_product_id = uuid.uuid4().hex[:12]
-                        while Product.objects.filter(id=trading_product_id).exists():
-                            trading_product_id = uuid.uuid4().hex[:12]
-                        trading_product = Product.objects.create(
-                            id=trading_product_id,
-                            name='Trading wallet',
-                            reference='TRADING_WALLET',
-                            type='Trading',
-                            subcategory='',
-                            status='Inactif',
-                            price=Decimal('0'),
-                            profitability=Decimal('0'),
-                            duration='',
-                            description='Produit technique (ne pas afficher).',
-                            active=False,
-                            show_on_launch='Non',
-                        )
-
-                    Position.objects.create(
-                        id=position_id,
-                        client=client,
-                        product=trading_product,
-                        transaction=transaction,
-                        asset=asset_obj,
-                        period_index=0,
-                        period_date=transaction_datetime.date(),
-                        invested_amount=Decimal(str(request.data.get('amount') or 0)),
-                        entry_price=entry_price,
-                        quantity=quantity,
-                        fx_rate_eur_to_asset=fx_rate_eur_to_asset,
-                        invested_amount_asset_currency=invested_amount_asset_currency,
-                        opened_at=transaction_datetime,
-                        closed_at=None,
-                        profit_loss=None,
-                        status='pending',
-                    )
+                # Create Position for manual trading order (product is NULL for asset-only trades)
+                Position.objects.create(
+                    id=position_id,
+                    client=client,
+                    product=None,
+                    transaction=transaction,
+                    asset=asset_obj,
+                    # period_index and period_date are NULL for manual trading positions
+                    # (we use opened_at/closed_at/created_at instead)
+                    invested_amount=Decimal(str(request.data.get('amount') or 0)),
+                    entry_price=entry_price,
+                    quantity=quantity,
+                    fx_rate_eur_to_asset=fx_rate_eur_to_asset,
+                    invested_amount_asset_currency=invested_amount_asset_currency,
+                    opened_at=transaction_datetime,
+                    closed_at=None,
+                    profit_loss=None,
+                    status='pending',
+                )
     except Exception as trade_err:
         # Don't silently succeed if we can't create the Position for a trade order.
         # Rollback the transaction so we don't debit funds without an order trace.

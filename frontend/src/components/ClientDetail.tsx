@@ -334,6 +334,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         <TabsContent value="misc">
           <ClientMiscTab
             clientId={clientId}
+            client={client}
             clientRibs={clientRibs}
             availableRibs={availableRibs}
             clientUsefulLinks={clientUsefulLinks}

@@ -65,7 +65,23 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                         storage.setItem('clientData', JSON.stringify(data.client));
                         setIsAuthenticated(true);
                         return;
+                    } else {
+                        // Client is disabled or doesn't have platform access - clear session
+                        storage.removeItem(ACCESS_TOKEN);
+                        storage.removeItem(CLIENT_ACCESS_TOKEN);
+                        storage.removeItem('userType');
+                        storage.removeItem('clientData');
+                        setIsAuthenticated(false);
+                        return;
                     }
+                } else if (response.status === 403) {
+                    // Client is disabled or access denied - clear session
+                    storage.removeItem(ACCESS_TOKEN);
+                    storage.removeItem(CLIENT_ACCESS_TOKEN);
+                    storage.removeItem('userType');
+                    storage.removeItem('clientData');
+                    setIsAuthenticated(false);
+                    return;
                 }
             } catch (error) {
                 console.error('Client authentication error:', error);

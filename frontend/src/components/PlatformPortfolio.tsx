@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
@@ -8,6 +9,7 @@ import { useIsMobile } from './ui/use-mobile';
 
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
   const [productsIndex, setProductsIndex] = useState<any[]>([]);
@@ -434,6 +436,13 @@ export function PlatformPortfolio() {
   }, [transactions]);
 
   const mergedHoldingsTableRows = useMemo(() => {
+    // Create assets map locally for this useMemo (matching PlatformDashboard pattern)
+    const assetsMap = new Map<string, any>();
+    for (const a of assetsIndex || []) {
+      const id = a?.id != null ? String(a.id) : '';
+      if (id) assetsMap.set(id, a);
+    }
+
     type Row =
       | {
           kind: 'asset';
@@ -473,7 +482,7 @@ export function PlatformPortfolio() {
     const rows: Row[] = [];
 
     for (const h of assetHoldings || []) {
-      const asset = assetsById.get(String(h.assetId)) || null;
+      const asset = assetsMap.get(String(h.assetId)) || null;
       const logoUrl = String(asset?.logoUrl || asset?.logo_url || h.logoUrl || '').trim();
       const currency = String(asset?.currency || h.assetCurrency || '').trim().toUpperCase();
       const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
@@ -567,7 +576,7 @@ export function PlatformPortfolio() {
       if (ta !== tb) return tb - ta;
       return a.kind === b.kind ? 0 : a.kind === 'asset' ? -1 : 1;
     });
-  }, [assetHoldings, investedProducts, assetsById, productsById, investedByAssetFromTransactions]);
+  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -664,27 +673,108 @@ export function PlatformPortfolio() {
   );
 
   const profitLoss = useMemo(() => {
-    let total = 0;
-    for (const p of visiblePositions || []) {
-      if (p?.status !== 'open' && p?.status !== 'done') continue;
+    // Profit/Loss basé sur:
+    // 1. Les transactions (interets, frais, perte)
+    // 2. Toutes les positions de trading (open, done, et cancelled si elles ont un profit_loss)
+    
+    // Create assets map locally for this useMemo (matching PlatformDashboard pattern)
+    const assetsMap = new Map<string, any>();
+    for (const a of assetsIndex || []) {
+      const id = a?.id != null ? String(a.id) : '';
+      if (id) assetsMap.set(id, a);
+    }
+    
+    // Commencer avec le profit/loss des transactions
+    let total = calculatedValues.hasCompletedTransactions ? calculatedValues.profitLoss : 0;
+    
+    // Ajouter le profit/loss des positions de trading
+    for (const p of positions || []) {
+      // Inclure les positions ouvertes, terminées, annulées, et pending avec profit_loss
+      // Exclure seulement les positions pending sans profit_loss
+      if (p?.status === 'pending' && (p?.profit_loss == null || p?.profit_loss === '')) continue;
+      // Inclure open, done, cancelled, et pending (les pending sans profit_loss ont déjà été exclus ci-dessus)
+      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled' && p?.status !== 'pending') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
       const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
       const expectedTotalNum =
         p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+      
+      // Récupérer la devise de l'actif et le taux de change
+      const assetId = p?.assetId || p?.asset_id || p?.asset?.id || null;
+      const asset = assetId ? assetsMap.get(String(assetId)) : null;
+      const assetCurrency = (p?.assetCurrency || p?.asset_currency || p?.asset?.currency || asset?.currency || 'EUR').trim().toUpperCase();
+      const fxNum =
+        p?.fx_rate_eur_to_asset == null
+          ? null
+          : typeof p.fx_rate_eur_to_asset === 'string'
+            ? parseFloat(p.fx_rate_eur_to_asset)
+            : Number(p.fx_rate_eur_to_asset);
+      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
 
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
-        positionPnl = profitLossNum;
+        // Si le profit_loss est dans une devise différente de EUR, convertir en EUR
+        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+          // profit_loss est en devise de l'actif, convertir en EUR: EUR = asset_ccy / fx_rate_eur_to_asset
+          positionPnl = profitLossNum / fxRate;
+        } else {
+          // Déjà en EUR ou pas de taux de change disponible
+          positionPnl = profitLossNum;
+        }
       } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        // Calculer le P&L à partir de expected_total et invested_amount
+        // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
         positionPnl = expectedTotalNum - investedNum;
+      } else if (p?.status === 'open' && assetId && asset) {
+        // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
+        const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+        const qtyNum = p?.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+        const investedAssetNum =
+          p?.invested_amount_asset_currency == null
+            ? null
+            : typeof p.invested_amount_asset_currency === 'string'
+              ? parseFloat(p.invested_amount_asset_currency)
+              : Number(p.invested_amount_asset_currency);
+        
+        const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+        const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
+        const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) && investedAssetNum > 0 ? investedAssetNum : null;
+        
+        // Prix actuel de l'actif
+        const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+        const currentPriceNum =
+          currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+        const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+        
+        if (currentPrice != null && qty > 0) {
+          // Calculer le P&L en devise de l'actif
+          let pnlAsset = 0;
+          if (investedAsset != null && investedAsset > 0) {
+            // Utiliser invested_amount_asset_currency si disponible
+            const marketValue = qty * currentPrice;
+            pnlAsset = marketValue - investedAsset;
+          } else if (entryPrice != null && entryPrice > 0) {
+            // Sinon utiliser entry_price
+            const marketValue = qty * currentPrice;
+            const costBasis = qty * entryPrice;
+            pnlAsset = marketValue - costBasis;
+          }
+          
+          // Convertir en EUR si nécessaire
+          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+            positionPnl = pnlAsset / fxRate;
+          } else {
+            positionPnl = pnlAsset;
+          }
+        }
       }
 
       total += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
     return total;
-  }, [visiblePositions]);
+  }, [positions, calculatedValues, assetsIndex]);
 
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
@@ -694,6 +784,115 @@ export function PlatformPortfolio() {
     [availableFunds, tradingPortfolio, profitLoss]
   );
   const isProfit = profitLoss >= 0;
+
+  // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
+  const allocationByType = useMemo(() => {
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+
+    const productTypeById = (productId: any): string | null => {
+      if (!productId) return null;
+      const id = String(productId);
+      const p = (productsIndex || []).find((x: any) => String(x?.id) === id);
+      return (p?.type || p?.subcategory || p?.categoryName || p?.category || null) as any;
+    };
+
+    const assetTypeById = (assetId: any): string | null => {
+      if (!assetId) return null;
+      const id = String(assetId);
+      const a = (assetsIndex || []).find((x: any) => String(x?.id) === id);
+      return (a?.type || a?.subcategory || null) as any;
+    };
+
+    const resolveTypeLabel = (t: any, fallbackProductId?: any): string => {
+      // 1) If transaction references an asset, prefer its type
+      const assetType = assetTypeById(t?.assetId || t?.asset_id || t?.asset) || assetTypeById(t?.asset?.id);
+      if (assetType) return String(assetType);
+
+      // 2) If transaction references a product, use product.type
+      const pid = t?.productId || t?.product_id || t?.product?.id || fallbackProductId || null;
+      const productType = productTypeById(pid);
+      if (productType) return String(productType);
+
+      // 3) Fallback to subscription_details.category when available
+      const cat = t?.subscription_details?.category || t?.category || null;
+      if (cat) return String(cat);
+
+      return 'Autre';
+    };
+
+    const totals = new Map<string, number>();
+
+    for (const t of completedTransactions) {
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amount = Number.isFinite(amountNum) ? amountNum : 0;
+      if (!amount) continue;
+
+      // Transfer direction fields can come from several aliases
+      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+
+      // What counts for "portfolio allocation" is the product/asset side, not deposits/withdrawals.
+      // - transfert: balance → product (invest) / product → balance (withdraw)
+      // - achat / investissement: invest
+      // - vente: disinvest (if resolvable)
+      let delta = 0;
+      let typeLabel: string | null = null;
+
+      if (t?.type === 'transfert') {
+        if (to && String(to) !== 'balance') {
+          // balance -> product
+          delta = amount;
+          typeLabel = resolveTypeLabel(t, to);
+        } else if (to && String(to) === 'balance') {
+          // product -> balance
+          const productId = from && String(from) !== 'balance' ? from : t?.productId || null;
+          delta = -amount;
+          typeLabel = resolveTypeLabel(t, productId);
+        } else {
+          // Best-effort fallback: treat as investment into linked product
+          delta = amount;
+          typeLabel = resolveTypeLabel(t);
+        }
+      } else if (t?.type === 'achat' || t?.type === 'investissement') {
+        delta = amount;
+        typeLabel = resolveTypeLabel(t);
+      } else if (t?.type === 'vente') {
+        delta = -amount;
+        typeLabel = resolveTypeLabel(t);
+      } else {
+        continue;
+      }
+
+      const key = String(typeLabel || 'Autre');
+      totals.set(key, (totals.get(key) || 0) + delta);
+    }
+
+    // Ajouter la balance (fonds disponibles)
+    const cash = Math.max(0, availableFunds);
+    if (cash > 0) {
+      totals.set('Balance', (totals.get('Balance') || 0) + cash);
+    }
+
+    // Clamp negatives to 0 (cannot display negative allocation)
+    const items = Array.from(totals.entries())
+      .map(([type, value]) => ({ type, value: Math.max(0, value) }))
+      .filter((it) => it.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    const total = items.reduce((sum, it) => sum + it.value, 0);
+
+    const palette = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#64748b'];
+    const colorForIndex = (i: number) => palette[i % palette.length];
+
+    return {
+      total,
+      segments: items.map((it, idx) => ({
+        ...it,
+        pct: total > 0 ? (it.value / total) * 100 : 0,
+        color: colorForIndex(idx),
+      })),
+    };
+  }, [transactions, productsIndex, assetsIndex, availableFunds]);
 
   return (
     <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
@@ -758,6 +957,55 @@ export function PlatformPortfolio() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div style={{ marginTop: 6, fontSize: 13, color: isProfit ? '#10b981' : '#ef4444' }}>
+                  {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                </div>
+
+                {allocationByType.total > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div
+                      style={{
+                        width: '100%',
+                        height: 12,
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                        backgroundColor: '#eef2f7',
+                        display: 'flex',
+                      }}
+                      aria-label="Répartition du portefeuille par type d'actif"
+                    >
+                      {allocationByType.segments.map((seg) => (
+                        <div
+                          key={seg.type}
+                          title={`${seg.type} • ${seg.pct.toFixed(0)}%`}
+                          style={{
+                            width: `${seg.pct}%`,
+                            backgroundColor: seg.color,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        fontSize: 12,
+                        color: '#6b7280',
+                      }}
+                    >
+                      {allocationByType.segments.slice(0, 6).map((seg) => (
+                        <div key={seg.type} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: seg.color }} />
+                          <span>
+                            {seg.type} {seg.pct.toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">Valeur totale actuelle</p>
               </CardContent>
             </Card>
@@ -772,7 +1020,6 @@ export function PlatformPortfolio() {
             <CardContent>
               <div style={{ display: 'grid', gap: 18 }}>
                 <div>
-                  <div style={{ fontWeight: 800, marginBottom: 8 }}>Mes actifs</div>
                   {mergedHoldingsTableRows.length === 0 ? (
                     <p>Aucun actif détenu</p>
                   ) : (
@@ -780,7 +1027,7 @@ export function PlatformPortfolio() {
                       <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actifs</th>
+                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
                             <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
                             <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
                             <th style={{ textAlign: 'left', padding: '10px 8px', whiteSpace: 'nowrap' }}>Dernière ouverture</th>
@@ -840,7 +1087,27 @@ export function PlatformPortfolio() {
                                       <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f3f4f6' }} />
                                     )}
                                     <div style={{ minWidth: 0 }}>
-                                      <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      <div 
+                                        onClick={() => {
+                                          // Extract ID from key (format: "asset-123" or "product-456")
+                                          const id = r.key.split('-').slice(1).join('-');
+                                          navigate(`/platform/product/${id}`);
+                                        }}
+                                        style={{ 
+                                          fontWeight: 700, 
+                                          whiteSpace: 'nowrap', 
+                                          overflow: 'hidden', 
+                                          textOverflow: 'ellipsis',
+                                          cursor: 'pointer',
+                                          color: '#2563eb',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          e.currentTarget.style.textDecoration = 'underline';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.textDecoration = 'none';
+                                        }}
+                                      >
                                         {r.name}
                                       </div>
                                     </div>
@@ -986,9 +1253,9 @@ export function PlatformPortfolio() {
                     <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix d'achat</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Quantité</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date d'ouverture</th>
@@ -1014,15 +1281,135 @@ export function PlatformPortfolio() {
                                 ? 'Annulée'
                                 : p.status || '-';
                         const hasAsset = Boolean(p.assetName || p.assetReference || p.assetId || p.asset_id || p.asset?.id);
-                        const productLabel = p.productName || p.productId || (hasAsset ? 'Trading' : '-');
+                        const assetId = p.assetId || p.asset_id || p.asset?.id || null;
+                        const asset = assetId ? assetsById.get(String(assetId)) : null;
+                        
+                        // Pour la colonne "Produit" : afficher le type
+                        // Si asset : utiliser le type de l'actif (action, etf, etc.)
+                        // Si produit interne : utiliser le type du produit (livret, etc.)
+                        let productTypeLabel = '';
+                        if (hasAsset && asset) {
+                          // Asset : utiliser le type de l'actif
+                          productTypeLabel = asset?.type || asset?.category || asset?.subcategory || p.assetType || p.asset_type || 'Trading';
+                        } else if (p.productId) {
+                          // Produit interne : utiliser le type du produit
+                          const product = productsById.get(String(p.productId));
+                          productTypeLabel = p.productType || p.product_type || product?.type || product?.subcategory || product?.categoryName || product?.category || '-';
+                        } else {
+                          productTypeLabel = '-';
+                        }
+                        
                         const assetLabel = p.assetName || p.assetReference || p.assetId || '-';
-                        const productType = p.productType || p.product_type || '';
-                        const typeLabel = productType || (hasAsset ? 'Trading' : '-');
+                        // Référence : asset reference ou product reference
+                        let refLabel = '-';
+                        if (hasAsset && asset) {
+                          refLabel = asset?.reference || asset?.symbol || p.assetReference || p.asset_reference || '-';
+                        } else if (p.productId) {
+                          const product = productsById.get(String(p.productId));
+                          refLabel = p.productReference || p.product_reference || product?.reference || '-';
+                        }
+                        
                         const entryPriceNum =
                           p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
                         const qtyNum =
                           p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
-                        const assetCurrency = p.assetCurrency || p.asset_currency || '';
+                        const assetCurrency = (p.assetCurrency || p.asset_currency || asset?.currency || 'EUR').trim().toUpperCase();
+                        
+                        // Récupérer le taux de change
+                        const fxNum =
+                          p?.fx_rate_eur_to_asset == null
+                            ? null
+                            : typeof p.fx_rate_eur_to_asset === 'string'
+                              ? parseFloat(p.fx_rate_eur_to_asset)
+                              : Number(p.fx_rate_eur_to_asset);
+                        const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+                        
+                        // Calculer le P&L en devise de l'actif et en EUR
+                        let pnlAsset: number | null = null;
+                        let pnlEur: number | null = pnlNum;
+                        
+                        // Si profit_loss est stocké, il est probablement en devise de l'actif
+                        if (pnlNum != null && Number.isFinite(pnlNum)) {
+                          // Si la devise n'est pas EUR, profit_loss est en devise de l'actif
+                          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                            pnlAsset = pnlNum; // P&L en devise de l'actif
+                            pnlEur = pnlNum / fxRate; // Convertir en EUR
+                          } else {
+                            pnlEur = pnlNum; // Déjà en EUR
+                            pnlAsset = null;
+                          }
+                        } else if (p?.status === 'open' && hasAsset && asset && entryPriceNum != null && qtyNum != null && qtyNum > 0) {
+                          // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
+                          const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+                          const currentPriceNum =
+                            currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+                          const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+                          
+                          if (currentPrice != null && entryPriceNum > 0) {
+                            // Calculer le P&L en devise de l'actif
+                            const marketValue = qtyNum * currentPrice;
+                            const costBasis = qtyNum * entryPriceNum;
+                            pnlAsset = marketValue - costBasis;
+                            
+                            // Convertir en EUR si nécessaire
+                            if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                              pnlEur = pnlAsset / fxRate;
+                            } else {
+                              pnlEur = pnlAsset;
+                              pnlAsset = null; // Pas besoin d'afficher deux fois si c'est déjà en EUR
+                            }
+                          }
+                        }
+                        
+                        // Labels pour l'affichage
+                        // Pour les positions non-EUR : afficher devise de l'actif en principal, EUR en secondaire
+                        // Pour les positions EUR : afficher EUR uniquement
+                        let pnlLabelMain: string;
+                        let pnlLabelSub: string | null = null;
+                        let finalPnlColor: string;
+                        
+                        if (assetCurrency !== 'EUR' && pnlAsset != null && Number.isFinite(pnlAsset)) {
+                          // Position non-EUR : devise de l'actif en principal
+                          pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
+                          // EUR en secondaire (estimation)
+                          pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) && fxRate != null && fxRate > 0
+                            ? `≈ ${formatCurrency(pnlEur)}`
+                            : null;
+                          // Couleur basée sur le P&L en devise de l'actif
+                          finalPnlColor = pnlAsset >= 0 ? '#10b981' : '#ef4444';
+                        } else {
+                          // Position EUR : EUR uniquement
+                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) 
+                            ? formatCurrency(pnlEur)
+                            : '-';
+                          finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                        }
+                        
+                        // Valeur investie : pour les positions non-EUR, afficher devise de l'actif en principal, EUR en secondaire
+                        const investedAssetNum =
+                          p?.invested_amount_asset_currency == null
+                            ? null
+                            : typeof p.invested_amount_asset_currency === 'string'
+                              ? parseFloat(p.invested_amount_asset_currency)
+                              : Number(p.invested_amount_asset_currency);
+                        
+                        let investedLabelMain: string;
+                        let investedLabelSub: string | null = null;
+                        
+                        if (assetCurrency !== 'EUR' && investedAssetNum != null && Number.isFinite(investedAssetNum)) {
+                          // Position non-EUR : devise de l'actif en principal
+                          investedLabelMain = formatMoney(investedAssetNum, assetCurrency, { maximumFractionDigits: 2 });
+                          // EUR en secondaire (estimation avec taux actuel)
+                          if (fxRate != null && fxRate > 0) {
+                            const investedEurEstimate = investedAssetNum / fxRate;
+                            investedLabelSub = `≈ ${formatCurrency(investedEurEstimate)}`;
+                          }
+                        } else {
+                          // Position EUR : EUR uniquement
+                          investedLabelMain = investedNum != null && Number.isFinite(investedNum)
+                            ? formatCurrency(investedNum)
+                            : '-';
+                        }
                         const entryPriceLabel =
                           entryPriceNum != null && Number.isFinite(entryPriceNum)
                             ? `${entryPriceNum.toLocaleString('fr-FR', { maximumFractionDigits: 8 })}${assetCurrency ? ` ${assetCurrency}` : ''}`
@@ -1039,18 +1426,24 @@ export function PlatformPortfolio() {
                         const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
                         return (
                           <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
                             <td style={{ padding: '10px 8px' }}>{assetLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{typeLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{productTypeLabel}</td>
+                            <td style={{ padding: '10px 8px' }}>{refLabel}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right' }}>{entryPriceLabel}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right' }}>{qtyLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{openedLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{closedLabel}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>
-                              {Number.isFinite(investedNum) ? formatCurrency(investedNum) : '-'}
+                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700 }}>{investedLabelMain}</div>
+                              {investedLabelSub && (
+                                <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{investedLabelSub}</div>
+                              )}
                             </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
-                              {p.profit_loss == null ? '-' : formatCurrency(p.profit_loss)}
+                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700, color: finalPnlColor }}>{pnlLabelMain}</div>
+                              {pnlLabelSub && (
+                                <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{pnlLabelSub}</div>
+                              )}
                             </td>
                             <td style={{ padding: '10px 8px' }}>{statusLabel}</td>
                           </tr>

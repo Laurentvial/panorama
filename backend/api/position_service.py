@@ -274,6 +274,38 @@ def _choose_trade_count(total_amount: Decimal, days: int, window_minutes: int) -
 
     return random.randint(low, high)
 
+def get_or_create_product_for_asset(asset: Asset) -> Product:
+    """
+    Get or create a Product that represents an Asset for trading positions.
+    Uses asset.id as the product reference to ensure one Product per Asset.
+    """
+    # Try to find existing product with reference matching asset ID
+    product = Product.objects.filter(reference=f'ASSET_{asset.id}').first()
+    if product:
+        return product
+    
+    # Create a new Product for this Asset
+    product_id = uuid.uuid4().hex[:12]
+    while Product.objects.filter(id=product_id).exists():
+        product_id = uuid.uuid4().hex[:12]
+    
+    product = Product.objects.create(
+        id=product_id,
+        name=asset.name,
+        reference=f'ASSET_{asset.id}',
+        type='Trading',
+        subcategory=asset.type or '',
+        status='Inactif',
+        price=Decimal('0'),
+        profitability=Decimal('0'),
+        duration='',
+        description=f'Produit technique pour actif: {asset.name}',
+        active=False,
+        show_on_launch='Non',
+    )
+    return product
+
+
 def _extract_product_from_description(description: str) -> Product | None:
     """
     Best-effort inference used when admin edits a transaction but transfer_to/product

@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
+import { Check } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
@@ -19,7 +20,7 @@ export function PlatformTrading() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [movementType, setMovementType] = useState<'depot' | 'retrait'>('depot');
-  const [paymentMethod, setPaymentMethod] = useState<'virement' | 'carte'>('virement');
+  const [paymentMethod, setPaymentMethod] = useState<'virement' | 'carte_bancaire'>('virement');
   const [amount, setAmount] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
@@ -28,6 +29,12 @@ export function PlatformTrading() {
   const [withdrawBic, setWithdrawBic] = useState('');
   const [withdrawBankName, setWithdrawBankName] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [clientRibs, setClientRibs] = useState<any[]>([]);
+  const [pendingAmount, setPendingAmount] = useState<number>(0);
+  const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
+  const [cardDepositDialogOpen, setCardDepositDialogOpen] = useState(false);
+  const [cardDepositSuccess, setCardDepositSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   const tabActiveColor = '#030213';
@@ -42,19 +49,56 @@ export function PlatformTrading() {
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search || '');
-    const movement = params.get('movement');
-    if (movement === 'depot' || movement === 'retrait') {
-      setMovementType(movement);
-    }
-  }, [location.search]);
-
-  useEffect(() => {
     if (currentUser && currentUser.id) {
       loadData();
+      loadClientRibs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  const loadClientRibs = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const ribsResponse = await apiCall(`/api/clients/${currentUser.id}/ribs/`);
+      setClientRibs((ribsResponse as any).ribs || []);
+    } catch (error) {
+      console.error('Error loading client RIBs:', error);
+      setClientRibs([]);
+    }
+  };
+
+  // Get available payment methods from client data
+  const availablePaymentMethods = useMemo(() => {
+    const methods = currentUser?.paymentMethods || [];
+    return methods;
+  }, [currentUser]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || '');
+    const movement = params.get('movement');
+    if (movement === 'depot' && availablePaymentMethods.length > 0) {
+      setMovementType('depot');
+    } else if (movement === 'retrait') {
+      setMovementType('retrait');
+    } else if (movement === 'depot' && availablePaymentMethods.length === 0) {
+      // If depot is requested but not available, default to retrait
+      setMovementType('retrait');
+    }
+  }, [location.search, availablePaymentMethods]);
+
+  // Set default payment method based on available options
+  useEffect(() => {
+    if (movementType === 'depot' && availablePaymentMethods.length > 0) {
+      // If current payment method is not available, switch to first available
+      if (!availablePaymentMethods.includes(paymentMethod)) {
+        setPaymentMethod(availablePaymentMethods[0] as 'virement' | 'carte_bancaire');
+      }
+    }
+    // If no payment methods available and user is on depot tab, switch to retrait
+    if (movementType === 'depot' && availablePaymentMethods.length === 0) {
+      setMovementType('retrait');
+    }
+  }, [availablePaymentMethods, movementType, paymentMethod]);
 
   const loadData = async () => {
     try {
@@ -141,6 +185,21 @@ export function PlatformTrading() {
       return;
     }
 
+    // If deposit with virement, show transfer instructions modal
+    if (movementType === 'depot' && paymentMethod === 'virement') {
+      setPendingAmount(amountNum);
+      setTransferDialogOpen(true);
+      return;
+    }
+
+    // For card payment, show dialog first
+    if (movementType === 'depot' && paymentMethod === 'carte_bancaire') {
+      setPendingAmount(amountNum);
+      setCardDepositDialogOpen(true);
+      return;
+    }
+
+    // This should not happen for deposits (handled above), but keep for safety
     try {
       setSubmitting(true);
       await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
@@ -148,21 +207,75 @@ export function PlatformTrading() {
         body: JSON.stringify({
           type: movementType,
           amount: amountNum,
-          description:
-            movementType === 'depot'
-              ? `Dépôt de fonds (${paymentMethod === 'carte' ? 'Carte bancaire' : 'Virement bancaire'})`
-              : 'Demande de retrait',
-          subscription_details: movementType === 'depot' ? { paymentMethod } : undefined,
+          description: 'Demande de retrait',
           datetime: new Date().toISOString(),
           status: 'en_attente_paiement',
         }),
       });
 
-      toast.success(movementType === 'depot' ? 'Dépôt initié' : 'Demande de retrait envoyée');
+      toast.success('Demande de retrait envoyée');
       setAmount('');
       loadData();
     } catch (error: any) {
       console.error('Error creating funds transaction:', error);
+      toast.error(error?.error || error?.message || 'Erreur lors de la création de la transaction');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirmCardDeposit = async () => {
+    try {
+      setSubmitting(true);
+      const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'depot',
+          amount: pendingAmount,
+          description: 'Dépôt de fonds (Carte bancaire)',
+          subscription_details: { paymentMethod: 'carte_bancaire' },
+          datetime: new Date().toISOString(),
+          status: 'en_attente_paiement',
+        }),
+      });
+
+      setCardDepositSuccess({
+        amount: pendingAmount,
+        transaction: response.transaction || null
+      });
+      setAmount('');
+      loadData();
+    } catch (error: any) {
+      console.error('Error creating card deposit transaction:', error);
+      toast.error(error?.error || error?.message || 'Erreur lors de la création de la transaction');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirmTransfer = async () => {
+    try {
+      setSubmitting(true);
+      const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'depot',
+          amount: pendingAmount,
+          description: 'Dépôt de fonds (Virement bancaire)',
+          subscription_details: { paymentMethod: 'virement' },
+          datetime: new Date().toISOString(),
+          status: 'en_attente_paiement',
+        }),
+      });
+
+      setTransferSuccess({
+        amount: pendingAmount,
+        transaction: response.transaction || null
+      });
+      setAmount('');
+      loadData();
+    } catch (error: any) {
+      console.error('Error creating transfer transaction:', error);
       toast.error(error?.error || error?.message || 'Erreur lors de la création de la transaction');
     } finally {
       setSubmitting(false);
@@ -254,8 +367,12 @@ export function PlatformTrading() {
 
           <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
-              <CardTitle>Dépôt / Retrait</CardTitle>
-              <CardDescription>Déposer ou retirer des fonds</CardDescription>
+              <CardTitle>
+                {availablePaymentMethods.length > 0 ? 'Dépôt / Retrait' : 'Retrait'}
+              </CardTitle>
+              <CardDescription>
+                {availablePaymentMethods.length > 0 ? 'Déposer ou retirer des fonds' : 'Retirer des fonds'}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit}>
@@ -263,7 +380,7 @@ export function PlatformTrading() {
                 <div style={{ marginBottom: 16, borderBottom: `1px solid ${tabBorderColor}` }}>
                   <div style={{ display: 'flex', gap: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     {[
-                      { value: 'depot' as const, label: 'Dépôt' },
+                      ...(availablePaymentMethods.length > 0 ? [{ value: 'depot' as const, label: 'Dépôt' }] : []),
                       { value: 'retrait' as const, label: 'Retrait' },
                     ].map((tab) => (
                       <button
@@ -319,7 +436,7 @@ export function PlatformTrading() {
                     />
                   </div>
 
-                  {movementType === 'depot' && (
+                  {movementType === 'depot' && availablePaymentMethods.length > 0 && (
                     <div style={{ width: isMobile ? '100%' : 260 }}>
                       <Label>Type de paiement</Label>
                       <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
@@ -327,8 +444,12 @@ export function PlatformTrading() {
                           <SelectValue placeholder="Choisir" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="virement">Virement bancaire</SelectItem>
-                          <SelectItem value="carte">Carte bancaire</SelectItem>
+                          {availablePaymentMethods.includes('virement') && (
+                            <SelectItem value="virement">Virement bancaire</SelectItem>
+                          )}
+                          {availablePaymentMethods.includes('carte_bancaire') && (
+                            <SelectItem value="carte_bancaire">Carte bancaire</SelectItem>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
@@ -336,7 +457,11 @@ export function PlatformTrading() {
                 </div>
 
                 <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <Button type="submit" disabled={submitting} variant="platform">
+                  <Button 
+                    type="submit" 
+                    disabled={submitting} 
+                    variant="platform"
+                  >
                     {submitting ? 'Traitement...' : 'Continuer'}
                   </Button>
                 </div>
@@ -430,6 +555,306 @@ export function PlatformTrading() {
                   {submitting ? 'Traitement...' : 'Confirmer le retrait'}
                 </Button>
               </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Transfer Instructions Dialog */}
+          <Dialog
+            open={transferDialogOpen}
+            onOpenChange={(open) => {
+              if (!submitting && !transferSuccess) {
+                setTransferDialogOpen(open);
+                if (!open) {
+                  setTransferSuccess(null);
+                  setPendingAmount(0);
+                }
+              }
+            }}
+          >
+            <DialogContent>
+              {transferSuccess ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 9999,
+                        backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Check size={22} color="#16a34a" />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>Dépôt initié</div>
+                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                        Virement bancaire
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                      <span>Montant</span>
+                      <strong>
+                        {transferSuccess.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      </strong>
+                    </div>
+                    {transferSuccess.transaction && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginTop: 6 }}>
+                        <span>Statut</span>
+                        <strong style={{ color: '#f59e0b' }}>En attente de paiement</strong>
+                      </div>
+                    )}
+                    {transferSuccess.transaction?.id && (
+                      <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>
+                        Référence: <strong>{transferSuccess.transaction.id}</strong>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Prochaines étapes :</div>
+                    <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
+                      <li>Effectuez le virement depuis votre compte bancaire</li>
+                      <li>Le traitement peut prendre 1 à 3 jours ouvrés</li>
+                      <li>Vous recevrez une confirmation une fois le virement traité</li>
+                    </ul>
+                  </div>
+
+                  <DialogFooter style={{ marginTop: 0, paddingTop: 0 }}>
+                    <Button
+                      type="button"
+                      variant="platform"
+                      onClick={() => {
+                        setTransferDialogOpen(false);
+                        setTransferSuccess(null);
+                        setPendingAmount(0);
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      Fermer
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ) : (
+                <>
+                  <DialogHeader>
+                    <DialogTitle>Instructions pour le virement bancaire</DialogTitle>
+                    <DialogDescription>
+                      Veuillez effectuer un virement bancaire en utilisant les informations ci-dessous
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
+                      <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
+                        Montant à virer : {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      </div>
+                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                        Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
+                      </div>
+                    </div>
+
+                    {clientRibs.length === 0 ? (
+                      <div style={{ padding: 12, backgroundColor: '#fef3c7', borderRadius: 6, fontSize: 13, color: '#92400e' }}>
+                        Aucun RIB disponible. Veuillez contacter votre gestionnaire.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: 12 }}>
+                        {clientRibs.map((clientRib: any, index: number) => {
+                          const rib = clientRib.rib;
+                          return (
+                            <div key={clientRib.id} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                              {clientRibs.length > 1 && (
+                                <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#374151' }}>
+                                  RIB {index + 1} {rib.name ? `- ${rib.name}` : ''}
+                                </div>
+                              )}
+                              <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bankCode || '-'}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.branchCode || '-'}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.accountNumber || '-'}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.ribKey || '-'}</span>
+                                </div>
+                                {rib.domiciliation && (
+                                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                                    <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>Domiciliation :</div>
+                                    <div style={{ fontSize: 12, color: '#374151' }}>{rib.domiciliation}</div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                      <div style={{ fontWeight: 600, marginBottom: 6 }}>Important :</div>
+                      <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
+                        <li>Effectuez le virement depuis votre compte bancaire</li>
+                        <li>Utilisez le montant exact indiqué ci-dessus</li>
+                        <li>Le traitement peut prendre 1 à 3 jours ouvrés</li>
+                        <li>Vous recevrez une confirmation une fois le virement traité</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={submitting}
+                      onClick={() => {
+                        setTransferDialogOpen(false);
+                        setPendingAmount(0);
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="platform" 
+                      disabled={submitting || clientRibs.length === 0} 
+                      onClick={confirmTransfer}
+                    >
+                      {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}
+                    </Button>
+                  </DialogFooter>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Card Deposit Dialog */}
+          <Dialog
+            open={cardDepositDialogOpen}
+            onOpenChange={(open) => {
+              if (!submitting && !cardDepositSuccess) {
+                setCardDepositDialogOpen(open);
+                if (!open) {
+                  setCardDepositSuccess(null);
+                  setPendingAmount(0);
+                }
+              }
+            }}
+          >
+            <DialogContent>
+              {cardDepositSuccess ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 9999,
+                        backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Check size={22} color="#16a34a" />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>Dépôt initié</div>
+                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                        Carte bancaire
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                      <span>Montant</span>
+                      <strong>
+                        {cardDepositSuccess.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      </strong>
+                    </div>
+                    {cardDepositSuccess.transaction && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginTop: 6 }}>
+                        <span>Statut</span>
+                        <strong style={{ color: '#f59e0b' }}>En attente de paiement</strong>
+                      </div>
+                    )}
+                    {cardDepositSuccess.transaction?.id && (
+                      <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>
+                        Référence: <strong>{cardDepositSuccess.transaction.id}</strong>
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter style={{ marginTop: 0, paddingTop: 0 }}>
+                    <Button
+                      type="button"
+                      variant="platform"
+                      onClick={() => {
+                        setCardDepositDialogOpen(false);
+                        setCardDepositSuccess(null);
+                        setPendingAmount(0);
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      Fermer
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ) : (
+                <>
+                  <DialogHeader>
+                    <DialogTitle>Confirmation du dépôt par carte bancaire</DialogTitle>
+                    <DialogDescription>
+                      Confirmez le dépôt de {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Information :</div>
+                    <p style={{ margin: 0, lineHeight: 1.6 }}>
+                      Le traitement du paiement par carte bancaire peut prendre quelques minutes. Vous recevrez une confirmation une fois le paiement traité.
+                    </p>
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={submitting}
+                      onClick={() => {
+                        setCardDepositDialogOpen(false);
+                        setPendingAmount(0);
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="platform" 
+                      disabled={submitting} 
+                      onClick={confirmCardDeposit}
+                    >
+                      {submitting ? 'Traitement...' : 'Confirmer le dépôt'}
+                    </Button>
+                  </DialogFooter>
+                </>
+              )}
             </DialogContent>
           </Dialog>
 

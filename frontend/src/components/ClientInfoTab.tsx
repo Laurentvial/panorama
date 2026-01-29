@@ -4,7 +4,6 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Pencil, ChevronDown } from 'lucide-react';
-import { ClientWallet } from './ClientWallet';
 import { ClientManagementInfo } from './ClientManagementInfo';
 import { EditClientManagementModal } from './EditClientManagementModal';
 
@@ -23,9 +22,8 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
 
   return (
     <div className="space-y-6">
-      {/* Two column layout: Personal Info on left, Wallet on right */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
+      {/* Personal Info */}
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Informations personnelles</CardTitle>
           <Button
@@ -119,10 +117,6 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           </div>
         </CardContent>
       </Card>
-
-        {/* Wallet Container */}
-        <ClientWallet client={client} />
-      </div>
 
       
       {/* Client Management Info */}

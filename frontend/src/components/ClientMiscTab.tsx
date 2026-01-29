@@ -1,15 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Trash2, X, CreditCard, Link as LinkIcon } from 'lucide-react';
+import { Checkbox } from './ui/checkbox';
+import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
 
 interface ClientMiscTabProps {
   clientId: string;
+  client: any;
   clientRibs: any[];
   availableRibs: any[];
   clientUsefulLinks: any[];
@@ -19,6 +21,7 @@ interface ClientMiscTabProps {
 
 export function ClientMiscTab({
   clientId,
+  client,
   clientRibs,
   availableRibs,
   clientUsefulLinks,
@@ -27,6 +30,47 @@ export function ClientMiscTab({
 }: ClientMiscTabProps) {
   const [isAddRibDialogOpen, setIsAddRibDialogOpen] = useState(false);
   const [isAddLinkDialogOpen, setIsAddLinkDialogOpen] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
+
+  // Initialize payment methods from client data
+  useEffect(() => {
+    if (client?.paymentMethods) {
+      setPaymentMethods(client.paymentMethods);
+    } else {
+      setPaymentMethods([]);
+    }
+  }, [client]);
+
+  function handlePaymentMethodChange(method: string, checked: boolean | 'indeterminate') {
+    if (checked === true) {
+      setPaymentMethods([...paymentMethods, method]);
+    } else {
+      setPaymentMethods(paymentMethods.filter((m) => m !== method));
+    }
+  }
+
+  async function handleSavePaymentMethods() {
+    setSavingPaymentMethods(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ paymentMethods: paymentMethods }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Méthodes de paiement mises à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving payment methods:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour des méthodes de paiement');
+      // Revert to original values on error
+      if (client?.paymentMethods) {
+        setPaymentMethods(client.paymentMethods);
+      }
+    } finally {
+      setSavingPaymentMethods(false);
+    }
+  }
 
   async function handleAddRib(ribId: string) {
     try {
@@ -98,6 +142,54 @@ export function ClientMiscTab({
 
   return (
     <div className="space-y-6">
+      {/* Payment Methods Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wallet className="w-5 h-5" />
+            Méthodes de paiement
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Sélectionnez les méthodes de paiement disponibles pour le dépôt des fonds
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="virement"
+                  checked={paymentMethods.includes('virement')}
+                  onCheckedChange={(checked) => handlePaymentMethodChange('virement', checked === true)}
+                />
+                <Label htmlFor="virement" className="font-normal cursor-pointer">
+                  Virement
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="carte_bancaire"
+                  checked={paymentMethods.includes('carte_bancaire')}
+                  onCheckedChange={(checked) => handlePaymentMethodChange('carte_bancaire', checked === true)}
+                />
+                <Label htmlFor="carte_bancaire" className="font-normal cursor-pointer">
+                  Carte bancaire
+                </Label>
+              </div>
+            </div>
+            <div className="pt-2">
+              <Button
+                onClick={handleSavePaymentMethods}
+                disabled={savingPaymentMethods}
+                size="sm"
+              >
+                {savingPaymentMethods ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* RIBs Section */}
       <Card>
         <CardHeader>

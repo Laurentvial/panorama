@@ -307,6 +307,9 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['bonus'] = float(ret.get('bonus', 0) or 0)
         # availableFunds is calculated on frontend
         
+        # Méthodes de paiement
+        ret['paymentMethods'] = ret.get('payment_methods', []) or []
+        
         return ret
 
 
@@ -854,6 +857,7 @@ class PositionSerializer(serializers.ModelSerializer):
             return obj.asset.currency if obj.asset else None
         except Exception:
             return None
+
 
 class ProductCategorySerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
