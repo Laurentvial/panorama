@@ -3104,18 +3104,21 @@ def client_ribs(request, client_id):
     """Liste les RIBs d'un client"""
     client = get_object_or_404(Client, id=client_id)
     
-    # Check authentication manually
+    # Check authentication manually - tokens must be in Authorization header only (not query params for security)
     auth_header = request.headers.get('Authorization', '')
-    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    if token and token.startswith('client_'):
+    token = auth_header.replace('Bearer ', '')
+    
+    if token.startswith('client_'):
         # Client token validation
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         if not client.platform_access or not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-    elif auth_header.startswith('Bearer '):
+    else:
         # Try to validate JWT token manually
         from rest_framework_simplejwt.authentication import JWTAuthentication
         jwt_auth = JWTAuthentication()
@@ -3128,8 +3131,6 @@ def client_ribs(request, client_id):
                 return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
         except Exception:
             return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
-    else:
-        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     client_ribs = ClientRIB.objects.filter(client=client).select_related('rib')
     serializer = ClientRIBSerializer(client_ribs, many=True)
