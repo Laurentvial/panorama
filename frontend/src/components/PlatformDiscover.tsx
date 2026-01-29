@@ -71,7 +71,7 @@ export function PlatformDiscover() {
       setAssets(assetsResponse.assets || []);
       // Filtrer les produits actifs uniquement pour la plateforme
       const allProducts = productsResponse?.products || productsResponse || [];
-      const activeProducts = allProducts.filter((p: any) => p.status === 'Actif' && p.active !== false);
+      const activeProducts = allProducts.filter((p: any) => p.status === 'Actif');
       
       // Enrichir les produits avec le nom de la catégorie
       const categoriesData = categoriesResponse?.categories || categoriesResponse || [];

@@ -194,7 +194,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                         <th className="text-left py-3 px-4">Référence</th>
                         <th className="text-left py-3 px-4">Nom</th>
                         <th className="text-left py-3 px-4">Catégorie</th>
-                        <th className="text-left py-3 px-4">Prix</th>
+                        <th className="text-left py-3 px-4">Investissement minimum</th>
+                        <th className="text-left py-3 px-4">Plafond de souscription</th>
                         <th className="text-left py-3 px-4">Rentabilité</th>
                         <th className="text-left py-3 px-4">Durée</th>
                         <th className="text-left py-3 px-4">Statut</th>
@@ -209,11 +210,17 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                           <tr key={product.id} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="py-3 px-4">
                               {product.imageUrl ? (
-                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
+                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-200 bg-slate-100" style={{ position: 'relative' }}>
                                   <img 
                                     src={product.imageUrl} 
                                     alt={product.name || 'Product image'}
-                                    className="w-full h-full object-cover"
+                                    style={{ 
+                                      width: '100%', 
+                                      height: '100%', 
+                                      objectFit: 'cover',
+                                      objectPosition: 'center',
+                                      display: 'block'
+                                    }}
                                     onError={(e) => {
                                       e.currentTarget.style.display = 'none';
                                       const parent = e.currentTarget.parentElement;
@@ -233,22 +240,58 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                             <td className="py-3 px-4">{product.name}</td>
                             <td className="py-3 px-4">
                               {category ? (
-                                <Badge variant="outline">{category.title}</Badge>
+                                <div className="flex flex-col gap-1">
+                                  <Badge variant="outline">{category.title}</Badge>
+                                  {product.subcategory && (
+                                    <span className="text-xs text-slate-500">{product.subcategory}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                product.subcategory ? (
+                                  <span className="text-xs text-slate-500">{product.subcategory}</span>
+                                ) : (
+                                  '-'
+                                )
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {product.minEntryValue ? (
+                                `${product.minEntryValue.toLocaleString('fr-FR')} €`
                               ) : (
                                 '-'
                               )}
                             </td>
-                            <td className="py-3 px-4">{product.price?.toLocaleString('fr-FR')} €</td>
-                            <td className="py-3 px-4 text-green-600">{product.profitability}%</td>
-                            <td className="py-3 px-4">{product.duration || '-'}</td>
+                            <td className="py-3 px-4">
+                              {product.maxEntryValue ? (
+                                `${product.maxEntryValue.toLocaleString('fr-FR')} €`
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-green-600">
+                              {product.isVariableProfitability === 'Oui' && product.variableProfitability ? (
+                                <span>
+                                  {product.profitability}% - {product.variableProfitability}%
+                                </span>
+                              ) : (
+                                product.profitability ? `${product.profitability}%` : '-'
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {product.duration ? (
+                                product.duration.toLowerCase().includes('mois') || product.duration.toLowerCase().includes('month') 
+                                  ? product.duration 
+                                  : `${product.duration} Mois`
+                              ) : '-'}
+                            </td>
                             <td className="py-3 px-4">
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleToggleProductActive(product.id)}
-                                className={product.active ? 'text-green-600' : 'text-red-600'}
+                                className={product.status === 'Actif' ? 'text-green-600' : 'text-red-600'}
                               >
-                                {product.active ? 'Actif' : 'Inactif'}
+                                {product.status === 'Actif' ? 'Actif' : product.status === 'Inactif' ? 'Inactif' : 'Brouillon'}
                               </Button>
                             </td>
                             <td className="py-3 px-4">

@@ -886,12 +886,11 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             'id', 'name', 'reference', 'type', 'categoryId', 'categoryTitle', 'subcategory', 'status', 
-            'price', 'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl', 'active',
+            'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
-            'show_min_profitability', 'interest_period', 'capitalisation_fonds',
+            'interest_period', 'capitalisation_fonds',
             'show_on_launch', 'availability_start', 'availability_end', 'is_savings',
-            'link_to_assets', 'enable_price_variation', 'min_entry_value', 'max_entry_value',
-            'min_price_variation', 'max_price_variation', 'current_price_variation',
+            'link_to_assets', 'min_entry_value', 'max_entry_value',
             'assetAllocations',
             'createdAt', 'updatedAt'
         ]
@@ -955,7 +954,6 @@ class ProductSerializer(serializers.ModelSerializer):
             'isVariableProfitability': 'is_variable_profitability',
             'variableProfitability': 'variable_profitability',
             'profitabilityPeriod': 'profitability_period',
-            'showMinProfitability': 'show_min_profitability',
             'interestPeriod': 'interest_period',
             'capitalisationFonds': 'capitalisation_fonds',
             'showOnLaunch': 'show_on_launch',
@@ -988,11 +986,11 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         # Convert snake_case to camelCase for frontend compatibility
-        ret['noProfitability'] = ret.pop('no_profitability', 'Oui')
+        # no_profitability is now a boolean (True = no profitability, False = has profitability)
+        ret['noProfitability'] = ret.pop('no_profitability', True)
         ret['isVariableProfitability'] = ret.pop('is_variable_profitability', 'Non')
         ret['variableProfitability'] = ret.pop('variable_profitability', '')
         ret['profitabilityPeriod'] = ret.pop('profitability_period', '')
-        ret['showMinProfitability'] = ret.pop('show_min_profitability', 'Non')
         ret['interestPeriod'] = ret.pop('interest_period', '')
         ret['capitalisationFonds'] = ret.pop('capitalisation_fonds', 'Non')
         ret['showOnLaunch'] = ret.pop('show_on_launch', 'Non')

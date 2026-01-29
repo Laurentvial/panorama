@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { ArrowLeft, Save, RefreshCw, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw, Trash2, Plus, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
@@ -37,19 +37,17 @@ export function EditProduct() {
     categoryId: '',
     subcategory: '',
     status: 'Brouillon',
-    price: '',
     profitability: '',
     duration: '',
     description: '',
     cgv: '',
     // Gestion de la rentabilité
-    noProfitability: 'Oui',
+    noProfitability: true, // Par défaut true (pas de rentabilité)
     isVariableProfitability: 'Non', // Rentabilité variable (Oui/Non)
     profitabilityRate: '', // Taux de rentabilité unique (si non variable)
     profitabilityMin: '', // Taux minimum (si variable) - valeur du taux de rentabilité
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
-    showMinProfitability: 'Non',
     interestPeriod: [] as string[],
     capitalisationFonds: 'Non',
     // Gestion du produit
@@ -162,9 +160,16 @@ export function EditProduct() {
       }
       
       // Déterminer si le produit a une rentabilité
-      // Si profitability existe et n'est pas 0/null, alors noProfitability devrait être 'Non'
+      // Si profitability existe et n'est pas 0/null, alors noProfitability devrait être false
       const hasProfitability = profitabilityValue !== '' && parseFloat(profitabilityValue) !== 0;
-      const finalNoProfitability = hasProfitability ? 'Non' : (product.noProfitability || 'Oui');
+      // Convert 'Oui'/'Non' to boolean, or use product.noProfitability if it's already boolean
+      let finalNoProfitability: boolean;
+      if (typeof product.noProfitability === 'boolean') {
+        finalNoProfitability = hasProfitability ? false : product.noProfitability;
+      } else {
+        // Legacy: convert 'Oui'/'Non' to boolean
+        finalNoProfitability = hasProfitability ? false : (product.noProfitability === 'Oui' || product.noProfitability === true);
+      }
       
       // Déterminer isVariableProfitability pour le formulaire
       // Utiliser la valeur du backend si disponible, sinon déduire de isVariable
@@ -189,9 +194,9 @@ export function EditProduct() {
         finalNoProfitability,
         finalIsVariableProfitability,
         variableProfitabilityValue,
-        profitabilityRate: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Non') ? profitabilityValue : '',
-        profitabilityMin: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Oui') ? profitabilityValue : '',
-        profitabilityMax: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Oui') ? variableProfitabilityValue : '',
+        profitabilityRate: (!finalNoProfitability && finalIsVariableProfitability === 'Non') ? profitabilityValue : '',
+        profitabilityMin: profitabilityValue !== '' ? profitabilityValue : '',
+        profitabilityMax: variableProfitabilityValue !== '' ? variableProfitabilityValue : '',
         interestPeriod: processedInterestPeriod,
         interestPeriodRaw: product.interestPeriod,
         interestPeriodType: typeof product.interestPeriod,
@@ -220,7 +225,6 @@ export function EditProduct() {
         categoryId: product.categoryId || '',
         subcategory: product.subcategory || '',
         status: product.status || 'Brouillon',
-        price: product.price?.toString() || '',
         profitability: profitabilityValue,
         duration: product.duration || '',
         description: product.description || '',
@@ -228,12 +232,13 @@ export function EditProduct() {
         noProfitability: finalNoProfitability,
         isVariableProfitability: finalIsVariableProfitability || 'Non', // Ensure it's always 'Oui' or 'Non'
         // Préremplir profitabilityRate si rentabilité fixe (isVariableProfitability === 'Non') et le produit a une rentabilité
-        profitabilityRate: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Non' && profitabilityValue !== '') ? profitabilityValue : '',
-        // Préremplir profitabilityMin et profitabilityMax si rentabilité variable (isVariableProfitability === 'Oui') et le produit a une rentabilité
-        profitabilityMin: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Oui' && profitabilityValue !== '') ? profitabilityValue : '',
-        profitabilityMax: (finalNoProfitability === 'Non' && finalIsVariableProfitability === 'Oui' && variableProfitabilityValue !== '') ? variableProfitabilityValue : '',
+        // finalNoProfitability is boolean: true = no profitability, false = has profitability
+        profitabilityRate: (!finalNoProfitability && finalIsVariableProfitability === 'Non' && profitabilityValue !== '') ? profitabilityValue : '',
+        // Always load profitabilityMin and profitabilityMax from database columns (profitability and variable_profitability)
+        // profitability column = minimum rate, variable_profitability column = maximum rate
+        profitabilityMin: profitabilityValue !== '' ? profitabilityValue : '',
+        profitabilityMax: variableProfitabilityValue !== '' ? variableProfitabilityValue : '',
         profitabilityPeriod: product.profitabilityPeriod || '',
-        showMinProfitability: product.showMinProfitability || 'Non',
         interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
         capitalisationFonds: product.capitalisationFonds || 'Non',
         showOnLaunch: product.showOnLaunch || 'Non',
@@ -349,7 +354,7 @@ export function EditProduct() {
         body: JSON.stringify({
           name: formData.name,
           categoryId: formData.categoryId,
-          price: formData.price,
+          minEntryValue: formData.minEntryValue,
           profitability: profitabilityText
         })
       });
@@ -357,7 +362,7 @@ export function EditProduct() {
     } catch (error) {
       const parts: string[] = [];
       if (formData.name) parts.push(`Le produit "${formData.name}"`);
-      if (formData.price) parts.push(`avec un prix de ${formData.price}€`);
+      if (formData.minEntryValue) parts.push(`avec un investissement minimum de ${formData.minEntryValue}€`);
       const profitabilityText = formData.isVariableProfitability === 'Non' 
         ? formData.profitabilityRate 
         : `${formData.profitabilityMin}% - ${formData.profitabilityMax}%`;
@@ -387,7 +392,7 @@ export function EditProduct() {
 Les présentes conditions générales de vente régissent la commercialisation du produit "${formData.name || 'd\'investissement'}".
 
 2. CARACTÉRISTIQUES DU PRODUIT
-• Prix: ${formData.price || 'Non défini'}€
+${formData.minEntryValue ? `• Investissement minimum: ${formData.minEntryValue}€` : ''}
 • Rentabilité: ${formData.profitability || 'Non définie'}%
 ${formData.duration ? `• Durée: ${formData.duration}` : ''}
 
@@ -452,7 +457,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
       return;
     }
 
-    if (formData.noProfitability === 'Non') {
+    if (!formData.noProfitability) {
       if (!formData.duration) {
         toast.error('La durée est requise pour un produit avec rentabilité');
         setLoading(false);
@@ -488,7 +493,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
       let profitabilityValue: number | undefined = undefined;
       let variableProfitabilityValue: string | undefined = undefined;
       
-      if (formData.noProfitability === 'Non') {
+      if (!formData.noProfitability) {
         if (formData.isVariableProfitability === 'Non') {
           // Rentabilité fixe : utiliser profitabilityRate
           profitabilityValue = parseFloat(formData.profitabilityRate);
@@ -512,7 +517,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         // Always send subcategory, even if empty
         formDataToSend.append('subcategory', formData.subcategory || '');
         formDataToSend.append('status', formData.status);
-        formDataToSend.append('price', formData.price);
+        // Price field removed - no longer used in Product model
         // Toujours envoyer profitability si une valeur existe, même si noProfitability est 'Oui'
         // Cela permet de préserver la valeur existante dans la base de données
         if (profitabilityValue !== undefined && !isNaN(profitabilityValue)) {
@@ -536,7 +541,6 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         formDataToSend.append('variableProfitability', variableProfitabilityValue || '');
         // Always send profitabilityPeriod, even if empty
         formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod || '');
-        formDataToSend.append('showMinProfitability', formData.showMinProfitability);
         // Always send interestPeriod, even if empty - join array with comma and space
         formDataToSend.append('interestPeriod', Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : '');
         formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
@@ -593,19 +597,18 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           name: formData.name,
           reference: formData.reference,
           type: typeToSend,
-          price: parseFloat(formData.price),
+          // Price field removed - using minEntryValue instead
           categoryId: formData.categoryId || undefined,
           subcategory: formData.subcategory || '',
           status: formData.status,
           description: formData.description || undefined,
           cgv: formData.cgv || undefined,
-          active: formData.status === 'Actif',
+          // active field removed - using status instead
           // Gestion de la rentabilité
           noProfitability: formData.noProfitability,
           isVariableProfitability: formData.isVariableProfitability || 'Non',
           variableProfitability: variableProfitabilityValue || undefined,
           profitabilityPeriod: formData.profitabilityPeriod || undefined,
-          showMinProfitability: formData.showMinProfitability,
           interestPeriod: formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
           capitalisationFonds: formData.capitalisationFonds,
           duration: formData.duration || undefined,
@@ -952,7 +955,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               value={formData.description}
               onChange={(value) => setFormData({ ...formData, description: value })}
               placeholder="Description détaillée du produit d'investissement..."
-              rows={4}
+              rows={10}
               onGenerateAI={generateAIDescription}
             />
 
@@ -962,7 +965,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               value={formData.cgv}
               onChange={(value) => setFormData({ ...formData, cgv: value })}
               placeholder="Conditions générales de vente du produit..."
-              rows={4}
+              rows={10}
               onGenerateAI={generateAICGV}
             />
 
@@ -970,23 +973,9 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
               <h3 className="text-lg font-semibold text-slate-800">Gestion des prix</h3>
               
-              <div className="space-y-2">
-                <Label htmlFor="product-base-price">Prix de base (€) *</Label>
-                <Input
-                  id="product-base-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  required
-                  placeholder="0.00"
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="product-min-entry-value">Valeur minimum d'entrée (€)</Label>
+                  <Label htmlFor="product-min-entry-value">Investissement minimum (€)</Label>
                   <Input
                     id="product-min-entry-value"
                     type="number"
@@ -998,7 +987,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="product-max-entry-value">Valeur maximum d'entrée (€)</Label>
+                  <Label htmlFor="product-max-entry-value">Plafond de souscription (€)</Label>
                   <Input
                     id="product-max-entry-value"
                     type="number"
@@ -1012,7 +1001,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               </div>
 
               <div className="space-y-4 pt-4 border-t border-slate-300">
-                <h4 className="text-md font-medium text-slate-700">Gestion des variations</h4>
+                <h4 className="text-md font-medium text-slate-700">Gestion des variations (en développement)</h4>
                 
                 <div className="space-y-2">
                   <Label htmlFor="product-enable-price-variation">Activer variation du prix sur le produit</Label>
@@ -1078,25 +1067,22 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
               <h3 className="text-lg font-semibold text-slate-800">Gestion de la rentabilité</h3>
               
               <div className="space-y-2">
-                <Label htmlFor="product-no-profitability">Produit sans rentabilité *</Label>
-                <Select 
-                  value={formData.noProfitability} 
-                  onValueChange={(value) => setFormData({ ...formData, noProfitability: value })}
-                >
-                  <SelectTrigger id="product-no-profitability">
-                    <SelectValue placeholder="Sélectionner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Oui">Oui</SelectItem>
-                    <SelectItem value="Non">Non</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="product-no-profitability"
+                    checked={formData.noProfitability}
+                    onCheckedChange={(checked) => setFormData({ ...formData, noProfitability: checked === true })}
+                  />
+                  <Label htmlFor="product-no-profitability" className="cursor-pointer">
+                    Produit sans rentabilité
+                  </Label>
+                </div>
               </div>
 
-              {formData.noProfitability === 'Non' && (
+              {!formData.noProfitability && (
                 <div className="space-y-4 pl-4 border-l-2 border-slate-200">
                   <div className="space-y-2">
-                    <Label htmlFor="product-duration-profitability">Durée *</Label>
+                    <Label htmlFor="product-duration-profitability">Durée (en mois) *</Label>
                     <Input
                       id="product-duration-profitability"
                       value={formData.duration}
@@ -1198,61 +1184,67 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="product-show-min-profitability">Afficher rentabilité minimum</Label>
+                    <Label htmlFor="product-interest-period">Période d'intérêt disponible *</Label>
                     <Select 
-                      value={formData.showMinProfitability} 
-                      onValueChange={(value) => setFormData({ ...formData, showMinProfitability: value })}
+                      value=""
+                      onValueChange={(value) => {
+                        if (value) {
+                          // Ensure interestPeriod is always an array
+                          const currentArray = Array.isArray(formData.interestPeriod) 
+                            ? formData.interestPeriod 
+                            : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
+                          
+                          if (!currentArray.includes(value)) {
+                            setFormData({ ...formData, interestPeriod: [...currentArray, value] });
+                          }
+                        }
+                      }}
                     >
-                      <SelectTrigger id="product-show-min-profitability">
-                        <SelectValue placeholder="Sélectionner" />
+                      <SelectTrigger id="product-interest-period">
+                        <SelectValue placeholder="Sélectionner une période" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Oui">Oui</SelectItem>
-                        <SelectItem value="Non">Non</SelectItem>
+                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat']
+                          .filter(option => {
+                            const currentArray = Array.isArray(formData.interestPeriod) 
+                              ? formData.interestPeriod 
+                              : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
+                            return !currentArray.includes(option);
+                          })
+                          .map((option) => (
+                            <SelectItem key={option} value={option}>{option}</SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="product-interest-period">Période d'intérêt disponible *</Label>
-                    <div className="space-y-2 border rounded-md p-4">
-                      {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'].map((option) => (
-                        <div key={option} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`interest-period-${option}`}
-                            checked={(() => {
-                              // Ensure interestPeriod is always an array
-                              const currentArray = Array.isArray(formData.interestPeriod) 
-                                ? formData.interestPeriod 
-                                : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
-                              return currentArray.includes(option);
-                            })()}
-                            onCheckedChange={(checked) => {
-                              // Ensure interestPeriod is always an array
-                              const currentArray = Array.isArray(formData.interestPeriod) 
-                                ? formData.interestPeriod 
-                                : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
-                              
-                              if (checked) {
-                                // Add option if not already present
-                                if (!currentArray.includes(option)) {
-                                  setFormData({ ...formData, interestPeriod: [...currentArray, option] });
-                                }
-                              } else {
-                                // Remove option
-                                setFormData({ ...formData, interestPeriod: currentArray.filter(p => p !== option) });
-                              }
-                            }}
-                          />
-                          <label
-                            htmlFor={`interest-period-${option}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                          >
-                            {option}
-                          </label>
+                    
+                    {(() => {
+                      const currentArray = Array.isArray(formData.interestPeriod) 
+                        ? formData.interestPeriod 
+                        : (formData.interestPeriod ? [String(formData.interestPeriod).trim()] : []);
+                      
+                      return currentArray.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {currentArray.map((period) => (
+                            <div
+                              key={period}
+                              className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-md text-sm border border-slate-200"
+                            >
+                              <span>{period}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updatedArray = currentArray.filter(p => p !== period);
+                                  setFormData({ ...formData, interestPeriod: updatedArray });
+                                }}
+                                className="ml-1 hover:text-red-600 transition-colors"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-2">
@@ -1276,7 +1268,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             {/* Gestion du produit */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Gestion du produit</h3>
+              <h3 className="text-lg font-semibold text-slate-800">Gestion du produit (en développement)</h3>
               
               <div className="space-y-2">
                 <Label htmlFor="product-show-on-launch">Afficher au lancement du produit</Label>
@@ -1331,7 +1323,12 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
+            {/* Lier le produit à des actifs */}
+            <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-800">Lier le produit à des actifs</h3>
+              
               <div className="space-y-2">
                 <Label htmlFor="product-link-to-assets">Lie le produit à des actifs</Label>
                 <Select 

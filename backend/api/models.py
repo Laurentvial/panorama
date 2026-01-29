@@ -516,20 +516,17 @@ class Product(models.Model):
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
     subcategory = models.CharField(max_length=200, default="", blank=True)  # Sous-catégorie
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Brouillon')  # Statut du produit
-    price = models.DecimalField(max_digits=15, decimal_places=2, default=0)  # Prix du produit
     profitability = models.DecimalField(max_digits=10, decimal_places=2, default=0, null=True, blank=True)  # Rentabilité en %
     duration = models.CharField(max_length=100, default="", blank=True)  # Durée (ex: "12 mois")
     description = models.TextField(default="", blank=True)  # Description du produit
     cgv = models.TextField(default="", blank=True)  # Conditions Générales de Vente
     image = models.ImageField(upload_to='products/', storage=product_storage, null=True, blank=True)  # Image du produit
-    active = models.BooleanField(default=True)  # Si le produit est actif
     
     # Gestion de la rentabilité
-    no_profitability = models.CharField(max_length=10, default='Oui')  # Produit sans rentabilité (Oui/Non)
+    no_profitability = models.BooleanField(default=True)  # Produit sans rentabilité (True = pas de rentabilité, False = avec rentabilité)
     is_variable_profitability = models.CharField(max_length=10, default='Non')  # Rentabilité variable (Oui/Non)
     variable_profitability = models.CharField(max_length=100, default="", blank=True)  # Taux maximum si variable, sinon vide
     profitability_period = models.CharField(max_length=50, default="", blank=True)  # Période de rentabilité
-    show_min_profitability = models.CharField(max_length=10, default='Non')  # Afficher rentabilité minimum (Oui/Non)
     interest_period = models.CharField(max_length=50, default="", blank=True)  # Période d'intérêt disponible
     capitalisation_fonds = models.CharField(max_length=10, default='Non')  # Capitalisation des fonds (Oui/Non)
     
@@ -541,12 +538,8 @@ class Product(models.Model):
     link_to_assets = models.CharField(max_length=10, default='Non')  # Lie le produit à des actifs (Oui/Non)
     
     # Gestion des prix
-    enable_price_variation = models.CharField(max_length=10, default='Non')  # Activer variation du prix (Oui/Non)
     min_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur minimum d'entrée
     max_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur maximum d'entrée
-    min_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation minimum
-    max_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation maximum
-    current_price_variation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Variation actuelle
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

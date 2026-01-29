@@ -73,7 +73,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
 
         const productsList = ((productsRes as any)?.products || productsRes || []) as any[];
         const activeProducts = Array.isArray(productsList)
-          ? productsList.filter((p: any) => p?.status === 'Actif' && p?.active !== false)
+          ? productsList.filter((p: any) => p?.status === 'Actif')
           : [];
 
         const assetsList = ((assetsRes as any)?.assets || assetsRes || []) as any[];

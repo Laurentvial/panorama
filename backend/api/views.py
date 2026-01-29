@@ -4692,7 +4692,7 @@ def product_create(request):
         except (ValueError, TypeError):
             pass
     
-    # Handle profitability - can be None if noProfitability is 'Oui'
+    # Handle profitability - can be None if noProfitability is True
     profitability = request.data.get('profitability')
     if profitability is not None:
         try:
@@ -4700,12 +4700,13 @@ def product_create(request):
         except (ValueError, TypeError):
             profitability = None
     
-    # Handle boolean conversion from FormData (FormData sends strings)
-    active_value = request.data.get('active', True)
-    if isinstance(active_value, str):
-        active_value = active_value.lower() == 'true'
+    # Handle no_profitability boolean conversion
+    no_profitability_value = request.data.get('noProfitability', True)
+    if isinstance(no_profitability_value, str):
+        # Convert 'Oui'/'Non' or 'true'/'false' to boolean
+        no_profitability_value = no_profitability_value.lower() in ['oui', 'true', '1']
     else:
-        active_value = bool(active_value)
+        no_profitability_value = bool(no_profitability_value)
     
     is_savings_value = request.data.get('isSavings', False)
     if isinstance(is_savings_value, str):
@@ -4724,18 +4725,15 @@ def product_create(request):
         category=category,
         subcategory=subcategory_value,
         status=request.data.get('status', 'Brouillon'),
-        price=request.data.get('price', 0),
         profitability=profitability,
         duration=request.data.get('duration', ''),
         description=request.data.get('description', ''),
         cgv=request.data.get('cgv', ''),
-        active=active_value,
         # Gestion de la rentabilité
-        no_profitability=request.data.get('noProfitability', 'Oui'),
+        no_profitability=no_profitability_value,
         is_variable_profitability=request.data.get('isVariableProfitability', 'Non'),
         variable_profitability=request.data.get('variableProfitability', ''),
         profitability_period=request.data.get('profitabilityPeriod', ''),
-        show_min_profitability=request.data.get('showMinProfitability', 'Non'),
         interest_period=request.data.get('interestPeriod', ''),
         capitalisation_fonds=request.data.get('capitalisationFonds', 'Non'),
         # Gestion du produit
@@ -5013,8 +5011,6 @@ def product_update(request, product_id):
                 return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
         else:
             product.category = None
-    if 'price' in request.data:
-        product.price = request.data['price']
     if 'profitability' in request.data:
         profitability = request.data['profitability']
         # Sauvegarder profitability si une valeur valide est fournie
@@ -5027,23 +5023,19 @@ def product_update(request, product_id):
             except (ValueError, TypeError):
                 # Si la conversion échoue, ne pas modifier la valeur existante
                 pass
-        # Si profitability est explicitement null/undefined et noProfitability est 'Oui', mettre à None
-        elif profitability is None and request.data.get('noProfitability') == 'Oui':
-            product.profitability = None
+        # Si profitability est explicitement null/undefined et noProfitability est True, mettre à None
+        elif profitability is None:
+            no_prof_value = request.data.get('noProfitability', True)
+            if isinstance(no_prof_value, str):
+                no_prof_value = no_prof_value.lower() in ['oui', 'true', '1']
+            if bool(no_prof_value):
+                product.profitability = None
     if 'duration' in request.data:
         product.duration = request.data['duration']
     if 'description' in request.data:
         product.description = request.data['description']
     if 'cgv' in request.data:
         product.cgv = request.data['cgv']
-    if 'active' in request.data:
-        active_value = request.data['active']
-        # Handle both string and boolean values (FormData sends strings)
-        if isinstance(active_value, str):
-            product.active = active_value.lower() == 'true'
-        else:
-            product.active = bool(active_value)
-    
     # Handle image upload or removal
     if 'image' in request.FILES:
         try:
@@ -5171,7 +5163,12 @@ def product_update(request, product_id):
     
     # Gestion de la rentabilité
     if 'noProfitability' in request.data:
-        product.no_profitability = request.data['noProfitability']
+        no_prof_value = request.data['noProfitability']
+        # Handle both string ('Oui'/'Non') and boolean values
+        if isinstance(no_prof_value, str):
+            product.no_profitability = no_prof_value.lower() in ['oui', 'true', '1']
+        else:
+            product.no_profitability = bool(no_prof_value)
     if 'isVariableProfitability' in request.data:
         is_var_prof = request.data['isVariableProfitability']
         # Ensure it's always 'Oui' or 'Non', default to 'Non' if empty or invalid
@@ -5183,8 +5180,6 @@ def product_update(request, product_id):
         product.variable_profitability = request.data['variableProfitability']
     if 'profitabilityPeriod' in request.data:
         product.profitability_period = request.data['profitabilityPeriod'] if request.data['profitabilityPeriod'] else ''
-    if 'showMinProfitability' in request.data:
-        product.show_min_profitability = request.data['showMinProfitability']
     if 'interestPeriod' in request.data:
         interest_period_value = request.data['interestPeriod']
         # Trim whitespace and save, or empty string if None/empty
@@ -5348,7 +5343,14 @@ def product_delete(request, product_id):
 def product_toggle_active(request, product_id):
     """Activer/Désactiver un produit"""
     product = get_object_or_404(Product, id=product_id)
-    product.active = not product.active
+    # Toggle between 'Actif' and 'Inactif' status
+    if product.status == 'Actif':
+        product.status = 'Inactif'
+    elif product.status == 'Inactif':
+        product.status = 'Actif'
+    # If status is 'Brouillon', set to 'Actif'
+    else:
+        product.status = 'Actif'
     product.save()
     serializer = ProductSerializer(product)
     return Response(serializer.data)

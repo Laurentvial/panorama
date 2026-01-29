@@ -340,9 +340,9 @@ export function Placements({ user }: PlacementsProps) {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleToggleProductActive(product.id)}
-                                className={product.active ? 'text-green-600' : 'text-red-600'}
+                                className={product.status === 'Actif' ? 'text-green-600' : 'text-red-600'}
                               >
-                                {product.active ? 'Actif' : 'Inactif'}
+                                {product.status === 'Actif' ? 'Actif' : product.status === 'Inactif' ? 'Inactif' : 'Brouillon'}
                               </Button>
                             </td>
                             <td className="py-3 px-4">

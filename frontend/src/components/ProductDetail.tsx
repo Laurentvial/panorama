@@ -977,7 +977,7 @@ export function ProductDetail() {
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Garantie contractuelle</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {product.noProfitability === 'Non' ? 'Oui' : 'Non'}
+                      {!product.noProfitability ? 'Oui' : 'Non'}
                     </div>
                   </div>
                   

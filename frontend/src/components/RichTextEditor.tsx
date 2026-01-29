@@ -167,13 +167,13 @@ export function RichTextEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        rows={isFocused ? rows : 2}
+        rows={isFocused ? rows : Math.max(4, Math.floor(rows * 0.5))}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
         className={`font-mono text-sm whitespace-pre-wrap resize-y transition-all duration-200 ${
           isFocused 
             ? 'max-h-none overflow-y-auto' 
-            : 'h-16 max-h-16 overflow-hidden'
+            : ''
         }`}
       />
     </div>

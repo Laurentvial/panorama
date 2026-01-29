@@ -296,11 +296,9 @@ def get_or_create_product_for_asset(asset: Asset) -> Product:
         type='Trading',
         subcategory=asset.type or '',
         status='Inactif',
-        price=Decimal('0'),
         profitability=Decimal('0'),
         duration='',
         description=f'Produit technique pour actif: {asset.name}',
-        active=False,
         show_on_launch='Non',
     )
     return product
