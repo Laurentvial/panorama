@@ -63,6 +63,15 @@ class Client(models.Model):
     nationality = models.CharField(max_length=100, default="", blank=True)
     successor = models.CharField(max_length=200, default="", blank=True)
 
+    # KYC Documents (client platform)
+    identity_document = models.ImageField(upload_to='kyc/identity/', storage=client_profile_storage, null=True, blank=True)  # ID card, passport, driver's license (recto)
+    identity_document_verso = models.ImageField(upload_to='kyc/identity/', storage=client_profile_storage, null=True, blank=True)  # ID card verso (back side)
+    proof_of_address = models.ImageField(upload_to='kyc/address/', storage=client_profile_storage, null=True, blank=True)  # Utility bill, bank statement, etc.
+    selfie_photo = models.ImageField(upload_to='kyc/selfie/', storage=client_profile_storage, null=True, blank=True)  # Selfie for identity verification
+    kyc_status = models.CharField(max_length=20, default="pending", blank=True)  # pending, submitted, approved, rejected
+    kyc_submitted_at = models.DateTimeField(null=True, blank=True)
+    kyc_reviewed_at = models.DateTimeField(null=True, blank=True)
+
     # Onboarding / Preferences (client platform)
     preferences = models.JSONField(default=list, blank=True)  # ex: ["stocks", "crypto", ...]
 

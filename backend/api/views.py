@@ -1317,6 +1317,77 @@ def client_update_identity(request):
     if 'totalLiquidities' in request.data:
         client.total_liquidities = request.data.get('totalLiquidities', '') or ''
 
+    # Handle KYC document uploads
+    update_fields_list = []
+    if 'identityDocument' in request.FILES:
+        identity_file = request.FILES['identityDocument']
+        try:
+            original_filename = identity_file.name
+            _, ext = os.path.splitext(original_filename)
+            custom_filename = f'{client_id}_identity_recto{ext}'
+            if client.identity_document:
+                client.identity_document.delete(save=False)
+            client.identity_document.save(custom_filename, identity_file, save=False)
+            update_fields_list.append('identity_document')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading identity document: {str(e)}")
+
+    if 'identityDocumentVerso' in request.FILES:
+        identity_verso_file = request.FILES['identityDocumentVerso']
+        try:
+            original_filename = identity_verso_file.name
+            _, ext = os.path.splitext(original_filename)
+            custom_filename = f'{client_id}_identity_verso{ext}'
+            if client.identity_document_verso:
+                client.identity_document_verso.delete(save=False)
+            client.identity_document_verso.save(custom_filename, identity_verso_file, save=False)
+            update_fields_list.append('identity_document_verso')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading identity document verso: {str(e)}")
+
+    if 'proofOfAddress' in request.FILES:
+        address_file = request.FILES['proofOfAddress']
+        try:
+            original_filename = address_file.name
+            _, ext = os.path.splitext(original_filename)
+            custom_filename = f'{client_id}_address{ext}'
+            if client.proof_of_address:
+                client.proof_of_address.delete(save=False)
+            client.proof_of_address.save(custom_filename, address_file, save=False)
+            update_fields_list.append('proof_of_address')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading proof of address: {str(e)}")
+
+    if 'selfiePhoto' in request.FILES:
+        selfie_file = request.FILES['selfiePhoto']
+        try:
+            original_filename = selfie_file.name
+            _, ext = os.path.splitext(original_filename)
+            custom_filename = f'{client_id}_selfie{ext}'
+            if client.selfie_photo:
+                client.selfie_photo.delete(save=False)
+            client.selfie_photo.save(custom_filename, selfie_file, save=False)
+            update_fields_list.append('selfie_photo')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading selfie photo: {str(e)}")
+
+    # Update KYC status when documents are submitted
+    if 'kycStatus' in request.data:
+        client.kyc_status = request.data.get('kycStatus', 'pending') or 'pending'
+        update_fields_list.append('kyc_status')
+        if client.kyc_status == 'submitted' and not client.kyc_submitted_at:
+            from django.utils import timezone
+            client.kyc_submitted_at = timezone.now()
+            update_fields_list.append('kyc_submitted_at')
+
     # If no legal_name provided, try to derive it from name parts
     if not (client.legal_name or '').strip():
         derived = " ".join(
@@ -1352,7 +1423,8 @@ def client_update_identity(request):
     )
     client.account_verified = bool(is_complete)
 
-    client.save(update_fields=[
+    # Build update fields list
+    base_update_fields = [
         'fname', 'middle_name', 'lname', 'legal_name', 'sex', 'birth_date',
         'address', 'postal_code', 'city',
         'preferences',
@@ -1360,7 +1432,9 @@ def client_update_identity(request):
         'compliance_family_flags', 'funds_sources',
         'primary_profession', 'employer_name', 'annual_net_income', 'total_liquidities',
         'account_verified'
-    ])
+    ]
+    all_update_fields = base_update_fields + update_fields_list
+    client.save(update_fields=all_update_fields)
     serializer = ClientSerializer(client, context={'request': request})
     return Response({'client': serializer.data, 'userType': 'client'})
 

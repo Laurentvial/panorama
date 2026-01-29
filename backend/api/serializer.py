@@ -268,6 +268,63 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['employerName'] = ret.get('employer_name', '') or ''
         ret['annualNetIncome'] = ret.get('annual_net_income', '') or ''
         ret['totalLiquidities'] = ret.get('total_liquidities', '') or ''
+        
+        # KYC fields
+        if instance.identity_document:
+            identity_url = instance.identity_document.url
+            if identity_url and (identity_url.startswith('http://') or identity_url.startswith('https://')):
+                ret['identityDocument'] = identity_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    ret['identityDocument'] = request.build_absolute_uri(identity_url) if identity_url else ''
+                else:
+                    ret['identityDocument'] = identity_url if identity_url else ''
+        else:
+            ret['identityDocument'] = ''
+        
+        if instance.identity_document_verso:
+            identity_verso_url = instance.identity_document_verso.url
+            if identity_verso_url and (identity_verso_url.startswith('http://') or identity_verso_url.startswith('https://')):
+                ret['identityDocumentVerso'] = identity_verso_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    ret['identityDocumentVerso'] = request.build_absolute_uri(identity_verso_url) if identity_verso_url else ''
+                else:
+                    ret['identityDocumentVerso'] = identity_verso_url if identity_verso_url else ''
+        else:
+            ret['identityDocumentVerso'] = ''
+        
+        if instance.proof_of_address:
+            address_url = instance.proof_of_address.url
+            if address_url and (address_url.startswith('http://') or address_url.startswith('https://')):
+                ret['proofOfAddress'] = address_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    ret['proofOfAddress'] = request.build_absolute_uri(address_url) if address_url else ''
+                else:
+                    ret['proofOfAddress'] = address_url if address_url else ''
+        else:
+            ret['proofOfAddress'] = ''
+        
+        if instance.selfie_photo:
+            selfie_url = instance.selfie_photo.url
+            if selfie_url and (selfie_url.startswith('http://') or selfie_url.startswith('https://')):
+                ret['selfiePhoto'] = selfie_url
+            else:
+                request = self.context.get('request')
+                if request:
+                    ret['selfiePhoto'] = request.build_absolute_uri(selfie_url) if selfie_url else ''
+                else:
+                    ret['selfiePhoto'] = selfie_url if selfie_url else ''
+        else:
+            ret['selfiePhoto'] = ''
+        
+        ret['kycStatus'] = ret.get('kyc_status', 'pending') or 'pending'
+        ret['kycSubmittedAt'] = ret.get('kyc_submitted_at', None)
+        ret['kycReviewedAt'] = ret.get('kyc_reviewed_at', None)
         ret['birthDate'] = instance.birth_date.isoformat() if instance.birth_date else None
         ret['birthPlace'] = ret.get('birth_place', '') or ''
         ret['address'] = ret.get('address', '') or ''

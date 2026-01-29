@@ -442,8 +442,29 @@ export function PlatformDashboard() {
 
   const { gainers, losers } = getGainersAndLosers();
 
+  // Check completion status for each step
+  const isStep1Completed = (() => {
+    if (!currentUser) return false;
+    const hasIdentity = !!(currentUser.firstName || currentUser.fname) && !!(currentUser.lastName || currentUser.lname) && currentUser.sex && (currentUser.birthDate || currentUser.birth_date);
+    const hasAddress = !!(currentUser.address && currentUser.postalCode && currentUser.city);
+    return hasIdentity && hasAddress;
+  })();
+
+  const isStep2Completed = (() => {
+    if (!currentUser) return false;
+    const hasProfile = !!(currentUser.primaryProfession || currentUser.primary_profession) && !!(currentUser.employerName || currentUser.employer_name) && currentUser.annualNetIncome && currentUser.totalLiquidities;
+    const hasPreferences = Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
+    const hasObjective = !!(currentUser.tradingObjective || currentUser.trading_objective) && !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
+    const hasCompliance = Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
+    const hasFundsSources = Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
+    return hasProfile && hasPreferences && hasObjective && hasCompliance && hasFundsSources;
+  })();
+
+  const isStep3Completed = currentUser?.kycStatus === 'approved' || currentUser?.kycStatus === 'submitted';
+  
   // Check if account is verified (server-side flag computed from all required onboarding fields)
-  const isVerified = Boolean(currentUser?.accountVerified || currentUser?.account_verified);
+  // Also check if KYC step 3 is completed
+  const isVerified = Boolean(currentUser?.accountVerified || currentUser?.account_verified) && isStep3Completed;
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   return (
@@ -466,72 +487,85 @@ export function PlatformDashboard() {
                   marginBottom: isMobile ? '20px' : '25px',
                   overflowX: 'auto',
                 }}>
-                  {/* Step 1 - Completed */}
+                  {/* Step 1 */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
                       height: isMobile ? '32px' : '40px',
                       borderRadius: '50%',
-                      backgroundColor: '#10b981',
+                      backgroundColor: isStep1Completed ? '#10b981' : '#f3f4f6',
+                      border: isStep1Completed ? 'none' : '2px solid #d1d5db',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: 'white',
+                      color: isStep1Completed ? 'white' : '#6b7280',
                       fontWeight: 'bold',
                     }}>
-                      <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
+                      {isStep1Completed ? (
+                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
+                      ) : (
+                        <span style={{ fontSize: isMobile ? '14px' : '16px' }}>1</span>
+                      )}
                     </div>
                     <div style={{
                       width: isMobile ? '40px' : '60px',
                       height: '2px',
-                      backgroundColor: '#d1d5db',
+                      backgroundColor: isStep1Completed ? '#10b981' : '#d1d5db',
                       borderStyle: 'dashed',
                       flexShrink: 0,
                     }}></div>
                   </div>
 
-                  {/* Step 2 - Current */}
+                  {/* Step 2 */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
                       height: isMobile ? '32px' : '40px',
                       borderRadius: '50%',
-                      backgroundColor: 'white',
-                      border: '2px solid #10b981',
+                      backgroundColor: isStep2Completed ? '#10b981' : (isStep1Completed ? 'white' : '#f3f4f6'),
+                      border: isStep2Completed ? 'none' : (isStep1Completed ? '2px solid #10b981' : '2px solid #d1d5db'),
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#111827',
+                      color: isStep2Completed ? 'white' : (isStep1Completed ? '#111827' : '#6b7280'),
                       fontWeight: 'bold',
                       fontSize: isMobile ? '14px' : '16px',
                     }}>
-                      2
+                      {isStep2Completed ? (
+                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
+                      ) : (
+                        '2'
+                      )}
                     </div>
                     <div style={{
                       width: isMobile ? '40px' : '60px',
                       height: '2px',
-                      backgroundColor: '#d1d5db',
+                      backgroundColor: isStep2Completed ? '#10b981' : '#d1d5db',
                       borderStyle: 'dashed',
                       flexShrink: 0,
                     }}></div>
                   </div>
 
-                  {/* Step 3 - Pending */}
+                  {/* Step 3 */}
                   <div style={{ flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
                       height: isMobile ? '32px' : '40px',
                       borderRadius: '50%',
-                      backgroundColor: '#f3f4f6',
-                      border: '2px solid #d1d5db',
+                      backgroundColor: isStep3Completed ? '#10b981' : (isStep2Completed ? 'white' : '#f3f4f6'),
+                      border: isStep3Completed ? 'none' : (isStep2Completed ? '2px solid #10b981' : '2px solid #d1d5db'),
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#6b7280',
+                      color: isStep3Completed ? 'white' : (isStep2Completed ? '#111827' : '#6b7280'),
                       fontWeight: 'bold',
                       fontSize: isMobile ? '14px' : '16px',
                     }}>
-                      3
+                      {isStep3Completed ? (
+                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
+                      ) : (
+                        '3'
+                      )}
                     </div>
                   </div>
                 </div>

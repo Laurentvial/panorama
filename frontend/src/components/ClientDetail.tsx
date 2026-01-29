@@ -15,6 +15,7 @@ import { ClientPositionsTab } from './ClientPositionsTab';
 import { ClientAppointmentsTab } from './ClientAppointmentsTab';
 import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
+import { ClientVerificationTab } from './ClientVerificationTab';
 import '../styles/Clients.css';
 import '../styles/PlanningCalendar.css';
 
@@ -274,6 +275,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="appointments">RDV</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
+          <TabsTrigger value="verification">Vérification</TabsTrigger>
           <TabsTrigger value="misc">Fonctionnalités diverses</TabsTrigger>
         </TabsList>
 
@@ -328,6 +330,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             clientId={clientId}
             onRefresh={loadClientData}
           />
+        </TabsContent>
+
+        {/* Verification Tab */}
+        <TabsContent value="verification">
+          <ClientVerificationTab client={client} />
         </TabsContent>
 
         {/* Misc Tab */}
