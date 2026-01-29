@@ -22,8 +22,6 @@ type PositionRow = {
   opened_at?: string | null;
   closed_at?: string | null;
   invested_amount: number | string;
-  expected_profit?: number | string | null;
-  expected_total?: number | string | null;
   profit_loss?: number | string | null;
   status: 'pending' | 'open' | 'done' | 'cancelled' | string;
   createdAt?: string;
@@ -225,7 +223,6 @@ function PositionsTable({ rows }: { rows: PositionRow[] }) {
             <th className="text-left py-2 px-3">Asset</th>
             <th className="text-left py-2 px-3">Montant</th>
             <th className="text-left py-2 px-3">P&amp;L</th>
-            <th className="text-left py-2 px-3">Total (prévu)</th>
             <th className="text-left py-2 px-3">Statut</th>
             <th className="text-left py-2 px-3">Transaction</th>
           </tr>
@@ -239,12 +236,8 @@ function PositionsTable({ rows }: { rows: PositionRow[] }) {
               <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
               <td className="py-2 px-3">{formatCurrency(p.invested_amount)}</td>
               <td className="py-2 px-3">
-                {formatPnlWithPct(
-                  p.profit_loss != null ? p.profit_loss : p.expected_profit,
-                  p.invested_amount
-                )}
+                {formatPnlWithPct(p.profit_loss, p.invested_amount)}
               </td>
-              <td className="py-2 px-3">{p.expected_total == null ? '-' : formatCurrency(p.expected_total)}</td>
               <td className="py-2 px-3">
                 {p.status === 'pending'
                   ? 'À venir'

@@ -4,7 +4,7 @@ import random
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction as db_transaction
@@ -50,6 +50,9 @@ def _period_months_from_profitability_period(period: str | None) -> int:
     if not period:
         return 1
     p = str(period).strip().lower()
+    # End of contract / maturity (caller should replace with full duration months)
+    if 'fin' in p and ('contrat' in p or 'matur' in p):
+        return 0
     if 'mens' in p or p in {'month', 'mois'}:
         return 1
     if 'trim' in p or p in {'quarter', 'trimestre'}:
@@ -274,6 +277,397 @@ def _choose_trade_count(total_amount: Decimal, days: int, window_minutes: int) -
 
     return random.randint(low, high)
 
+
+def _choose_trade_count_for_duration(total_amount: Decimal, duration_months: int) -> int:
+    """
+    Choose a total number of trade-like positions across an investment duration.
+
+    We want:
+    - A *non-trivial* number of trades even for small tickets (e.g. 2k)
+    - More trades for longer durations
+    - Still bounded to avoid huge DB writes
+    """
+    total_amount = (total_amount or Decimal("0")).quantize(Decimal("0.01"))
+    months = int(duration_months or 0) if duration_months else 0
+    if total_amount <= 0 or months <= 0:
+        return 0
+
+    # Rough heuristic: trades per month based on ticket size.
+    if total_amount < Decimal("5000"):
+        tpm_low, tpm_high = 2, 5
+    elif total_amount < Decimal("20000"):
+        tpm_low, tpm_high = 4, 10
+    else:
+        tpm_low, tpm_high = 6, 14
+
+    trades_per_month = random.randint(tpm_low, tpm_high)
+    desired_total = trades_per_month * months
+    return max(1, min(250, desired_total))
+
+
+def _trading_days_between(start_dt: datetime, end_dt: datetime) -> list[date]:
+    """Return Mon-Fri dates between start_dt and end_dt (inclusive)."""
+    start_day = start_dt.date()
+    end_day = end_dt.date()
+    days_list: list[date] = []
+    d = start_day
+    while d <= end_day:
+        if d.weekday() < 5:
+            days_list.append(d)
+        d += timedelta(days=1)
+    return days_list
+
+
+def _existing_trade_counts(txn_id: str) -> tuple[dict[date, int], int]:
+    """
+    Return (count_by_day, max_period_index) for existing positions of a transaction.
+    """
+    counts: dict[date, int] = {}
+    max_idx = -1
+    qs = Position.objects.filter(transaction_id=txn_id).only("period_date", "period_index")
+    for p in qs.iterator():
+        if p.period_date:
+            counts[p.period_date] = counts.get(p.period_date, 0) + 1
+        if p.period_index is not None:
+            try:
+                max_idx = max(max_idx, int(p.period_index))
+            except Exception:
+                pass
+    return counts, max_idx
+
+
+def _choose_total_trades_with_min_per_day(
+    *,
+    total_amount: Decimal,
+    duration_months: int,
+    trading_days_count: int,
+    max_per_day: int = 3,
+) -> int:
+    """
+    Choose a total number of trades across the duration, but guarantee:
+    - at least 1 trade per tradable day
+    - at most max_per_day per day
+    """
+    if trading_days_count <= 0:
+        return 0
+    base = _choose_trade_count_for_duration(total_amount, duration_months)
+    total = max(trading_days_count, base)
+    total = min(total, trading_days_count * max_per_day)
+    # Safety cap (still allows long durations)
+    total = min(total, 5000)
+    return total
+
+
+def _build_day_targets(trading_days: list[date], total_trades: int, *, max_per_day: int, rng: random.Random) -> dict[date, int]:
+    """
+    Build per-day trade targets such that each day has >=1 and <= max_per_day.
+    """
+    if not trading_days:
+        return {}
+    total_trades = max(len(trading_days), total_trades)
+    total_trades = min(total_trades, len(trading_days) * max_per_day)
+
+    targets: dict[date, int] = {d: 1 for d in trading_days}
+    remaining = total_trades - len(trading_days)
+    if remaining <= 0:
+        return targets
+
+    # Distribute remaining trades randomly across days, capped per day.
+    candidates = list(trading_days)
+    while remaining > 0 and candidates:
+        day = rng.choice(candidates)
+        if targets[day] < max_per_day:
+            targets[day] += 1
+            remaining -= 1
+        else:
+            candidates = [d for d in candidates if targets[d] < max_per_day]
+    return targets
+
+
+def _day_market_window(
+    *,
+    day: date,
+    start_dt: datetime,
+    end_dt: datetime,
+    market_open: time,
+    market_close: time,
+    tz,
+) -> tuple[datetime, datetime] | None:
+    """
+    Compute the tradable window for a given day, considering overall [start_dt, end_dt].
+    """
+    day_open = timezone.make_aware(datetime.combine(day, market_open), tz)
+    day_close = timezone.make_aware(datetime.combine(day, market_close), tz)
+    if day == start_dt.date() and start_dt > day_open:
+        day_open = start_dt
+    if day == end_dt.date() and end_dt < day_close:
+        day_close = end_dt
+    if day_close <= day_open:
+        return None
+    return day_open, day_close
+
+
+def _schedule_trades_for_day(
+    *,
+    day_open: datetime,
+    day_close: datetime,
+    count: int,
+    rng: random.Random,
+) -> list[tuple[datetime, datetime]]:
+    """
+    Create sequential (non-overlapping) [opened_at, closed_at] windows within market hours.
+    """
+    if count <= 0:
+        return []
+    scheduled: list[tuple[datetime, datetime]] = []
+    cursor = day_open
+    for i in range(count):
+        # Leave a random gap (0..45min), but ensure we can still fit at least 5 minutes.
+        gap_minutes = rng.randint(0, 45)
+        opened_at = cursor + timedelta(minutes=gap_minutes)
+        if opened_at >= day_close - timedelta(minutes=5):
+            # Force a minimal trade at the end of the window if none scheduled yet.
+            if not scheduled:
+                opened_at = day_close - timedelta(minutes=5)
+            else:
+                break
+        # duration <= 5h, but must fit before market close
+        duration_minutes = rng.randint(5, 5 * 60)
+        closed_at = opened_at + timedelta(minutes=duration_minutes)
+        if closed_at > day_close:
+            closed_at = day_close
+        if closed_at <= opened_at:
+            continue
+        scheduled.append((opened_at, closed_at))
+        cursor = closed_at
+    # Guarantee at least one if requested count>0
+    if not scheduled and count > 0 and day_close > day_open:
+        scheduled.append((day_close - timedelta(minutes=5), day_close))
+    return scheduled
+
+
+def _choose_annual_profitability_rate(product: Product | None, *, rng: random.Random) -> Decimal:
+    """
+    Pick an annual profitability rate (percent) for the whole transaction.
+    - If variable profitability: pick within [profitability, variable_profitability]
+    - Else: use profitability
+    """
+    if product is None:
+        return Decimal('0')
+    rate_min = _parse_decimal(getattr(product, 'profitability', None)) or Decimal('0')
+    if (getattr(product, 'is_variable_profitability', '') or '').lower() == 'oui':
+        rate_max = _parse_decimal(getattr(product, 'variable_profitability', None))
+        if rate_max is not None and rate_max > rate_min:
+            return Decimal(str(rng.uniform(float(rate_min), float(rate_max))))
+    return rate_min
+
+
+def _weighted_choice_with_rng(items_with_weights: list[tuple[object, Decimal]], rng: random.Random):
+    """Like _weighted_choice, but uses a provided RNG (no global random)."""
+    weights = [float(w if w is not None else Decimal('0')) for _, w in items_with_weights]
+    total = sum(weights)
+    if total <= 0:
+        return items_with_weights[int(rng.random() * len(items_with_weights))][0]
+    r = rng.random() * total
+    upto = 0.0
+    for item, w in items_with_weights:
+        upto += float(w)
+        if upto >= r:
+            return item
+    return items_with_weights[-1][0]
+
+
+def _create_trade_positions_compounding(
+    *,
+    txn: Transaction,
+    product: Product | None,
+    ctx: InvestmentContext,
+    allocations: list[ProductAssetAllocation] | None,
+) -> list[Position]:
+    """
+    Create trade-like positions across the whole duration with:
+    - at least 1 trade per tradable day (Mon-Fri)
+    - market hours only
+    - profitability_period support (mensuel/trimestriel/semestriel/annuel/fin de contrat)
+    - compounding: profits credited at each profitability period boundary
+
+    Idempotent-by-day: it checks existing Position rows for this transaction and only fills missing
+    trades up to the per-day target.
+    """
+    tz = timezone.get_current_timezone()
+    start_dt = txn.datetime or timezone.now()
+    if timezone.is_naive(start_dt):
+        start_dt = timezone.make_aware(start_dt, tz)
+    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+
+    trading_days = _trading_days_between(start_dt, end_dt)
+    if not trading_days:
+        return []
+
+    invested_total = ctx.invested_amount
+    if invested_total <= 0:
+        return []
+
+    max_per_day = 3
+    rng = random.Random(str(txn.id))
+
+    desired_total = _choose_total_trades_with_min_per_day(
+        total_amount=invested_total,
+        duration_months=ctx.duration_months,
+        trading_days_count=len(trading_days),
+        max_per_day=max_per_day,
+    )
+    day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
+
+    existing_counts, max_idx = _existing_trade_counts(ctx.transaction_id)
+    next_idx = max_idx + 1
+
+    # Profitability config
+    annual_rate = _choose_annual_profitability_rate(product, rng=rng)
+    pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
+    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+
+    assets_weighted: list[tuple[object, Decimal]] = []
+    if allocations:
+        assets_weighted = [
+            (a.asset, (a.proportion if a.proportion is not None else Decimal('0')))
+            for a in allocations
+        ]
+
+    created: list[Position] = []
+    capital = invested_total.quantize(Decimal('0.01'))
+    remaining_months = ctx.duration_months
+    cursor_dt = start_dt
+    period_idx = 0
+
+    while remaining_months > 0:
+        step_months = min(profit_period_months, remaining_months)
+        period_end_dt = _add_months_dt(cursor_dt, step_months)
+
+        # Days within this profitability period
+        period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
+        if not period_days:
+            cursor_dt = period_end_dt
+            remaining_months -= step_months
+            period_idx += 1
+            continue
+
+        # Existing realized profit in this period (so reruns remain consistent)
+        existing_profit = Decimal('0.00')
+        for v in Position.objects.filter(
+            transaction_id=ctx.transaction_id,
+            period_date__gte=period_days[0],
+            period_date__lte=period_days[-1],
+        ).values_list('profit_loss', flat=True):
+            if v is None:
+                continue
+            try:
+                existing_profit += Decimal(str(v))
+            except Exception:
+                continue
+
+        # Target profit for this period (annual prorated by months)
+        period_rate = (annual_rate * Decimal(str(step_months)) / Decimal('12')).quantize(Decimal('0.0001'))
+        target_profit = (capital * period_rate / Decimal('100')).quantize(Decimal('0.01'))
+        profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
+
+        # Determine missing trades for each day in this period
+        trade_specs: list[tuple[date, int]] = []
+        for day in period_days:
+            target = day_targets.get(day, 1)
+            existing = existing_counts.get(day, 0)
+            missing = max(0, min(max_per_day, target) - existing)
+            for slot in range(missing):
+                trade_specs.append((day, slot))
+
+        if trade_specs:
+            invested_amounts: list[Decimal] = []
+            for day, slot in trade_specs:
+                amt_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:amt")
+                pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
+                amt = (capital * pct).quantize(Decimal('0.01'))
+                if amt < Decimal('50.00'):
+                    amt = Decimal('50.00')
+                invested_amounts.append(amt)
+
+            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts)
+
+            for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
+                win = _day_market_window(
+                    day=day,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    market_open=market_open,
+                    market_close=market_close,
+                    tz=tz,
+                )
+                if not win:
+                    continue
+                day_open, day_close = win
+
+                time_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:time")
+                windows = _schedule_trades_for_day(day_open=day_open, day_close=day_close, count=1, rng=time_rng)
+                if not windows:
+                    continue
+                opened_at, closed_at = windows[0]
+
+                asset_obj = None
+                if assets_weighted:
+                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
+                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+
+                asset_currency = None
+                fx_rate = None
+                invested_amount_asset_currency = None
+                if asset_obj is not None:
+                    asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
+                    fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
+                    if fx_rate is not None:
+                        try:
+                            invested_amount_asset_currency = (Decimal(str(amt)) * fx_rate).quantize(Decimal('0.00000001'))
+                        except Exception:
+                            invested_amount_asset_currency = None
+
+                position_id = uuid.uuid4().hex[:12]
+                while Position.objects.filter(id=position_id).exists():
+                    position_id = uuid.uuid4().hex[:12]
+
+                created.append(
+                    Position.objects.create(
+                        id=position_id,
+                        client_id=ctx.client_id,
+                        product_id=ctx.product_id,
+                        transaction_id=ctx.transaction_id,
+                        asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                        opened_at=opened_at,
+                        closed_at=closed_at,
+                        invested_amount=amt,
+                        fx_rate_eur_to_asset=fx_rate,
+                        invested_amount_asset_currency=invested_amount_asset_currency,
+                        profit_loss=pnl,
+                        period_index=next_idx,
+                        period_date=opened_at.date(),
+                        status='pending',
+                    )
+                )
+                next_idx += 1
+
+        # Compound at period boundary using realized profit (existing + newly created for this period)
+        new_profit = sum(
+            (p.profit_loss or Decimal('0')) for p in created
+            if p.period_date and period_days[0] <= p.period_date <= period_days[-1]
+        )
+        capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
+
+        cursor_dt = period_end_dt
+        remaining_months -= step_months
+        period_idx += 1
+
+    return created
+
 def get_or_create_product_for_asset(asset: Asset) -> Product:
     """
     Get or create a Product that represents an Asset for trading positions.
@@ -332,8 +726,8 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction) -> l
     Rules (requested):
     - Link each generated position to an Asset linked to the Smart Portfolio (ProductAssetAllocation).
     - If product has no linked assets, do nothing.
-    - Generate positions from txn start datetime until +period (Mensuel=1M, Trimestriel=3M, etc.).
-    - Generate all positions in one run.
+    - Generate positions from txn start datetime until +duration (product/transaction duration).
+    - Generate a random number of positions per day (market hours only).
     - Each position duration <= 5 hours.
     - Total P&L over the period should approximate product profitability (±10%).
     """
@@ -352,121 +746,17 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction) -> l
     if not _is_smart_portfolio(product):
         return []
 
-    # Idempotency: don't generate twice
-    if Position.objects.filter(transaction_id=ctx.transaction_id, asset__isnull=False).exists():
-        return []
-
     allocations = list(
         ProductAssetAllocation.objects.select_related('asset')
         .filter(product_id=product.id)
     )
-    if not allocations:
-        # No linked assets => do not generate positions
-        return []
 
-    # Determine time window
-    start_dt = txn.datetime or timezone.now()
-    if timezone.is_naive(start_dt):
-        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
-
-    months = _period_months_from_profitability_period(product.profitability_period)
-    end_dt = _add_months_dt(start_dt, months)
-
-    # Profitability rate selection
-    rate_min = _parse_decimal(product.profitability) or Decimal('0')
-    rate = rate_min
-    if (product.is_variable_profitability or '').lower() == 'oui':
-        rate_max = _parse_decimal(product.variable_profitability)
-        if rate_max is not None and rate_max > rate_min:
-            # Choose a rate within the allowed range
-            r = Decimal(str(random.uniform(float(rate_min), float(rate_max))))
-            rate = r
-
-    # Total P&L target (±10%)
-    invested_total = ctx.invested_amount
-    target_rate_low = rate * Decimal('0.90')
-    target_rate_high = rate * Decimal('1.10')
-    chosen_rate = Decimal(str(random.uniform(float(target_rate_low), float(target_rate_high))))
-    target_pnl_total = (invested_total * chosen_rate / Decimal('100')).quantize(Decimal('0.01'))
-
-    # Decide how many positions to create (fewer but larger for big tickets), enforce "no overlap"
-    days = max(1, (end_dt.date() - start_dt.date()).days)
-    window_minutes = max(1, int((end_dt - start_dt).total_seconds() // 60))
-    desired = _choose_trade_count(invested_total, days, window_minutes)
-    if desired <= 0:
-        return []
-
-    # Random invested amount per position (sum == txn amount, no reuse of capital)
-    # alpha<1 => spiky: allows a few large trades (better for big tickets)
-    invested_amounts = _split_amount_random(invested_total, desired, alpha=0.5)
-    if not invested_amounts:
-        return []
-
-    # Distribute P&L to match target total while allowing wins/losses, but cap per-position P&L
-    pnl_parts = _distribute_pnl_total_capped(target_pnl_total, invested_amounts)
-
-    # Build positions skeletons with timestamps (sequential => never overlapping)
-    assets_weighted: list[tuple[object, Decimal]] = [
-        (a.asset, (a.proportion if a.proportion is not None else Decimal('0')))
-        for a in allocations
-    ]
-
-    opened_closed: list[tuple[datetime, datetime, object]] = []
-    cursor = start_dt
-    for _ in range(len(invested_amounts)):
-        # random idle gap between trades (0..6h)
-        gap_minutes = random.randint(0, 6 * 60)
-        opened_at = cursor + timedelta(minutes=gap_minutes)
-        if opened_at >= end_dt:
-            break
-
-        # duration <= 5h
-        duration_minutes = random.randint(5, 5 * 60)
-        closed_at = opened_at + timedelta(minutes=duration_minutes)
-        if closed_at > end_dt:
-            closed_at = end_dt
-        if closed_at <= opened_at:
-            closed_at = opened_at + timedelta(minutes=5)
-            if closed_at > end_dt:
-                break
-
-        asset = _weighted_choice(assets_weighted)
-        opened_closed.append((opened_at, closed_at, asset))
-        cursor = closed_at  # sequential: next trade starts after this one closes
-
-    # If we couldn't fit all desired trades, trim amounts/pnl accordingly
-    if not opened_closed:
-        return []
-    if len(opened_closed) != len(invested_amounts):
-        # Re-split (sum == total) and re-distribute pnl to new count
-        invested_amounts = _split_amount_random(invested_total, len(opened_closed), alpha=0.5)
-        pnl_parts = _distribute_pnl_total_capped(target_pnl_total, invested_amounts)
-
-    created: list[Position] = []
-    for i, (opened_at, closed_at, asset) in enumerate(opened_closed):
-        position_id = uuid.uuid4().hex[:12]
-        while Position.objects.filter(id=position_id).exists():
-            position_id = uuid.uuid4().hex[:12]
-
-        created.append(
-            Position.objects.create(
-                id=position_id,
-                client_id=ctx.client_id,
-                product_id=product.id,
-                transaction_id=ctx.transaction_id,
-                asset_id=getattr(asset, 'id', asset),
-                opened_at=opened_at,
-                closed_at=closed_at,
-                invested_amount=invested_amounts[i],
-                profit_loss=pnl_parts[i],
-                period_index=i,
-                period_date=opened_at.date(),
-                # Let the scheduler open/close it based on opened_at/closed_at.
-                status='pending',
-            )
-        )
-
-    return created
+    return _create_trade_positions_compounding(
+        txn=txn,
+        product=product,
+        ctx=ctx,
+        allocations=allocations,
+    )
 
 
 def _parse_months(duration: str | None) -> int:
@@ -489,6 +779,50 @@ def _to_decimal(value) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+def _get_fx_rate_eur_to_ccy(
+    to_currency: str,
+    *,
+    _cache: dict[str, Decimal] = {},
+) -> Decimal | None:
+    """
+    Best-effort FX rate snapshot EUR -> to_currency.
+
+    Used for populating Position.fx_rate_eur_to_asset and Position.invested_amount_asset_currency
+    on generated asset-linked positions.
+
+    - Uses an in-memory cache per process run.
+    - Uses Frankfurter (ECB-based) to avoid API key + rate limits.
+    """
+    ccy = (to_currency or '').strip().upper()
+    if not ccy:
+        return None
+    if ccy == 'EUR':
+        return Decimal('1')
+    if ccy in _cache:
+        return _cache[ccy]
+
+    try:
+        import requests  # type: ignore
+
+        r = requests.get(
+            "https://api.frankfurter.app/latest",
+            params={"from": "EUR", "to": ccy},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            payload = r.json() or {}
+            rate = (payload.get("rates") or {}).get(ccy)
+            if rate is not None:
+                d = Decimal(str(rate))
+                if d > 0:
+                    _cache[ccy] = d
+                    return d
+    except Exception:
+        pass
+
+    return None
 
 
 def build_investment_context(txn: Transaction) -> InvestmentContext | None:
@@ -520,10 +854,21 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     start = date(start.year, start.month, 1)
 
     # Determine duration (months): subscription_details.duration first, fallback to product.duration
-    duration_str = None
+    # Some historical transactions stored "N/A" (or empty) in subscription_details.duration;
+    # in that case we must fall back to the product duration to generate the correct number of periods.
+    duration_candidates: list[str | None] = []
     if isinstance(txn.subscription_details, dict):
-        duration_str = txn.subscription_details.get('duration')
-    duration_str = duration_str or product.duration
+        duration_candidates.append(txn.subscription_details.get('duration'))
+    # Also consider the explicit column (admin edits may fill it).
+    duration_candidates.append(getattr(txn, 'subscription_duration', None) or None)
+    duration_candidates.append(product.duration)
+
+    duration_str: str | None = None
+    for cand in duration_candidates:
+        if cand and _DURATION_RE.search(str(cand)):
+            duration_str = str(cand)
+            break
+
     months = _parse_months(duration_str)
 
     invested_amount = _to_decimal(txn.amount) or Decimal('0')
@@ -558,50 +903,36 @@ def create_positions_for_investment(txn: Transaction) -> list[Position]:
     if ctx is None:
         return []
 
-    # If Smart Portfolio: generate trade positions linked to allocated assets instead.
-    # If no linked assets => do nothing (requested).
+    # New behavior: generate trade-like positions during market hours (random per day).
     product: Product | None = txn.product
     if product is None:
         try:
             product = Product.objects.get(id=ctx.product_id)
         except Product.DoesNotExist:
             product = None
+
+    # For Smart Portfolio, generate asset-linked trades (uses allocations if present).
     if product is not None and _is_smart_portfolio(product):
-        # Generate trade-like Position rows linked to allocated assets.
-        # If no linked assets => returns [] and does nothing.
         return create_trade_positions_for_smart_portfolio_investment(txn)
 
-    created: list[Position] = []
+    # Non-smart internal products: trade-like positions without asset linkage, with profitability_period + compounding.
+    start_dt = txn.datetime or timezone.now()
+    if timezone.is_naive(start_dt):
+        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+    end_dt = _add_months_dt(start_dt, ctx.duration_months)
 
-    # Simple proration: split expected profit/total evenly by month if provided.
-    monthly_profit = None
-    monthly_total = None
-    if ctx.total_expected_profit is not None:
-        monthly_profit = (ctx.total_expected_profit / Decimal(ctx.duration_months)).quantize(Decimal('0.01'))
-    if ctx.total_expected_amount is not None:
-        monthly_total = (ctx.total_expected_amount / Decimal(ctx.duration_months)).quantize(Decimal('0.01'))
+    trading_days = _trading_days_between(start_dt, end_dt)
+    if not trading_days:
+        return []
 
-    for period_index in range(ctx.duration_months):
-        if Position.objects.filter(transaction_id=ctx.transaction_id, period_index=period_index).exists():
-            continue
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+    tz = timezone.get_current_timezone()
 
-        position_id = uuid.uuid4().hex[:12]
-        while Position.objects.filter(id=position_id).exists():
-            position_id = uuid.uuid4().hex[:12]
-
-        position = Position.objects.create(
-            id=position_id,
-            client_id=ctx.client_id,
-            product_id=ctx.product_id,
-            transaction_id=ctx.transaction_id,
-            period_index=period_index,
-            period_date=_add_months(ctx.start_date, period_index),
-            invested_amount=ctx.invested_amount,
-            expected_profit=monthly_profit,
-            expected_total=monthly_total,
-            status='pending',
-        )
-        created.append(position)
-
-    return created
+    return _create_trade_positions_compounding(
+        txn=txn,
+        product=product,
+        ctx=ctx,
+        allocations=None,
+    )
 
