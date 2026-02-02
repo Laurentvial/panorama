@@ -39,24 +39,21 @@ cd backend && python manage.py refresh_external_asset_prices --scope product-ass
 
 ### Étape 3 : Configurer le scheduler
 
-Dans le dashboard Heroku, configurez la commande du scheduler avec l'une des options suivantes :
+Dans le dashboard Heroku, configurez la commande du scheduler avec :
 
-**Option 1 (recommandée - commande directe)** :
 ```
 cd backend && /app/.heroku/python/bin/python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
 ```
 
-**Option 2 (script)** :
-```
-bash refresh_prices.sh
-```
+**Explication** :
+- Le Procfile utilise `cd backend`, donc le code est dans `/app/backend/` lors de l'exécution
+- Le chemin `/app/.heroku/python/bin/python` est le chemin complet vers Python installé par le buildpack
+- Cette commande devrait fonctionner dans le contexte du scheduler
 
-**Option 3 (si Option 1 ne fonctionne pas)** :
+**Alternative (si la commande ci-dessus ne fonctionne pas)** :
 ```
 cd backend && python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
 ```
-
-**Note** : Le scheduler s'exécute dans le contexte du dyno web où le code est disponible. Le Procfile utilise `cd backend`, donc le code devrait être dans `/app/backend/` lors de l'exécution du scheduler.
 
 ### Étape 4 : Vérifier les logs
 

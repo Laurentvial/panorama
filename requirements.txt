@@ -11,6 +11,7 @@ python-dotenv
 dj-database-url
 gunicorn
 google-genai
+django-storages
 django-cloudinary-storage
 cloudinary
 requests
