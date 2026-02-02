@@ -38,10 +38,10 @@ heroku run python manage.py refresh_external_asset_prices --scope product-assets
 Dans le dashboard Heroku, configurez la commande du scheduler :
 
 ```
-python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+cd backend && python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
 ```
 
-**Note** : Après le redéploiement avec le buildpack Python, la commande `python` devrait fonctionner directement (pas besoin de `python3`).
+**Note** : Comme le projet est structuré avec `backend/` et `frontend/` à la racine, il faut faire `cd backend` avant d'exécuter `manage.py`.
 
 ## Alternative : Utiliser le chemin complet
 
