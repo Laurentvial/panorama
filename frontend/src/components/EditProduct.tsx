@@ -679,7 +679,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
-          <p className="text-gray-600">Chargement du produit...</p>
+          <p className="text-accent-foreground">Chargement du produit...</p>
         </div>
       </div>
     );
@@ -936,7 +936,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                     </Button>
                   </div>
                   {currentImageUrl && (
-                    <p className="text-xs text-gray-400 break-all">URL: {currentImageUrl}</p>
+                    <p className="text-xs text-accent-foreground break-all">URL: {currentImageUrl}</p>
                   )}
                 </div>
               ) : (
@@ -950,7 +950,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   />
                 </div>
               )}
-              <p className="text-sm text-gray-500">Formats acceptés: JPG, PNG, GIF (max 5MB)</p>
+              <p className="text-sm text-accent-foreground">Formats acceptés: JPG, PNG, GIF (max 5MB)</p>
             </div>
 
             <RichTextEditor
@@ -975,7 +975,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             {/* Gestion des prix */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Gestion des prix</h3>
+              <h3 className="text-lg font-semibold text-accent-foreground">Gestion des prix</h3>
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -1008,7 +1008,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             {/* Gestion de la rentabilité */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Gestion de la rentabilité</h3>
+              <h3 className="text-lg font-semibold text-accent-foreground">Gestion de la rentabilité</h3>
               
               <div className="space-y-2">
                 <div className="flex items-center space-x-2">
@@ -1171,7 +1171,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                           {currentArray.map((period) => (
                             <div
                               key={period}
-                              className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-md text-sm border border-slate-200"
+                              className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-accent-foreground rounded-md text-sm border border-slate-200"
                             >
                               <span>{period}</span>
                               <button
@@ -1212,7 +1212,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             {/* Gestion du produit */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Gestion du produit</h3>
+              <h3 className="text-lg font-semibold text-accent-foreground">Gestion du produit</h3>
               
               <div className="space-y-2">
                 <div className="flex items-center space-x-2">
@@ -1265,7 +1265,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
               {formData.linkToAssets && (
                 <div className="space-y-4 pl-4 border-l-2 border-slate-200 mt-4">
-                  <div className="text-sm text-slate-600">
+                  <div className="text-sm text-accent-foreground">
                     Sélectionnez les actifs composant le produit et définissez leur proportion (la somme doit faire 100%).
                   </div>
 
@@ -1274,11 +1274,11 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                       <table className="w-full border-collapse">
                         <thead>
                           <tr className="border-b border-slate-200">
-                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Logo</th>
-                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Nom</th>
-                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Référence</th>
-                            <th className="text-left py-2 px-3 text-sm font-semibold text-slate-700">Proportion (%)</th>
-                            <th className="text-right py-2 px-3 text-sm font-semibold text-slate-700">Actions</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Logo</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Nom</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Référence</th>
+                            <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Proportion (%)</th>
+                            <th className="text-right py-2 px-3 text-sm font-semibold text-accent-foreground">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1297,13 +1297,13 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                                       }}
                                     />
                                   ) : (
-                                    <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-xs text-slate-500">
+                                    <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-xs text-accent-foreground">
                                       {asset?.name?.charAt(0)?.toUpperCase() || '?'}
                                     </div>
                                   )}
                                 </td>
-                                <td className="py-3 px-3 text-sm text-slate-900">{asset?.name || '-'}</td>
-                                <td className="py-3 px-3 text-sm text-slate-600">{asset?.reference || '-'}</td>
+                                <td className="py-3 px-3 text-sm text-accent-foreground">{asset?.name || '-'}</td>
+                                <td className="py-3 px-3 text-sm text-accent-foreground">{asset?.reference || '-'}</td>
                                 <td className="py-3 px-3">
                                   <Input
                                     type="number"
@@ -1396,11 +1396,11 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   </div>
                   <div style={{ maxHeight: '60vh', overflowY: 'auto', marginTop: '1rem' }}>
                     {!assetSearchQuery || assetSearchQuery.trim().length < 2 ? (
-                      <div className="text-center py-8 text-slate-500">
+                      <div className="text-center py-8 text-accent-foreground">
                         Tapez au moins 2 caractères pour rechercher des actifs
                       </div>
                     ) : loadingAssets ? (
-                      <div className="text-center py-8 text-slate-500">Chargement...</div>
+                      <div className="text-center py-8 text-accent-foreground">Chargement...</div>
                     ) : (
                       <div className="space-y-2">
                         {assets.map((asset: any) => {
@@ -1439,25 +1439,25 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                                     }}
                                   />
                                 ) : (
-                                  <div className="w-10 h-10 bg-slate-200 rounded flex items-center justify-center text-sm text-slate-500">
+                                  <div className="w-10 h-10 bg-slate-200 rounded flex items-center justify-center text-sm text-accent-foreground">
                                     {asset.name?.charAt(0)?.toUpperCase() || '?'}
                                   </div>
                                 )}
                                 <div className="flex-1">
-                                  <div className="font-medium text-slate-900">{asset.name}</div>
-                                  <div className="text-sm text-slate-500">
+                                  <div className="font-medium text-accent-foreground">{asset.name}</div>
+                                  <div className="text-sm text-accent-foreground">
                                     {asset.reference && `${asset.reference} • `}
                                     {asset.type}
                                   </div>
                                 </div>
                                 {isAlreadyAdded && (
-                                  <span className="text-xs text-slate-500">Déjà ajouté</span>
+                                  <span className="text-xs text-accent-foreground">Déjà ajouté</span>
                                 )}
                               </div>
                             );
                           })}
                         {assets.length === 0 && !loadingAssets && (
-                          <div className="text-center py-8 text-slate-500">Aucun actif trouvé</div>
+                          <div className="text-center py-8 text-accent-foreground">Aucun actif trouvé</div>
                         )}
                       </div>
                     )}

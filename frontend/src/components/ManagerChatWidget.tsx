@@ -216,8 +216,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
           }}
           aria-label="Ouvrir le chat"
           style={{
-            width: 64,
-            height: 64,
+            width: 80,
+            height: 80,
             borderRadius: 9999,
             border: '1px solid rgba(2, 6, 23, 0.12)',
             background: 'white',
@@ -239,15 +239,15 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
               }}
             />
           ) : (
-            <MessageCircle size={28} />
+            <MessageCircle size={36} />
           )}
         </button>
       ) : (
         <div
           style={{
-            width: 320,
+            width: 400,
             maxWidth: 'calc(100vw - 32px)',
-            height: 420,
+            height: 520,
             maxHeight: 'calc(100vh - 140px)',
             background: 'white',
             borderRadius: 16,

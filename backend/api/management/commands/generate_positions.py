@@ -34,8 +34,12 @@ class Command(BaseCommand):
             qs = qs.filter(id=transaction_id)
         if client_id:
             qs = qs.filter(client_id=client_id)
+        # By default, only generate for validated transactions (admin-approved).
+        # Use --status to override.
         if status_filter:
             qs = qs.filter(status=status_filter)
+        else:
+            qs = qs.filter(status="termine")
 
         total_created = 0
         total_txn = 0

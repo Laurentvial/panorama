@@ -17,18 +17,6 @@
 .page-header-back-button {
   margin-bottom: 0.5rem;
   align-self: flex-start; /* Align to the left */
-  color: var(--accent-foreground);
-  background-color: var(--accent);
-}
-
-.page-header-back-button:hover {
-  background-color: var(--accent);
-  opacity: 0.9;
-  color: var(--accent-foreground);
-}
-
-.page-header-back-button svg {
-  color: var(--accent-foreground);
 }
 
 /* Title Section - contains title and subtitle */
@@ -40,12 +28,17 @@
 /* Page Title */
 .page-title {
   margin-bottom: 0.5rem;
-  color: var(--primary);
+  color: #000000 !important;
   font-size: 2rem;
 }
 
 /* Page Subtitle */
 .page-subtitle {
   color: #475569;
+}
+
+/* Card Titles in CRM pages */
+[data-slot="card-title"] {
+  color: #000000 !important;
 }
 

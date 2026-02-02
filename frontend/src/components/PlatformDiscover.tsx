@@ -222,13 +222,20 @@ export function PlatformDiscover() {
   // Get unique asset categories
   const assetCategories = Array.from(new Set(assets.map((a: any) => a.category).filter(Boolean)));
 
-  // Filter assets (no search filtering - search only shows in dropdown)
-  // Note: Tabs don't filter - all assets are always shown
+  // Filter assets by category and type filter (tabs)
   const filteredAssets = assets.filter((asset: any) => {
-    // Only filter by category if selected, but not by type filter (tabs don't filter)
+    // Filter by category if selected
     const matchesCategory = selectedCategory === 'all' || asset.category === selectedCategory;
     
-    return matchesCategory;
+    // Filter by type filter (tabs)
+    if (selectedTypeFilter === 'all') {
+      return matchesCategory;
+    }
+    
+    const assetProductType = getAssetProductType(asset);
+    const matchesType = assetProductType === selectedTypeFilter;
+    
+    return matchesCategory && matchesType;
   });
   
   console.log('Total assets:', assets.length);
@@ -272,8 +279,7 @@ export function PlatformDiscover() {
   };
 
   // Filter Smart Portfolios (products with type "Smart Portfolio" stored in subcategory or type field)
-  // Smart Portfolios are always shown regardless of selected filter
-  const smartPortfolios = products.filter((product: any) => {
+  const allSmartPortfolios = products.filter((product: any) => {
     // Check both type (if exists) and subcategory for Smart Portfolio
     const productType = product.type || product.subcategory || '';
     const isSmartPortfolio = productType.toLowerCase().includes('smart portfolio') || 
@@ -284,9 +290,16 @@ export function PlatformDiscover() {
     return isSmartPortfolio;
   });
 
+  // Filter Smart Portfolios by selected type filter
+  const smartPortfolios = allSmartPortfolios.filter((product: any) => {
+    if (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') {
+      return true;
+    }
+    return false;
+  });
+
   // Filter other internal products (non-Smart Portfolio products)
-  // Note: Tabs don't filter - all products are always shown
-  const otherInternalProducts = products.filter((product: any) => {
+  const allOtherInternalProducts = products.filter((product: any) => {
     // Check if it's NOT a Smart Portfolio
     const productType = product.type || product.subcategory || '';
     const isSmartPortfolio = productType.toLowerCase().includes('smart portfolio') || 
@@ -296,6 +309,19 @@ export function PlatformDiscover() {
     
     // Exclude Smart Portfolios (they're shown separately)
     return !isSmartPortfolio;
+  });
+
+  // Filter other internal products by selected type filter
+  const otherInternalProducts = allOtherInternalProducts.filter((product: any) => {
+    if (selectedTypeFilter === 'all') {
+      return true;
+    }
+    if (selectedTypeFilter === 'smart_portfolio') {
+      return false; // Smart portfolios are shown separately
+    }
+    
+    const productTypeCategory = getProductType(product);
+    return productTypeCategory === selectedTypeFilter;
   });
 
   // Check if asset is actually in client's portfolio (has open positions)
@@ -314,20 +340,30 @@ export function PlatformDiscover() {
     return true;
   };
 
-  // Count items per type to determine which tabs to show
+  // Count items per type based on filtered assets and products (respecting selectedCategory)
   const getItemCountByType = (type: string): number => {
+    // Filter assets by category first (same logic as filteredAssets)
+    const categoryFilteredAssets = assets.filter((asset: any) => {
+      return selectedCategory === 'all' || asset.category === selectedCategory;
+    });
+    
+    // Filter products by category (products don't have category filter yet, but we keep it consistent)
+    // For now, products are not filtered by category, so we use all products
+    // If products get category filtering in the future, apply it here
+    
     if (type === 'all') {
-      return filteredAssets.length + smartPortfolios.length + otherInternalProducts.length;
+      return categoryFilteredAssets.length + products.length;
     }
     if (type === 'smart_portfolio') {
-      return smartPortfolios.length;
+      // Smart portfolios are not filtered by category currently
+      return allSmartPortfolios.length;
     }
-    // For other types, count assets and products matching the type
-    const assetsOfType = filteredAssets.filter((asset: any) => {
+    // For other types, count assets and products matching the type AND category filter
+    const assetsOfType = categoryFilteredAssets.filter((asset: any) => {
       const assetProductType = getAssetProductType(asset);
       return assetProductType === type;
     });
-    const productsOfType = otherInternalProducts.filter((product: any) => {
+    const productsOfType = allOtherInternalProducts.filter((product: any) => {
       const productTypeCategory = getProductType(product);
       return productTypeCategory === type;
     });
@@ -348,10 +384,10 @@ export function PlatformDiscover() {
     { value: 'autres', label: 'Autres' },
   ];
 
-  // Filter tabs to only show those with items (always show 'all' if there are any items)
+  // Filter tabs to only show those with visible items
   const visibleTabs = allTabs.filter((tab) => {
     if (tab.value === 'all') {
-      // Always show 'Tous' if there are any items at all
+      // Always show 'Tous' if there are any visible items at all
       return getItemCountByType('all') > 0;
     }
     return getItemCountByType(tab.value) > 0;
@@ -663,8 +699,8 @@ export function PlatformDiscover() {
             </div>
           </div>
 
-          {/* Smart Portfolios Section - Always visible */}
-          {smartPortfolios.length > 0 && (
+          {/* Smart Portfolios Section - Only visible when 'all' or 'smart_portfolio' tab is selected */}
+          {smartPortfolios.length > 0 && (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') && (
             <div style={{ marginBottom: '50px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -812,7 +848,7 @@ export function PlatformDiscover() {
           )}
 
           {/* Assets Grid (External Assets + Other Internal Products) */}
-          {/* Always show all assets and products, tabs don't filter */}
+          {/* Filtered by selected tab */}
           {(filteredAssets.length > 0 || otherInternalProducts.length > 0) && (
             <div style={{ 
               display: 'grid', 

@@ -64,7 +64,7 @@
   padding: 0.625rem 1rem;
   margin-top: 0.5rem;
   background-color: var(--primary);
-  color: var(--primary-foreground);
+  color: var(--accent-foreground);
   border: none;
   border-radius: var(--radius-md);
   font-size: var(--font-size);

@@ -31,6 +31,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     (settings?.primary_color || '').trim() ||
     '#030213';
   const platformPrimaryBg = (settings?.primary_color || '').trim() || '#030213';
+  const platformSecondaryBg = (settings?.secondary_color || '').trim() || 'var(--secondary)';
+  const platformAccentBg = 'var(--accent)';
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
@@ -166,15 +168,15 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       className="platform-root"
       style={{
         minHeight: '100vh',
-        backgroundColor: 'var(--accent)',
+        backgroundColor: 'var(--background)',
         ['--platform-button-bg' as any]: platformButtonBg,
       }}
     >
       {/* Header */}
       <header style={{
         backgroundColor: 'var(--primary)',
-        color: 'var(--primary-foreground)',
-        borderBottom: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
+        color: 'var(--accent-foreground)',
+        borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
         padding: isMobile ? '12px 16px' : '15px 20px',
         display: 'flex',
         justifyContent: 'space-between',
@@ -238,12 +240,10 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               height: isMobile ? '34px' : '40px',
               fontSize: isMobile ? '13px' : '14px',
               borderRadius: 9999,
-              border: '1px solid rgba(255, 255, 255, 0.28)',
-              backgroundColor: 'rgba(255, 255, 255, 0.18)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              color: 'var(--primary-foreground)',
-              caretColor: 'var(--primary-foreground)',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--input-background)',
+              color: 'var(--accent-foreground)',
+              caretColor: 'var(--accent-foreground)',
               width: '100%',
             }}
           />
@@ -295,6 +295,15 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                             border: 'none',
                             cursor: 'pointer',
                             textAlign: 'left',
+                            transition: 'background-color 0.2s, color 0.2s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = platformPrimaryBg;
+                            e.currentTarget.style.color = '#ffffff';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                            e.currentTarget.style.color = '';
                           }}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
@@ -337,6 +346,15 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       border: 'none',
                       cursor: 'pointer',
                       textAlign: 'left',
+                      transition: 'background-color 0.2s, color 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = platformAccentBg;
+                      e.currentTarget.style.color = platformPrimaryBg;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '';
                     }}
                     onMouseDown={(e) => {
                       // Prevent blur before click handler runs
@@ -422,7 +440,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   showBottomNav
                     ? {
                         backgroundColor: 'var(--primary)',
-                        color: 'var(--primary-foreground)',
+                        color: 'var(--accent-foreground)',
                         borderRight: 'none',
                         height: '100%',
                         display: 'flex',
@@ -436,8 +454,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                         width: 360,
                         height: 'calc(100vh - 60px)',
                         backgroundColor: 'var(--primary)',
-                        color: 'var(--primary-foreground)',
-                        borderRight: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
+                        color: 'var(--accent-foreground)',
+                        borderRight: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
                         display: 'flex',
                         flexDirection: 'column',
                         overflow: 'hidden',
@@ -489,8 +507,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 display: 'flex', 
                 alignItems: 'center', 
                 gap: '12px',
-                borderTop: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
-                borderBottom: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
+                borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+                borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
               }}>
                 {currentUser?.profilePhoto ? (
                   <img 
@@ -522,7 +540,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   <div style={{ 
                     fontSize: isMobile ? '14px' : '16px', 
                     fontWeight: '600', 
-                    color: 'var(--primary-foreground)',
+                    color: 'var(--accent-foreground)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis'
@@ -532,7 +550,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   {currentUser?.email && (
                     <div style={{ 
                       fontSize: isMobile ? '12px' : '14px', 
-                      color: 'color-mix(in srgb, var(--primary-foreground) 75%, transparent)',
+                      color: 'color-mix(in srgb, var(--accent-foreground) 75%, transparent)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis'
@@ -560,15 +578,15 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                         alignItems: 'center',
                         gap: isMobile ? '12px' : '16px',
                         backgroundColor: isActive
-                          ? 'color-mix(in srgb, var(--primary-foreground) 12%, transparent)'
+                          ? 'color-mix(in srgb, var(--accent-foreground) 12%, transparent)'
                           : 'transparent',
                         border: 'none',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: isMobile ? '16px' : '18px',
                         color: isActive
-                          ? 'var(--primary-foreground)'
-                          : 'color-mix(in srgb, var(--primary-foreground) 75%, transparent)',
+                          ? 'var(--accent-foreground)'
+                          : 'color-mix(in srgb, var(--accent-foreground) 75%, transparent)',
                         fontWeight: isActive ? '600' : '400',
                       }}
                     >
@@ -585,10 +603,10 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 style={{
                   flexShrink: 0,
                   backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-foreground)',
+                  color: 'var(--accent-foreground)',
                   paddingTop: 12,
                   paddingBottom: 12,
-                  borderTop: '1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent)',
+                  borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
                 }}
               >
                 <div
@@ -635,12 +653,12 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 10,
-                      backgroundColor: 'white',
+                      backgroundColor: platformSecondaryBg,
                       border: `1px solid color-mix(in srgb, ${platformPrimaryBg} 35%, transparent)`,
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontSize: isMobile ? '15px' : '16px',
-                      color: platformPrimaryBg,
+                      color: 'var(--secondary-foreground)',
                       fontWeight: 500,
                       borderRadius: 9999,
                       whiteSpace: 'nowrap',

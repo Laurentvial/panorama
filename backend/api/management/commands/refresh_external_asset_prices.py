@@ -109,7 +109,16 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
         if not quote:
             return False, "quote not found / rate limited"
 
-        asset.last_price = quote["price"]
+        new_price = quote["price"]
+        old_price = asset.last_price
+        
+        # Log price change for debugging
+        if old_price is not None and float(old_price) != float(new_price):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Price changed for {symbol_upper}: {old_price} -> {new_price}")
+
+        asset.last_price = new_price
         asset.last_price_update = timezone.now()
         asset.price_change = quote.get("change")
         cp = quote.get("change_percent")
@@ -158,7 +167,39 @@ class Command(BaseCommand):
             product_asset_ids = ProductAssetAllocation.objects.values_list("asset_id", flat=True).distinct()
             qs = qs.filter(id__in=product_asset_ids)
 
+        # Debug: show all assets before filtering
+        all_assets_before_filter = qs.count()
+        self.stdout.write(f"Assets with symbols (before age filter): {all_assets_before_filter}")
+        
         qs = qs.filter(models.Q(last_price_update__isnull=True) | models.Q(last_price_update__lt=cutoff))
+        total_eligible = qs.count()
+        
+        # Debug: show some examples
+        if total_eligible > 0:
+            sample_assets = list(qs[:5])
+            self.stdout.write(f"Sample eligible assets:")
+            for a in sample_assets:
+                self.stdout.write(f"  - {a.id} {a.alpha_vantage_symbol}: last_update={a.last_price_update}, price={a.last_price}")
+        else:
+            # Show why assets are not eligible
+            sample_all = Asset.objects.filter(
+                alpha_vantage_symbol__isnull=False
+            ).exclude(alpha_vantage_symbol="")
+            if scope == "product-assets":
+                product_asset_ids = ProductAssetAllocation.objects.values_list("asset_id", flat=True).distinct()
+                sample_all = sample_all.filter(id__in=product_asset_ids)
+            sample_all = list(sample_all[:5])
+            self.stdout.write(f"Sample assets (not eligible - too recent):")
+            for a in sample_all:
+                age_seconds = (now - a.last_price_update).total_seconds() if a.last_price_update else None
+                self.stdout.write(
+                    f"  - {a.id} {a.alpha_vantage_symbol}: "
+                    f"last_update={a.last_price_update}, "
+                    f"age_seconds={age_seconds:.1f if age_seconds else 'None'}, "
+                    f"cutoff={cutoff}, "
+                    f"needs_update={age_seconds is None or (age_seconds is not None and age_seconds >= min_age_seconds)}"
+                )
+        
         qs = qs.order_by(models.F("last_price_update").asc(nulls_first=True), "id")[:limit]
 
         av_service = get_alpha_vantage_service()
@@ -169,14 +210,28 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Refreshing asset prices (scope={scope}, limit={limit}, min_age_seconds={min_age_seconds})..."
         )
+        self.stdout.write(f"Found {total_eligible} assets eligible for update (cutoff: {cutoff})")
 
         for asset in qs:
+            old_price = asset.last_price
+            old_update = asset.last_price_update
             ok, err = _update_one_asset_price(asset, av_service)
             if ok:
+                # Refresh from DB to get actual saved values
+                asset.refresh_from_db()
+                new_price = asset.last_price
+                new_update = asset.last_price_update
                 updated += 1
+                price_changed = old_price != new_price
+                price_status = "CHANGED" if price_changed else "SAME"
+                self.stdout.write(
+                    f"[OK] {asset.id} {asset.alpha_vantage_symbol}: "
+                    f"price {old_price} -> {new_price} ({price_status}), "
+                    f"updated {old_update} -> {new_update}"
+                )
             else:
                 errors += 1
-                self.stdout.write(f"- {asset.id} {asset.alpha_vantage_symbol}: {err}")
+                self.stdout.write(f"[ERROR] {asset.id} {asset.alpha_vantage_symbol}: {err}")
 
         self.stdout.write(f"Done. Updated={updated}, Errors={errors}, TotalConsidered={qs.count()}")
 

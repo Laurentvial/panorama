@@ -27,7 +27,7 @@
 
 /* Sidebar links */
 .platform-root .platform-sidebar-link[data-active='false']:hover {
-  background-color: color-mix(in srgb, var(--primary-foreground) 12%, transparent) !important;
+  background-color: color-mix(in srgb, var(--accent-foreground) 12%, transparent) !important;
 }
 
 /* Bottom action buttons */

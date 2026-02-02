@@ -975,7 +975,7 @@ export function ManageAssets() {
                                 <div
                                   key={`${result.symbol || 'sym'}-${result.exchange || 'ex'}-${result.currency || 'ccy'}-${index}`}
                                   onClick={() => handleSelectSearchResult(result)}
-                                  className={`p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
+                                  className={`p-3 hover:bg-accent hover:text-primary cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
                                     selectedSearchResult?.symbol === result.symbol &&
                                     selectedSearchResult?.exchange === result.exchange &&
                                     selectedSearchResult?.currency === result.currency

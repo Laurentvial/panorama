@@ -3,6 +3,8 @@ import logging
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.core.signals import request_finished
+from django.db import close_old_connections, connections
 
 from .models import Transaction, Position
 from .position_service import create_positions_for_investment
@@ -23,13 +25,14 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
             instance._previous_status = None
             instance._previous_type = None
             instance._previous_transfer_to = None
-            return
+            instance._previous_validated_at = None
+        else:
+            prev = Transaction.objects.filter(pk=instance.pk).only("status", "type", "transfer_to", "validated_at").first()
+            instance._previous_status = getattr(prev, "status", None)
+            instance._previous_type = getattr(prev, "type", None)
+            instance._previous_transfer_to = getattr(prev, "transfer_to", None)
+            instance._previous_validated_at = getattr(prev, "validated_at", None)
 
-        prev = Transaction.objects.filter(pk=instance.pk).only("status", "type", "transfer_to", "validated_at").first()
-        instance._previous_status = getattr(prev, "status", None)
-        instance._previous_type = getattr(prev, "type", None)
-        instance._previous_transfer_to = getattr(prev, "transfer_to", None)
-        instance._previous_validated_at = getattr(prev, "validated_at", None)
     except Exception as e:
         logger.warning("Failed to capture previous Transaction state: %s", e)
         instance._previous_status = None
@@ -77,4 +80,27 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         create_positions_for_investment(instance, trigger="signal")
     except Exception as e:
         logger.error("Failed to auto-generate positions for transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)
+
+
+@receiver(request_finished)
+def close_db_connections_on_request_finished(sender, **kwargs):
+    """
+    Signal handler to aggressively close database connections after each request.
+    This provides an additional safety net beyond the middleware to prevent
+    connection pool exhaustion.
+    """
+    try:
+        close_old_connections()
+        # Also explicitly close all connections
+        for conn in connections.all():
+            try:
+                if hasattr(conn, 'connection') and conn.connection is not None:
+                    # Use getattr with default True to handle drivers that don't have 'closed' attribute
+                    is_closed = getattr(conn.connection, 'closed', True)
+                    if not is_closed:
+                        conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Error closing connections in signal handler: {e}")
 

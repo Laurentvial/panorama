@@ -1381,6 +1381,82 @@
     color: var(--primary-foreground);
   }
 
+  /* Ensure dropdown items use primary color text when hovered or focused */
+  /* Hover: accent background, Focus: secondary background */
+  [data-slot="dropdown-menu-item"]:hover,
+  [data-slot="select-item"]:hover,
+  [data-slot="menubar-item"]:hover,
+  [data-slot="context-menu-item"]:hover,
+  [data-slot="command-item"]:hover,
+  [data-slot="dropdown-menu-checkbox-item"]:hover,
+  [data-slot="dropdown-menu-radio-item"]:hover,
+  [data-slot="menubar-checkbox-item"]:hover,
+  [data-slot="menubar-radio-item"]:hover,
+  [data-slot="context-menu-checkbox-item"]:hover,
+  [data-slot="context-menu-radio-item"]:hover,
+  [data-slot="dropdown-menu-sub-trigger"]:hover,
+  [data-slot="menubar-sub-trigger"]:hover,
+  [data-slot="context-menu-sub-trigger"]:hover,
+  [data-slot="menubar-trigger"]:hover {
+    color: var(--primary) !important;
+  }
+
+  [data-slot="dropdown-menu-item"]:focus,
+  [data-slot="select-item"]:focus,
+  [data-slot="menubar-item"]:focus,
+  [data-slot="context-menu-item"]:focus,
+  [data-slot="command-item"]:focus,
+  [data-slot="dropdown-menu-checkbox-item"]:focus,
+  [data-slot="dropdown-menu-radio-item"]:focus,
+  [data-slot="menubar-checkbox-item"]:focus,
+  [data-slot="menubar-radio-item"]:focus,
+  [data-slot="context-menu-checkbox-item"]:focus,
+  [data-slot="context-menu-radio-item"]:focus,
+  [data-slot="dropdown-menu-sub-trigger"]:focus,
+  [data-slot="menubar-sub-trigger"]:focus,
+  [data-slot="context-menu-sub-trigger"]:focus,
+  [data-slot="menubar-trigger"]:focus {
+    background-color: var(--secondary) !important;
+    color: var(--primary) !important;
+  }
+
+  [data-slot="dropdown-menu-item"]:hover *,
+  [data-slot="select-item"]:hover *,
+  [data-slot="menubar-item"]:hover *,
+  [data-slot="context-menu-item"]:hover *,
+  [data-slot="command-item"]:hover *,
+  [data-slot="dropdown-menu-checkbox-item"]:hover *,
+  [data-slot="dropdown-menu-radio-item"]:hover *,
+  [data-slot="menubar-checkbox-item"]:hover *,
+  [data-slot="menubar-radio-item"]:hover *,
+  [data-slot="context-menu-checkbox-item"]:hover *,
+  [data-slot="context-menu-radio-item"]:hover *,
+  [data-slot="dropdown-menu-sub-trigger"]:hover *,
+  [data-slot="menubar-sub-trigger"]:hover *,
+  [data-slot="context-menu-sub-trigger"]:hover *,
+  [data-slot="menubar-trigger"]:hover * {
+    color: var(--primary) !important;
+  }
+
+  [data-slot="dropdown-menu-item"]:focus *,
+  [data-slot="select-item"]:focus *,
+  [data-slot="menubar-item"]:focus *,
+  [data-slot="context-menu-item"]:focus *,
+  [data-slot="command-item"]:focus *,
+  [data-slot="dropdown-menu-checkbox-item"]:focus *,
+  [data-slot="dropdown-menu-radio-item"]:focus *,
+  [data-slot="menubar-checkbox-item"]:focus *,
+  [data-slot="menubar-radio-item"]:focus *,
+  [data-slot="context-menu-checkbox-item"]:focus *,
+  [data-slot="context-menu-radio-item"]:focus *,
+  [data-slot="dropdown-menu-sub-trigger"]:focus *,
+  [data-slot="menubar-sub-trigger"]:focus *,
+  [data-slot="context-menu-sub-trigger"]:focus *,
+  [data-slot="menubar-trigger"]:focus * {
+    color: var(--primary) !important;
+  }
+
+
   .text-purple-600 {
     color: var(--color-purple-600);
   }

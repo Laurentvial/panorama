@@ -1,8 +1,8 @@
 .header {
   /* Use the app's "couleur principale" */
   background-color: var(--primary);
-  color: var(--primary-foreground);
-  border-bottom: 1px solid color-mix(in srgb, var(--primary-foreground) 20%, transparent);
+  color: var(--accent-foreground);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -50,7 +50,7 @@
 .header-platform-name {
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--primary-foreground);
+  color: var(--accent-foreground);
   line-height: 1.1;
   margin: 0;
 }
@@ -58,14 +58,14 @@
 .header-title {
   font-size: 1.125rem;
   font-weight: var(--font-weight-medium);
-  color: var(--primary-foreground);
+  color: var(--accent-foreground);
   margin: 0;
   line-height: 1.5;
 }
 
 .header-subtitle {
   font-size: 0.875rem;
-  color: color-mix(in srgb, var(--primary-foreground) 75%, transparent);
+  color: color-mix(in srgb, var(--accent-foreground) 75%, transparent);
   margin: 0;
   line-height: 1.5;
 }
@@ -89,7 +89,7 @@
 }
 
 .header-button:hover {
-  background-color: color-mix(in srgb, var(--primary-foreground) 12%, transparent);
+  background-color: color-mix(in srgb, var(--accent-foreground) 12%, transparent);
 }
 
 .header-button-notifications {
@@ -123,11 +123,13 @@
 .header-button svg {
   width: 1rem;
   height: 1rem;
-  color: var(--primary-foreground);
+  color: var(--accent-foreground);
 }
 
 .header-button-notifications svg {
-  color: var(--primary);
+  color: var(--secondary);
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .header-badge {
@@ -149,7 +151,7 @@
 
 .header-user-name {
   display: none;
-  color: var(--primary-foreground);
+  color: var(--accent-foreground);
 }
 
 @media (min-width: 768px) {
@@ -161,7 +163,7 @@
 .header-user-avatar {
   width: 3rem;
   height: 3rem;
-  border: 2px solid color-mix(in srgb, var(--primary-foreground) 45%, transparent);
+  border: 2px solid color-mix(in srgb, var(--accent-foreground) 45%, transparent);
 }
 
 .header-user-avatar-fallback {

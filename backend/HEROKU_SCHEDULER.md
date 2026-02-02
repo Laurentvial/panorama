@@ -42,8 +42,10 @@ cd backend && python manage.py refresh_external_asset_prices --scope product-ass
 Dans le dashboard Heroku, configurez la commande du scheduler avec :
 
 ```
-cd backend && /app/.heroku/python/bin/python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+cd backend && /app/.heroku/python/bin/python manage.py refresh_external_asset_prices --scope product-assets --limit 100 --min-age-seconds 240
 ```
+
+**Note importante** : La limite par défaut est de 20 assets. Si vous avez plus de 20 assets, augmentez le `--limit` (par exemple `--limit 100` ou `--limit 200`) pour que tous les assets soient mis à jour en une seule exécution. Sinon, les assets seront mis à jour progressivement sur plusieurs exécutions, ce qui donnera des timestamps différents.
 
 **Explication** :
 - Le Procfile utilise `cd backend`, donc le code est dans `/app/backend/` lors de l'exécution

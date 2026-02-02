@@ -4568,22 +4568,9 @@ def client_transaction_create(request, client_id):
         transfer_to=transfer_to,
     )
 
-    # If this transfert starts an investment (balance -> product), create monthly positions immediately.
-    # Exclude client trading orders where transfer_to == 'trading'.
-    if (
-        transaction.type == 'transfert'
-        and transaction.transfer_to
-        and transaction.transfer_to not in ['balance', 'trading']
-    ):
-        try:
-            create_positions_for_investment(transaction, trigger="api_transaction_create")
-        except Exception as pos_err:
-            # Don't fail transaction creation if positions generation fails
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to create positions for transaction {transaction.id}: {str(pos_err)}")
-            import traceback
-            logger.error(traceback.format_exc())
+    # IMPORTANT: do NOT generate investment positions on client subscription.
+    # Positions must be generated only when an admin validates the transaction (status == 'termine'),
+    # which is handled by the Transaction post_save signal and the admin update endpoint.
 
     # If this transfert is a client trading order (balance -> trading wallet), create a Position (ordre).
     # The trading order is represented by:

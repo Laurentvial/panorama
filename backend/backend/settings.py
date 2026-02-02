@@ -109,13 +109,14 @@ if DATABASE_URL:
         ssl_require=True,
     )
     # Explicitly set CONN_MAX_AGE to ensure it's applied (override any defaults)
-    db_config['CONN_MAX_AGE'] = CONN_MAX_AGE
+    # Force CONN_MAX_AGE to 0 to ensure connections are closed immediately
+    db_config['CONN_MAX_AGE'] = 0  # Force immediate closure
     # Add connection options to prevent too many connections
     db_config.setdefault('OPTIONS', {})
     db_config['OPTIONS'].update({
         'connect_timeout': 10,
-        # Ensure connections are properly closed
-        'options': '-c statement_timeout=30000',  # 30 second statement timeout
+        # Ensure connections are properly closed and limit idle time
+        'options': '-c statement_timeout=30000 -c idle_in_transaction_session_timeout=10000',  # 30s statement timeout, 10s idle timeout
     })
     # Disable atomic requests to prevent long-held connections
     db_config['ATOMIC_REQUESTS'] = False
@@ -132,11 +133,11 @@ else:
             "PASSWORD": os.getenv("DB_PASSWORD"),
             "HOST": os.getenv("DB_HOST"),
             "PORT": os.getenv("DB_PORT"),
-            "CONN_MAX_AGE": CONN_MAX_AGE,
+            "CONN_MAX_AGE": 0,  # Force immediate closure to prevent pool exhaustion
             "ATOMIC_REQUESTS": False,  # Disable atomic requests to prevent long-held connections
             "OPTIONS": {
                 'connect_timeout': 10,
-                'options': '-c statement_timeout=30000',  # 30 second statement timeout
+                'options': '-c statement_timeout=30000 -c idle_in_transaction_session_timeout=10000',  # 30s statement timeout, 10s idle timeout
             },
         }
     }
