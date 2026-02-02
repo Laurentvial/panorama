@@ -40,6 +40,7 @@ export function PlatformDiscover() {
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
+  const [positions, setPositions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
@@ -48,13 +49,22 @@ export function PlatformDiscover() {
   useEffect(() => {
     if (currentUser && currentUser.id) {
       loadDiscoverData();
+      
+      // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
+      const priceRefreshInterval = setInterval(() => {
+        loadDiscoverData();
+      }, 120000); // 2 minutes
+      
+      return () => {
+        clearInterval(priceRefreshInterval);
+      };
     }
   }, [currentUser]);
 
   const loadDiscoverData = async () => {
     try {
       setLoading(true);
-      const [clientAssetsResponse, clientProductsResponse, categoriesResponse] = await Promise.all([
+      const [clientAssetsResponse, clientProductsResponse, categoriesResponse, positionsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/assets/`),
         apiCall(`/api/clients/${currentUser.id}/products/`).catch((err) => {
           console.warn('Error loading client products:', err);
@@ -63,6 +73,10 @@ export function PlatformDiscover() {
         apiCall('/api/categories/').catch((err) => {
           console.warn('Error loading categories:', err);
           return { categories: [] };
+        }),
+        apiCall(`/api/clients/${currentUser.id}/positions/?status=open`).catch((err) => {
+          console.warn('Error loading positions:', err);
+          return { positions: [] };
         }),
       ]);
       
@@ -122,6 +136,11 @@ export function PlatformDiscover() {
         subcategory: p.subcategory,
         status: p.status
       })));
+      
+      // Load positions to check which assets are actually in portfolio
+      const positionsData = (positionsResponse as any)?.positions || [];
+      setPositions(positionsData);
+      console.log('Loaded positions:', positionsData.length);
     } catch (error) {
       console.error('Error loading discover data:', error);
       toast.error('Erreur lors du chargement des produits');
@@ -204,25 +223,12 @@ export function PlatformDiscover() {
   const assetCategories = Array.from(new Set(assets.map((a: any) => a.category).filter(Boolean)));
 
   // Filter assets (no search filtering - search only shows in dropdown)
+  // Note: Tabs don't filter - all assets are always shown
   const filteredAssets = assets.filter((asset: any) => {
-    const assetProductType = getAssetProductType(asset);
-    const matchesTypeFilter = selectedTypeFilter === 'all' || assetProductType === selectedTypeFilter;
+    // Only filter by category if selected, but not by type filter (tabs don't filter)
     const matchesCategory = selectedCategory === 'all' || asset.category === selectedCategory;
     
-    const matches = matchesTypeFilter && matchesCategory;
-    if (!matches && assets.length > 0) {
-      console.log('Asset filtered out:', {
-        name: asset.name,
-        type: asset.type,
-        category: asset.category,
-        assetProductType,
-        selectedTypeFilter,
-        selectedCategory,
-        matchesTypeFilter,
-        matchesCategory
-      });
-    }
-    return matches;
+    return matchesCategory;
   });
   
   console.log('Total assets:', assets.length);
@@ -266,7 +272,7 @@ export function PlatformDiscover() {
   };
 
   // Filter Smart Portfolios (products with type "Smart Portfolio" stored in subcategory or type field)
-  // No search filtering - search only shows in dropdown
+  // Smart Portfolios are always shown regardless of selected filter
   const smartPortfolios = products.filter((product: any) => {
     // Check both type (if exists) and subcategory for Smart Portfolio
     const productType = product.type || product.subcategory || '';
@@ -274,13 +280,12 @@ export function PlatformDiscover() {
                              productType.toLowerCase().includes('smartportfolio') ||
                              product.subcategory?.toLowerCase().includes('smart portfolio') ||
                              product.subcategory?.toLowerCase().includes('smartportfolio');
-    const matchesTypeFilter = selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio';
     
-    return isSmartPortfolio && matchesTypeFilter;
+    return isSmartPortfolio;
   });
 
   // Filter other internal products (non-Smart Portfolio products)
-  // No search filtering - search only shows in dropdown
+  // Note: Tabs don't filter - all products are always shown
   const otherInternalProducts = products.filter((product: any) => {
     // Check if it's NOT a Smart Portfolio
     const productType = product.type || product.subcategory || '';
@@ -289,17 +294,18 @@ export function PlatformDiscover() {
                              product.subcategory?.toLowerCase().includes('smart portfolio') ||
                              product.subcategory?.toLowerCase().includes('smartportfolio');
     
-    if (isSmartPortfolio) return false;
-    
-    const productTypeCategory = getProductType(product);
-    const matchesTypeFilter = selectedTypeFilter === 'all' || selectedTypeFilter === productTypeCategory;
-    
-    return matchesTypeFilter;
+    // Exclude Smart Portfolios (they're shown separately)
+    return !isSmartPortfolio;
   });
 
-  // Check if asset is already in client's portfolio (all assets shown are already accessible)
+  // Check if asset is actually in client's portfolio (has open positions)
   const isAssetInPortfolio = (assetId: string) => {
-    return clientAssets.some((ca: any) => ca.asset?.id === assetId);
+    // Check if there are any open positions for this asset
+    return positions.some((p: any) => {
+      const positionAssetId = p.assetId || p.asset_id || p.asset?.id;
+      // Compare as strings to handle type mismatches
+      return String(positionAssetId) === String(assetId) && p.status === 'open';
+    });
   };
 
   // Check if product is already in client's portfolio
@@ -657,8 +663,8 @@ export function PlatformDiscover() {
             </div>
           </div>
 
-          {/* Smart Portfolios Section */}
-          {(selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') && smartPortfolios.length > 0 && (
+          {/* Smart Portfolios Section - Always visible */}
+          {smartPortfolios.length > 0 && (
             <div style={{ marginBottom: '50px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -806,9 +812,8 @@ export function PlatformDiscover() {
           )}
 
           {/* Assets Grid (External Assets + Other Internal Products) */}
-          {(selectedTypeFilter === 'all' || selectedTypeFilter !== 'smart_portfolio') && (
-            <>
-              {(filteredAssets.length > 0 || otherInternalProducts.length > 0) && (
+          {/* Always show all assets and products, tabs don't filter */}
+          {(filteredAssets.length > 0 || otherInternalProducts.length > 0) && (
             <div style={{ 
               display: 'grid', 
               gridTemplateColumns: isMobile 
@@ -1159,8 +1164,6 @@ export function PlatformDiscover() {
                 );
               })}
             </div>
-          )}
-            </>
           )}
           
           {/* Empty State - Show only if no items match the current filter */}

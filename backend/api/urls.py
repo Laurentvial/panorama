@@ -56,6 +56,7 @@ urlpatterns = [
     path('assets/generate-description/', api_views.asset_generate_description, name='asset-generate-description'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
     path('assets/get-logo/', api_views.asset_get_logo, name='asset-get-logo'),  # Specific route before generic
+    path('assets/<str:asset_id>/upload-logo/', api_views.asset_upload_logo, name='asset-upload-logo'),
     path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),
     path('assets/<str:asset_id>/delete/', api_views.asset_delete, name='asset-delete'),
     path('assets/<str:asset_id>/', api_views.asset_detail, name='asset-detail'),

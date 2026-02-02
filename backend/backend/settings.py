@@ -68,6 +68,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.CloseDBConnectionsMiddleware',  # Close DB connections after each request
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -94,14 +95,32 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+# Connection max age: 0 = close immediately, None = keep forever, or seconds
+# Lower values prevent connection pool exhaustion on limited DB plans
+# For Scalingo/limited connection pools, use 0 to close connections immediately
+CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "0"))  # Default 0 seconds (close immediately)
+
 if DATABASE_URL:
-    # Heroku provides DATABASE_URL; enable persistent connections + require SSL
+    # Heroku/Scalingo provides DATABASE_URL; enable persistent connections + require SSL
+    # Use shorter conn_max_age to prevent connection pool exhaustion
+    db_config = dj_database_url.config(
+        default=DATABASE_URL,
+        conn_max_age=CONN_MAX_AGE,
+        ssl_require=True,
+    )
+    # Explicitly set CONN_MAX_AGE to ensure it's applied (override any defaults)
+    db_config['CONN_MAX_AGE'] = CONN_MAX_AGE
+    # Add connection options to prevent too many connections
+    db_config.setdefault('OPTIONS', {})
+    db_config['OPTIONS'].update({
+        'connect_timeout': 10,
+        # Ensure connections are properly closed
+        'options': '-c statement_timeout=30000',  # 30 second statement timeout
+    })
+    # Disable atomic requests to prevent long-held connections
+    db_config['ATOMIC_REQUESTS'] = False
     DATABASES = {
-        "default": dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=600,
-            ssl_require=True,
-        )
+        "default": db_config
     }
 else:
     # Local/dev (or other platforms) using discrete DB_* env vars
@@ -113,6 +132,12 @@ else:
             "PASSWORD": os.getenv("DB_PASSWORD"),
             "HOST": os.getenv("DB_HOST"),
             "PORT": os.getenv("DB_PORT"),
+            "CONN_MAX_AGE": CONN_MAX_AGE,
+            "ATOMIC_REQUESTS": False,  # Disable atomic requests to prevent long-held connections
+            "OPTIONS": {
+                'connect_timeout': 10,
+                'options': '-c statement_timeout=30000',  # 30 second statement timeout
+            },
         }
     }
 

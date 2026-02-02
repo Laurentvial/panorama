@@ -65,6 +65,15 @@ export function PlatformPortfolio() {
   useEffect(() => {
     if (currentUser && currentUser.id) {
       loadPortfolioData();
+      
+      // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
+      const priceRefreshInterval = setInterval(() => {
+        loadPortfolioData();
+      }, 120000); // 2 minutes
+      
+      return () => {
+        clearInterval(priceRefreshInterval);
+      };
     }
   }, [currentUser]);
 

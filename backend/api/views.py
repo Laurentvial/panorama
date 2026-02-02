@@ -2020,9 +2020,32 @@ def asset_detail(request, asset_id):
     if not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Check if default is being changed from False to True
+    old_default_value = asset.default
+    
     serializer = AssetSerializer(asset, data=request.data, partial=True, context={'request': request})
     if serializer.is_valid():
         serializer.save()
+        
+        # Refresh asset from database to get the actual saved value
+        asset.refresh_from_db()
+        
+        # If default changed from False to True, assign asset to all existing clients
+        # Use asset.default (actual DB value) instead of parsed request value
+        if not old_default_value and asset.default:
+            existing_clients = Client.objects.all()
+            for client in existing_clients:
+                # Check if client already has this asset (avoid duplicates)
+                if not ClientAsset.objects.filter(client=client, asset=asset).exists():
+                    client_asset_id = uuid.uuid4().hex[:12]
+                    while ClientAsset.objects.filter(id=client_asset_id).exists():
+                        client_asset_id = uuid.uuid4().hex[:12]
+                    ClientAsset.objects.create(
+                        id=client_asset_id,
+                        client=client,
+                        asset=asset
+                    )
+        
         return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2033,6 +2056,133 @@ def asset_delete(request, asset_id):
     asset = get_object_or_404(Asset, id=asset_id)
     asset.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+def download_logo_to_cloudinary(logo_url: str, asset_id: str) -> str:
+    """
+    Download a logo from an external URL and upload it to Cloudinary.
+    Returns the Cloudinary URL.
+    """
+    if not logo_url or not logo_url.startswith('http'):
+        return logo_url  # Return as-is if not a valid HTTP URL
+    
+    try:
+        import requests
+        from api.storage import CloudinaryMediaStorage
+        from django.core.files.base import ContentFile
+        
+        # Download the logo from the external URL
+        response = requests.get(logo_url, timeout=10, stream=True)
+        response.raise_for_status()
+        
+        # Get file extension from URL or Content-Type
+        content_type = response.headers.get('Content-Type', '')
+        if 'image/png' in content_type:
+            ext = '.png'
+        elif 'image/jpeg' in content_type or 'image/jpg' in content_type:
+            ext = '.jpg'
+        elif 'image/gif' in content_type:
+            ext = '.gif'
+        elif 'image/svg' in content_type:
+            ext = '.svg'
+        else:
+            # Try to get extension from URL
+            from urllib.parse import urlparse
+            parsed = urlparse(logo_url)
+            path = parsed.path
+            _, ext = os.path.splitext(path)
+            ext = ext.lower() if ext else '.png'
+        
+        # Create filename with asset ID: assets/{asset_id}{ext}
+        custom_filename = f'assets/{asset_id}{ext}'
+        
+        # Read image content
+        image_content = response.content
+        
+        # Upload to Cloudinary
+        storage = CloudinaryMediaStorage()
+        content_file = ContentFile(image_content)
+        content_file.name = custom_filename
+        
+        filename = storage.save(custom_filename, content_file)
+        cloudinary_url = storage.url(filename)
+        
+        print(f"Logo downloaded from {logo_url} and uploaded to Cloudinary: {cloudinary_url}")
+        return cloudinary_url
+        
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"Error downloading logo from {logo_url} to Cloudinary: {error_msg}")
+        print(traceback.format_exc())
+        # Return original URL if download fails
+        return logo_url
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def asset_upload_logo(request, asset_id):
+    """Upload a logo file for an asset and return the URL"""
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    if 'logo' not in request.FILES:
+        return Response({'error': 'No logo file provided'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        logo_file = request.FILES['logo']
+        
+        # Validate file type
+        if not logo_file.content_type.startswith('image/'):
+            return Response({'error': 'File must be an image'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate file size (max 5MB)
+        if logo_file.size > 5 * 1024 * 1024:
+            return Response({'error': 'File size must be less than 5MB'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get file extension
+        original_filename = logo_file.name
+        _, ext = os.path.splitext(original_filename)
+        ext = ext.lower() if ext else '.png'
+        
+        # Create filename with asset ID: assets/{asset_id}{ext}
+        custom_filename = f'assets/{asset_id}{ext}'
+        
+        print(f"Uploading asset logo: {original_filename} as {custom_filename} for asset {asset_id}")
+        
+        # Upload to Cloudinary using the storage backend
+        from api.storage import CloudinaryMediaStorage
+        from django.core.files.base import ContentFile
+        
+        storage = CloudinaryMediaStorage()
+        
+        # Read file content and create ContentFile
+        logo_file.seek(0)
+        file_content = logo_file.read()
+        content_file = ContentFile(file_content)
+        content_file.name = custom_filename
+        
+        # Upload to Cloudinary
+        filename = storage.save(custom_filename, content_file)
+        
+        # Get the URL
+        logo_url = storage.url(filename)
+        
+        print(f"Logo uploaded successfully. Filename: {filename}, URL: {logo_url}")
+        
+        # Update the asset with the new logo URL
+        asset.logo_url = logo_url
+        asset.save(update_fields=['logo_url'])
+        
+        return Response({
+            'logo_url': logo_url,
+            'message': 'Logo uploaded successfully'
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"Error uploading logo: {error_msg}")
+        print(traceback.format_exc())
+        return Response({'error': f'Error uploading logo: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
@@ -3120,6 +3270,15 @@ Entrée (JSON):
         category = _country_to_fr_import(category)
         region = _country_to_fr_import(region)
 
+        # Download logo from external API to Cloudinary if it's an external URL
+        # This avoids making requests to external APIs on every page load
+        if logo_url and logo_url.startswith('http') and 'cloudinary.com' not in logo_url:
+            try:
+                logo_url = download_logo_to_cloudinary(logo_url, asset_id)
+            except Exception as e:
+                # If download fails, keep original URL
+                print(f"Warning: Could not download logo to Cloudinary, keeping original URL: {str(e)}")
+
         asset = Asset.objects.create(
             id=asset_id,
             type=asset_type,
@@ -3147,6 +3306,25 @@ Entrée (JSON):
             market_cap_currency=overview_currency or currency or 'USD',
             country=overview_country,
         )
+        
+        # Refresh asset from database to ensure we have the actual saved value
+        asset.refresh_from_db()
+        
+        # If asset is marked as default, assign it to all existing clients
+        # Use asset.default (actual DB value) instead of request parameter
+        if asset.default:
+            existing_clients = Client.objects.all()
+            for client in existing_clients:
+                # Check if client already has this asset (avoid duplicates)
+                if not ClientAsset.objects.filter(client=client, asset=asset).exists():
+                    client_asset_id = uuid.uuid4().hex[:12]
+                    while ClientAsset.objects.filter(id=client_asset_id).exists():
+                        client_asset_id = uuid.uuid4().hex[:12]
+                    ClientAsset.objects.create(
+                        id=client_asset_id,
+                        client=client,
+                        asset=asset
+                    )
         
         return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
     except Exception as e:

@@ -70,6 +70,9 @@ export function ManageAssets() {
   const [generatingDescription, setGeneratingDescription] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   
   // Alpha Vantage search state (inside modal)
   const [alphaVantageSearch, setAlphaVantageSearch] = useState('');
@@ -82,12 +85,18 @@ export function ManageAssets() {
   useEffect(() => {
     loadAssets();
     
-    // Cleanup function to clear timeout on unmount
+    // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
+    const priceRefreshInterval = setInterval(() => {
+      loadAssets();
+    }, 120000); // 2 minutes
+    
+    // Cleanup function to clear timeout and interval on unmount
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = null;
       }
+      clearInterval(priceRefreshInterval);
     };
   }, []);
 
@@ -120,6 +129,7 @@ export function ManageAssets() {
         logoUrl: asset.logoUrl || '',
         description: asset.description || '',
       });
+      setLogoPreview(asset.logoUrl || null);
     } else {
       setEditingAsset(null);
       setFormData({
@@ -134,7 +144,10 @@ export function ManageAssets() {
         logoUrl: '',
         description: '',
       });
+      setLogoPreview(null);
     }
+    // Reset logo file and preview
+    setLogoFile(null);
     // Reset search when opening dialog
     setSearchAssetType('');
     setAlphaVantageSearch('');
@@ -165,6 +178,8 @@ export function ManageAssets() {
       logoUrl: '',
       description: '',
     });
+    setLogoFile(null);
+    setLogoPreview(null);
     setAlphaVantageSearch('');
     setSearchResults([]);
     setSelectedSearchResult(null);
@@ -338,12 +353,35 @@ export function ManageAssets() {
           description: formData.description,
         };
 
-        await apiCall('/api/assets/create-from-alpha-vantage/', {
+        const createdAsset = await apiCall('/api/assets/create-from-alpha-vantage/', {
           method: 'POST',
           body: JSON.stringify(importPayload),
           headers: { 'Content-Type': 'application/json' }
         });
-        toast.success('Actif créé avec succès');
+        
+        // If a logo file was selected but not uploaded yet, upload it now
+        if (logoFile && createdAsset?.id) {
+          try {
+            const formDataUpload = new FormData();
+            formDataUpload.append('logo', logoFile);
+            const logoResponse = await apiCall(`/api/assets/${createdAsset.id}/upload-logo/`, {
+              method: 'POST',
+              body: formDataUpload
+            });
+            if (logoResponse.logo_url) {
+              // Logo uploaded successfully, asset already updated
+              // Nettoyer le preview local et le fichier
+              setLogoFile(null);
+              setLogoPreview(null);
+              toast.success('Actif créé avec logo téléchargé avec succès');
+            }
+          } catch (logoError: any) {
+            console.error('Error uploading logo after creation:', logoError);
+            toast.warning('Actif créé mais erreur lors du téléchargement du logo: ' + (logoError?.message || 'Erreur inconnue'));
+          }
+        } else {
+          toast.success('Actif créé avec succès');
+        }
       }
       handleCloseDialog();
       loadAssets();
@@ -410,6 +448,66 @@ export function ManageAssets() {
       setSearchResults([]);
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function handleLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner un fichier image');
+        return;
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('L\'image ne doit pas dépasser 5MB');
+        return;
+      }
+      setLogoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLogoPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  async function handleUploadLogo() {
+    if (!logoFile || !editingAsset) {
+      toast.error('Veuillez sélectionner un fichier image');
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+      const uploadFormData = new FormData();
+      uploadFormData.append('logo', logoFile);
+
+      const response = await apiCall(`/api/assets/${editingAsset.id}/upload-logo/`, {
+        method: 'POST',
+        body: uploadFormData
+      });
+
+      if (response.logo_url) {
+        setFormData((prevFormData) => ({ ...prevFormData, logoUrl: response.logo_url }));
+        // Utiliser uniquement l'URL du serveur, retirer le preview local
+        setLogoPreview(null);
+        setLogoFile(null);
+        // Réinitialiser le champ de fichier
+        const fileInput = document.getElementById('asset-logo-file') as HTMLInputElement;
+        if (fileInput) {
+          fileInput.value = '';
+        }
+        toast.success('Logo téléchargé avec succès');
+      } else {
+        toast.error('Erreur lors du téléchargement du logo');
+      }
+    } catch (error: any) {
+      console.error('Error uploading logo:', error);
+      toast.error(error?.message || 'Erreur lors du téléchargement du logo');
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
@@ -988,6 +1086,72 @@ export function ManageAssets() {
                   )}
                 </div>
               </div>
+              <div className="modal-form-field">
+                <Label htmlFor="asset-logo">Logo de l'actif</Label>
+                  <div className="space-y-2">
+                    {logoFile ? (
+                      <div className="flex items-center gap-4">
+                        <div className="flex-shrink-0">
+                          <img 
+                            src={logoPreview || ''} 
+                            alt={formData.name || 'Logo'}
+                            className="w-20 h-20 rounded object-contain border border-slate-200 bg-white p-1"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <Input
+                            id="asset-logo-file"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoFileChange}
+                            className="cursor-pointer"
+                            disabled={uploadingLogo}
+                          />
+                          {editingAsset && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleUploadLogo}
+                              disabled={uploadingLogo}
+                              className="w-full"
+                            >
+                              {uploadingLogo ? 'Téléchargement...' : 'Télécharger le logo'}
+                            </Button>
+                          )}
+                          {!editingAsset && (
+                            <p className="text-sm text-blue-600">
+                              Le logo sera téléchargé automatiquement après la création de l'actif.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <Input
+                          id="asset-logo-file"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleLogoFileChange}
+                          className="cursor-pointer"
+                          disabled={uploadingLogo}
+                        />
+                        {formData.logoUrl && (
+                          <p className="text-xs text-green-600 mt-2">
+                            ✓ Logo téléchargé avec succès
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {editingAsset 
+                      ? 'Téléchargez un logo manuellement si l\'API ne l\'a pas trouvé. Formats acceptés: JPG, PNG, GIF (max 5MB)'
+                      : 'Sélectionnez un logo à télécharger après la création de l\'actif. Formats acceptés: JPG, PNG, GIF (max 5MB)'}
+                  </p>
+                </div>
               <div className="modal-form-field">
                 <Label htmlFor="reference">Référence</Label>
                 <Input
