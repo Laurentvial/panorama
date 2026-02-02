@@ -27,21 +27,46 @@ git push heroku <votre-branche>:main
 
 ### Étape 2 : Tester la commande
 
-Une fois redéployé, testez la commande :
+**Important** : Les dynos one-off (`heroku run`) peuvent ne pas avoir accès au code source de la même manière que les dynos web. Le scheduler Heroku s'exécute dans le contexte du dyno web où le code est disponible.
+
+Pour tester, vous pouvez :
+1. Configurer la commande dans le scheduler et vérifier les logs
+2. Ou utiliser la commande suivante (qui devrait fonctionner dans le contexte du scheduler) :
 
 ```bash
-heroku run python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+cd backend && python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
 ```
 
 ### Étape 3 : Configurer le scheduler
 
-Dans le dashboard Heroku, configurez la commande du scheduler :
+Dans le dashboard Heroku, configurez la commande du scheduler avec l'une des options suivantes :
 
+**Option 1 (recommandée - commande directe)** :
+```
+cd backend && /app/.heroku/python/bin/python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+```
+
+**Option 2 (script)** :
+```
+bash refresh_prices.sh
+```
+
+**Option 3 (si Option 1 ne fonctionne pas)** :
 ```
 cd backend && python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
 ```
 
-**Note** : Comme le projet est structuré avec `backend/` et `frontend/` à la racine, il faut faire `cd backend` avant d'exécuter `manage.py`.
+**Note** : Le scheduler s'exécute dans le contexte du dyno web où le code est disponible. Le Procfile utilise `cd backend`, donc le code devrait être dans `/app/backend/` lors de l'exécution du scheduler.
+
+### Étape 4 : Vérifier les logs
+
+Après avoir configuré le scheduler, vérifiez les logs pour confirmer que la commande fonctionne :
+
+```bash
+heroku logs --tail --source scheduler
+```
+
+Ou dans le dashboard Heroku, allez dans "More" > "View logs" et filtrez par "scheduler".
 
 ## Alternative : Utiliser le chemin complet
 
