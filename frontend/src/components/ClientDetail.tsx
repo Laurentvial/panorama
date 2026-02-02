@@ -31,6 +31,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [notes, setNotes] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
   const [availableAssets, setAvailableAssets] = useState<any[]>([]);
+  const [clientProducts, setClientProducts] = useState<any[]>([]);
+  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [availableRibs, setAvailableRibs] = useState<any[]>([]);
   const [clientUsefulLinks, setClientUsefulLinks] = useState<any[]>([]);
@@ -54,6 +56,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         eventsData,
         assetsData,
         availableAssetsData,
+        productsData,
+        availableProductsData,
         ribsData,
         availableRibsData,
         usefulLinksData,
@@ -64,6 +68,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         apiCall(`/api/events/`),
         apiCall(`/api/clients/${clientId}/assets/`),
         apiCall(`/api/assets/`),
+        apiCall(`/api/clients/${clientId}/products/`),
+        apiCall(`/api/products/`),
         apiCall(`/api/clients/${clientId}/ribs/`),
         apiCall(`/api/ribs/`),
         apiCall(`/api/clients/${clientId}/useful-links/`),
@@ -88,6 +94,14 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       // Set available assets
       const availableAssetsArray = (availableAssetsData as any).assets || [];
       setAvailableAssets(availableAssetsArray);
+      
+      // Set client products
+      const productsArray = (productsData as any).products || [];
+      setClientProducts(productsArray);
+      
+      // Set available products
+      const availableProductsArray = (availableProductsData as any).products || [];
+      setAvailableProducts(availableProductsArray);
       
       // Set client RIBs
       const ribsArray = (ribsData as any).ribs || [];
@@ -314,6 +328,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             clientId={clientId}
             clientAssets={clientAssets}
             availableAssets={availableAssets}
+            clientProducts={clientProducts}
+            availableProducts={availableProducts}
             onRefresh={loadClientData}
           />
         </TabsContent>

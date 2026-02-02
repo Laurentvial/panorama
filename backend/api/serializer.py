@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, Position, AppSettings, NewsPost
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -695,7 +695,11 @@ class ClientAssetSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['clientId'] = instance.client.id
-        ret['asset'] = AssetSerializer(instance.asset).data
+        # Only serialize asset if it exists (handle case where asset was deleted but ClientAsset remains)
+        if instance.asset:
+            ret['asset'] = AssetSerializer(instance.asset).data
+        else:
+            ret['asset'] = None
         ret['featured'] = bool(instance.featured)
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
@@ -948,6 +952,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'interest_period', 'capitalisation_fonds',
             'availability_start', 'availability_end',
             'link_to_assets', 'min_entry_value', 'max_entry_value',
+            'default',
             'assetAllocations',
             'createdAt', 'updatedAt'
         ]
@@ -1034,6 +1039,14 @@ class ProductSerializer(serializers.ModelSerializer):
                 internal_data[camel_to_snake[key]] = value
             else:
                 internal_data[key] = value
+
+        # Normalize booleans that historically arrived as 'Oui'/'Non'
+        if 'capitalisation_fonds' in internal_data:
+            v = internal_data.get('capitalisation_fonds')
+            if isinstance(v, str):
+                internal_data['capitalisation_fonds'] = v.strip().lower() in ['oui', 'true', '1', 'yes']
+            else:
+                internal_data['capitalisation_fonds'] = bool(v)
         
         return super().to_internal_value(internal_data)
     
@@ -1050,12 +1063,13 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['variableProfitability'] = ret.pop('variable_profitability', '')
         ret['profitabilityPeriod'] = ret.pop('profitability_period', '')
         ret['interestPeriod'] = ret.pop('interest_period', '')
-        ret['capitalisationFonds'] = ret.pop('capitalisation_fonds', 'Non')
+        ret['capitalisationFonds'] = bool(ret.pop('capitalisation_fonds', False))
         ret['availabilityStart'] = ret.pop('availability_start', None)
         ret['availabilityEnd'] = ret.pop('availability_end', None)
         ret['linkToAssets'] = ret.pop('link_to_assets', 'Non')
         ret['minEntryValue'] = ret.pop('min_entry_value', None)
         ret['maxEntryValue'] = ret.pop('max_entry_value', None)
+        ret['default'] = bool(ret.pop('default', False))
         # Type is now a real field in the model, so it's already in ret
         # Handle image URL - get_imageUrl already handles proxy URL conversion
         # Just ensure None values are handled correctly
@@ -1063,6 +1077,34 @@ class ProductSerializer(serializers.ModelSerializer):
             ret['imageUrl'] = None
         elif ret.get('imageUrl') == '':
             ret['imageUrl'] = None
+        return ret
+
+class ClientProductSerializer(serializers.ModelSerializer):
+    product = ProductSerializer(read_only=True)
+    productId = serializers.CharField(write_only=True, required=False)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    featured = serializers.BooleanField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientProduct
+        fields = ['id', 'clientId', 'product', 'productId', 'featured', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
+        # Pass request context to ProductSerializer for image URLs
+        # Only serialize product if it exists (handle case where product was deleted but ClientProduct remains)
+        request = self.context.get('request')
+        if instance.product:
+            ret['product'] = ProductSerializer(instance.product, context={'request': request}).data
+        else:
+            ret['product'] = None
+        ret['featured'] = bool(instance.featured)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
         return ret
 
 class AppSettingsSerializer(serializers.ModelSerializer):

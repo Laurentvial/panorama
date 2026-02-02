@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
-from .models import Product, Transaction, Position, ProductAssetAllocation
+from .models import Product, Transaction, Position, ProductAssetAllocation, Log
 
 
 @dataclass(frozen=True)
@@ -446,14 +446,39 @@ def _schedule_trades_for_day(
     return scheduled
 
 
-def _choose_annual_profitability_rate(product: Product | None, *, rng: random.Random) -> Decimal:
+def _product_compounds(product: Product | None) -> bool:
     """
-    Pick an annual profitability rate (percent) for the whole transaction.
+    Return True when the product is configured to compound profits between profitability periods.
+    """
+    if product is None:
+        return False
+    v = getattr(product, 'capitalisation_fonds', False)
+    # Backward compatibility: historical DB values were 'Oui'/'Non'
+    if isinstance(v, str):
+        return v.strip().lower() in {'oui', 'true', '1', 'yes'}
+    return bool(v)
+
+
+def _choose_profitability_rate_pct(product: Product | None, *, rng: random.Random) -> Decimal:
+    """
+    Pick a profitability rate (percent) expressed in the unit of product.profitability_period.
+
+    Examples:
+    - profitability_period == "Mensuelle"      => rate is % per month
+    - profitability_period == "Trimestrielle"  => rate is % per trimester (3 months)
+    - profitability_period == "Semestrielle"   => rate is % per semester (6 months)
+    - profitability_period == "Annuelle"       => rate is % per year (12 months)
+    - profitability_period == "Fin de contrat" => rate is % over the full contract duration
+
     - If variable profitability: pick within [profitability, variable_profitability]
     - Else: use profitability
     """
     if product is None:
         return Decimal('0')
+    # Some products explicitly disable profitability.
+    if bool(getattr(product, 'no_profitability', False)):
+        return Decimal('0')
+
     rate_min = _parse_decimal(getattr(product, 'profitability', None)) or Decimal('0')
     if (getattr(product, 'is_variable_profitability', '') or '').lower() == 'oui':
         rate_max = _parse_decimal(getattr(product, 'variable_profitability', None))
@@ -477,12 +502,120 @@ def _weighted_choice_with_rng(items_with_weights: list[tuple[object, Decimal]], 
     return items_with_weights[-1][0]
 
 
+def _new_log_id() -> str:
+    log_id = uuid.uuid4().hex[:12]
+    while Log.objects.filter(id=log_id).exists():
+        log_id = uuid.uuid4().hex[:12]
+    return log_id
+
+
+def _safe_decimal_sum(values) -> Decimal:
+    total = Decimal('0')
+    for v in values:
+        if v is None:
+            continue
+        try:
+            total += Decimal(str(v))
+        except Exception:
+            continue
+    return total
+
+
+def _log_positions_generation(
+    *,
+    txn: Transaction,
+    product: Product | None,
+    ctx: InvestmentContext,
+    trigger: str | None,
+    start_dt: datetime,
+    end_dt: datetime,
+    created_positions: list[Position],
+    period_summaries: list[dict],
+    existing_count_before: int,
+) -> None:
+    """
+    Store a structured Log entry about a positions generation run.
+
+    We log when we create positions, or when the run is a validation-triggered run (signal),
+    or when there were no positions before (first run). This keeps noise low while ensuring
+    we have an audit trail for the important events.
+    """
+    if not created_positions and not (trigger == "signal" or int(existing_count_before or 0) == 0):
+        return
+
+    try:
+        from django.db.models import Count, Max, Min, Sum  # local import to avoid global dependency
+
+        created_profit = _safe_decimal_sum([p.profit_loss for p in created_positions]).quantize(Decimal("0.01"))
+        created_invested = _safe_decimal_sum([p.invested_amount for p in created_positions]).quantize(Decimal("0.01"))
+
+        # Totals after generation
+        totals = Position.objects.filter(transaction_id=txn.id).aggregate(
+            count=Count("id"),
+            profit=Sum("profit_loss"),
+            invested=Sum("invested_amount"),
+        )
+        all_count = int(totals.get("count") or 0)
+        all_profit = (Decimal(str(totals.get("profit") or "0"))).quantize(Decimal("0.01"))
+        all_invested = (Decimal(str(totals.get("invested") or "0"))).quantize(Decimal("0.01"))
+
+        # Period/date range for created positions
+        if created_positions:
+            created_dates_agg = Position.objects.filter(id__in=[p.id for p in created_positions]).aggregate(
+                min_date=Min("period_date"),
+                max_date=Max("period_date"),
+            )
+            min_date = created_dates_agg.get("min_date")
+            max_date = created_dates_agg.get("max_date")
+        else:
+            min_date = None
+            max_date = None
+
+        details = {
+            "transactionId": txn.id,
+            "clientId": getattr(txn, "client_id", None),
+            "productId": ctx.product_id,
+            "productName": getattr(product, "name", None) if product else None,
+            "trigger": trigger,
+            "status": getattr(txn, "status", None),
+            "validatedAt": getattr(txn, "validated_at", None).isoformat() if getattr(txn, "validated_at", None) else None,
+            "startDt": start_dt.isoformat() if start_dt else None,
+            "endDt": end_dt.isoformat() if end_dt else None,
+            "durationMonths": ctx.duration_months,
+            "profitabilityPeriod": getattr(product, "profitability_period", None) if product else None,
+            "capitalisationFonds": bool(getattr(product, "capitalisation_fonds", False)) if product is not None else False,
+            "existingPositionsBefore": int(existing_count_before or 0),
+            "createdPositions": int(len(created_positions)),
+            "createdInvestedTotal": str(created_invested),
+            "createdProfitTotal": str(created_profit),
+            "createdPeriodDateMin": min_date.isoformat() if min_date else None,
+            "createdPeriodDateMax": max_date.isoformat() if max_date else None,
+            "positionsTotalAfter": int(all_count),
+            "investedTotalAfter": str(all_invested),
+            "profitTotalAfter": str(all_profit),
+            "periods": period_summaries,
+        }
+
+        Log.objects.create(
+            id=_new_log_id(),
+            event_type="positions_generated",
+            user_id=None,
+            details=details,
+            old_value={},
+            new_value={},
+        )
+    except Exception:
+        # Best-effort logging; never block business flow
+        return
+
+
 def _create_trade_positions_compounding(
     *,
     txn: Transaction,
     product: Product | None,
     ctx: InvestmentContext,
     allocations: list[ProductAssetAllocation] | None,
+    trigger: str | None = None,
 ) -> list[Position]:
     """
     Create trade-like positions across the whole duration with:
@@ -495,7 +628,9 @@ def _create_trade_positions_compounding(
     trades up to the per-day target.
     """
     tz = timezone.get_current_timezone()
-    start_dt = txn.datetime or timezone.now()
+    # IMPORTANT: start generating from validation time when available.
+    # Transactions can be created days before being validated.
+    start_dt = getattr(txn, 'validated_at', None) or txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
     end_dt = _add_months_dt(start_dt, ctx.duration_months)
@@ -519,13 +654,14 @@ def _create_trade_positions_compounding(
     )
     day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
 
+    existing_count_before = Position.objects.filter(transaction_id=ctx.transaction_id).count()
     existing_counts, max_idx = _existing_trade_counts(ctx.transaction_id)
     next_idx = max_idx + 1
 
-    # Profitability config
-    annual_rate = _choose_annual_profitability_rate(product, rng=rng)
+    # Profitability config (rate unit is product.profitability_period)
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    does_compound = _product_compounds(product)
 
     market_open = time(9, 30)
     market_close = time(16, 0)
@@ -538,6 +674,7 @@ def _create_trade_positions_compounding(
         ]
 
     created: list[Position] = []
+    period_summaries: list[dict] = []
     capital = invested_total.quantize(Decimal('0.01'))
     remaining_months = ctx.duration_months
     cursor_dt = start_dt
@@ -569,9 +706,21 @@ def _create_trade_positions_compounding(
             except Exception:
                 continue
 
-        # Target profit for this period (annual prorated by months)
-        period_rate = (annual_rate * Decimal(str(step_months)) / Decimal('12')).quantize(Decimal('0.0001'))
-        target_profit = (capital * period_rate / Decimal('100')).quantize(Decimal('0.01'))
+        # Target profit for this period.
+        # The profitability rate is configured per `profitability_period` (monthly/quarterly/etc).
+        # If this period is shorter than the configured period (e.g. last half-year for annual),
+        # pro-rate linearly by months.
+        rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
+        period_rate_pct = _choose_profitability_rate_pct(product, rng=rate_rng)
+        proration = (
+            (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
+            if profit_period_months and step_months != profit_period_months
+            else Decimal('1')
+        )
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+
+        capital_base = capital if does_compound else invested_total
+        target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
         profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
 
         # Determine missing trades for each day in this period
@@ -583,17 +732,21 @@ def _create_trade_positions_compounding(
             for slot in range(missing):
                 trade_specs.append((day, slot))
 
+        created_profit_this_period = Decimal('0.00')
+        created_count_this_period = 0
         if trade_specs:
             invested_amounts: list[Decimal] = []
             for day, slot in trade_specs:
                 amt_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:amt")
                 pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
-                amt = (capital * pct).quantize(Decimal('0.01'))
+                amt = ((capital if does_compound else invested_total) * pct).quantize(Decimal('0.01'))
                 if amt < Decimal('50.00'):
                     amt = Decimal('50.00')
                 invested_amounts.append(amt)
 
             pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts)
+            created_profit_this_period = _safe_decimal_sum(pnl_parts).quantize(Decimal('0.01'))
+            created_count_this_period = len(pnl_parts)
 
             for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
                 win = _day_market_window(
@@ -655,16 +808,44 @@ def _create_trade_positions_compounding(
                 )
                 next_idx += 1
 
-        # Compound at period boundary using realized profit (existing + newly created for this period)
-        new_profit = sum(
-            (p.profit_loss or Decimal('0')) for p in created
-            if p.period_date and period_days[0] <= p.period_date <= period_days[-1]
+        # Compound (if enabled) at period boundary using realized profit (existing + newly created for this period)
+        if does_compound:
+            new_profit = sum(
+                (p.profit_loss or Decimal('0')) for p in created
+                if p.period_date and period_days[0] <= p.period_date <= period_days[-1]
+            )
+            capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
+
+        period_summaries.append(
+            {
+                "periodIndex": int(period_idx),
+                "months": int(step_months),
+                "startDate": period_days[0].isoformat() if period_days else None,
+                "endDate": period_days[-1].isoformat() if period_days else None,
+                "ratePct": str(effective_rate_pct),
+                "capitalBase": str(capital_base.quantize(Decimal("0.01"))),
+                "targetProfit": str(target_profit),
+                "existingProfit": str(existing_profit.quantize(Decimal("0.01"))),
+                "createdProfit": str(created_profit_this_period),
+                "createdCount": int(created_count_this_period),
+            }
         )
-        capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
 
         cursor_dt = period_end_dt
         remaining_months -= step_months
         period_idx += 1
+
+    _log_positions_generation(
+        txn=txn,
+        product=product,
+        ctx=ctx,
+        trigger=trigger,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        created_positions=created,
+        period_summaries=period_summaries,
+        existing_count_before=existing_count_before,
+    )
 
     return created
 
@@ -719,7 +900,7 @@ def _extract_product_from_description(description: str) -> Product | None:
 
 
 @db_transaction.atomic
-def create_trade_positions_for_smart_portfolio_investment(txn: Transaction) -> list[Position]:
+def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, trigger: str | None = None) -> list[Position]:
     """
     Generate trade-like positions for Smart Portfolio investment transactions.
 
@@ -756,6 +937,7 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction) -> l
         product=product,
         ctx=ctx,
         allocations=allocations,
+        trigger=trigger,
     )
 
 
@@ -892,7 +1074,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
 
 
 @db_transaction.atomic
-def create_positions_for_investment(txn: Transaction) -> list[Position]:
+def create_positions_for_investment(txn: Transaction, *, trigger: str | None = None) -> list[Position]:
     """
     Create monthly positions for an investment transaction.
 
@@ -913,7 +1095,7 @@ def create_positions_for_investment(txn: Transaction) -> list[Position]:
 
     # For Smart Portfolio, generate asset-linked trades (uses allocations if present).
     if product is not None and _is_smart_portfolio(product):
-        return create_trade_positions_for_smart_portfolio_investment(txn)
+        return create_trade_positions_for_smart_portfolio_investment(txn, trigger=trigger)
 
     # Non-smart internal products: trade-like positions without asset linkage, with profitability_period + compounding.
     start_dt = txn.datetime or timezone.now()
@@ -934,5 +1116,6 @@ def create_positions_for_investment(txn: Transaction) -> list[Position]:
         product=product,
         ctx=ctx,
         allocations=None,
+        trigger=trigger,
     )
 

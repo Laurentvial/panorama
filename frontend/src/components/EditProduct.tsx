@@ -51,11 +51,13 @@ export function EditProduct() {
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
     interestPeriod: [] as string[],
-    capitalisationFonds: 'Non',
+    // Cumuler les intérêts (capitalisation_fonds)
+    capitalisationFonds: false,
     // Gestion du produit
     availabilityStart: '',
     availabilityEnd: '',
     linkToAssets: false,
+    default: false, // Afficher par défaut pour tous les clients
     // Gestion des prix
     minEntryValue: '',
     maxEntryValue: ''
@@ -249,10 +251,16 @@ export function EditProduct() {
         profitabilityMax: variableProfitabilityValue !== '' ? variableProfitabilityValue : '',
         profitabilityPeriod: product.profitabilityPeriod || '',
         interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
-        capitalisationFonds: product.capitalisationFonds || 'Non',
+        capitalisationFonds: (() => {
+          const v = (product as any).capitalisationFonds ?? (product as any).capitalisation_fonds;
+          if (typeof v === 'boolean') return v;
+          if (typeof v === 'string') return v.trim().toLowerCase() === 'oui' || v.trim().toLowerCase() === 'true' || v.trim() === '1';
+          return Boolean(v);
+        })(),
         availabilityStart: formatDate(product.availabilityStart),
         availabilityEnd: formatDate(product.availabilityEnd),
         linkToAssets: product.linkToAssets === 'Oui' || product.linkToAssets === true,
+        default: product.default || false,
         minEntryValue: product.minEntryValue?.toString() || '',
         maxEntryValue: product.maxEntryValue?.toString() || ''
       });
@@ -547,12 +555,13 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
         formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod || '');
         // Always send interestPeriod, even if empty - join array with comma and space
         formDataToSend.append('interestPeriod', Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : '');
-        formDataToSend.append('capitalisationFonds', formData.capitalisationFonds);
+        formDataToSend.append('capitalisationFonds', String(!!formData.capitalisationFonds));
         // Always send availability dates, even if empty
         formDataToSend.append('availabilityStart', formData.availabilityStart || '');
         formDataToSend.append('availabilityEnd', formData.availabilityEnd || '');
         const linkToAssetsValue = formData.linkToAssets ? 'Oui' : 'Non';
         formDataToSend.append('linkToAssets', linkToAssetsValue);
+        formDataToSend.append('default', formData.default.toString());
         if (formData.linkToAssets) {
           const allocationsPayload = assetAllocations
             .map((row) => ({
@@ -610,12 +619,13 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           variableProfitability: variableProfitabilityValue || undefined,
           profitabilityPeriod: formData.profitabilityPeriod || undefined,
           interestPeriod: formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
-          capitalisationFonds: formData.capitalisationFonds,
+          capitalisationFonds: !!formData.capitalisationFonds,
           duration: formData.duration || undefined,
           // Gestion du produit
           availabilityStart: formData.availabilityStart || undefined,
           availabilityEnd: formData.availabilityEnd || undefined,
           linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
+          default: formData.default,
           assetAllocations: formData.linkToAssets && assetAllocations.length > 0
             ? assetAllocations
                 .map((row) => ({
@@ -1184,8 +1194,8 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   <div className="space-y-2">
                     <Label htmlFor="product-capitalisation-fonds">Cumuler les intérêts ?</Label>
                     <Select 
-                      value={formData.capitalisationFonds} 
-                      onValueChange={(value) => setFormData({ ...formData, capitalisationFonds: value })}
+                      value={formData.capitalisationFonds ? 'Oui' : 'Non'} 
+                      onValueChange={(value) => setFormData({ ...formData, capitalisationFonds: value === 'Oui' })}
                     >
                       <SelectTrigger id="product-capitalisation-fonds">
                         <SelectValue placeholder="Sélectionner" />
@@ -1202,8 +1212,21 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
 
             {/* Gestion du produit */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Gestion du produit (en développement)</h3>
+              <h3 className="text-lg font-semibold text-slate-800">Gestion du produit</h3>
               
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="product-default"
+                    checked={formData.default}
+                    onCheckedChange={(checked) => setFormData({ ...formData, default: checked === true })}
+                  />
+                  <Label htmlFor="product-default" className="cursor-pointer">
+                    Afficher par défaut (ce produit sera ajouté aux produits actifs de tous les clients)
+                  </Label>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="product-availability-start">Début de disponibilité</Label>

@@ -64,6 +64,12 @@ urlpatterns = [
     path('clients/<str:client_id>/assets/reset/', api_views.client_assets_reset, name='client-assets-reset'),
     path('clients/<str:client_id>/assets/<str:asset_id>/toggle-featured/', api_views.client_asset_toggle_featured, name='client-asset-toggle-featured'),
     path('clients/<str:client_id>/assets/<str:asset_id>/', api_views.client_asset_remove, name='client-asset-remove'),
+    # Client Products endpoints
+    path('clients/<str:client_id>/products/', api_views.client_products, name='client-products'),
+    path('clients/<str:client_id>/products/add/', api_views.client_product_add, name='client-product-add'),
+    path('clients/<str:client_id>/products/reset/', api_views.client_products_reset, name='client-products-reset'),
+    path('clients/<str:client_id>/products/<str:product_id>/toggle-featured/', api_views.client_product_toggle_featured, name='client-product-toggle-featured'),
+    path('clients/<str:client_id>/products/<str:product_id>/', api_views.client_product_remove, name='client-product-remove'),
     # Alpha Vantage endpoints
     path('alpha-vantage/search/', api_views.alpha_vantage_search, name='alpha-vantage-search'),
     path('alpha-vantage/quote/<str:symbol>/', api_views.alpha_vantage_quote, name='alpha-vantage-quote'),

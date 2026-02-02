@@ -42,7 +42,7 @@ class Command(BaseCommand):
 
         for txn in qs.iterator():
             total_txn += 1
-            created = create_positions_for_investment(txn)
+            created = create_positions_for_investment(txn, trigger="management_command")
             total_created += len(created)
 
         self.stdout.write(self.style.SUCCESS(f"Processed {total_txn} transaction(s). Created {total_created} position(s)."))

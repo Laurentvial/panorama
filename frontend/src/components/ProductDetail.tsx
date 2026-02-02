@@ -54,6 +54,8 @@ export function ProductDetail() {
   // Profitability simulator state
   const [simulatorAmount, setSimulatorAmount] = useState<number>(10000);
   const [simulatorBasePrice, setSimulatorBasePrice] = useState<string>('10000');
+  const [simulatorRateMode, setSimulatorRateMode] = useState<'min' | 'avg' | 'max' | 'custom'>('avg');
+  const [simulatorCustomRate, setSimulatorCustomRate] = useState<string>('');
   
   // Helper function to format date to French format (jj/mm/aaaa) - declared before use
   const formatDateToFrench = (dateString: string): string => {
@@ -241,6 +243,39 @@ export function ProductDetail() {
   const loadData = async () => {
     try {
       setLoading(true);
+      
+      // First, check if client has access to this product/asset
+      if (!currentUser?.id) {
+        toast.error('Utilisateur non identifié');
+        navigate('/platform');
+        return;
+      }
+      
+      const [clientProductsResponse, clientAssetsResponse] = await Promise.all([
+        apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
+        apiCall(`/api/clients/${currentUser.id}/assets/`).catch(() => ({ assets: [] })),
+      ]);
+      
+      const clientProducts = (clientProductsResponse as any)?.products || [];
+      const clientAssets = (clientAssetsResponse as any)?.assets || [];
+      const clientProductIds = clientProducts.map((cp: any) => {
+        const product = cp.product || cp;
+        return product?.id;
+      }).filter(Boolean);
+      const clientAssetIds = clientAssets.map((ca: any) => {
+        const asset = ca.asset || ca;
+        return asset?.id;
+      }).filter(Boolean);
+      
+      // Check if the requested ID is in client's accessible products or assets
+      const hasAccess = clientProductIds.includes(id) || clientAssetIds.includes(id);
+      
+      if (!hasAccess) {
+        toast.error('Vous n\'avez pas accès à ce produit ou actif');
+        navigate('/platform/discover');
+        return;
+      }
+      
       // Try loading as product first (since smartPortfolios are products)
       // If that fails with 404, silently try as asset (this is expected behavior)
       let productLoaded = false;
@@ -370,25 +405,126 @@ export function ProductDetail() {
   };
 
   const calculateGains = (product: any, amount: number, basePrice: number): number => {
-    if (!product || amount <= 0 || basePrice <= 0) return 0;
-    
-    // Parse duration (assuming format like "1 mois" or "12 mois")
-    const durationMatch = product.duration?.match(/(\d+)/);
-    const durationMonths = durationMatch ? parseInt(durationMatch[1]) : 1;
-    
-    // Get profitability rate (use average if variable)
-    let profitabilityRate = 0;
-    if (product.isVariableProfitability === 'Oui' && product.variableProfitability) {
-      const min = parseFinancialValue(product.profitability);
-      const max = parseFinancialValue(product.variableProfitability);
-      profitabilityRate = (min + max) / 2; // Use average for calculation
-    } else if (product.profitability !== null && product.profitability !== undefined) {
-      profitabilityRate = parseFinancialValue(product.profitability);
+    // Backward-compat wrapper kept for existing call sites.
+    // The simulator now uses per-period profitability and optional compounding.
+    const sim = simulateProfitability(product, basePrice, {
+      rateMode: simulatorRateMode,
+      customRatePct: simulatorCustomRate,
+    });
+    return sim.totalProfit;
+  };
+
+  const parseDurationMonths = (duration: any): number => {
+    if (!duration) return 0;
+    const m = String(duration).match(/(\d+)/);
+    const v = m ? parseInt(m[1], 10) : 0;
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  };
+
+  const profitabilityPeriodMonths = (period: any, durationMonths: number): number => {
+    const p = String(period || '').trim().toLowerCase();
+    if (!p) return 1;
+    if (p.includes('fin') && (p.includes('contrat') || p.includes('matur'))) {
+      return Math.max(1, durationMonths || 1);
     }
-    
-    // Calculate gains: basePrice * (profitabilityRate / 100) * durationMonths
-    const gains = basePrice * (profitabilityRate / 100) * durationMonths;
-    return gains;
+    if (p.includes('mens')) return 1;
+    if (p.includes('trim')) return 3;
+    if (p.includes('sem')) return 6;
+    if (p.includes('ann') || p === 'an' || p.includes('année') || p.includes('annee')) return 12;
+    // Fallback: try parse a number of months
+    const m = p.match(/(\d+)/);
+    const v = m ? parseInt(m[1], 10) : 0;
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  };
+
+  const normalizeBool = (v: any): boolean => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') return v.trim().toLowerCase() === 'oui' || v.trim().toLowerCase() === 'true' || v.trim() === '1';
+    return Boolean(v);
+  };
+
+  const getRateBoundsPct = (product: any): { min: number; max: number; avg: number } => {
+    const min = parseFinancialValue(product?.profitability);
+    const maxRaw = parseFinancialValue(product?.variableProfitability);
+    const isVar = product?.isVariableProfitability === 'Oui' && maxRaw > 0;
+    const max = isVar ? maxRaw : min;
+    const avg = isVar ? (min + max) / 2 : min;
+    return { min, max, avg };
+  };
+
+  const simulateProfitability = (
+    product: any,
+    principal: number,
+    opts: { rateMode: 'min' | 'avg' | 'max' | 'custom'; customRatePct: string }
+  ): {
+    durationMonths: number;
+    periodMonths: number;
+    compound: boolean;
+    pickedRatePct: number;
+    rows: Array<{
+      index: number;
+      months: number;
+      base: number;
+      ratePct: number;
+      profit: number;
+      end: number;
+    }>;
+    totalProfit: number;
+    endCapital: number;
+    annualizedPct: number | null;
+  } => {
+    const durationMonths = parseDurationMonths(product?.duration);
+    const periodMonths = profitabilityPeriodMonths(product?.profitabilityPeriod, durationMonths);
+    const compound = normalizeBool(product?.capitalisationFonds ?? product?.capitalisation_fonds);
+
+    const bounds = getRateBoundsPct(product);
+    let pickedRatePct = bounds.avg;
+    if (opts.rateMode === 'min') pickedRatePct = bounds.min;
+    if (opts.rateMode === 'max') pickedRatePct = bounds.max;
+    if (opts.rateMode === 'custom') {
+      const v = parseFinancialValue(opts.customRatePct);
+      if (Number.isFinite(v)) pickedRatePct = v;
+    }
+
+    const rows: Array<{ index: number; months: number; base: number; ratePct: number; profit: number; end: number }> = [];
+    const safePrincipal = Number.isFinite(principal) ? Math.max(0, principal) : 0;
+    if (!product || safePrincipal <= 0 || durationMonths <= 0 || pickedRatePct <= 0) {
+      return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
+    }
+
+    let remaining = durationMonths;
+    let capital = safePrincipal;
+    let totalProfit = 0;
+    let idx = 1;
+
+    while (remaining > 0) {
+      const step = Math.min(periodMonths, remaining);
+      const proration = periodMonths > 0 ? step / periodMonths : 1;
+      const effectiveRatePct = pickedRatePct * proration;
+      const base = compound ? capital : safePrincipal;
+      const profit = base * (effectiveRatePct / 100);
+      totalProfit += profit;
+      const end = compound ? (base + profit) : (safePrincipal + totalProfit);
+      rows.push({
+        index: idx,
+        months: step,
+        base,
+        ratePct: effectiveRatePct,
+        profit,
+        end,
+      });
+      capital = end;
+      remaining -= step;
+      idx += 1;
+    }
+
+    const endCapital = compound ? capital : safePrincipal + totalProfit;
+    const annualizedPct =
+      durationMonths > 0 && endCapital > 0
+        ? (Math.pow(endCapital / safePrincipal, 12 / durationMonths) - 1) * 100
+        : null;
+
+    return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
   };
 
   // Initialize signature canvas
@@ -585,32 +721,20 @@ export function ProductDetail() {
 
     setIsSubscribing(true);
     try {
-      // Calculate gains - use annual rate
-      const durationMatch = productData.duration?.match(/(\d+)/);
-      const durationMonths = durationMatch ? parseInt(durationMatch[1]) : 1;
-      
-      let profitabilityRate = 0;
-      if (productData.isVariableProfitability === 'Oui' && productData.variableProfitability) {
-        const min = parseFinancialValue(productData.profitability);
-        const max = parseFinancialValue(productData.variableProfitability);
-        profitabilityRate = (min + max) / 2; // Use average
-      } else if (productData.profitability !== null && productData.profitability !== undefined) {
-        profitabilityRate = parseFinancialValue(productData.profitability);
-      }
-      
-      // Calculate gains: amount * (annualRate / 100) * (durationMonths / 12)
-      const gains = amount * (profitabilityRate / 100) * (durationMonths / 12);
-      const total = amount + gains;
+      // Calculate gains using the same simulator logic as the product page
+      const sim = simulateProfitability(productData, amount, { rateMode: 'avg', customRatePct: '' });
+      const gains = sim.totalProfit;
+      const total = sim.endCapital;
       
       // Format profitability for display
       let profitabilityDisplay = 'N/A';
       if (productData.isVariableProfitability === 'Oui' && productData.variableProfitability) {
         const min = parseFinancialValue(productData.profitability);
         const max = parseFinancialValue(productData.variableProfitability);
-        profitabilityDisplay = `${min.toFixed(2)} à ${max.toFixed(2)}%`;
+        profitabilityDisplay = `${min.toFixed(2)} à ${max.toFixed(2)}% ${productData.profitabilityPeriod || ''}`.trim();
       } else if (productData.profitability !== null && productData.profitability !== undefined) {
         const profit = parseFinancialValue(productData.profitability);
-        profitabilityDisplay = `${profit.toFixed(2)}%`;
+        profitabilityDisplay = `${profit.toFixed(2)}% ${productData.profitabilityPeriod || ''}`.trim();
       }
       
       // Get category name
@@ -734,17 +858,16 @@ export function ProductDetail() {
     contractEndDate.setMonth(contractEndDate.getMonth() + durationMonths);
     const contractEndDateStr = formatDateToFrench(contractEndDate.toISOString().split('T')[0]);
 
-    // Calculate interest
-    const profitabilityRate = productData.isVariableProfitability === 'Oui' && productData.variableProfitability
-      ? (parseFinancialValue(productData.profitability) + parseFinancialValue(productData.variableProfitability)) / 2
-      : parseFinancialValue(productData.profitability);
-    const interestAmount = amount * (profitabilityRate / 100) * durationMonths;
+    // Calculate interest (use the same logic as the profitability simulator)
+    const sim = simulateProfitability(productData, amount, { rateMode: 'avg', customRatePct: '' });
+    const profitabilityRate = sim.pickedRatePct;
+    const interestAmount = sim.totalProfit;
 
     // Interest period
     const interestPeriod = subscriptionData.interestPeriod || productData.interestPeriod || 'Fin de contrat';
 
-    // Auto-renewal
-    const autoRenewal = productData.capitalisationFonds === 'Oui' ? 'OUI' : 'NON';
+    // Auto-renewal / compounding
+    const autoRenewal = normalizeBool(productData.capitalisationFonds ?? productData.capitalisation_fonds) ? 'OUI' : 'NON';
 
     // Min/Max investment
     const minInvestment = parseFinancialValue(productData.minEntryValue) || 0;
@@ -810,8 +933,12 @@ export function ProductDetail() {
     const maxInvestment = parseFinancialValue(product.maxEntryValue);
     
     const basePriceNum = parseFinancialValue(simulatorBasePrice) || 0;
-    const calculatedGains = calculateGains(product, simulatorAmount, basePriceNum);
-    const total = basePriceNum + calculatedGains;
+    const sim = simulateProfitability(product, basePriceNum, {
+      rateMode: simulatorRateMode,
+      customRatePct: simulatorCustomRate,
+    });
+    const calculatedGains = sim.totalProfit;
+    const total = sim.endCapital;
 
     // Helper function to get TradingView symbol for products linked to assets
     const getProductTradingViewSymbol = (productData: any): string | null => {
@@ -1042,6 +1169,42 @@ export function ProductDetail() {
                       }}
                     />
                   </div>
+
+                  {/* Taux (min/avg/max/custom) */}
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+                    <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+                      <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux utilisé</div>
+                      <Select
+                        value={simulatorRateMode}
+                        onValueChange={(v) => setSimulatorRateMode(v as any)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choisir" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="min">Minimum</SelectItem>
+                          <SelectItem value="avg">Moyen</SelectItem>
+                          <SelectItem value="max">Maximum</SelectItem>
+                          <SelectItem value="custom">Personnalisé</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+                      <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux (%)</div>
+                      <Input
+                        type="number"
+                        value={simulatorRateMode === 'custom' ? simulatorCustomRate : String(sim.pickedRatePct || 0)}
+                        onChange={(e) => setSimulatorCustomRate(e.target.value)}
+                        disabled={simulatorRateMode !== 'custom'}
+                        style={{ backgroundColor: simulatorRateMode === 'custom' ? 'white' : '#f9fafb' }}
+                      />
+                      <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                        {product?.profitabilityPeriod ? `par ${product.profitabilityPeriod}` : 'par période'}
+                        {sim.compound ? ' • capitalisation' : ''}
+                      </div>
+                    </div>
+                  </div>
                   
                   {/* Calculation Fields */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1130,7 +1293,74 @@ export function ProductDetail() {
                         {total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
                       </span>
                     </div>
+
+                    {/* Annualized */}
+                    {sim.annualizedPct != null && Number.isFinite(sim.annualizedPct) && (
+                      <div style={{ 
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: isMobile ? '8px' : '8px 12px',
+                        backgroundColor: '#f9fafb',
+                        borderRadius: '6px',
+                        flexWrap: 'wrap',
+                        gap: isMobile ? '4px' : '0',
+                      }}>
+                        <span style={{ fontSize: isMobile ? '13px' : '14px', color: '#374151', fontWeight: '500' }}>
+                          Annualisé (indicatif)
+                        </span>
+                        <span style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280' }}>
+                          {sim.annualizedPct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                        </span>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Breakdown table */}
+                  {sim.rows.length > 0 && (
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 13, color: '#374151', fontWeight: 600 }}>
+                        Détail par période
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+                          <thead>
+                            <tr style={{ backgroundColor: 'white', borderBottom: '1px solid #e5e7eb' }}>
+                              <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Période</th>
+                              <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Mois</th>
+                              <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Base</th>
+                              <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Taux</th>
+                              <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Profit</th>
+                              <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Fin</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sim.rows.map((r) => (
+                              <tr key={r.index} style={{ borderBottom: '1px solid rgba(229,231,235,0.7)' }}>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#111827', fontWeight: 600 }}>#{r.index}</td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>{r.months}</td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>
+                                  {r.base.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>
+                                  {r.ratePct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#0f766e', textAlign: 'right', fontWeight: 700 }}>
+                                  +{r.profit.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#111827', textAlign: 'right', fontWeight: 800 }}>
+                                  {r.end.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', fontSize: 12, color: '#6b7280' }}>
+                        Le calcul utilise la rentabilité “par période” (mensuelle/trimestrielle/…) et applique la capitalisation si elle est activée sur le produit.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

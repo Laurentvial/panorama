@@ -24,21 +24,29 @@ export function PlatformDashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      // Load all transactions
-      const [transactionsResponse, allAssetsResponse, productsResponse, positionsResponse] = await Promise.all([
+      // Load client-specific assets and products
+      const [transactionsResponse, clientAssetsResponse, clientProductsResponse, positionsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
-        apiCall('/api/assets/'),
-        apiCall('/api/products/'),
+        apiCall(`/api/clients/${currentUser.id}/assets/`),
+        apiCall(`/api/clients/${currentUser.id}/products/`),
         apiCall(`/api/clients/${currentUser.id}/positions/`),
       ]);
 
       setAllTransactions(transactionsResponse.transactions || []);
-      setAssets(allAssetsResponse.assets || []);
-      // Ensure `products` is always an array.
-      // Some backends return `{ products: [...] }` while others return an object without `products`.
-      // Falling back to the whole response object breaks `.find()` calls downstream.
-      const rawProducts = (productsResponse as any)?.products;
-      setProducts(Array.isArray(rawProducts) ? rawProducts : Array.isArray(productsResponse) ? (productsResponse as any) : []);
+      // Extract assets from ClientAsset objects
+      const clientAssets = (clientAssetsResponse as any)?.assets || [];
+      const assetsList = clientAssets.map((ca: any) => {
+        // Handle both structures: {asset: {...}} and direct asset object
+        return ca.asset || ca;
+      }).filter(Boolean);
+      setAssets(assetsList);
+      // Extract products from ClientProduct objects
+      const clientProducts = (clientProductsResponse as any)?.products || [];
+      const productsList = clientProducts.map((cp: any) => {
+        // Handle both structures: {product: {...}} and direct product object
+        return cp.product || cp;
+      }).filter(Boolean);
+      setProducts(productsList);
       setPositions((positionsResponse as any)?.positions || []);
     } catch (error: any) {
       // If it's a redirect error, don't log it - page is navigating away

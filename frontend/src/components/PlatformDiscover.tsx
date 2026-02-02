@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
-import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -36,7 +35,6 @@ function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }
 
 export function PlatformDiscover() {
   const { currentUser } = useUser();
-  const { searchTerm } = usePlatformSearch();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [assets, setAssets] = useState<any[]>([]);
@@ -56,22 +54,52 @@ export function PlatformDiscover() {
   const loadDiscoverData = async () => {
     try {
       setLoading(true);
-      const [assetsResponse, productsResponse, clientAssetsResponse, categoriesResponse] = await Promise.all([
-        apiCall('/api/assets/'),
-        apiCall('/api/products/').catch((err) => {
-          console.warn('Error loading products:', err);
+      const [clientAssetsResponse, clientProductsResponse, categoriesResponse] = await Promise.all([
+        apiCall(`/api/clients/${currentUser.id}/assets/`),
+        apiCall(`/api/clients/${currentUser.id}/products/`).catch((err) => {
+          console.warn('Error loading client products:', err);
           return { products: [] };
         }),
-        apiCall(`/api/clients/${currentUser.id}/assets/`),
         apiCall('/api/categories/').catch((err) => {
           console.warn('Error loading categories:', err);
           return { categories: [] };
         }),
       ]);
-      setAssets(assetsResponse.assets || []);
-      // Filtrer les produits actifs uniquement pour la plateforme
-      const allProducts = productsResponse?.products || productsResponse || [];
-      const activeProducts = allProducts.filter((p: any) => p.status === 'Actif');
+      
+      // Extract assets from ClientAsset objects - only show assets the client has access to
+      const clientAssets = (clientAssetsResponse as any)?.assets || [];
+      console.log('=== PLATFORM DISCOVER DEBUG ===');
+      console.log('ClientAssets raw response:', clientAssetsResponse);
+      console.log('ClientAssets array:', clientAssets);
+      console.log('ClientAssets length:', clientAssets.length);
+      
+      if (clientAssets.length > 0) {
+        console.log('First ClientAsset example:', clientAssets[0]);
+        console.log('First ClientAsset asset property:', clientAssets[0]?.asset);
+      }
+      
+      const assetsList = clientAssets.map((ca: any) => {
+        // ClientAssetSerializer returns {id, clientId, asset: {...}, featured, ...}
+        const asset = ca.asset;
+        if (!asset) {
+          console.warn('ClientAsset without asset:', ca);
+          return null;
+        }
+        console.log('Extracted asset:', asset.id, asset.name);
+        return asset;
+      }).filter(Boolean);
+      
+      console.log('Extracted assets:', assetsList);
+      console.log('Extracted assets length:', assetsList.length);
+      console.log('=== END DEBUG ===');
+      setAssets(assetsList);
+      setClientAssets(clientAssets);
+      
+      // Extract products from ClientProduct objects - only show products the client has access to
+      const clientProducts = (clientProductsResponse as any)?.products || [];
+      const productsList = clientProducts.map((cp: any) => cp.product).filter(Boolean);
+      // Filter active products only
+      const activeProducts = productsList.filter((p: any) => p.status === 'Actif');
       
       // Enrichir les produits avec le nom de la catégorie
       const categoriesData = categoriesResponse?.categories || categoriesResponse || [];
@@ -85,17 +113,15 @@ export function PlatformDiscover() {
       });
       
       setProducts(enrichedProducts);
-      console.log('Loaded products:', enrichedProducts.length, 'products (total:', allProducts.length, ')');
+      console.log('Loaded client products:', enrichedProducts.length, 'products (total:', productsList.length, ')');
       console.log('Products details:', enrichedProducts.map((p: any) => ({ 
         id: p.id, 
         name: p.name, 
         type: p.type, 
         categoryName: p.categoryName,
         subcategory: p.subcategory,
-        status: p.status,
-        active: p.active 
+        status: p.status
       })));
-      setClientAssets(clientAssetsResponse.assets || []);
     } catch (error) {
       console.error('Error loading discover data:', error);
       toast.error('Erreur lors du chargement des produits');
@@ -177,18 +203,32 @@ export function PlatformDiscover() {
   // Get unique asset categories
   const assetCategories = Array.from(new Set(assets.map((a: any) => a.category).filter(Boolean)));
 
-  // Filter assets
+  // Filter assets (no search filtering - search only shows in dropdown)
   const filteredAssets = assets.filter((asset: any) => {
-    const matchesSearch = !searchTerm || 
-      asset.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.reference?.toLowerCase().includes(searchTerm.toLowerCase());
-    
     const assetProductType = getAssetProductType(asset);
     const matchesTypeFilter = selectedTypeFilter === 'all' || assetProductType === selectedTypeFilter;
     const matchesCategory = selectedCategory === 'all' || asset.category === selectedCategory;
     
-    return matchesSearch && matchesTypeFilter && matchesCategory;
+    const matches = matchesTypeFilter && matchesCategory;
+    if (!matches && assets.length > 0) {
+      console.log('Asset filtered out:', {
+        name: asset.name,
+        type: asset.type,
+        category: asset.category,
+        assetProductType,
+        selectedTypeFilter,
+        selectedCategory,
+        matchesTypeFilter,
+        matchesCategory
+      });
+    }
+    return matches;
   });
+  
+  console.log('Total assets:', assets.length);
+  console.log('Filtered assets:', filteredAssets.length);
+  console.log('Selected type filter:', selectedTypeFilter);
+  console.log('Selected category:', selectedCategory);
 
   // Map product to product type category (for internal products)
   const getProductType = (product: any): string => {
@@ -226,11 +266,8 @@ export function PlatformDiscover() {
   };
 
   // Filter Smart Portfolios (products with type "Smart Portfolio" stored in subcategory or type field)
+  // No search filtering - search only shows in dropdown
   const smartPortfolios = products.filter((product: any) => {
-    const matchesSearch = !searchTerm || 
-      product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.reference?.toLowerCase().includes(searchTerm.toLowerCase());
-    
     // Check both type (if exists) and subcategory for Smart Portfolio
     const productType = product.type || product.subcategory || '';
     const isSmartPortfolio = productType.toLowerCase().includes('smart portfolio') || 
@@ -239,15 +276,12 @@ export function PlatformDiscover() {
                              product.subcategory?.toLowerCase().includes('smartportfolio');
     const matchesTypeFilter = selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio';
     
-    return isSmartPortfolio && matchesSearch && matchesTypeFilter;
+    return isSmartPortfolio && matchesTypeFilter;
   });
 
   // Filter other internal products (non-Smart Portfolio products)
+  // No search filtering - search only shows in dropdown
   const otherInternalProducts = products.filter((product: any) => {
-    const matchesSearch = !searchTerm || 
-      product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.reference?.toLowerCase().includes(searchTerm.toLowerCase());
-    
     // Check if it's NOT a Smart Portfolio
     const productType = product.type || product.subcategory || '';
     const isSmartPortfolio = productType.toLowerCase().includes('smart portfolio') || 
@@ -260,20 +294,87 @@ export function PlatformDiscover() {
     const productTypeCategory = getProductType(product);
     const matchesTypeFilter = selectedTypeFilter === 'all' || selectedTypeFilter === productTypeCategory;
     
-    return matchesSearch && matchesTypeFilter;
+    return matchesTypeFilter;
   });
 
-  // Check if asset is already in client's portfolio
+  // Check if asset is already in client's portfolio (all assets shown are already accessible)
   const isAssetInPortfolio = (assetId: string) => {
     return clientAssets.some((ca: any) => ca.asset?.id === assetId);
   };
 
-  // Check if product is already in client's portfolio (via assets if linked)
+  // Check if product is already in client's portfolio
   const isProductInPortfolio = (productId: string) => {
-    // Pour l'instant, on vérifie si le produit est lié à un actif qui est dans le portefeuille
-    // À l'avenir, on pourrait avoir une relation ClientProduct directe
-    return false; // Placeholder - à implémenter selon votre logique métier
+    // All products shown are already accessible to the client
+    return true;
   };
+
+  // Count items per type to determine which tabs to show
+  const getItemCountByType = (type: string): number => {
+    if (type === 'all') {
+      return filteredAssets.length + smartPortfolios.length + otherInternalProducts.length;
+    }
+    if (type === 'smart_portfolio') {
+      return smartPortfolios.length;
+    }
+    // For other types, count assets and products matching the type
+    const assetsOfType = filteredAssets.filter((asset: any) => {
+      const assetProductType = getAssetProductType(asset);
+      return assetProductType === type;
+    });
+    const productsOfType = otherInternalProducts.filter((product: any) => {
+      const productTypeCategory = getProductType(product);
+      return productTypeCategory === type;
+    });
+    return assetsOfType.length + productsOfType.length;
+  };
+
+  // Available tabs with their labels
+  const allTabs = [
+    { value: 'all', label: 'Tous' },
+    { value: 'smart_portfolio', label: 'Smart Portfolios' },
+    { value: 'actions', label: 'Actions' },
+    { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
+    { value: 'etf', label: 'ETF' },
+    { value: 'obligations', label: 'Obligations' },
+    { value: 'matieres_premieres', label: 'Matières premières' },
+    { value: 'devises', label: 'Devises' },
+    { value: 'epargne', label: 'Épargne' },
+    { value: 'autres', label: 'Autres' },
+  ];
+
+  // Filter tabs to only show those with items (always show 'all' if there are any items)
+  const visibleTabs = allTabs.filter((tab) => {
+    if (tab.value === 'all') {
+      // Always show 'Tous' if there are any items at all
+      return getItemCountByType('all') > 0;
+    }
+    return getItemCountByType(tab.value) > 0;
+  });
+
+  // If selected filter has no items, switch to 'all' if available, or first available tab
+  useEffect(() => {
+    if (visibleTabs.length > 0 && getItemCountByType(selectedTypeFilter) === 0) {
+      const allTab = visibleTabs.find(t => t.value === 'all');
+      if (allTab && getItemCountByType('all') > 0) {
+        setSelectedTypeFilter('all');
+      } else if (visibleTabs.length > 0) {
+        setSelectedTypeFilter(visibleTabs[0].value);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets.length, products.length]);
+
+  // If selected filter has no items, switch to 'all' if available, or first available tab
+  useEffect(() => {
+    if (getItemCountByType(selectedTypeFilter) === 0 && visibleTabs.length > 0) {
+      const allTab = visibleTabs.find(t => t.value === 'all');
+      if (allTab && getItemCountByType('all') > 0) {
+        setSelectedTypeFilter('all');
+      } else if (visibleTabs.length > 0) {
+        setSelectedTypeFilter(visibleTabs[0].value);
+      }
+    }
+  }, [visibleTabs.length, assets.length, products.length]);
 
   const getProductTypeIcon = (productType: string) => {
     switch (productType) {
@@ -440,18 +541,7 @@ export function PlatformDiscover() {
           WebkitOverflowScrolling: 'touch',
           paddingBottom: '0',
         }}>
-          {[
-            { value: 'all', label: 'Tous' },
-            { value: 'smart_portfolio', label: 'Smart Portfolios' },
-            { value: 'actions', label: 'Actions' },
-            { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
-            { value: 'etf', label: 'ETF' },
-            { value: 'obligations', label: 'Obligations' },
-            { value: 'matieres_premieres', label: 'Matières premières' },
-            { value: 'devises', label: 'Devises' },
-            { value: 'epargne', label: 'Épargne' },
-            { value: 'autres', label: 'Autres' },
-          ].map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.value}
               onClick={() => setSelectedTypeFilter(tab.value)}
@@ -718,13 +808,7 @@ export function PlatformDiscover() {
           {/* Assets Grid (External Assets + Other Internal Products) */}
           {(selectedTypeFilter === 'all' || selectedTypeFilter !== 'smart_portfolio') && (
             <>
-              {filteredAssets.length === 0 && otherInternalProducts.length === 0 ? (
-            <Card>
-              <CardContent style={{ padding: '60px 40px', textAlign: 'center' }}>
-                <p style={{ color: '#6b7280', fontSize: '16px' }}>Aucun produit trouvé avec ces critères</p>
-              </CardContent>
-            </Card>
-          ) : (
+              {(filteredAssets.length > 0 || otherInternalProducts.length > 0) && (
             <div style={{ 
               display: 'grid', 
               gridTemplateColumns: isMobile 
@@ -1079,10 +1163,8 @@ export function PlatformDiscover() {
             </>
           )}
           
-          {/* Empty State */}
-          {((selectedTypeFilter === 'all' && filteredAssets.length === 0 && smartPortfolios.length === 0 && otherInternalProducts.length === 0) ||
-            (selectedTypeFilter !== 'all' && selectedTypeFilter !== 'smart_portfolio' && filteredAssets.length === 0 && otherInternalProducts.length === 0) ||
-            (selectedTypeFilter === 'smart_portfolio' && smartPortfolios.length === 0)) && (
+          {/* Empty State - Show only if no items match the current filter */}
+          {getItemCountByType(selectedTypeFilter) === 0 && (
             <Card>
               <CardContent style={{ padding: '60px 40px', textAlign: 'center' }}>
                 <p style={{ color: '#6b7280', fontSize: '16px' }}>Aucun produit trouvé avec ces critères</p>

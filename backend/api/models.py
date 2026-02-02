@@ -407,6 +407,9 @@ class Transaction(models.Model):
     description = models.TextField(default="", blank=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='en_cours')
     datetime = models.DateTimeField()  # Date et heure de la transaction
+    # Timestamp when the transaction was validated (status became 'termine').
+    # Used to start position generation at validation time instead of creation time.
+    validated_at = models.DateTimeField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -537,7 +540,9 @@ class Product(models.Model):
     variable_profitability = models.CharField(max_length=100, default="", blank=True)  # Taux maximum si variable, sinon vide
     profitability_period = models.CharField(max_length=50, default="", blank=True)  # Période de rentabilité
     interest_period = models.CharField(max_length=50, default="", blank=True)  # Période d'intérêt disponible
-    capitalisation_fonds = models.CharField(max_length=10, default='Non')  # Capitalisation des fonds (Oui/Non)
+    # Capitalisation des fonds (compounding between profitability periods)
+    # NOTE: historically stored as 'Oui'/'Non' (string). Migrated to boolean.
+    capitalisation_fonds = models.BooleanField(default=False)
     
     # Gestion du produit
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité
@@ -547,6 +552,7 @@ class Product(models.Model):
     # Gestion des prix
     min_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur minimum d'entrée
     max_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur maximum d'entrée
+    default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -575,6 +581,21 @@ class ProductAssetAllocation(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.asset.name}: {self.proportion}%"
+
+class ClientProduct(models.Model):
+    """Table relationnelle entre Client et Product"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_products')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='client_products')
+    featured = models.BooleanField(default=False)  # Si True, le produit est mis en avant pour ce client
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['client', 'product']  # Un client ne peut avoir qu'une fois le même produit
+
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.product.name}"
 
 class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""

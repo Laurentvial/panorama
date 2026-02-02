@@ -27,6 +27,7 @@ from .models import Transaction
 from .models import ProductCategory
 from .models import Product
 from .models import ProductAssetAllocation
+from .models import ClientProduct
 from .models import Position
 from .models import AppSettings
 from .models import NewsPost
@@ -34,7 +35,7 @@ from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -50,6 +51,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
 from django.utils import timezone
 from django.db.models import Q
+from django.db import IntegrityError
 from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import create_positions_for_investment
 
@@ -2179,6 +2181,170 @@ def client_assets_reset(request, client_id):
         'added': added_count
     }, status=status.HTTP_200_OK)
 
+# Client Products endpoints
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
+def client_products(request, client_id):
+    """Liste les produits d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Check if it's a client accessing their own data
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    
+    if token and token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    # Check if user is authenticated via JWT (validate manually to avoid DRF failing on invalid tokens)
+    elif auth_header.startswith('Bearer '):
+        # Try to validate JWT token manually
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    client_products = ClientProduct.objects.filter(client=client).select_related('product')
+    serializer = ClientProductSerializer(client_products, many=True, context={'request': request})
+    return Response({'products': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_product_add(request, client_id):
+    """Ajouter un produit à un client"""
+    client = get_object_or_404(Client, id=client_id)
+    product_id = request.data.get('productId')
+    
+    if not product_id:
+        return Response({'error': 'productId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        product = Product.objects.get(id=product_id)
+        
+        # Check if client already has this product
+        if ClientProduct.objects.filter(client=client, product=product).exists():
+            return Response({'error': 'Client already has this product'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Generate ClientProduct ID
+        client_product_id = uuid.uuid4().hex[:12]
+        while ClientProduct.objects.filter(id=client_product_id).exists():
+            client_product_id = uuid.uuid4().hex[:12]
+        
+        # Create ClientProduct relationship
+        # Handle potential race condition: if two concurrent requests try to add the same product,
+        # the second one will hit the unique_together constraint and raise IntegrityError
+        try:
+            client_product = ClientProduct.objects.create(
+                id=client_product_id,
+                client=client,
+                product=product
+            )
+        except IntegrityError:
+            # Another request created this relationship concurrently
+            return Response({'error': 'Client already has this product'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = ClientProductSerializer(client_product, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Product.DoesNotExist:
+        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_product_remove(request, client_id, product_id):
+    """Retirer un produit d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    product = get_object_or_404(Product, id=product_id)
+    
+    try:
+        client_product = ClientProduct.objects.get(client=client, product=product)
+        client_product.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except ClientProduct.DoesNotExist:
+        return Response({'error': 'Client product relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def client_product_toggle_featured(request, client_id, product_id):
+    """Basculer le statut 'mis en avant' d'un produit pour un client"""
+    client = get_object_or_404(Client, id=client_id)
+    product = get_object_or_404(Product, id=product_id)
+    
+    try:
+        client_product = ClientProduct.objects.get(client=client, product=product)
+        client_product.featured = not client_product.featured
+        client_product.save()
+        serializer = ClientProductSerializer(client_product, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except ClientProduct.DoesNotExist:
+        return Response({'error': 'Client product relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_products_reset(request, client_id):
+    """Réinitialiser les produits d'un client : retirer ceux qui ne sont pas default=True, ajouter ceux qui sont default=True"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Get all current client products (convert to list to avoid query issues after deletion)
+    # Filter out ClientProducts where the product has been deleted (product is None)
+    current_client_products = [
+        cp for cp in ClientProduct.objects.filter(client=client).select_related('product')
+        if cp.product is not None
+    ]
+    current_product_ids = {cp.product.id for cp in current_client_products}
+    
+    # Get all default products
+    default_products = Product.objects.filter(default=True)
+    
+    # Remove products that are not default=True
+    removed_count = 0
+    for client_product in current_client_products:
+        if not client_product.product.default:
+            client_product.delete()
+            removed_count += 1
+    
+    # Add products that are default=True and not already assigned
+    added_count = 0
+    for product in default_products:
+        if product.id not in current_product_ids:
+            # Generate ClientProduct ID
+            client_product_id = uuid.uuid4().hex[:12]
+            while ClientProduct.objects.filter(id=client_product_id).exists():
+                client_product_id = uuid.uuid4().hex[:12]
+            
+            # Create ClientProduct relationship
+            # Handle potential race condition: if two concurrent requests try to add the same product,
+            # the second one will hit the unique_together constraint and raise IntegrityError
+            try:
+                ClientProduct.objects.create(
+                    id=client_product_id,
+                    client=client,
+                    product=product
+                )
+                added_count += 1
+            except IntegrityError:
+                # Another request created this relationship concurrently, skip it
+                pass
+    
+    return Response({
+        'message': 'Produits réinitialisés avec succès',
+        'removed': removed_count,
+        'added': added_count
+    }, status=status.HTTP_200_OK)
+
 # Alpha Vantage endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -4232,7 +4398,7 @@ def client_transaction_create(request, client_id):
         and transaction.transfer_to not in ['balance', 'trading']
     ):
         try:
-            create_positions_for_investment(transaction)
+            create_positions_for_investment(transaction, trigger="api_transaction_create")
         except Exception as pos_err:
             # Don't fail transaction creation if positions generation fails
             import logging
@@ -4534,7 +4700,7 @@ def client_transaction_update(request, client_id, transaction_id):
     if is_investment and transaction.status == 'termine':
         if previous_status != 'termine' or not Position.objects.filter(transaction=transaction).exists():
             try:
-                create_positions_for_investment(transaction)
+                create_positions_for_investment(transaction, trigger="api_transaction_update")
             except Exception as pos_err:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -4544,7 +4710,7 @@ def client_transaction_update(request, client_id, transaction_id):
     if is_investment and not was_investment:
         # Transaction now represents an investment start: create positions
         try:
-            create_positions_for_investment(transaction)
+            create_positions_for_investment(transaction, trigger="api_transaction_update")
         except Exception as pos_err:
             import logging
             logger = logging.getLogger(__name__)
@@ -4820,11 +4986,22 @@ def product_create(request):
         variable_profitability=request.data.get('variableProfitability', ''),
         profitability_period=request.data.get('profitabilityPeriod', ''),
         interest_period=request.data.get('interestPeriod', ''),
-        capitalisation_fonds=request.data.get('capitalisationFonds', 'Non'),
+        # Support both legacy string ('Oui'/'Non') and boolean values
+        capitalisation_fonds=(
+            (str(request.data.get('capitalisationFonds', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
+            if isinstance(request.data.get('capitalisationFonds', False), str)
+            else bool(request.data.get('capitalisationFonds', False))
+        ),
         # Gestion du produit
         availability_start=availability_start,
         availability_end=availability_end,
         link_to_assets=request.data.get('linkToAssets', 'Non'),
+        # Handle default field - support both string and boolean
+        default=(
+            (str(request.data.get('default', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
+            if isinstance(request.data.get('default', False), str)
+            else bool(request.data.get('default', False))
+        ),
         # Gestion des prix
         min_entry_value=request.data.get('minEntryValue'),
         max_entry_value=request.data.get('maxEntryValue')
@@ -5270,7 +5447,11 @@ def product_update(request, product_id):
         else:
             product.interest_period = ''
     if 'capitalisationFonds' in request.data:
-        product.capitalisation_fonds = request.data['capitalisationFonds']
+        v = request.data['capitalisationFonds']
+        if isinstance(v, str):
+            product.capitalisation_fonds = v.strip().lower() in ['oui', 'true', '1', 'yes']
+        else:
+            product.capitalisation_fonds = bool(v)
     
     # Gestion du produit
     if 'availabilityStart' in request.data:
@@ -5299,6 +5480,13 @@ def product_update(request, product_id):
     if 'maxEntryValue' in request.data:
         max_entry = request.data['maxEntryValue']
         product.max_entry_value = float(max_entry) if max_entry is not None and max_entry != '' else None
+    if 'default' in request.data:
+        # Handle default field - support both string and boolean
+        default_value = request.data['default']
+        if isinstance(default_value, str):
+            product.default = default_value.strip().lower() in ['oui', 'true', '1', 'yes']
+        else:
+            product.default = bool(default_value)
     
     # Handle product-asset allocations (assetAllocations)
     try:

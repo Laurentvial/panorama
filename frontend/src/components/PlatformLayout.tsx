@@ -59,6 +59,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
 
   // Load product index once so the header search can show results.
   useEffect(() => {
+    if (!currentUser?.id) return;
+    
     let cancelled = false;
 
     const loadSearchIndex = async () => {
@@ -66,22 +68,31 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         setProductsIndexLoading(true);
         setAssetsIndexLoading(true);
 
-        const [productsRes, assetsRes] = await Promise.all([
-          apiCall('/api/products/').catch(() => null),
-          apiCall('/api/assets/').catch(() => null),
+        const [clientProductsRes, clientAssetsRes] = await Promise.all([
+          apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => null),
+          apiCall(`/api/clients/${currentUser.id}/assets/`).catch(() => null),
         ]);
 
-        const productsList = ((productsRes as any)?.products || productsRes || []) as any[];
+        // Extract products from ClientProduct objects
+        const clientProducts = ((clientProductsRes as any)?.products || []) as any[];
+        const productsList = clientProducts.map((cp: any) => {
+          // Handle both structures: {product: {...}} and direct product object
+          return cp.product || cp;
+        }).filter(Boolean);
         const activeProducts = Array.isArray(productsList)
           ? productsList.filter((p: any) => p?.status === 'Actif')
           : [];
 
-        const assetsList = ((assetsRes as any)?.assets || assetsRes || []) as any[];
-        const normalizedAssets = Array.isArray(assetsList) ? assetsList : [];
+        // Extract assets from ClientAsset objects
+        const clientAssets = ((clientAssetsRes as any)?.assets || []) as any[];
+        const assetsList = clientAssets.map((ca: any) => {
+          // Handle both structures: {asset: {...}} and direct asset object
+          return ca.asset || ca;
+        }).filter(Boolean);
 
         if (!cancelled) {
           setProductsIndex(activeProducts);
-          setAssetsIndex(normalizedAssets);
+          setAssetsIndex(assetsList);
         }
       } catch (e) {
         console.warn('Unable to load search index for header search:', e);
@@ -101,7 +112,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentUser?.id]);
 
   const handleLogout = async () => {
     await clientSignOut();

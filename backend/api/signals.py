@@ -2,6 +2,7 @@ import logging
 
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from .models import Transaction, Position
 from .position_service import create_positions_for_investment
@@ -24,15 +25,28 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
             instance._previous_transfer_to = None
             return
 
-        prev = Transaction.objects.filter(pk=instance.pk).only("status", "type", "transfer_to").first()
+        prev = Transaction.objects.filter(pk=instance.pk).only("status", "type", "transfer_to", "validated_at").first()
         instance._previous_status = getattr(prev, "status", None)
         instance._previous_type = getattr(prev, "type", None)
         instance._previous_transfer_to = getattr(prev, "transfer_to", None)
+        instance._previous_validated_at = getattr(prev, "validated_at", None)
     except Exception as e:
         logger.warning("Failed to capture previous Transaction state: %s", e)
         instance._previous_status = None
         instance._previous_type = None
         instance._previous_transfer_to = None
+        instance._previous_validated_at = None
+
+    # If we are transitioning to 'termine', capture a stable validated_at timestamp.
+    # This ensures position generation starts at validation time (not creation time),
+    # even if the transaction is created days earlier.
+    try:
+        previous_status = getattr(instance, "_previous_status", None)
+        if previous_status != "termine" and instance.status == "termine" and not getattr(instance, "validated_at", None):
+            instance.validated_at = timezone.now()
+    except Exception:
+        # Best-effort; validation timestamp isn't critical enough to crash saves.
+        pass
 
 
 @receiver(post_save, sender=Transaction)
@@ -60,7 +74,7 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         if not should_generate:
             return
 
-        create_positions_for_investment(instance)
+        create_positions_for_investment(instance, trigger="signal")
     except Exception as e:
         logger.error("Failed to auto-generate positions for transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)
 

@@ -71,11 +71,11 @@ export function PlatformPortfolio() {
   const loadPortfolioData = async () => {
     try {
       setLoading(true);
-      const [positionsResponse, transactionsResponse, assetsResponse, productsResponse] = await Promise.all([
+      const [positionsResponse, transactionsResponse, clientAssetsResponse, clientProductsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/positions/`),
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
-        apiCall('/api/assets/').catch(() => ({ assets: [] })),
-        apiCall('/api/products/').catch(() => ({ products: [] })),
+        apiCall(`/api/clients/${currentUser.id}/assets/`).catch(() => ({ assets: [] })),
+        apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
       ]);
       setPositions((positionsResponse as any)?.positions || []);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
@@ -90,8 +90,20 @@ export function PlatformPortfolio() {
         return !isFuture && !isUpcomingStatus;
       });
       setTransactions(filteredTransactions);
-      setAssetsIndex((assetsResponse as any)?.assets || []);
-      setProductsIndex((productsResponse as any)?.products || productsResponse || []);
+      // Extract assets from ClientAsset objects
+      const clientAssets = (clientAssetsResponse as any)?.assets || [];
+      const assetsList = clientAssets.map((ca: any) => {
+        // Handle both structures: {asset: {...}} and direct asset object
+        return ca.asset || ca;
+      }).filter(Boolean);
+      setAssetsIndex(assetsList);
+      // Extract products from ClientProduct objects
+      const clientProducts = (clientProductsResponse as any)?.products || [];
+      const productsList = clientProducts.map((cp: any) => {
+        // Handle both structures: {product: {...}} and direct product object
+        return cp.product || cp;
+      }).filter(Boolean);
+      setProductsIndex(productsList);
     } catch (error) {
       console.error('Error loading portfolio data:', error);
     } finally {
