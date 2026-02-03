@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { X, ArrowLeftRight } from 'lucide-react';
@@ -38,6 +38,8 @@ export function ViewTransactionModal({
   const [logsLoading, setLogsLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [productLoadError, setProductLoadError] = useState<string | null>(null);
+  const [assetsMap, setAssetsMap] = useState<Record<string, any>>({});
+  const assetsMapEffectKeyRef = useRef<string>('');
 
   // Find asset/product ID by name
   const findAssetProductId = (name: string, reference: string | null): string | null => {
@@ -111,6 +113,80 @@ export function ViewTransactionModal({
       setTransactionLogs([]);
     }
   }, [isOpen, transaction, clientId]);
+
+  // Load assets to map IDs to names for position generation history
+  useEffect(() => {
+    let isMounted = true;
+    
+    if (isOpen && transaction && transaction.position_generation_history) {
+      // Extract all asset IDs from history
+      const assetIds = new Set<string>();
+      transaction.position_generation_history.forEach((entry: any) => {
+        if (entry.summary && entry.summary.positions_by_asset) {
+          Object.keys(entry.summary.positions_by_asset).forEach(assetId => {
+            if (assetId !== 'none') {
+              assetIds.add(assetId);
+            }
+          });
+        }
+      });
+
+      if (assetIds.size > 0) {
+        // Create a unique key for this effect run based on transaction ID and asset IDs
+        const sortedAssetIds = Array.from(assetIds).sort().join(',');
+        const effectKey = `${transaction.id}-${sortedAssetIds}`;
+        assetsMapEffectKeyRef.current = effectKey;
+
+        // Try to find assets from props first
+        const foundAssets: Record<string, any> = {};
+        assetIds.forEach(assetId => {
+          const asset = assets.find(a => a.id === assetId);
+          if (asset) {
+            foundAssets[assetId] = asset;
+          }
+        });
+
+        // If some assets are missing, fetch them
+        const missingIds = Array.from(assetIds).filter(id => !foundAssets[id]);
+        if (missingIds.length > 0) {
+          Promise.all(
+            missingIds.map(assetId =>
+              apiCall(`/api/assets/${assetId}/`)
+                .then(response => ({ id: assetId, asset: response.asset || response }))
+                .catch(() => ({ id: assetId, asset: null }))
+            )
+          ).then(results => {
+            // Only update state if this effect run is still current and component is mounted
+            if (isMounted && assetsMapEffectKeyRef.current === effectKey) {
+              const newAssetsMap: Record<string, any> = { ...foundAssets };
+              results.forEach(({ id, asset }) => {
+                if (asset) {
+                  newAssetsMap[id] = asset;
+                }
+              });
+              setAssetsMap(newAssetsMap);
+            }
+          });
+        } else {
+          if (isMounted && assetsMapEffectKeyRef.current === effectKey) {
+            setAssetsMap(foundAssets);
+          }
+        }
+      } else {
+        if (isMounted) {
+          setAssetsMap({});
+        }
+      }
+    } else {
+      if (isMounted) {
+        setAssetsMap({});
+      }
+    }
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, transaction, assets]);
 
   if (!isOpen || !transaction) return null;
 
@@ -446,6 +522,172 @@ export function ViewTransactionModal({
               </p>
             </div>
           </div>
+          
+          {/* Position Generation History Section */}
+          {transaction.type === 'transfert' && transaction.position_generation_history && Array.isArray(transaction.position_generation_history) && transaction.position_generation_history.length > 0 && (
+            <div className="border-t pt-4 mt-6">
+              <h3 className="text-lg font-semibold mb-3">Historique de génération des positions</h3>
+              <div className="max-h-96 overflow-y-auto pr-2">
+                <div className="space-y-4">
+                  {transaction.position_generation_history.map((historyEntry: any, idx: number) => (
+                    <div key={idx} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <div className="font-semibold text-slate-900 text-sm mb-1">
+                            Génération #{idx + 1}
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            {historyEntry.timestamp ? new Date(historyEntry.timestamp).toLocaleString('fr-FR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : 'Date inconnue'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {historyEntry.summary && (
+                        <div className="mb-3 p-3 bg-white rounded border border-slate-200">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <Label className="text-xs text-slate-500">Positions générées</Label>
+                              <p className="text-slate-900 font-semibold mt-1">
+                                {historyEntry.summary.positions_generated || 0}
+                              </p>
+                            </div>
+                            <div>
+                              <Label className="text-xs text-slate-500">Total investi</Label>
+                              <p className="text-slate-900 font-semibold mt-1">
+                                {parseFloat(historyEntry.summary.total_invested || 0).toLocaleString('fr-FR', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2
+                                })} €
+                              </p>
+                            </div>
+                            <div>
+                              <Label className="text-xs text-slate-500">Total profit</Label>
+                              <p className="text-green-600 font-semibold mt-1">
+                                {parseFloat(historyEntry.summary.total_profit || 0).toLocaleString('fr-FR', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2
+                                })} €
+                              </p>
+                            </div>
+                            {historyEntry.deleted_future_positions && historyEntry.deleted_future_positions.count > 0 && (
+                              <div>
+                                <Label className="text-xs text-slate-500">Positions supprimées</Label>
+                                <p className="text-orange-600 font-semibold mt-1">
+                                  {historyEntry.deleted_future_positions.count}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {historyEntry.summary.positions_by_asset && Object.keys(historyEntry.summary.positions_by_asset).length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-200">
+                              <Label className="text-xs text-slate-500 mb-2 block">Répartition par actif</Label>
+                              <div className="space-y-2">
+                                {Object.entries(historyEntry.summary.positions_by_asset).map(([assetId, summary]: [string, any]) => {
+                                  const asset = assetsMap[assetId] || assets.find((a: any) => a.id === assetId);
+                                  const assetName = asset ? (asset.name || asset.reference || `Actif ${assetId}`) : (assetId === 'none' ? 'Aucun actif' : `Actif ${assetId}`);
+                                  return (
+                                  <div key={assetId} className="flex justify-between items-center text-xs">
+                                    <span className="text-slate-700">
+                                      {assetName}
+                                    </span>
+                                    <div className="flex gap-4">
+                                      <span className="text-slate-600">
+                                        {summary.count} position(s)
+                                      </span>
+                                      <span className="text-slate-700 font-medium">
+                                        {parseFloat(summary.total_invested || 0).toLocaleString('fr-FR', {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2
+                                        })} €
+                                      </span>
+                                      <span className="text-green-600 font-medium">
+                                        {parseFloat(summary.total_profit || 0).toLocaleString('fr-FR', {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2
+                                        })} €
+                                      </span>
+                                    </div>
+                                  </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {historyEntry.rates_used && Object.keys(historyEntry.rates_used).length > 0 && (
+                        <div className="mb-3">
+                          <Label className="text-xs text-slate-500 mb-2 block">Taux utilisés par période</Label>
+                          <div className="bg-white rounded border border-slate-200 p-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              {Object.entries(historyEntry.rates_used).map(([periodIdx, rate]: [string, any]) => (
+                                <div key={periodIdx} className="flex justify-between">
+                                  <span className="text-slate-600">Période {parseInt(periodIdx) + 1}:</span>
+                                  <span className="text-slate-900 font-semibold">{parseFloat(rate || 0).toFixed(2)}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {historyEntry.period_summaries && historyEntry.period_summaries.length > 0 && (
+                        <div>
+                          <Label className="text-xs text-slate-500 mb-2 block">Détails des périodes</Label>
+                          <div className="bg-white rounded border border-slate-200 overflow-x-auto">
+                            <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr className="bg-slate-100 border-b border-slate-200">
+                                  <th className="text-left p-2 font-semibold text-slate-700">Période</th>
+                                  <th className="text-left p-2 font-semibold text-slate-700">Durée</th>
+                                  <th className="text-left p-2 font-semibold text-slate-700">Dates</th>
+                                  <th className="text-right p-2 font-semibold text-slate-700">Taux</th>
+                                  <th className="text-right p-2 font-semibold text-slate-700">Capital base</th>
+                                  <th className="text-right p-2 font-semibold text-slate-700">Profit cible</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {historyEntry.period_summaries.map((period: any, pIdx: number) => (
+                                  <tr key={pIdx} className="border-b border-slate-100">
+                                    <td className="p-2 text-slate-900">{period.periodIndex + 1}</td>
+                                    <td className="p-2 text-slate-700">{period.months} mois</td>
+                                    <td className="p-2 text-slate-700 text-xs">
+                                      {period.startDate ? new Date(period.startDate).toLocaleDateString('fr-FR') : '-'} - {period.endDate ? new Date(period.endDate).toLocaleDateString('fr-FR') : '-'}
+                                    </td>
+                                    <td className="p-2 text-right text-slate-900 font-medium">{parseFloat(period.ratePct || 0).toFixed(2)}%</td>
+                                    <td className="p-2 text-right text-slate-700">
+                                      {parseFloat(period.capitalBase || 0).toLocaleString('fr-FR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                      })} €
+                                    </td>
+                                    <td className="p-2 text-right text-green-600 font-medium">
+                                      {parseFloat(period.targetProfit || 0).toLocaleString('fr-FR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                      })} €
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Transaction Logs Section */}
           {clientId && (
