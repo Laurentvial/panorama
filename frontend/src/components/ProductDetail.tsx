@@ -1113,6 +1113,13 @@ export function ProductDetail() {
                       </div>
                     </div>
                   )}
+                  
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Capitalisation des fonds</div>
+                    <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
+                      {product.capitalisationFonds || product.capitalisation_fonds ? 'Oui' : 'Non'}
+                    </div>
+                  </div>
                 </div>
                 
                 <div style={{ marginTop: '20px', display: 'flex', gap: '12px' }}>

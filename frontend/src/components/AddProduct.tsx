@@ -57,7 +57,7 @@ export function AddProduct() {
     interestPeriod: [] as string[],
     // Cumuler les intérêts (capitalisation_fonds)
     capitalisationFonds: false,
-    // Gestion du produit
+    valeurCumuleeInterets: '', // Valeur cumulée des intérêts
     availabilityStart: '',
     availabilityEnd: '',
     linkToAssets: false,
@@ -390,6 +390,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
           if (formData.profitabilityPeriod) formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod);
           formDataToSend.append('interestPeriod', formData.interestPeriod.join(', '));
           formDataToSend.append('capitalisationFonds', String(!!formData.capitalisationFonds));
+          if (formData.valeurCumuleeInterets) formDataToSend.append('valeurCumuleeInterets', formData.valeurCumuleeInterets);
         }
         if (formData.availabilityStart) formDataToSend.append('availabilityStart', formData.availabilityStart);
         if (formData.availabilityEnd) formDataToSend.append('availabilityEnd', formData.availabilityEnd);
@@ -432,7 +433,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             profitabilityPeriod: !formData.noProfitability ? formData.profitabilityPeriod || undefined : undefined,
             interestPeriod: !formData.noProfitability ? (formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined) : undefined,
             capitalisationFonds: !formData.noProfitability ? !!formData.capitalisationFonds : undefined,
-            // Gestion du produit
+            valeurCumuleeInterets: formData.valeurCumuleeInterets ? parseFloat(formData.valeurCumuleeInterets) : undefined,
             availabilityStart: formData.availabilityStart || undefined,
             availabilityEnd: formData.availabilityEnd || undefined,
             linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
@@ -835,7 +836,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                         <SelectValue placeholder="Sélectionner une période" />
                       </SelectTrigger>
                       <SelectContent>
-                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds']
+                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat']
                           .filter(option => !formData.interestPeriod.includes(option))
                           .map((option) => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
@@ -883,6 +884,19 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                         <SelectItem value="Non">Non</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="product-valeur-cumulee-interets">Valeur cumulée des intérêts (€)</Label>
+                    <Input
+                      id="product-valeur-cumulee-interets"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.valeurCumuleeInterets}
+                      onChange={(e) => setFormData({ ...formData, valeurCumuleeInterets: e.target.value })}
+                      placeholder="0.00"
+                    />
                   </div>
                 </div>
               )}

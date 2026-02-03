@@ -23,7 +23,20 @@ export function PlatformPortfolio() {
   const [transactionsPage, setTransactionsPage] = useState(1);
 
   const visiblePositions = useMemo(() => {
-    return (positions || []).filter((p: any) => p?.status !== 'pending');
+    return (positions || []).filter((p: any) => {
+      // Exclure les positions pending
+      if (p?.status === 'pending') return false;
+      
+      // Exclure les positions ouvertes sans prix d'achat (générations automatiques)
+      if (p?.status === 'open') {
+        const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+        const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+        // Si pas de prix d'achat, c'est une génération automatique -> exclure
+        if (!entryPrice) return false;
+      }
+      
+      return true;
+    });
   }, [positions]);
 
   // Pagination helpers
@@ -242,6 +255,11 @@ export function PlatformPortfolio() {
       if (!p) continue;
       if (String(p.status || '') !== 'open') continue; // open positions only
 
+      // Exclure les positions ouvertes sans prix d'achat (générations automatiques)
+      const entryPriceNum = p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+      const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+      if (!entryPrice) continue; // Pas de prix d'achat = génération automatique -> exclure
+
       const assetId = p.assetId || p.asset_id || p.asset?.id || null;
       if (!assetId) continue;
 
@@ -272,9 +290,7 @@ export function PlatformPortfolio() {
       // Correct direction: EUR = asset_ccy / fx_rate_eur_to_asset
       const investedEurFromFx = investedAsset > 0 && fxRate != null ? investedAsset / fxRate : null;
 
-      const entryPriceNum =
-        p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
-      const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+      // entryPriceNum et entryPrice sont déjà déclarés plus haut dans le filtre (lignes 259-260)
 
       const qtyNum = p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
       let qty = qtyNum != null && Number.isFinite(qtyNum) ? qtyNum : 0;

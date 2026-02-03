@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { 
   HiOutlineViewGrid as LayoutDashboard,
-  HiOutlineCalendar as Calendar,
   HiOutlineUserGroup as Users,
   HiOutlineUserCircle as UserCircle,
   HiOutlineCreditCard as CreditCard,
@@ -30,7 +29,6 @@ export function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin' },
-    { id: 'planning', label: 'Planning', icon: Calendar, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/planning' },
     { id: 'clients', label: 'Clients', icon: UserCircle, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/clients' },
     { id: 'transactions', label: 'Transactions', icon: CreditCard, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/transactions' },
     { id: 'positions', label: 'Positions', icon: ChartPie, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/positions' },

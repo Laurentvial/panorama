@@ -42,11 +42,6 @@ urlpatterns = [
     path('users/<str:user_id>/update/', api_views.user_update, name='user-update'),
     path('users/<str:user_id>/toggle-active/', api_views.user_toggle_active, name='user-toggle-active'),
     path('users/<str:user_id>/reset-password/', api_views.user_reset_password, name='user-reset-password'),
-    # Events endpoints
-    path('events/', api_views.event_list, name='event-list'),
-    path('events/create/', api_views.event_create, name='event-create'),
-    path('events/<str:event_id>/update/', api_views.event_update, name='event-update'),
-    path('events/<str:event_id>/', api_views.event_delete, name='event-delete'),
     # Assets endpoints
     path('assets/', api_views.asset_list, name='asset-list'),
     path('assets/create/', api_views.asset_create, name='asset-create'),

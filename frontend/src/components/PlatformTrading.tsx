@@ -56,6 +56,15 @@ export function PlatformTrading() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
+  // Créer automatiquement le dépôt si aucun RIB n'est disponible quand le dialog s'ouvre
+  useEffect(() => {
+    if (transferDialogOpen && !transferSuccess && clientRibs.length === 0 && pendingAmount > 0 && !submitting) {
+      // Créer automatiquement le dépôt
+      confirmTransfer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transferDialogOpen, clientRibs.length, pendingAmount]);
+
   const loadClientRibs = async () => {
     if (!currentUser?.id) return;
     try {
@@ -650,93 +659,116 @@ export function PlatformTrading() {
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
-                      <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
-                        Montant à virer : {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                      </div>
-                      <div style={{ fontSize: 13, color: '#6b7280' }}>
-                        Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
-                      </div>
-                    </div>
-
-                    {clientRibs.length === 0 ? (
-                      <div style={{ padding: 12, backgroundColor: '#fef3c7', borderRadius: 6, fontSize: 13, color: '#92400e' }}>
-                        Aucun RIB disponible. Veuillez contacter votre gestionnaire.
-                      </div>
-                    ) : (
+                  {clientRibs.length === 0 ? (
+                    <>
                       <div style={{ display: 'grid', gap: 12 }}>
-                        {clientRibs.map((clientRib: any, index: number) => {
-                          const rib = clientRib.rib;
-                          return (
-                            <div key={clientRib.id} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 6 }}>
-                              {clientRibs.length > 1 && (
-                                <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#374151' }}>
-                                  RIB {index + 1} {rib.name ? `- ${rib.name}` : ''}
-                                </div>
-                              )}
-                              <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bankCode || '-'}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.branchCode || '-'}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.accountNumber || '-'}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.ribKey || '-'}</span>
-                                </div>
-                                {rib.domiciliation && (
-                                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
-                                    <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>Domiciliation :</div>
-                                    <div style={{ fontSize: 12, color: '#374151' }}>{rib.domiciliation}</div>
+                        <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af', textAlign: 'center' }}>
+                          <div style={{ fontWeight: 600, marginBottom: 8 }}>Votre demande de dépôt est en cours de traitement</div>
+                          <div style={{ fontSize: 13 }}>
+                            Montant : <strong>{pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="platform"
+                          disabled={submitting}
+                          onClick={() => {
+                            setTransferDialogOpen(false);
+                            setPendingAmount(0);
+                          }}
+                          style={{ width: '100%' }}
+                        >
+                          Fermer
+                        </Button>
+                      </DialogFooter>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gap: 12 }}>
+                        <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
+                          <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
+                            Montant à virer : {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          </div>
+                          <div style={{ fontSize: 13, color: '#6b7280' }}>
+                            Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gap: 12 }}>
+                          {clientRibs.map((clientRib: any, index: number) => {
+                            const rib = clientRib.rib;
+                            return (
+                              <div key={clientRib.id} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+                                {clientRibs.length > 1 && (
+                                  <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#374151' }}>
+                                    RIB {index + 1} {rib.name ? `- ${rib.name}` : ''}
                                   </div>
                                 )}
+                                <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bankCode || '-'}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.branchCode || '-'}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.accountNumber || '-'}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.ribKey || '-'}</span>
+                                  </div>
+                                  {rib.domiciliation && (
+                                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>Domiciliation :</div>
+                                      <div style={{ fontSize: 12, color: '#374151' }}>{rib.domiciliation}</div>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
+
+                        <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                          <div style={{ fontWeight: 600, marginBottom: 6 }}>Important :</div>
+                          <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
+                            <li>Effectuez le virement depuis votre compte bancaire</li>
+                            <li>Utilisez le montant exact indiqué ci-dessus</li>
+                            <li>Le traitement peut prendre 1 à 3 jours ouvrés</li>
+                            <li>Vous recevrez une confirmation une fois le virement traité</li>
+                          </ul>
+                        </div>
                       </div>
-                    )}
 
-                    <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
-                      <div style={{ fontWeight: 600, marginBottom: 6 }}>Important :</div>
-                      <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
-                        <li>Effectuez le virement depuis votre compte bancaire</li>
-                        <li>Utilisez le montant exact indiqué ci-dessus</li>
-                        <li>Le traitement peut prendre 1 à 3 jours ouvrés</li>
-                        <li>Vous recevrez une confirmation une fois le virement traité</li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <DialogFooter>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={submitting}
-                      onClick={() => {
-                        setTransferDialogOpen(false);
-                        setPendingAmount(0);
-                      }}
-                    >
-                      Annuler
-                    </Button>
-                    <Button 
-                      type="button" 
-                      variant="platform" 
-                      disabled={submitting || clientRibs.length === 0} 
-                      onClick={confirmTransfer}
-                    >
-                      {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}
-                    </Button>
-                  </DialogFooter>
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={submitting}
+                          onClick={() => {
+                            setTransferDialogOpen(false);
+                            setPendingAmount(0);
+                          }}
+                        >
+                          Annuler
+                        </Button>
+                        <Button 
+                          type="button" 
+                          variant="platform" 
+                          disabled={submitting} 
+                          onClick={confirmTransfer}
+                        >
+                          {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}
+                        </Button>
+                      </DialogFooter>
+                    </>
+                  )}
                 </>
               )}
             </DialogContent>

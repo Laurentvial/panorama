@@ -1187,7 +1187,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                         <SelectValue placeholder="Sélectionner une période" />
                       </SelectTrigger>
                       <SelectContent>
-                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds']
+                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat']
                           .filter(option => {
                             const currentArray = Array.isArray(formData.interestPeriod) 
                               ? formData.interestPeriod 

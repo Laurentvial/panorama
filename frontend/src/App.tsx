@@ -5,7 +5,6 @@ import AdminLoginPage from './components/AdminLoginPage';
 import Dashboard from './components/Dashboard';
 import NotFound from './components/NotFound';
 import UsersAndTeams from './components/UsersTeams';
-import Planning from './components/PlanningCalendar';
 import Clients from './components/Clients';
 import AddClient from './components/AddClient';
 import { ClientDetail } from './components/ClientDetail';
@@ -125,13 +124,6 @@ function App() {
                         <ProtectedRoute>
                             <Layout>
                                 <MonProfil />
-                            </Layout>
-                        </ProtectedRoute>
-                    } />
-                    <Route path="/admin/planning" element={
-                        <ProtectedRoute>
-                            <Layout>
-                                <Planning />
                             </Layout>
                         </ProtectedRoute>
                     } />
@@ -308,7 +300,6 @@ function App() {
                     <Route path="/clients/add" element={<Navigate to="/admin/clients/add" replace />} />
                     <Route path="/clients/:id" element={<LegacyClientRedirect />} />
                     <Route path="/users" element={<Navigate to="/admin/users" replace />} />
-                    <Route path="/planning" element={<Navigate to="/admin/planning" replace />} />
                     <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
                     <Route path="/manage/ribs" element={<Navigate to="/admin/manage/ribs" replace />} />
                     <Route path="/manage/assets" element={<Navigate to="/admin/manage/assets" replace />} />

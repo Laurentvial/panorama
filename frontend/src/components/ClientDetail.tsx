@@ -17,7 +17,6 @@ import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
 import { ClientVerificationTab } from './ClientVerificationTab';
 import '../styles/Clients.css';
-import '../styles/PlanningCalendar.css';
 
 interface ClientDetailProps {
   clientId: string;
@@ -53,7 +52,6 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       const [
         clientData,
         notesData,
-        eventsData,
         assetsData,
         availableAssetsData,
         productsData,
@@ -65,7 +63,6 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       ] = await Promise.all([
         apiCall(`/api/clients/${clientId}/`),
         apiCall(`/api/notes/`),
-        apiCall(`/api/events/`),
         apiCall(`/api/clients/${clientId}/assets/`),
         apiCall(`/api/assets/`),
         apiCall(`/api/clients/${clientId}/products/`),
@@ -82,10 +79,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       const clientNotes = notesArray.filter((note: any) => note.clientId === clientId);
       setNotes(clientNotes);
       
-      // Filter events (appointments) for this client - events API returns {events: [...]}
-      const eventsArray = (eventsData as any).events || [];
-      const clientAppointments = eventsArray.filter((event: any) => event.clientId === clientId);
-      setAppointments(clientAppointments);
+      // Events endpoint was removed - set appointments to empty array
+      setAppointments([]);
       
       // Set client assets
       const assetsArray = (assetsData as any).assets || [];

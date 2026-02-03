@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, Event, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -530,72 +530,6 @@ class TeamMemberSerializer(serializers.ModelSerializer):
 class TeamDetailSerializer(serializers.Serializer):
     team = TeamSerializer()
     members = TeamMemberSerializer(many=True, source='team_members')
-
-class EventSerializer(serializers.ModelSerializer):
-    clientId = serializers.CharField(write_only=True, required=False, allow_null=True, allow_blank=True)
-    clientId_read = serializers.CharField(source='clientId.id', read_only=True, allow_null=True)
-    clientName = serializers.SerializerMethodField()
-    createdBy = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Event
-        fields = ['id', 'datetime', 'userId', 'clientId', 'clientId_read', 'comment', 'created_at', 'updated_at', 'clientName', 'createdBy']
-        extra_kwargs = {
-            'userId': {'read_only': True},
-            'id': {'required': False}
-        }
-    
-    def get_clientName(self, obj):
-        if obj.clientId:
-            return f"{obj.clientId.fname} {obj.clientId.lname}"
-        return None
-    
-    def get_createdBy(self, obj):
-        if obj.userId:
-            first_name = obj.userId.first_name or ''
-            last_name = obj.userId.last_name or ''
-            if first_name or last_name:
-                return f"{first_name} {last_name}".strip()
-            return obj.userId.username or ''
-        return ''
-    
-    def to_internal_value(self, data):
-        # Traiter le datetime comme heure locale (naive) sans conversion de timezone
-        if 'datetime' in data:
-            from django.utils.dateparse import parse_datetime
-            from django.utils import timezone
-            import pytz
-            datetime_str = data['datetime']
-            # Si le datetime n'a pas de timezone, on le traite comme heure locale
-            parsed = parse_datetime(datetime_str)
-            if parsed and timezone.is_naive(parsed):
-                # Convertir l'heure locale en UTC pour le stockage
-                # On assume que l'heure entrée est en heure locale (Europe/Paris)
-                local_tz = pytz.timezone('Europe/Paris')
-                local_dt = local_tz.localize(parsed)
-                data = data.copy()
-                data['datetime'] = local_dt.astimezone(pytz.UTC).isoformat()
-        return super().to_internal_value(data)
-    
-    def to_representation(self, instance):
-        from django.utils import timezone
-        import pytz
-        ret = super().to_representation(instance)
-        ret['clientId'] = ret.pop('clientId_read', None)
-        # Convertir l'UTC stocké en heure locale pour l'affichage
-        if instance.datetime:
-            # Le datetime stocké est déjà aware (avec timezone UTC)
-            if timezone.is_naive(instance.datetime):
-                # Si naive, on le traite comme UTC
-                utc_dt = timezone.make_aware(instance.datetime, timezone.utc)
-            else:
-                # Si déjà aware, on s'assure qu'il est en UTC
-                utc_dt = instance.datetime.astimezone(pytz.UTC)
-            local_tz = pytz.timezone('Europe/Paris')
-            local_dt = utc_dt.astimezone(local_tz)
-            # Retourner le datetime en format ISO sans timezone pour que le frontend le traite comme local
-            ret['datetime'] = local_dt.replace(tzinfo=None).isoformat()
-        return ret
 
 class LogSerializer(serializers.ModelSerializer):
     userId = serializers.SerializerMethodField()

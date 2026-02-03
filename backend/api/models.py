@@ -239,18 +239,6 @@ class TeamMember(models.Model):
     class Meta:
         unique_together = ['user', 'team']  # Un utilisateur ne peut être qu'une fois dans une équipe
 
-class Event(models.Model):
-    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
-    datetime = models.DateTimeField()
-    userId = models.ForeignKey(DjangoUser, on_delete=models.CASCADE, related_name='events')
-    clientId = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True)
-    comment = models.TextField(default="", blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Event {self.id} - {self.datetime}"
-
 class Log(models.Model):
     """Table for tracking all CRM activity logs"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)

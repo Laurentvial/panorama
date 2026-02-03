@@ -14,7 +14,6 @@ from .models import ClientChatMessage
 from .models import Note
 from .models import UserDetails
 from .models import Team
-from .models import Event
 from .models import TeamMember
 from .models import Log
 from .models import Asset
@@ -33,7 +32,7 @@ from .models import AppSettings
 from .models import NewsPost
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
-    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, EventSerializer, TeamMemberSerializer,
+    TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer
@@ -1829,68 +1828,6 @@ def user_update(request, user_id):
     # Return updated user data
     serializer = UserDetailsSerializer(user_details, context={'request': request})
     return Response(serializer.data)
-
-# Events endpoints
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def event_list(request):
-    events = Event.objects.filter(userId=request.user).order_by('datetime')
-    serializer = EventSerializer(events, many=True)
-    return Response({'events': serializer.data})
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def event_create(request):
-    serializer = EventSerializer(data=request.data)
-    if serializer.is_valid():
-        # Generate event ID
-        event_id = uuid.uuid4().hex[:12]
-        while Event.objects.filter(id=event_id).exists():
-            event_id = uuid.uuid4().hex[:12]
-        
-        # Get client if clientId provided
-        client = None
-        if request.data.get('clientId'):
-            try:
-                client = Client.objects.get(id=request.data['clientId'])
-            except Client.DoesNotExist:
-                pass
-        
-        event = serializer.save(
-            id=event_id,
-            userId=request.user,
-            clientId=client
-        )
-        return Response(EventSerializer(event).data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-@api_view(['PUT'])
-@permission_classes([IsAuthenticated])
-def event_update(request, event_id):
-    event = get_object_or_404(Event, id=event_id, userId=request.user)
-    serializer = EventSerializer(event, data=request.data, partial=True)
-    if serializer.is_valid():
-        # Get client if clientId provided
-        client = None
-        if request.data.get('clientId'):
-            try:
-                client = Client.objects.get(id=request.data['clientId'])
-            except Client.DoesNotExist:
-                pass
-        elif request.data.get('clientId') == '' or request.data.get('clientId') is None:
-            client = None
-        
-        # Update event with new data
-        event = serializer.save(clientId=client)
-        return Response(EventSerializer(event).data, status=status.HTTP_200_OK)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def event_delete(request, event_id):
-    event = get_object_or_404(Event, id=event_id, userId=request.user)
-    event.delete()
-    return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -3959,9 +3896,6 @@ def stats(request):
     # Count total clients
     total_clients = Client.objects.count()
     
-    # Count total appointments (events)
-    total_appointments = Event.objects.count()
-    
     # Get recent transactions (last 10)
     recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')[:10]
     transaction_serializer = TransactionSerializer(recent_transactions, many=True)
@@ -3970,7 +3904,6 @@ def stats(request):
         'totalRevenue': float(total_revenue),
         'pendingRevenue': float(pending_revenue),
         'totalClients': total_clients,
-        'totalAppointments': total_appointments,
         'recentTransactions': transaction_serializer.data
     })
 
