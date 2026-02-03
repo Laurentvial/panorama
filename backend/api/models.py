@@ -191,12 +191,20 @@ class Note(models.Model):
         return self.text
 
 class UserDetails(models.Model):
+    STATUS_CHOICES = [
+        ('online', 'En ligne'),
+        ('away', 'Absent'),
+        ('offline', 'Déconnecté'),
+    ]
+    
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     django_user = models.OneToOneField(DjangoUser, on_delete=models.CASCADE, related_name='user_details')
     profile_photo = models.ImageField(upload_to='user_profiles/', storage=user_profile_storage, null=True, blank=True)
     role = models.CharField(max_length=12, default="0")
     phone = models.CharField(max_length=20, default="", blank=True)
     active = models.BooleanField(null=False, default=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='offline', blank=True)
+    availability_schedule = models.JSONField(default=dict, blank=True)  # Format: {"monday": {"start": "09:00", "end": "18:00"}, ...}
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -442,6 +450,10 @@ class Transaction(models.Model):
     subscription_contract_end = models.CharField(max_length=20, default="", blank=True)
     subscription_signature = models.TextField(default="", blank=True)  # Base64 encoded signature image
     
+    # Position generation history: stores details of each position generation run
+    # Format: [{"timestamp": "...", "rates": {...}, "positions": [...], "summary": {...}}, ...]
+    position_generation_history = models.JSONField(default=list, blank=True, null=True)
+    
     def __str__(self):
         return f"{self.get_type_display()} - {self.amount} € - {self.client.fname} {self.client.lname}"
 
@@ -553,6 +565,7 @@ class Product(models.Model):
     min_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur minimum d'entrée
     max_entry_value = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Valeur maximum d'entrée
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    available_funds = models.BooleanField(default=False)  # Fonds disponibles
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

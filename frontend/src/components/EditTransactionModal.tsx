@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
+import { PositionGenerationModal } from './PositionGenerationModal';
 import '../styles/Modal.css';
 
 interface EditTransactionModalProps {
@@ -32,6 +33,8 @@ export function EditTransactionModal({
     status: 'en_attente_paiement',
     datetime: ''
   });
+  const [showPositionModal, setShowPositionModal] = useState(false);
+  const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
 
   // Initialize form when transaction changes
   useEffect(() => {
@@ -95,6 +98,50 @@ export function EditTransactionModal({
       return;
     }
     
+    // Check if this is an investment transaction changing to "termine"
+    // Check multiple possible field names for transfer_to (as returned by serializer)
+    const transferTo = transaction.transfer_to || 
+                       transaction.to_field || 
+                       transaction.to || 
+                       transaction.transferTo ||
+                       transaction.productId ||
+                       transaction.product_id ||
+                       null;
+    
+    // Also check subscription_details for productId
+    const productIdFromSubscription = transaction.subscription_details?.productId || 
+                                      transaction.subscriptionDetails?.productId ||
+                                      null;
+    
+    const finalProductId = transferTo || productIdFromSubscription;
+    
+    const isInvestment = transactionForm.type === 'transfert' && 
+                         finalProductId && 
+                         String(finalProductId) !== 'balance' &&
+                         String(finalProductId) !== 'trading';
+    const isChangingToTermine = transactionForm.status === 'termine' && 
+                                 transaction.status !== 'termine';
+    
+    // Debug logging
+    console.log('EditTransactionModal - Checking investment:', {
+      type: transactionForm.type,
+      transferTo,
+      productIdFromSubscription,
+      finalProductId,
+      isInvestment,
+      currentStatus: transaction.status,
+      newStatus: transactionForm.status,
+      isChangingToTermine
+    });
+    
+    if (isInvestment && isChangingToTermine) {
+      // Show position generation modal instead of directly updating
+      console.log('EditTransactionModal - Showing position generation modal');
+      setPendingStatusUpdate(transactionForm.status);
+      setShowPositionModal(true);
+      return;
+    }
+    
     try {
       // Convert datetime-local format to ISO string
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
@@ -106,7 +153,8 @@ export function EditTransactionModal({
           amount: parseFloat(transactionForm.amount),
           description: transactionForm.description,
           status: transactionForm.status,
-          datetime: datetimeISO
+          datetime: datetimeISO,
+          skip_position_generation: false // Normal update, allow auto-generation
         })
       });
       
@@ -119,88 +167,135 @@ export function EditTransactionModal({
     }
   }
 
+  const handlePositionModalSuccess = async () => {
+    // After positions are generated, update transaction status to termine
+    if (pendingStatusUpdate) {
+      try {
+        const datetimeISO = new Date(transactionForm.datetime).toISOString();
+        
+        await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            type: transactionForm.type,
+            amount: parseFloat(transactionForm.amount),
+            description: transactionForm.description,
+            status: pendingStatusUpdate,
+            datetime: datetimeISO,
+            skip_position_generation: true // Skip auto-generation since we already generated via modal
+          })
+        });
+        
+        toast.success('Transaction modifiée avec succès');
+        setShowPositionModal(false);
+        setPendingStatusUpdate(null);
+        handleClose();
+        onSuccess();
+      } catch (error: any) {
+        console.error('Error updating transaction after position generation:', error);
+        toast.error(error.message || 'Erreur lors de la mise à jour de la transaction');
+      }
+    }
+  };
+
+  const handlePositionModalClose = () => {
+    setShowPositionModal(false);
+    setPendingStatusUpdate(null);
+  };
+
   if (!isOpen || !transaction) return null;
 
   return (
-    <div className="modal-overlay" onClick={handleClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">Modifier la transaction</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="modal-close"
-            onClick={handleClose}
-          >
-            <X className="planning-icon-md" />
-          </Button>
-        </div>
-        <form onSubmit={handleSubmit} className="modal-form">
-          <div className="modal-form-field">
-            <Label>Type</Label>
-            <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
-                  <SelectItem key={key} value={key}>{config.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="modal-form-field">
-            <Label>Date et heure</Label>
-            <Input
-              type="datetime-local"
-              value={transactionForm.datetime}
-              onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
-              required
-            />
-          </div>
-          <div className="modal-form-field">
-            <Label>Montant (€)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={transactionForm.amount}
-              onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-              required
-            />
-          </div>
-          <div className="modal-form-field">
-            <Label>Description</Label>
-            <Textarea
-              value={transactionForm.description}
-              onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-              placeholder="Description de la transaction"
-            />
-          </div>
-          <div className="modal-form-field">
-            <Label>Statut</Label>
-            <Select value={transactionForm.status} onValueChange={(value) => setTransactionForm({ ...transactionForm, status: value })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {getAvailableStatuses().map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {STATUS_LABELS[status]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="modal-form-actions">
-            <Button type="button" variant="outline" onClick={handleClose}>
-              Annuler
+    <>
+      <div className="modal-overlay" onClick={handleClose}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2 className="modal-title">Modifier la transaction</h2>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="modal-close"
+              onClick={handleClose}
+            >
+              <X className="planning-icon-md" />
             </Button>
-            <Button type="submit">Enregistrer</Button>
           </div>
-        </form>
+          <form onSubmit={handleSubmit} className="modal-form">
+            <div className="modal-form-field">
+              <Label>Type</Label>
+              <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
+                    <SelectItem key={key} value={key}>{config.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="modal-form-field">
+              <Label>Date et heure</Label>
+              <Input
+                type="datetime-local"
+                value={transactionForm.datetime}
+                onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
+                required
+              />
+            </div>
+            <div className="modal-form-field">
+              <Label>Montant (€)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={transactionForm.amount}
+                onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
+                required
+              />
+            </div>
+            <div className="modal-form-field">
+              <Label>Description</Label>
+              <Textarea
+                value={transactionForm.description}
+                onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
+                placeholder="Description de la transaction"
+              />
+            </div>
+            <div className="modal-form-field">
+              <Label>Statut</Label>
+              <Select value={transactionForm.status} onValueChange={(value) => setTransactionForm({ ...transactionForm, status: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {getAvailableStatuses().map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {STATUS_LABELS[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="modal-form-actions">
+              <Button type="button" variant="outline" onClick={handleClose}>
+                Annuler
+              </Button>
+              <Button type="submit">Enregistrer</Button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+      
+      {showPositionModal && (
+        <PositionGenerationModal
+          isOpen={showPositionModal}
+          transaction={transaction}
+          clientId={clientId}
+          onClose={handlePositionModalClose}
+          onSuccess={handlePositionModalSuccess}
+        />
+      )}
+    </>
   );
 }

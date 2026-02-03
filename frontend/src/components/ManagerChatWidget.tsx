@@ -43,6 +43,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
   const [selectedConversationId, setSelectedConversationId] = useState<string>('');
   const [managerName, setManagerName] = useState(managerNameFallback);
   const [managerPhoto, setManagerPhoto] = useState<string>('');
+  const [managerStatus, setManagerStatus] = useState<'online' | 'away' | 'offline'>('offline');
+  const [managerPhone, setManagerPhone] = useState<string>('');
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const bottomCss = useMemo(() => {
@@ -63,6 +65,12 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
       if (m) setManagerName(m);
       const photo = data?.manager?.profilePhoto;
       if (typeof photo === 'string') setManagerPhoto(photo);
+      const status = data?.manager?.status;
+      if (status && ['online', 'away', 'offline'].includes(status)) {
+        setManagerStatus(status);
+      }
+      const phone = data?.manager?.phone;
+      if (typeof phone === 'string') setManagerPhone(phone);
 
       // Default selection: first conversation (often "legacy") if present.
       if (!selectedConversationId && convs.length > 0) {
@@ -89,6 +97,12 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
       }
       const photo = data?.manager?.profilePhoto;
       if (typeof photo === 'string') setManagerPhoto(photo);
+      const status = data?.manager?.status;
+      if (status && ['online', 'away', 'offline'].includes(status)) {
+        setManagerStatus(status);
+      }
+      const phone = data?.manager?.phone;
+      if (typeof phone === 'string') setManagerPhone(phone);
     } catch (e) {
       console.error('Error loading conversation messages:', e);
     } finally {
@@ -294,8 +308,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
               )}
               <div
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 48,
+                  height: 48,
                   borderRadius: 9999,
                   background: '#f3f4f6',
                   border: '1px solid rgba(2, 6, 23, 0.10)',
@@ -315,12 +329,52 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                 ) : null}
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {managerName}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {managerName}
+                  </div>
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor:
+                        managerStatus === 'online'
+                          ? '#10b981'
+                          : managerStatus === 'away'
+                          ? '#f59e0b'
+                          : '#9ca3af',
+                      flexShrink: 0,
+                    }}
+                    title={
+                      managerStatus === 'online'
+                        ? 'En ligne'
+                        : managerStatus === 'away'
+                        ? 'Absent'
+                        : 'Déconnecté'
+                    }
+                  />
                 </div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
-                {view === 'thread' ? (activeConversation?.subject || 'Conversation') : 'Messagerie'}
-              </div>
+                {managerPhone && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    <a
+                      href={`tel:${managerPhone.replace(/\s/g, '')}`}
+                      style={{
+                        color: '#2563eb',
+                        textDecoration: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span>{managerPhone}</span>
+                    </a>
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: managerPhone ? 2 : 0 }}>
+                  {view === 'thread' ? (activeConversation?.subject || 'Conversation') : 'Messagerie'}
+                </div>
               </div>
             </div>
             <button

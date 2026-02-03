@@ -1,0 +1,420 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useUser } from '../contexts/UserContext';
+import { apiCall } from '../utils/api';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import { HiOutlineUser, HiOutlineCamera } from 'react-icons/hi';
+import { toast } from 'sonner';
+import '../styles/PageHeader.css';
+
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_LABELS: { [key: string]: string } = {
+  monday: 'Lundi',
+  tuesday: 'Mardi',
+  wednesday: 'Mercredi',
+  thursday: 'Jeudi',
+  friday: 'Vendredi',
+  saturday: 'Samedi',
+  sunday: 'Dimanche',
+};
+
+export function MonProfil() {
+  const { currentUser, refreshUser } = useUser();
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    status: 'offline' as 'online' | 'away' | 'offline',
+    availabilitySchedule: {} as { [key: string]: { start: string; end: string } },
+  });
+  
+  const [profilePhoto, setProfilePhoto] = useState<string>('');
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      setFormData({
+        firstName: currentUser.firstName || '',
+        lastName: currentUser.lastName || '',
+        email: currentUser.email || '',
+        phone: currentUser.phone || '',
+        status: currentUser.status || 'offline',
+        availabilitySchedule: currentUser.availabilitySchedule || {},
+      });
+      setProfilePhoto(currentUser.profilePhoto || '');
+    }
+  }, [currentUser]);
+
+  const handleInputChange = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleDayScheduleChange = (day: string, field: 'start' | 'end', value: string) => {
+    // Ensure format is HH:MM (24h format)
+    const timeValue = value.split(':').slice(0, 2).join(':');
+    setFormData(prev => ({
+      ...prev,
+      availabilitySchedule: {
+        ...prev.availabilitySchedule,
+        [day]: {
+          ...(prev.availabilitySchedule[day] || { start: '09:00', end: '18:00' }),
+          [field]: timeValue,
+        },
+      },
+    }));
+  };
+
+  const handleTimeSelectChange = (day: string, field: 'start' | 'end', hour: string, minute: string) => {
+    const timeValue = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    setFormData(prev => ({
+      ...prev,
+      availabilitySchedule: {
+        ...prev.availabilitySchedule,
+        [day]: {
+          ...(prev.availabilitySchedule[day] || { start: '09:00', end: '18:00' }),
+          [field]: timeValue,
+        },
+      },
+    }));
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('La photo ne doit pas dépasser 5 Mo');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner une image');
+        return;
+      }
+      setProfilePhotoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePhoto(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append('first_name', formData.firstName);
+      formDataToSend.append('last_name', formData.lastName);
+      formDataToSend.append('email', formData.email);
+      formDataToSend.append('phone', formData.phone);
+      formDataToSend.append('status', formData.status);
+      formDataToSend.append('availabilitySchedule', JSON.stringify(formData.availabilitySchedule));
+      
+      if (profilePhotoFile) {
+        formDataToSend.append('profilePhoto', profilePhotoFile);
+      }
+
+      await apiCall('/api/user/profile/', {
+        method: 'PATCH',
+        body: formDataToSend,
+        headers: {}, // Don't set Content-Type, browser will set it with boundary for FormData
+      });
+
+      toast.success('Profil mis à jour avec succès');
+      await refreshUser();
+    } catch (error: any) {
+      console.error('Error updating profile:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour du profil');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const getInitials = () => {
+    const firstName = formData.firstName || '';
+    const lastName = formData.lastName || '';
+    if (firstName || lastName) {
+      return `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase();
+    }
+    if (formData.email) {
+      return formData.email[0].toUpperCase();
+    }
+    return '';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div>Chargement...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mon-profil-container" style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+      <div className="page-header-section">
+        <h1 className="page-title">Mon Profil</h1>
+        <p className="page-subtitle">Gérez vos informations personnelles et votre disponibilité</p>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <div className="grid gap-6">
+          {/* Informations personnelles */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Informations personnelles</CardTitle>
+              <CardDescription>Modifiez vos informations de base</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Photo de profil */}
+              <div className="flex items-center gap-6">
+                <div className="relative">
+                  <Avatar style={{ width: '72px', height: '72px' }}>
+                    <AvatarImage src={profilePhoto} alt={`${formData.firstName} ${formData.lastName}`} />
+                    <AvatarFallback className="text-sm">
+                      {getInitials() || <HiOutlineUser className="w-5 h-5" />}
+                    </AvatarFallback>
+                  </Avatar>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute bottom-0 right-0 p-1.5 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition-colors shadow-sm"
+                    title="Changer la photo"
+                  >
+                    <HiOutlineCamera className="w-3 h-3" />
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoChange}
+                    className="hidden"
+                  />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium mb-1">Photo de profil</p>
+                  <p className="text-sm text-muted-foreground mb-3">JPG, PNG ou GIF. Max 5 Mo</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2"
+                  >
+                    <HiOutlineCamera className="w-4 h-4" />
+                    {profilePhoto ? 'Modifier la photo' : 'Ajouter une photo'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Nom et Prénom */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">Prénom *</Label>
+                  <Input
+                    id="firstName"
+                    value={formData.firstName}
+                    onChange={(e) => handleInputChange('firstName', e.target.value)}
+                    required
+                    placeholder="Votre prénom"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Nom *</Label>
+                  <Input
+                    id="lastName"
+                    value={formData.lastName}
+                    onChange={(e) => handleInputChange('lastName', e.target.value)}
+                    required
+                    placeholder="Votre nom"
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email *</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => handleInputChange('email', e.target.value)}
+                  required
+                  placeholder="votre.email@example.com"
+                />
+              </div>
+
+              {/* Téléphone */}
+              <div className="space-y-2">
+                <Label htmlFor="phone">Téléphone</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => handleInputChange('phone', e.target.value)}
+                  placeholder="+33 6 12 34 56 78"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Statut et disponibilité */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Statut et disponibilité</CardTitle>
+              <CardDescription>Définissez votre statut et vos horaires de disponibilité pour le chat</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Statut */}
+              <div className="space-y-2">
+                <Label htmlFor="status">Statut d'activité</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value: 'online' | 'away' | 'offline') => handleInputChange('status', value)}
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="online">En ligne</SelectItem>
+                    <SelectItem value="away">Absent</SelectItem>
+                    <SelectItem value="offline">Déconnecté</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Ce statut sera visible par vos clients dans le chat
+                </p>
+              </div>
+
+              {/* Horaires de disponibilité */}
+              <div className="space-y-4">
+                <Label>Horaires de disponibilité</Label>
+                <p className="text-sm text-muted-foreground">
+                  Définissez vos heures de disponibilité pour chaque jour de la semaine (format 24h)
+                </p>
+                <div className="space-y-3">
+                  {DAYS.map((day) => {
+                    const schedule = formData.availabilitySchedule[day] || { start: '09:00', end: '18:00' };
+                    const startTime = schedule.start.split(':');
+                    const endTime = schedule.end.split(':');
+                    const startHour = startTime[0] || '09';
+                    const startMinute = startTime[1] || '00';
+                    const endHour = endTime[0] || '18';
+                    const endMinute = endTime[1] || '00';
+                    
+                    // Generate hour and minute options
+                    const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+                    const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
+                    
+                    return (
+                      <div key={day} className="grid grid-cols-[150px_1fr_1fr] gap-4 items-center">
+                        <Label className="text-sm font-medium">{DAY_LABELS[day]}</Label>
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={startHour}
+                            onValueChange={(value) => handleTimeSelectChange(day, 'start', value, startMinute)}
+                          >
+                            <SelectTrigger className="w-20">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {hours.map((h) => (
+                                <SelectItem key={h} value={h}>{h}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className="text-sm font-medium">:</span>
+                          <Select
+                            value={startMinute}
+                            onValueChange={(value) => handleTimeSelectChange(day, 'start', startHour, value)}
+                          >
+                            <SelectTrigger className="w-20">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {minutes.filter((_, i) => i % 5 === 0).map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={endHour}
+                            onValueChange={(value) => handleTimeSelectChange(day, 'end', value, endMinute)}
+                          >
+                            <SelectTrigger className="w-20">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {hours.map((h) => (
+                                <SelectItem key={h} value={h}>{h}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className="text-sm font-medium">:</span>
+                          <Select
+                            value={endMinute}
+                            onValueChange={(value) => handleTimeSelectChange(day, 'end', endHour, value)}
+                          >
+                            <SelectTrigger className="w-20">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {minutes.filter((_, i) => i % 5 === 0).map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Boutons d'action */}
+          <div className="flex justify-end gap-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (currentUser) {
+                  setFormData({
+                    firstName: currentUser.firstName || '',
+                    lastName: currentUser.lastName || '',
+                    email: currentUser.email || '',
+                    phone: currentUser.phone || '',
+                    status: currentUser.status || 'offline',
+                    availabilitySchedule: currentUser.availabilitySchedule || {},
+                  });
+                  setProfilePhoto(currentUser.profilePhoto || '');
+                  setProfilePhotoFile(null);
+                }
+              }}
+            >
+              Annuler
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+export default MonProfil;

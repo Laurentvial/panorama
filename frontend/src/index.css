@@ -1377,6 +1377,19 @@
     color: var(--primary);
   }
 
+  /* Ghost buttons: make text and SVG icons use primary color on hover */
+  @media (hover: hover) {
+    /* Target ghost variant buttons specifically */
+    button[data-slot="button"][data-button-variant="ghost"]:hover {
+      color: var(--primary) !important;
+    }
+    
+    /* Make SVG icons use primary color on hover for ghost buttons */
+    button[data-slot="button"][data-button-variant="ghost"]:hover svg {
+      color: var(--primary) !important;
+    }
+  }
+
   .text-primary-foreground {
     color: var(--primary-foreground);
   }

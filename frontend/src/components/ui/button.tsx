@@ -18,7 +18,7 @@ const buttonVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost:
-          "hover:bg-accent hover:text-primary dark:hover:bg-accent/50",
+          "hover:bg-accent hover:text-primary dark:hover:bg-accent/50 hover:[&_svg]:text-primary [data-button-variant='ghost']",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
@@ -42,6 +42,7 @@ const Button = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button"
     return (
       <Comp
         data-slot="button"
+        data-button-variant={variant}
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}

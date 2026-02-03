@@ -447,12 +447,15 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     mobile = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     profilePhoto = serializers.SerializerMethodField()
+    status = serializers.CharField(required=False, allow_blank=True)
+    availabilitySchedule = serializers.JSONField(source='availability_schedule', required=False, allow_null=True)
 
     class Meta:
         model = UserDetails
         fields = [
             'id', 'firstName', 'lastName', 'username', 'email',
-            'role', 'phone', 'mobile', 'teamId', 'active', 'createdAt', 'profilePhoto'
+            'role', 'phone', 'mobile', 'teamId', 'active', 'createdAt', 'profilePhoto',
+            'status', 'availabilitySchedule'
         ]
         read_only_fields = ['id']
 
@@ -498,6 +501,8 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         # Get teamId from TeamMember relationship
         team_member = instance.team_memberships.first()
         ret['teamId'] = team_member.team.id if team_member else None
+        ret['status'] = instance.status if instance.status else 'offline'
+        ret['availabilitySchedule'] = instance.availability_schedule if instance.availability_schedule else {}
         return ret
 
 class TeamMemberSerializer(serializers.ModelSerializer):
@@ -826,7 +831,8 @@ class TransactionSerializer(serializers.ModelSerializer):
             'subscription_birth_date', 'subscription_city', 'subscription_ip',
             'subscription_date', 'subscription_duration', 'subscription_interest_period',
             'subscription_profitability', 'subscription_investment', 'subscription_profits',
-            'subscription_total', 'subscription_contract_end', 'subscription_signature'
+            'subscription_total', 'subscription_contract_end', 'subscription_signature',
+            'position_generation_history'
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
     
@@ -952,7 +958,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'interest_period', 'capitalisation_fonds',
             'availability_start', 'availability_end',
             'link_to_assets', 'min_entry_value', 'max_entry_value',
-            'default',
+            'default', 'available_funds',
             'assetAllocations',
             'createdAt', 'updatedAt'
         ]
@@ -1030,6 +1036,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'linkToAssets': 'link_to_assets',
             'minEntryValue': 'min_entry_value',
             'maxEntryValue': 'max_entry_value',
+            'availableFunds': 'available_funds',
         }
         
         # Create a copy to avoid modifying the original
@@ -1047,6 +1054,12 @@ class ProductSerializer(serializers.ModelSerializer):
                 internal_data['capitalisation_fonds'] = v.strip().lower() in ['oui', 'true', '1', 'yes']
             else:
                 internal_data['capitalisation_fonds'] = bool(v)
+        if 'available_funds' in internal_data:
+            v = internal_data.get('available_funds')
+            if isinstance(v, str):
+                internal_data['available_funds'] = v.strip().lower() in ['oui', 'true', '1', 'yes']
+            else:
+                internal_data['available_funds'] = bool(v)
         
         return super().to_internal_value(internal_data)
     
@@ -1070,6 +1083,7 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['minEntryValue'] = ret.pop('min_entry_value', None)
         ret['maxEntryValue'] = ret.pop('max_entry_value', None)
         ret['default'] = bool(ret.pop('default', False))
+        ret['availableFunds'] = bool(ret.pop('available_funds', False))
         # Type is now a real field in the model, so it's already in ret
         # Handle image URL - get_imageUrl already handles proxy URL conversion
         # Just ensure None values are handled correctly

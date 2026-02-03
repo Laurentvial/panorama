@@ -53,7 +53,12 @@ from django.utils import timezone
 from django.db.models import Q
 from django.db import IntegrityError
 from .alpha_vantage_service import get_alpha_vantage_service
-from .position_service import create_positions_for_investment
+from .position_service import (
+    create_positions_for_investment,
+    generate_rates_for_investment,
+    generate_positions_with_rates,
+    save_generated_positions,
+)
 
 
 def get_client_ip(request):
@@ -1466,6 +1471,8 @@ def get_current_user(request):
                 'role': '0',  # Default role
                 'phone': '',
                 'active': True,
+                'status': 'offline',
+                'availabilitySchedule': {},
                 'userType': 'admin'
             })
     except Exception as e:
@@ -1476,6 +1483,85 @@ def get_current_user(request):
         logger.error(traceback.format_exc())
         return Response(
             {'error': f'Error retrieving user: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_own_profile(request):
+    """
+    Allow authenticated user to update their own profile.
+    Users can update: first_name, last_name, email, phone, profile_photo, status, availability_schedule
+    """
+    try:
+        django_user = request.user
+        try:
+            user_details = UserDetails.objects.get(django_user=django_user)
+        except UserDetails.DoesNotExist:
+            return Response(
+                {'error': 'User profile not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Update Django User fields
+        if 'first_name' in request.data:
+            django_user.first_name = request.data['first_name']
+        if 'last_name' in request.data:
+            django_user.last_name = request.data['last_name']
+        if 'email' in request.data:
+            email = request.data['email'].strip()
+            # Check if email is already taken by another user
+            if DjangoUser.objects.filter(email=email).exclude(id=django_user.id).exists():
+                return Response(
+                    {'error': 'Cet email est déjà utilisé par un autre utilisateur'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            django_user.email = email
+            django_user.username = email  # Keep username in sync with email
+        django_user.save()
+        
+        # Update UserDetails fields
+        if 'phone' in request.data:
+            user_details.phone = request.data['phone'] or ''
+        if 'status' in request.data:
+            status_value = request.data['status']
+            if status_value in ['online', 'away', 'offline']:
+                user_details.status = status_value
+        if 'availabilitySchedule' in request.data:
+            user_details.availability_schedule = request.data['availabilitySchedule'] or {}
+        
+        # Update profile photo if provided
+        if 'profilePhoto' in request.FILES:
+            try:
+                profile_photo_file = request.FILES['profilePhoto']
+                # Delete old photo if any
+                if user_details.profile_photo:
+                    user_details.profile_photo.delete(save=False)
+                original_filename = profile_photo_file.name or 'photo'
+                _, ext = os.path.splitext(original_filename)
+                ext = ext.lower() if ext else '.jpg'
+                custom_filename = f"user_{user_details.id}_{uuid.uuid4().hex[:8]}{ext}"
+                user_details.profile_photo.save(custom_filename, profile_photo_file, save=False)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"User profile photo update failed: {str(e)}")
+        
+        user_details.save()
+        
+        # Return updated user data
+        serializer = UserDetailsSerializer(user_details, context={'request': request})
+        return Response({
+            **serializer.data,
+            'userType': 'admin'
+        })
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in update_own_profile: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'error': f'Error updating profile: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -4056,13 +4142,30 @@ def client_chat(request, client_id):
         qs = ClientChatMessage.objects.filter(client=client).order_by('created_at')
         serializer = ClientChatMessageSerializer(qs, many=True)
         manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
+        
+        # Get manager status, availability schedule, and phone from UserDetails
+        manager_status = 'offline'
+        manager_availability_schedule = {}
+        manager_phone = ''
+        if manager_user:
+            try:
+                user_details = UserDetails.objects.get(django_user=manager_user)
+                manager_status = user_details.status if user_details.status else 'offline'
+                manager_availability_schedule = user_details.availability_schedule if user_details.availability_schedule else {}
+                manager_phone = user_details.phone if user_details.phone else ''
+            except UserDetails.DoesNotExist:
+                pass
+        
         return Response({
             'messages': serializer.data,
             'manager': {
                 'id': str(manager_user.id) if manager_user else None,
                 'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
                 'email': (manager_user.email if manager_user else ''),
+                'phone': manager_phone,
                 'profilePhoto': manager_photo,
+                'status': manager_status,
+                'availabilitySchedule': manager_availability_schedule,
             },
         })
 
@@ -4204,13 +4307,29 @@ def client_conversations(request, client_id):
             }
             conv_data = [legacy_item] + list(conv_data)
 
+        # Get manager status, availability schedule, and phone from UserDetails
+        manager_status = 'offline'
+        manager_availability_schedule = {}
+        manager_phone = ''
+        if manager_user:
+            try:
+                user_details = UserDetails.objects.get(django_user=manager_user)
+                manager_status = user_details.status if user_details.status else 'offline'
+                manager_availability_schedule = user_details.availability_schedule if user_details.availability_schedule else {}
+                manager_phone = user_details.phone if user_details.phone else ''
+            except UserDetails.DoesNotExist:
+                pass
+        
         return Response({
             'conversations': conv_data,
             'manager': {
                 'id': str(manager_user.id) if manager_user else None,
                 'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
                 'email': (manager_user.email if manager_user else ''),
+                'phone': manager_phone,
                 'profilePhoto': manager_photo,
+                'status': manager_status,
+                'availabilitySchedule': manager_availability_schedule,
             },
         })
 
@@ -4292,6 +4411,20 @@ def client_conversation_messages(request, client_id, conversation_id):
         else:
             qs = ClientChatMessage.objects.filter(client=client, conversation=conversation).order_by('created_at')
         serializer = ClientChatMessageSerializer(qs, many=True)
+        
+        # Get manager status, availability schedule, and phone from UserDetails
+        manager_status = 'offline'
+        manager_availability_schedule = {}
+        manager_phone = ''
+        if manager_user:
+            try:
+                user_details = UserDetails.objects.get(django_user=manager_user)
+                manager_status = user_details.status if user_details.status else 'offline'
+                manager_availability_schedule = user_details.availability_schedule if user_details.availability_schedule else {}
+                manager_phone = user_details.phone if user_details.phone else ''
+            except UserDetails.DoesNotExist:
+                pass
+        
         return Response({
             'conversation': (ClientConversationSerializer(conversation).data if conversation else {'id': 'legacy', 'subject': 'Conversation précédente'}),
             'messages': serializer.data,
@@ -4299,7 +4432,10 @@ def client_conversation_messages(request, client_id, conversation_id):
                 'id': str(manager_user.id) if manager_user else None,
                 'name': (f"{manager_user.first_name} {manager_user.last_name}".strip() if manager_user else ''),
                 'email': (manager_user.email if manager_user else ''),
+                'phone': manager_phone,
                 'profilePhoto': manager_photo,
+                'status': manager_status,
+                'availabilitySchedule': manager_availability_schedule,
             },
         })
 
@@ -4803,6 +4939,11 @@ def client_transaction_update(request, client_id, transaction_id):
         if not transaction.transfer_from:
             transaction.transfer_from = 'balance'
     
+    # Set skip flag BEFORE saving if needed (so signal can check it)
+    skip_position_generation = request.data.get('skip_position_generation', False)
+    if skip_position_generation:
+        transaction._skip_auto_position_generation = True
+    
     transaction.save()
 
     is_investment = (transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'balance')
@@ -4862,7 +5003,9 @@ def client_transaction_update(request, client_id, transaction_id):
             transaction.save()
     # If an investment becomes "termine", this is the moment it starts: create monthly positions.
     # Also backfill if it's already termine but positions are missing (idempotent).
-    if is_investment and transaction.status == 'termine':
+    # Skip automatic generation if skip_position_generation flag is set (for staged modal flow)
+    # Note: skip_position_generation flag is already set above before transaction.save()
+    if is_investment and transaction.status == 'termine' and not skip_position_generation:
         if previous_status != 'termine' or not Position.objects.filter(transaction=transaction).exists():
             try:
                 create_positions_for_investment(transaction, trigger="api_transaction_update")
@@ -4912,6 +5055,227 @@ def client_transaction_update(request, client_id, transaction_id):
     
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_generate_rates(request, client_id, transaction_id):
+    """Generate profitability rates for an investment transaction without creating positions."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Authorization check
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Check if this is an investment transaction
+    is_investment = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to
+        and transaction.transfer_to != 'balance'
+    )
+    
+    if not is_investment:
+        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        rates = generate_rates_for_investment(transaction)
+        return Response({'rates': rates})
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to generate rates for transaction {transaction.id}: {str(e)}", exc_info=True)
+        return Response({'error': f'Erreur lors de la génération des taux: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_generate_positions(request, client_id, transaction_id):
+    """Generate positions using custom rates without saving to database."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Authorization check
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Check if this is an investment transaction
+    is_investment = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to
+        and transaction.transfer_to != 'balance'
+    )
+    
+    if not is_investment:
+        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Parse custom rates from request
+    custom_rates_data = request.data.get('rates', {})
+    if not isinstance(custom_rates_data, dict):
+        return Response({'error': 'Les taux doivent être un objet'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        custom_rates = {
+            int(period_idx): Decimal(str(rate))
+            for period_idx, rate in custom_rates_data.items()
+        }
+    except (ValueError, InvalidOperation) as e:
+        return Response({'error': f'Format de taux invalide: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        positions = generate_positions_with_rates(transaction, custom_rates=custom_rates, save_to_db=False)
+        # Convert Position objects to dicts if needed
+        positions_data = []
+        for p in positions:
+            if isinstance(p, dict):
+                pos_data = {
+                    'id': p.get('id'),
+                    'client_id': p.get('client_id'),
+                    'product_id': p.get('product_id'),
+                    'transaction_id': p.get('transaction_id'),
+                    'asset_id': p.get('asset_id'),
+                    'asset_name': p.get('asset_name', ''),
+                    'asset_reference': p.get('asset_reference', ''),
+                    'asset_type': p.get('asset_type', ''),
+                    'opened_at': p.get('opened_at'),
+                    'closed_at': p.get('closed_at'),
+                    'invested_amount': p.get('invested_amount'),
+                    'fx_rate_eur_to_asset': p.get('fx_rate_eur_to_asset'),
+                    'invested_amount_asset_currency': p.get('invested_amount_asset_currency'),
+                    'profit_loss': p.get('profit_loss'),
+                    'period_index': p.get('period_index'),
+                    'period_date': p.get('period_date'),
+                    'status': p.get('status'),
+                }
+            else:
+                # Position object - need to fetch asset info
+                asset_name = ''
+                asset_reference = ''
+                asset_type = ''
+                if hasattr(p, 'asset') and p.asset:
+                    asset_name = p.asset.name or ''
+                    asset_reference = p.asset.reference or ''
+                    asset_type = p.asset.type or ''
+                elif p.asset_id:
+                    try:
+                        from .models import Asset
+                        asset = Asset.objects.filter(id=p.asset_id).first()
+                        if asset:
+                            asset_name = asset.name or ''
+                            asset_reference = asset.reference or ''
+                            asset_type = asset.type or ''
+                    except Exception:
+                        pass
+                
+                pos_data = {
+                    'id': p.id,
+                    'client_id': p.client_id,
+                    'product_id': p.product_id,
+                    'transaction_id': p.transaction_id,
+                    'asset_id': p.asset_id if hasattr(p, 'asset_id') else None,
+                    'asset_name': asset_name,
+                    'asset_reference': asset_reference,
+                    'asset_type': asset_type,
+                    'opened_at': p.opened_at.isoformat() if hasattr(p, 'opened_at') and p.opened_at else None,
+                    'closed_at': p.closed_at.isoformat() if hasattr(p, 'closed_at') and p.closed_at else None,
+                    'invested_amount': str(p.invested_amount),
+                    'fx_rate_eur_to_asset': str(p.fx_rate_eur_to_asset) if p.fx_rate_eur_to_asset else None,
+                    'invested_amount_asset_currency': str(p.invested_amount_asset_currency) if p.invested_amount_asset_currency else None,
+                    'profit_loss': str(p.profit_loss),
+                    'period_index': p.period_index,
+                    'period_date': p.period_date.isoformat() if hasattr(p, 'period_date') and p.period_date else None,
+                    'status': p.status,
+                }
+            positions_data.append(pos_data)
+        return Response({'positions': positions_data})
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to generate positions for transaction {transaction.id}: {str(e)}", exc_info=True)
+        return Response({'error': f'Erreur lors de la génération des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_save_positions(request, client_id, transaction_id):
+    """Save previously generated positions to database."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+    
+    # Authorization check
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Check if this is an investment transaction
+    is_investment = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to
+        and transaction.transfer_to != 'balance'
+    )
+    
+    if not is_investment:
+        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Parse positions data from request
+    positions_data = request.data.get('positions', [])
+    if not isinstance(positions_data, list):
+        return Response({'error': 'Les positions doivent être un tableau'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Parse rates and period summaries if provided (for history)
+    rates_used = request.data.get('rates_used')
+    if rates_used and isinstance(rates_used, dict):
+        try:
+            rates_used = {int(k): Decimal(str(v)) for k, v in rates_used.items()}
+        except (ValueError, InvalidOperation):
+            rates_used = None
+    else:
+        rates_used = None
+    
+    period_summaries = request.data.get('period_summaries')
+    if not isinstance(period_summaries, list):
+        period_summaries = None
+    
+    try:
+        created_positions = save_generated_positions(
+            transaction, 
+            positions_data,
+            rates_used=rates_used,
+            period_summaries=period_summaries,
+        )
+        serializer = PositionSerializer(created_positions, many=True)
+        return Response({'positions': serializer.data, 'count': len(created_positions)})
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to save positions for transaction {transaction.id}: {str(e)}", exc_info=True)
+        return Response({'error': f'Erreur lors de l\'enregistrement des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
@@ -5166,6 +5530,12 @@ def product_create(request):
             (str(request.data.get('default', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
             if isinstance(request.data.get('default', False), str)
             else bool(request.data.get('default', False))
+        ),
+        # Handle available_funds field - support both string and boolean
+        available_funds=(
+            (str(request.data.get('availableFunds', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
+            if isinstance(request.data.get('availableFunds', False), str)
+            else bool(request.data.get('availableFunds', False))
         ),
         # Gestion des prix
         min_entry_value=request.data.get('minEntryValue'),
@@ -5652,6 +6022,13 @@ def product_update(request, product_id):
             product.default = default_value.strip().lower() in ['oui', 'true', '1', 'yes']
         else:
             product.default = bool(default_value)
+    if 'availableFunds' in request.data:
+        # Handle available_funds field - support both string and boolean
+        v = request.data['availableFunds']
+        if isinstance(v, str):
+            product.available_funds = v.strip().lower() in ['oui', 'true', '1', 'yes']
+        else:
+            product.available_funds = bool(v)
     
     # Handle product-asset allocations (assetAllocations)
     try:

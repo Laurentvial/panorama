@@ -147,6 +147,44 @@ export function PlatformPortfolio() {
     }).format(d);
   };
 
+  const formatTransactionStatus = (status: string | undefined | null) => {
+    if (!status) return '-';
+    const statusLower = String(status).toLowerCase();
+    switch (statusLower) {
+      case 'termine':
+        return 'Terminé';
+      case 'en_cours':
+        return 'En cours';
+      case 'en_attente_paiement':
+        return 'En attente de paiement';
+      case 'conteste':
+        return 'Contesté';
+      case 'annule':
+        return 'Annulé';
+      default:
+        return status;
+    }
+  };
+
+  const getStatusColor = (status: string | undefined | null) => {
+    if (!status) return '#6b7280';
+    const statusLower = String(status).toLowerCase();
+    switch (statusLower) {
+      case 'termine':
+        return '#10b981'; // green
+      case 'en_cours':
+        return '#3b82f6'; // blue
+      case 'en_attente_paiement':
+        return '#f59e0b'; // amber
+      case 'conteste':
+        return '#ef4444'; // red
+      case 'annule':
+        return '#6b7280'; // gray
+      default:
+        return '#6b7280';
+    }
+  };
+
   const formatPositionRange = (p: any) => {
     if (p.opened_at) {
       const start = formatDateTime(p.opened_at);
@@ -1218,6 +1256,7 @@ export function PlatformPortfolio() {
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1250,6 +1289,8 @@ export function PlatformPortfolio() {
                           t.assetName ||
                           t.productName ||
                           (isTradingTransfer ? (t.assetType || 'Trading') : '-');
+                        const statusLabel = formatTransactionStatus(t.status);
+                        const statusColor = getStatusColor(t.status);
                         return (
                           <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatDateTime(t.datetime)}</td>
@@ -1257,6 +1298,15 @@ export function PlatformPortfolio() {
                             <td style={{ padding: '10px 8px' }}>{productLabel}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
                               {formatCurrency(t.amount)}
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>
+                              <span style={{ 
+                                color: statusColor, 
+                                fontWeight: 600,
+                                fontSize: '13px'
+                              }}>
+                                {statusLabel}
+                              </span>
                             </td>
                           </tr>
                         );

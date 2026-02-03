@@ -26,6 +26,7 @@ import { PlatformDiscover } from './components/PlatformDiscover';
 import { PlatformAccountVerification } from './components/PlatformAccountVerification';
 import { PlatformLayout } from './components/PlatformLayout';
 import { ProductDetail } from './components/ProductDetail';
+import { MonProfil } from './components/MonProfil';
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
@@ -117,6 +118,13 @@ function App() {
                         <ProtectedRoute>
                             <Layout>
                                 <UsersAndTeams />
+                            </Layout>
+                        </ProtectedRoute>
+                    } />
+                    <Route path="/admin/profile" element={
+                        <ProtectedRoute>
+                            <Layout>
+                                <MonProfil />
                             </Layout>
                         </ProtectedRoute>
                     } />

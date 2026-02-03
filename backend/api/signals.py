@@ -56,6 +56,8 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
 def _transaction_generate_positions_on_termine(sender, instance: Transaction, created: bool, **kwargs):
     """
     Idempotently generate positions for investment transactions when they reach 'termine'.
+    
+    Skip generation if skip_auto_position_generation flag is set (for staged modal flow).
     """
     try:
         is_investment = (
@@ -69,14 +71,36 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         if instance.status != "termine":
             return
 
-        previous_status = getattr(instance, "_previous_status", None)
-        should_generate = (
-            previous_status != "termine"
-            or not Position.objects.filter(transaction=instance).exists()
-        )
-        if not should_generate:
+        # Skip if flag is set (set by API when using staged generation flow)
+        if getattr(instance, "_skip_auto_position_generation", False):
+            logger.debug("Skipping auto-position generation for transaction %s (skip flag set)", getattr(instance, "id", None))
             return
 
+        previous_status = getattr(instance, "_previous_status", None)
+        
+        # Idempotent logic: generate positions if:
+        # 1. Status just changed to "termine" (previous_status != "termine"), OR
+        # 2. Status is "termine" but no positions exist (recovery from accidental deletion)
+        # Note: create_positions_for_investment is idempotent and will only create missing positions
+        existing_positions_count = Position.objects.filter(transaction=instance).count()
+        status_changed_to_termine = previous_status != "termine"
+        no_positions_exist = existing_positions_count == 0
+        
+        # If status didn't change AND positions already exist, skip (already fully generated)
+        if not status_changed_to_termine and existing_positions_count > 0:
+            logger.debug("Skipping auto-position generation for transaction %s (%d positions already exist, status unchanged)", getattr(instance, "id", None), existing_positions_count)
+            return
+        
+        # Generate if status changed to "termine" OR if no positions exist (recovery case)
+        if status_changed_to_termine:
+            logger.info("Auto-generating positions for transaction %s (status changed to termine)", getattr(instance, "id", None))
+        elif no_positions_exist:
+            logger.info("Auto-generating positions for transaction %s (recovery: status is termine but no positions exist)", getattr(instance, "id", None))
+        else:
+            # This shouldn't happen, but log it
+            logger.warning("Unexpected state in position generation signal for transaction %s", getattr(instance, "id", None))
+            return
+        
         create_positions_for_investment(instance, trigger="signal")
     except Exception as e:
         logger.error("Failed to auto-generate positions for transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)

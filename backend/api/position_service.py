@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.db.models import Q, Sum
 
 from .models import Product, Transaction, Position, ProductAssetAllocation, Log
 
@@ -848,6 +849,567 @@ def _create_trade_positions_compounding(
     )
 
     return created
+
+
+def generate_rates_for_investment(
+    txn: Transaction,
+    *,
+    custom_rates: dict[int, Decimal] | None = None,
+) -> list[dict]:
+    """
+    Generate profitability rates for each period without creating positions.
+    Returns a list of period summaries with rates that can be edited.
+    
+    custom_rates: Optional dict mapping period_index to custom rate percentage
+    """
+    ctx = build_investment_context(txn)
+    if ctx is None:
+        return []
+
+    product: Product | None = txn.product
+    if product is None:
+        try:
+            product = Product.objects.get(id=ctx.product_id)
+        except Product.DoesNotExist:
+            product = None
+
+    # Check if product has asset allocations (for both Smart Portfolios and regular products)
+    has_allocations = False
+    if product is not None:
+        has_allocations = ProductAssetAllocation.objects.filter(product_id=product.id).exists()
+
+    start_dt = txn.datetime or timezone.now()
+    if timezone.is_naive(start_dt):
+        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+
+    trading_days = _trading_days_between(start_dt, end_dt)
+    if not trading_days:
+        return []
+
+    invested_total = ctx.invested_amount
+    if invested_total <= 0:
+        return []
+
+    pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
+    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    does_compound = _product_compounds(product)
+
+    # Calculate initial capital: if compounding, add profits from all closed and open positions
+    capital = invested_total.quantize(Decimal('0.01'))
+    if does_compound:
+        now = timezone.now()
+        existing_profits = Position.objects.filter(
+            transaction_id=ctx.transaction_id
+        ).filter(
+            # Count closed positions (done) and open positions (opened_at <= now)
+            # Exclude only future positions (pending with opened_at > now)
+            Q(status='done') | 
+            Q(status='open') | 
+            (Q(status='pending') & Q(opened_at__lte=now))
+        ).aggregate(
+            total_profit=Sum('profit_loss')
+        )['total_profit'] or Decimal('0')
+        capital = (capital + existing_profits).quantize(Decimal('0.01'))
+
+    period_summaries: list[dict] = []
+    remaining_months = ctx.duration_months
+    cursor_dt = start_dt
+    period_idx = 0
+
+    while remaining_months > 0:
+        step_months = min(profit_period_months, remaining_months)
+        period_end_dt = _add_months_dt(cursor_dt, step_months)
+
+        period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
+        if not period_days:
+            cursor_dt = period_end_dt
+            remaining_months -= step_months
+            period_idx += 1
+            continue
+
+        # Calculate existing profit from CLOSED and OPEN positions (ignore only future positions)
+        now = timezone.now()
+        existing_profit = Decimal('0.00')
+        existing_positions = Position.objects.filter(
+            transaction_id=ctx.transaction_id,
+            period_date__gte=period_days[0],
+            period_date__lte=period_days[-1],
+        ).filter(
+            # Count closed positions (done) and open positions (opened_at <= now)
+            # Exclude only future positions (pending with opened_at > now)
+            Q(status='done') | 
+            Q(status='open') | 
+            (Q(status='pending') & Q(opened_at__lte=now))
+        )
+        for pos in existing_positions:
+            if pos.profit_loss is not None:
+                try:
+                    existing_profit += Decimal(str(pos.profit_loss))
+                except Exception:
+                    continue
+
+        # Use custom rate if provided, otherwise generate
+        if custom_rates and period_idx in custom_rates:
+            period_rate_pct = custom_rates[period_idx]
+        else:
+            rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
+            period_rate_pct = _choose_profitability_rate_pct(product, rng=rate_rng)
+
+        proration = (
+            (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
+            if profit_period_months and step_months != profit_period_months
+            else Decimal('1')
+        )
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+
+        capital_base = capital if does_compound else invested_total
+        target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
+
+        period_summaries.append({
+            "periodIndex": int(period_idx),
+            "months": int(step_months),
+            "startDate": period_days[0].isoformat() if period_days else None,
+            "endDate": period_days[-1].isoformat() if period_days else None,
+            "ratePct": str(effective_rate_pct),
+            "baseRatePct": str(period_rate_pct),  # Base rate before proration
+            "capitalBase": str(capital_base.quantize(Decimal("0.01"))),
+            "targetProfit": str(target_profit),
+        })
+
+        cursor_dt = period_end_dt
+        remaining_months -= step_months
+        period_idx += 1
+
+    return period_summaries
+
+
+def generate_positions_with_rates(
+    txn: Transaction,
+    *,
+    custom_rates: dict[int, Decimal],
+    save_to_db: bool = False,
+) -> list[Position | dict]:
+    """
+    Generate positions using custom rates without saving to database (unless save_to_db=True).
+    
+    custom_rates: Dict mapping period_index to rate percentage (before proration)
+    Returns list of Position objects (if saved) or dict representations (if not saved)
+    """
+    ctx = build_investment_context(txn)
+    if ctx is None:
+        return []
+
+    product: Product | None = txn.product
+    if product is None:
+        try:
+            product = Product.objects.get(id=ctx.product_id)
+        except Product.DoesNotExist:
+            product = None
+
+    # Always fetch asset allocations if they exist (not just for Smart Portfolios)
+    allocations = None
+    if product is not None:
+        allocations_list = list(
+            ProductAssetAllocation.objects.select_related('asset')
+            .filter(product_id=product.id)
+        )
+        if allocations_list:
+            allocations = allocations_list
+
+    start_dt = txn.datetime or timezone.now()
+    if timezone.is_naive(start_dt):
+        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+
+    trading_days = _trading_days_between(start_dt, end_dt)
+    if not trading_days:
+        return []
+
+    invested_total = ctx.invested_amount
+    if invested_total <= 0:
+        return []
+
+    max_per_day = 3
+    rng = random.Random(str(txn.id))
+
+    desired_total = _choose_total_trades_with_min_per_day(
+        total_amount=invested_total,
+        duration_months=ctx.duration_months,
+        trading_days_count=len(trading_days),
+        max_per_day=max_per_day,
+    )
+    day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
+
+    existing_count_before = Position.objects.filter(transaction_id=ctx.transaction_id).count() if save_to_db else 0
+    existing_counts, max_idx = _existing_trade_counts(ctx.transaction_id) if save_to_db else ({}, 0)
+    next_idx = max_idx + 1
+
+    pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
+    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    does_compound = _product_compounds(product)
+
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+    tz = timezone.get_current_timezone()
+
+    assets_weighted: list[tuple[object, Decimal]] = []
+    if allocations:
+        assets_weighted = [
+            (a.asset, (a.proportion if a.proportion is not None else Decimal('0')))
+            for a in allocations
+            if a.asset is not None  # Ensure asset exists
+        ]
+        # Debug: log if allocations exist but assets_weighted is empty
+        if allocations and not assets_weighted:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Product {product.id if product else 'unknown'} has {len(allocations)} allocations but no valid assets")
+
+    # Calculate initial capital: if compounding, add profits from all closed and open positions
+    capital = invested_total.quantize(Decimal('0.01'))
+    if does_compound:
+        now = timezone.now()
+        existing_profits = Position.objects.filter(
+            transaction_id=ctx.transaction_id
+        ).filter(
+            # Count closed positions (done) and open positions (opened_at <= now)
+            # Exclude only future positions (pending with opened_at > now)
+            Q(status='done') | 
+            Q(status='open') | 
+            (Q(status='pending') & Q(opened_at__lte=now))
+        ).aggregate(
+            total_profit=Sum('profit_loss')
+        )['total_profit'] or Decimal('0')
+        capital = (capital + existing_profits).quantize(Decimal('0.01'))
+
+    created: list[Position | dict] = []
+    remaining_months = ctx.duration_months
+    cursor_dt = start_dt
+    period_idx = 0
+
+    while remaining_months > 0:
+        step_months = min(profit_period_months, remaining_months)
+        period_end_dt = _add_months_dt(cursor_dt, step_months)
+
+        period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
+        if not period_days:
+            cursor_dt = period_end_dt
+            remaining_months -= step_months
+            period_idx += 1
+            continue
+
+        # Calculate existing profit from CLOSED and OPEN positions (ignore only future positions)
+        now = timezone.now()
+        existing_profit = Decimal('0.00')
+        existing_positions = Position.objects.filter(
+            transaction_id=ctx.transaction_id,
+            period_date__gte=period_days[0],
+            period_date__lte=period_days[-1],
+        ).filter(
+            # Count closed positions (done) and open positions (opened_at <= now)
+            # Exclude only future positions (pending with opened_at > now)
+            Q(status='done') | 
+            Q(status='open') | 
+            (Q(status='pending') & Q(opened_at__lte=now))
+        )
+        for pos in existing_positions:
+            if pos.profit_loss is not None:
+                try:
+                    existing_profit += Decimal(str(pos.profit_loss))
+                except Exception:
+                    continue
+
+        # Use custom rate
+        period_rate_pct = custom_rates.get(period_idx, Decimal('0'))
+        proration = (
+            (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
+            if profit_period_months and step_months != profit_period_months
+            else Decimal('1')
+        )
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+
+        capital_base = capital if does_compound else invested_total
+        target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
+        profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
+
+        # Count CLOSED and OPEN positions for existing counts (ignore only future positions)
+        now = timezone.now()
+        existing_counts_by_day = {}
+        if save_to_db:
+            existing_positions_by_day = Position.objects.filter(
+                transaction_id=ctx.transaction_id,
+                period_date__gte=period_days[0],
+                period_date__lte=period_days[-1],
+            ).filter(
+                # Count closed positions (done) and open positions (opened_at <= now)
+                # Exclude only future positions (pending with opened_at > now)
+                Q(status='done') | 
+                Q(status='open') | 
+                (Q(status='pending') & Q(opened_at__lte=now))
+            ).values_list('period_date', flat=True)
+            for day in period_days:
+                existing_counts_by_day[day] = sum(1 for pd in existing_positions_by_day if pd == day)
+        else:
+            existing_counts_by_day = {}
+
+        trade_specs: list[tuple[date, int]] = []
+        for day in period_days:
+            target = day_targets.get(day, 1)
+            existing = existing_counts_by_day.get(day, 0)
+            missing = max(0, min(max_per_day, target) - existing)
+            for slot in range(missing):
+                trade_specs.append((day, slot))
+
+        if trade_specs:
+            invested_amounts: list[Decimal] = []
+            for day, slot in trade_specs:
+                amt_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:amt")
+                pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
+                amt = ((capital if does_compound else invested_total) * pct).quantize(Decimal('0.01'))
+                if amt < Decimal('50.00'):
+                    amt = Decimal('50.00')
+                invested_amounts.append(amt)
+
+            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts)
+
+            for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
+                win = _day_market_window(
+                    day=day,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    market_open=market_open,
+                    market_close=market_close,
+                    tz=tz,
+                )
+                if not win:
+                    continue
+                day_open, day_close = win
+
+                time_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:time")
+                windows = _schedule_trades_for_day(day_open=day_open, day_close=day_close, count=1, rng=time_rng)
+                if not windows:
+                    continue
+                opened_at, closed_at = windows[0]
+
+                asset_obj = None
+                if assets_weighted:
+                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
+                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+                    # Ensure asset_obj is an Asset object, not None
+                    if asset_obj is None and assets_weighted:
+                        # Fallback: use first asset if weighted choice fails
+                        asset_obj = assets_weighted[0][0]
+
+                asset_currency = None
+                fx_rate = None
+                invested_amount_asset_currency = None
+                if asset_obj is not None:
+                    asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
+                    fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
+                    if fx_rate is not None:
+                        try:
+                            invested_amount_asset_currency = (Decimal(str(amt)) * fx_rate).quantize(Decimal('0.00000001'))
+                        except Exception:
+                            invested_amount_asset_currency = None
+
+                position_id = uuid.uuid4().hex[:12]
+                if save_to_db:
+                    while Position.objects.filter(id=position_id).exists():
+                        position_id = uuid.uuid4().hex[:12]
+
+                    created.append(
+                        Position.objects.create(
+                            id=position_id,
+                            client_id=ctx.client_id,
+                            product_id=ctx.product_id,
+                            transaction_id=ctx.transaction_id,
+                            asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                            opened_at=opened_at,
+                            closed_at=closed_at,
+                            invested_amount=amt,
+                            fx_rate_eur_to_asset=fx_rate,
+                            invested_amount_asset_currency=invested_amount_asset_currency,
+                            profit_loss=pnl,
+                            period_index=next_idx,
+                            period_date=opened_at.date(),
+                            status='pending',
+                        )
+                    )
+                else:
+                    # Return dict representation with asset info
+                    asset_info = {}
+                    if asset_obj is not None:
+                        asset_info = {
+                            'asset_id': getattr(asset_obj, 'id', None),
+                            'asset_name': getattr(asset_obj, 'name', None) or '',
+                            'asset_reference': getattr(asset_obj, 'reference', None) or '',
+                            'asset_type': getattr(asset_obj, 'type', None) or '',
+                        }
+                    
+                    created.append({
+                        'id': position_id,
+                        'client_id': ctx.client_id,
+                        'product_id': ctx.product_id,
+                        'transaction_id': ctx.transaction_id,
+                        'asset_id': asset_info.get('asset_id') if asset_info else None,
+                        'asset_name': asset_info.get('asset_name', '') if asset_info else '',
+                        'asset_reference': asset_info.get('asset_reference', '') if asset_info else '',
+                        'asset_type': asset_info.get('asset_type', '') if asset_info else '',
+                        'opened_at': opened_at.isoformat(),
+                        'closed_at': closed_at.isoformat(),
+                        'invested_amount': str(amt),
+                        'fx_rate_eur_to_asset': str(fx_rate) if fx_rate else None,
+                        'invested_amount_asset_currency': str(invested_amount_asset_currency) if invested_amount_asset_currency else None,
+                        'profit_loss': str(pnl),
+                        'period_index': next_idx,
+                        'period_date': opened_at.date().isoformat(),
+                        'status': 'pending',
+                    })
+                next_idx += 1
+
+        if does_compound:
+            # For compounding, add existing profit (from closed and open positions) + new profit from this period
+            new_profit = sum(
+                Decimal(str(p.get('profit_loss', 0) if isinstance(p, dict) else (p.profit_loss or Decimal('0'))))
+                for p in created
+                if (isinstance(p, dict) and p.get('period_date') and period_days[0] <= date.fromisoformat(p['period_date']) <= period_days[-1])
+                or (not isinstance(p, dict) and p.period_date and period_days[0] <= p.period_date <= period_days[-1])
+            )
+            # Capital grows with existing profit (from closed and open positions) + new profit
+            capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
+
+        cursor_dt = period_end_dt
+        remaining_months -= step_months
+        period_idx += 1
+
+    return created
+
+
+def save_generated_positions(
+    txn: Transaction, 
+    positions_data: list[dict],
+    *,
+    rates_used: dict[int, Decimal] | None = None,
+    period_summaries: list[dict] | None = None,
+) -> list[Position]:
+    """
+    Save previously generated positions (from generate_positions_with_rates) to database.
+    
+    Before saving, deletes future positions (pending/open with closed_at > now) to allow recalculation
+    when transaction amount changes (deposit/withdrawal).
+    
+    Also records generation history in transaction.position_generation_history.
+    """
+    ctx = build_investment_context(txn)
+    if ctx is None:
+        return []
+
+    # Delete future positions (pending with opened_at > now) before inserting new ones
+    # Keep open positions (opened_at <= now) as they are already active
+    now = timezone.now()
+    future_positions = Position.objects.filter(
+        transaction_id=ctx.transaction_id
+    ).filter(
+        # Future positions: pending with opened_at > now (not yet opened)
+        Q(status='pending', opened_at__gt=now) |
+        # Also delete pending positions without opened_at (shouldn't happen but safety check)
+        (Q(status='pending') & Q(opened_at__isnull=True))
+    )
+    future_count = future_positions.count()
+    deleted_future_ids = list(future_positions.values_list('id', flat=True))
+    if future_count > 0:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Deleting {future_count} future positions for transaction {txn.id} before recalculation")
+        future_positions.delete()
+
+    created: list[Position] = []
+    for pos_data in positions_data:
+        position_id = pos_data.get('id') or uuid.uuid4().hex[:12]
+        while Position.objects.filter(id=position_id).exists():
+            position_id = uuid.uuid4().hex[:12]
+
+        opened_at = datetime.fromisoformat(pos_data['opened_at'].replace('Z', '+00:00'))
+        closed_at = datetime.fromisoformat(pos_data['closed_at'].replace('Z', '+00:00'))
+        if timezone.is_naive(opened_at):
+            opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
+        if timezone.is_naive(closed_at):
+            closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
+
+        created.append(
+            Position.objects.create(
+                id=position_id,
+                client_id=ctx.client_id,
+                product_id=ctx.product_id,
+                transaction_id=ctx.transaction_id,
+                asset_id=pos_data.get('asset_id'),
+                opened_at=opened_at,
+                closed_at=closed_at,
+                invested_amount=Decimal(str(pos_data['invested_amount'])),
+                fx_rate_eur_to_asset=Decimal(str(pos_data['fx_rate_eur_to_asset'])) if pos_data.get('fx_rate_eur_to_asset') else None,
+                invested_amount_asset_currency=Decimal(str(pos_data['invested_amount_asset_currency'])) if pos_data.get('invested_amount_asset_currency') else None,
+                profit_loss=Decimal(str(pos_data['profit_loss'])),
+                period_index=pos_data['period_index'],
+                period_date=date.fromisoformat(pos_data['period_date']),
+                status='pending',
+            )
+        )
+
+    # Record generation history in transaction (without duplicating position details)
+    try:
+        # Calculate summary statistics
+        total_invested = sum(Decimal(str(p.invested_amount)) for p in created).quantize(Decimal('0.01'))
+        total_profit = sum(Decimal(str(p.profit_loss)) for p in created).quantize(Decimal('0.01'))
+        
+        # Count positions by asset (summary only)
+        positions_by_asset = {}
+        for pos in created:
+            asset_id = str(pos.asset_id) if pos.asset_id else 'none'
+            if asset_id not in positions_by_asset:
+                positions_by_asset[asset_id] = {
+                    "count": 0,
+                    "total_invested": Decimal('0'),
+                    "total_profit": Decimal('0'),
+                }
+            positions_by_asset[asset_id]["count"] += 1
+            positions_by_asset[asset_id]["total_invested"] += Decimal(str(pos.invested_amount))
+            positions_by_asset[asset_id]["total_profit"] += Decimal(str(pos.profit_loss))
+        
+        # Convert Decimal to string for JSON serialization
+        for asset_id, summary in positions_by_asset.items():
+            positions_by_asset[asset_id]["total_invested"] = str(summary["total_invested"].quantize(Decimal('0.01')))
+            positions_by_asset[asset_id]["total_profit"] = str(summary["total_profit"].quantize(Decimal('0.01')))
+        
+        history_entry = {
+            "timestamp": now.isoformat(),
+            "rates_used": {str(k): str(v) for k, v in (rates_used or {}).items()},
+            "period_summaries": period_summaries or [],
+            "summary": {
+                "positions_generated": len(created),
+                "total_invested": str(total_invested),
+                "total_profit": str(total_profit),
+                "positions_by_asset": positions_by_asset,
+            },
+            "deleted_future_positions": {
+                "count": future_count,
+                "position_ids": deleted_future_ids,
+            },
+        }
+        
+        # Append to transaction history
+        if txn.position_generation_history is None:
+            txn.position_generation_history = []
+        txn.position_generation_history.append(history_entry)
+        txn.save(update_fields=['position_generation_history'])
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to record position generation history for transaction {txn.id}: {e}", exc_info=True)
+        # Don't fail the operation if history recording fails
+
+    return created
+
 
 def get_or_create_product_for_asset(asset: Asset) -> Product:
     """

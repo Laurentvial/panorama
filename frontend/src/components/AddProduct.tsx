@@ -27,6 +27,14 @@ export function AddProduct() {
   const [showAssetModal, setShowAssetModal] = useState(false);
   const [assetSearchQuery, setAssetSearchQuery] = useState('');
   const [selectedAssetsInModal, setSelectedAssetsInModal] = useState<string[]>([]);
+  // États pour le modal "Ajouter plusieurs actifs"
+  const [showBulkAssetModal, setShowBulkAssetModal] = useState(false);
+  const [allAssets, setAllAssets] = useState<any[]>([]);
+  const [loadingAllAssets, setLoadingAllAssets] = useState(false);
+  const [selectedAssetsInBulkModal, setSelectedAssetsInBulkModal] = useState<string[]>([]);
+  const [bulkFilterType, setBulkFilterType] = useState<string>('all');
+  const [bulkFilterCategory, setBulkFilterCategory] = useState<string>('all');
+  const [bulkFilterSubcategory, setBulkFilterSubcategory] = useState<string>('all');
   
   const [formData, setFormData] = useState({
     name: '',
@@ -54,6 +62,7 @@ export function AddProduct() {
     availabilityEnd: '',
     linkToAssets: false,
     default: false, // Afficher par défaut pour tous les clients
+    availableFunds: false, // Fonds disponibles
     // Gestion des prix
     minEntryValue: '',
     maxEntryValue: ''
@@ -98,6 +107,20 @@ export function AddProduct() {
     }
   }, []);
 
+  const loadAllAssets = useCallback(async () => {
+    try {
+      setLoadingAllAssets(true);
+      const data = await apiCall('/api/assets/');
+      setAllAssets((data as any)?.assets || []);
+    } catch (error) {
+      console.error('Error loading all assets:', error);
+      toast.error('Erreur lors du chargement des actifs');
+      setAllAssets([]);
+    } finally {
+      setLoadingAllAssets(false);
+    }
+  }, []);
+
   // Debounce search query
   useEffect(() => {
     if (!showAssetModal) {
@@ -116,6 +139,19 @@ export function AddProduct() {
 
     return () => clearTimeout(timeoutId);
   }, [assetSearchQuery, showAssetModal, loadAssets]);
+
+  // Charger tous les actifs quand le modal bulk s'ouvre
+  useEffect(() => {
+    if (showBulkAssetModal) {
+      loadAllAssets();
+    } else {
+      setAllAssets([]);
+      setSelectedAssetsInBulkModal([]);
+      setBulkFilterType('all');
+      setBulkFilterCategory('all');
+      setBulkFilterSubcategory('all');
+    }
+  }, [showBulkAssetModal, loadAllAssets]);
 
   function getSubcategoriesForCategory(categoryId: string): string[] {
     if (!categoryId) return [];
@@ -401,6 +437,7 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
             availabilityEnd: formData.availabilityEnd || undefined,
             linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
             default: formData.default,
+            availableFunds: formData.availableFunds,
             assetAllocations: formData.linkToAssets
               ? assetAllocations
                   .map((row) => ({
@@ -866,6 +903,16 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                     Afficher par défaut (ce produit sera ajouté aux produits actifs de tous les clients)
                   </Label>
                 </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="product-available-funds"
+                    checked={formData.availableFunds}
+                    onCheckedChange={(checked) => setFormData({ ...formData, availableFunds: checked === true })}
+                  />
+                  <Label htmlFor="product-available-funds" className="cursor-pointer">
+                    Fonds disponibles
+                  </Label>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -983,18 +1030,30 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                   )}
 
                   <div className="flex items-center justify-between gap-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setSelectedAssetsInModal([]);
-                        setAssetSearchQuery('');
-                        setShowAssetModal(true);
-                      }}
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Ajouter un actif
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedAssetsInModal([]);
+                          setAssetSearchQuery('');
+                          setShowAssetModal(true);
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Ajouter un actif
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowBulkAssetModal(true);
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Ajouter plusieurs actifs
+                      </Button>
+                    </div>
 
                     {(() => {
                       const total = assetAllocations.reduce((acc, r) => acc + (parseFloat(String(r.proportion)) || 0), 0);
@@ -1122,7 +1181,22 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                             asset
                           };
                         });
-                        setAssetAllocations([...assetAllocations, ...newAllocations]);
+                        
+                        // Calculer automatiquement les proportions
+                        const totalAssets = assetAllocations.length + newAllocations.length;
+                        const proportionPerAsset = totalAssets > 0 ? (100 / totalAssets).toFixed(2) : '0';
+                        
+                        // Mettre à jour les proportions existantes et nouvelles
+                        const updatedExisting = assetAllocations.map(a => ({
+                          ...a,
+                          proportion: proportionPerAsset
+                        }));
+                        const updatedNew = newAllocations.map(a => ({
+                          ...a,
+                          proportion: proportionPerAsset
+                        }));
+                        
+                        setAssetAllocations([...updatedExisting, ...updatedNew]);
                         setSelectedAssetsInModal([]);
                         setAssetSearchQuery('');
                         setShowAssetModal(false);
@@ -1130,6 +1204,267 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                       disabled={selectedAssetsInModal.length === 0}
                     >
                       Ajouter ({selectedAssetsInModal.length})
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal pour ajouter plusieurs actifs avec filtres */}
+            {showBulkAssetModal && (
+              <div className="modal-overlay" onClick={() => setShowBulkAssetModal(false)}>
+                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '90vh' }}>
+                  <div className="modal-header">
+                    <h2 className="modal-title">Ajouter plusieurs actifs</h2>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="modal-close"
+                      onClick={() => setShowBulkAssetModal(false)}
+                    >
+                      <X className="planning-icon-md" />
+                    </Button>
+                  </div>
+                  
+                  {/* Filtres */}
+                  <div className="space-y-4 mb-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="bulk-filter-type">Type</Label>
+                        <Select 
+                          value={bulkFilterType} 
+                          onValueChange={(value) => {
+                            setBulkFilterType(value);
+                            setBulkFilterSubcategory('all'); // Reset subcategory when type changes
+                          }}
+                        >
+                          <SelectTrigger id="bulk-filter-type">
+                            <SelectValue placeholder="Tous les types" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Tous les types</SelectItem>
+                            {(Array.from(new Set(allAssets.map((a: any) => a.type).filter(Boolean))) as string[]).sort().map((type: string) => (
+                              <SelectItem key={type} value={type}>{type}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="bulk-filter-category">Catégorie</Label>
+                        <Select 
+                          value={bulkFilterCategory} 
+                          onValueChange={(value) => {
+                            setBulkFilterCategory(value);
+                            setBulkFilterSubcategory('all'); // Reset subcategory when category changes
+                          }}
+                        >
+                          <SelectTrigger id="bulk-filter-category">
+                            <SelectValue placeholder="Toutes les catégories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les catégories</SelectItem>
+                            {(Array.from(new Set(allAssets.map((a: any) => a.category).filter(Boolean))) as string[]).sort().map((category: string) => (
+                              <SelectItem key={category} value={category}>{category}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="bulk-filter-subcategory">Sous-catégorie</Label>
+                        <Select 
+                          value={bulkFilterSubcategory} 
+                          onValueChange={setBulkFilterSubcategory}
+                          disabled={bulkFilterCategory === 'all'}
+                        >
+                          <SelectTrigger id="bulk-filter-subcategory">
+                            <SelectValue placeholder={bulkFilterCategory === 'all' ? "Sélectionnez d'abord une catégorie" : "Toutes les sous-catégories"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les sous-catégories</SelectItem>
+                            {(() => {
+                              const filteredForSubcategory = allAssets.filter((a: any) => 
+                                bulkFilterCategory === 'all' || a.category === bulkFilterCategory
+                              );
+                              return (Array.from(new Set(filteredForSubcategory.map((a: any) => a.subcategory).filter(Boolean))) as string[]).sort().map((subcategory: string) => (
+                                <SelectItem key={subcategory} value={subcategory}>{subcategory}</SelectItem>
+                              ));
+                            })()}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Liste des actifs filtrés */}
+                  {(() => {
+                    // Filtrer les actifs selon les critères
+                    const filteredAssets = allAssets.filter((asset: any) => {
+                      const typeMatch = bulkFilterType === 'all' || asset.type === bulkFilterType;
+                      const categoryMatch = bulkFilterCategory === 'all' || asset.category === bulkFilterCategory;
+                      const subcategoryMatch = bulkFilterSubcategory === 'all' || asset.subcategory === bulkFilterSubcategory;
+                      return typeMatch && categoryMatch && subcategoryMatch;
+                    });
+
+                    // Actifs disponibles (non déjà ajoutés)
+                    const availableAssets = filteredAssets.filter((asset: any) => 
+                      !assetAllocations.some(a => a.assetId === asset.id)
+                    );
+                    const availableAssetIds = availableAssets.map((a: any) => a.id);
+                    const allAvailableSelected = availableAssetIds.length > 0 && 
+                      availableAssetIds.every(id => selectedAssetsInBulkModal.includes(id));
+
+                    return (
+                      <>
+                        {!loadingAllAssets && filteredAssets.length > 0 && availableAssets.length > 0 && (
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm text-slate-600">
+                              {filteredAssets.length} actif{filteredAssets.length > 1 ? 's' : ''} trouvé{filteredAssets.length > 1 ? 's' : ''}
+                              {availableAssets.length < filteredAssets.length && (
+                                <span className="text-slate-500"> ({availableAssets.length} disponible{availableAssets.length > 1 ? 's' : ''})</span>
+                              )}
+                            </span>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (allAvailableSelected) {
+                                  // Désélectionner tous les actifs disponibles
+                                  setSelectedAssetsInBulkModal(prev => 
+                                    prev.filter(id => !availableAssetIds.includes(id))
+                                  );
+                                } else {
+                                  // Sélectionner tous les actifs disponibles
+                                  setSelectedAssetsInBulkModal(prev => {
+                                    const newIds = availableAssetIds.filter(id => !prev.includes(id));
+                                    return [...prev, ...newIds];
+                                  });
+                                }
+                              }}
+                              className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                            >
+                              {allAvailableSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                            </a>
+                          </div>
+                        )}
+                        <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
+                          {loadingAllAssets ? (
+                            <div className="text-center py-8 text-slate-500">Chargement...</div>
+                          ) : (
+                            filteredAssets.length > 0 ? (
+                              <div className="space-y-2">
+                                {filteredAssets.map((asset: any) => {
+                                  const isSelected = selectedAssetsInBulkModal.includes(asset.id);
+                                  const isAlreadyAdded = assetAllocations.some(a => a.assetId === asset.id);
+                                  return (
+                                    <div
+                                      key={asset.id}
+                                      className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                        isSelected
+                                          ? 'border-blue-500 bg-blue-50'
+                                          : isAlreadyAdded
+                                          ? 'border-slate-200 bg-slate-50 opacity-50'
+                                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={(checked) => {
+                                          if (isAlreadyAdded) return;
+                                          if (checked) {
+                                            setSelectedAssetsInBulkModal(prev => [...prev, asset.id]);
+                                          } else {
+                                            setSelectedAssetsInBulkModal(prev => prev.filter(id => id !== asset.id));
+                                          }
+                                        }}
+                                        disabled={isAlreadyAdded}
+                                      />
+                                      {asset.logoUrl ? (
+                                        <img 
+                                          src={asset.logoUrl} 
+                                          alt={asset.name || ''} 
+                                          className="w-10 h-10 object-contain rounded"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                      ) : (
+                                        <div className="w-10 h-10 bg-slate-200 rounded flex items-center justify-center text-sm text-slate-500">
+                                          {asset.name?.charAt(0)?.toUpperCase() || '?'}
+                                        </div>
+                                      )}
+                                      <div className="flex-1">
+                                        <div className="font-medium text-slate-900">{asset.name}</div>
+                                        <div className="text-sm text-slate-500">
+                                          {asset.reference && `${asset.reference} • `}
+                                          {asset.type}
+                                          {asset.category && ` • ${asset.category}`}
+                                          {asset.subcategory && ` • ${asset.subcategory}`}
+                                        </div>
+                                      </div>
+                                      {isAlreadyAdded && (
+                                        <span className="text-xs text-slate-500">Déjà ajouté</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-slate-500">Aucun actif trouvé avec ces filtres</div>
+                            )
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowBulkAssetModal(false)}
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        const newAllocations = selectedAssetsInBulkModal.map(assetId => {
+                          const asset = allAssets.find(a => a.id === assetId);
+                          return {
+                            assetId,
+                            proportion: '',
+                            asset
+                          };
+                        });
+                        
+                        // Calculer automatiquement les proportions
+                        const totalAssets = assetAllocations.length + newAllocations.length;
+                        const proportionPerAsset = totalAssets > 0 ? (100 / totalAssets).toFixed(2) : '0';
+                        
+                        // Mettre à jour les proportions existantes et nouvelles
+                        const updatedExisting = assetAllocations.map(a => ({
+                          ...a,
+                          proportion: proportionPerAsset
+                        }));
+                        const updatedNew = newAllocations.map(a => ({
+                          ...a,
+                          proportion: proportionPerAsset
+                        }));
+                        
+                        setAssetAllocations([...updatedExisting, ...updatedNew]);
+                        // S'assurer que la checkbox "Lier le produit à des actifs" est cochée
+                        if (!formData.linkToAssets) {
+                          setFormData({ ...formData, linkToAssets: true });
+                        }
+                        setSelectedAssetsInBulkModal([]);
+                        setShowBulkAssetModal(false);
+                      }}
+                      disabled={selectedAssetsInBulkModal.length === 0}
+                    >
+                      Ajouter ({selectedAssetsInBulkModal.length})
                     </Button>
                   </div>
                 </div>

@@ -132,6 +132,9 @@ export function Header({ user }: HeaderProps) {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate('/admin/profile')} className="header-profile">
+                  Mon profil
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="header-logout">
                   Déconnexion
                 </DropdownMenuItem>
