@@ -42,6 +42,15 @@ export function EditPersonalInfoModal({
     city: '',
     nationality: '',
     successor: '',
+    ribBankName: '',
+    ribAccountHolder: '',
+    ribBankCode: '',
+    ribBranchCode: '',
+    ribAccountNumber: '',
+    ribKey: '',
+    ribIban: '',
+    ribBic: '',
+    ribDomiciliation: '',
     profilePhoto: null as File | null,
     profilePhotoPreview: '' as string | null,
     removeProfilePhoto: false
@@ -67,6 +76,15 @@ export function EditPersonalInfoModal({
         city: client.city || '',
         nationality: client.nationality || '',
         successor: client.successor || '',
+        ribBankName: client.ribBankName || '',
+        ribAccountHolder: client.ribAccountHolder || '',
+        ribBankCode: client.ribBankCode || '',
+        ribBranchCode: client.ribBranchCode || '',
+        ribAccountNumber: client.ribAccountNumber || '',
+        ribKey: client.ribKey || '',
+        ribIban: client.ribIban || '',
+        ribBic: client.ribBic || '',
+        ribDomiciliation: client.ribDomiciliation || '',
         profilePhoto: null,
         profilePhotoPreview: client.profilePhoto || null,
         removeProfilePhoto: false
@@ -118,7 +136,16 @@ export function EditPersonalInfoModal({
         postalCode: editPersonalInfoForm.postalCode || '',
         city: editPersonalInfoForm.city || '',
         nationality: editPersonalInfoForm.nationality || '',
-        successor: editPersonalInfoForm.successor || ''
+        successor: editPersonalInfoForm.successor || '',
+        ribBankName: editPersonalInfoForm.ribBankName || '',
+        ribAccountHolder: editPersonalInfoForm.ribAccountHolder || '',
+        ribBankCode: editPersonalInfoForm.ribBankCode || '',
+        ribBranchCode: editPersonalInfoForm.ribBranchCode || '',
+        ribAccountNumber: editPersonalInfoForm.ribAccountNumber || '',
+        ribKey: editPersonalInfoForm.ribKey || '',
+        ribIban: editPersonalInfoForm.ribIban || '',
+        ribBic: editPersonalInfoForm.ribBic || '',
+        ribDomiciliation: editPersonalInfoForm.ribDomiciliation || ''
       };
 
       let response;
@@ -409,6 +436,115 @@ export function EditPersonalInfoModal({
                 value={editPersonalInfoForm.successor}
                 onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, successor: e.target.value })}
                 placeholder="Successeur"
+              />
+            </div>
+          </div>
+
+          {/* RIB Section */}
+          <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1rem', color: '#374151' }}>RIB</h3>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+              <div className="modal-form-field">
+                <Label htmlFor="editRibBankName">Banque</Label>
+                <Input
+                  id="editRibBankName"
+                  value={editPersonalInfoForm.ribBankName}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribBankName: e.target.value })}
+                  placeholder="Nom de la banque"
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label htmlFor="editRibAccountHolder">Titulaire</Label>
+                <Input
+                  id="editRibAccountHolder"
+                  value={editPersonalInfoForm.ribAccountHolder}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribAccountHolder: e.target.value })}
+                  placeholder="Titulaire du compte"
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginTop: '1rem' }}>
+              <div className="modal-form-field">
+                <Label htmlFor="editRibBankCode">Code banque</Label>
+                <Input
+                  id="editRibBankCode"
+                  value={editPersonalInfoForm.ribBankCode}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribBankCode: e.target.value })}
+                  placeholder="12345"
+                  maxLength={5}
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label htmlFor="editRibBranchCode">Code guichet</Label>
+                <Input
+                  id="editRibBranchCode"
+                  value={editPersonalInfoForm.ribBranchCode}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribBranchCode: e.target.value })}
+                  placeholder="12345"
+                  maxLength={5}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginTop: '1rem' }}>
+              <div className="modal-form-field">
+                <Label htmlFor="editRibAccountNumber">N° compte</Label>
+                <Input
+                  id="editRibAccountNumber"
+                  value={editPersonalInfoForm.ribAccountNumber}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribAccountNumber: e.target.value })}
+                  placeholder="12345678901"
+                  maxLength={11}
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label htmlFor="editRibKey">Clé RIB</Label>
+                <Input
+                  id="editRibKey"
+                  value={editPersonalInfoForm.ribKey}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribKey: e.target.value })}
+                  placeholder="12"
+                  maxLength={2}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginTop: '1rem' }}>
+              <div className="modal-form-field">
+                <Label htmlFor="editRibIban">IBAN</Label>
+                <Input
+                  id="editRibIban"
+                  value={editPersonalInfoForm.ribIban}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribIban: e.target.value })}
+                  placeholder="FR76 1234 5678 9012 3456 7890 123"
+                  maxLength={34}
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label htmlFor="editRibBic">BIC</Label>
+                <Input
+                  id="editRibBic"
+                  value={editPersonalInfoForm.ribBic}
+                  onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribBic: e.target.value })}
+                  placeholder="ABCDEFGHIJK"
+                  maxLength={11}
+                />
+              </div>
+            </div>
+
+            <div className="modal-form-field" style={{ marginTop: '1rem' }}>
+              <Label htmlFor="editRibDomiciliation">Domiciliation</Label>
+              <Input
+                id="editRibDomiciliation"
+                value={editPersonalInfoForm.ribDomiciliation}
+                onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, ribDomiciliation: e.target.value })}
+                placeholder="Domiciliation"
               />
             </div>
           </div>

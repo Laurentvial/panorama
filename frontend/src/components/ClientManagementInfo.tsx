@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { User, Users, Edit } from 'lucide-react';
+import { Edit } from 'lucide-react';
 
 interface ClientManagementInfoProps {
   client: any;
@@ -30,10 +30,7 @@ export function ClientManagementInfo({ client, onEdit }: ClientManagementInfoPro
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <div className="flex items-center gap-2 mb-2">
-              <User className="w-4 h-4 text-slate-500" />
-              <Label className="text-slate-600 font-semibold">Gestionnaire</Label>
-            </div>
+            <Label className="text-slate-600 font-semibold mb-2 block">Gestionnaire</Label>
             {client?.managerName || client?.manager ? (
               <>
                 <p className="text-slate-900 font-medium">
@@ -43,8 +40,7 @@ export function ClientManagementInfo({ client, onEdit }: ClientManagementInfoPro
                   <p className="text-sm text-slate-500">{client.managerEmail}</p>
                 )}
                 {client?.managerTeamName && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Users className="w-4 h-4 text-slate-400" />
+                  <div className="mt-2">
                     <p className="text-sm text-slate-600 font-medium">
                       Équipe: <span className="text-slate-700">{client.managerTeamName}</span>
                     </p>

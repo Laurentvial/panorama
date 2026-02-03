@@ -62,6 +62,17 @@ class Client(models.Model):
     city = models.CharField(max_length=100, default="", blank=True)
     nationality = models.CharField(max_length=100, default="", blank=True)
     successor = models.CharField(max_length=200, default="", blank=True)
+    
+    # RIB du client (un seul RIB possible par client)
+    rib_bank_name = models.CharField(max_length=200, default="", blank=True)  # Nom de la banque
+    rib_account_holder = models.CharField(max_length=200, default="", blank=True)  # Titulaire du compte
+    rib_bank_code = models.CharField(max_length=5, default="", blank=True)  # Code banque (5 chiffres)
+    rib_branch_code = models.CharField(max_length=5, default="", blank=True)  # Code guichet (5 chiffres)
+    rib_account_number = models.CharField(max_length=11, default="", blank=True)  # Numéro de compte (11 caractères)
+    rib_key = models.CharField(max_length=2, default="", blank=True)  # Clé RIB (2 chiffres)
+    rib_iban = models.CharField(max_length=34, default="", blank=True)  # IBAN
+    rib_bic = models.CharField(max_length=11, default="", blank=True)  # BIC
+    rib_domiciliation = models.CharField(max_length=200, default="", blank=True)  # Domiciliation
 
     # KYC Documents (client platform)
     identity_document = models.ImageField(upload_to='kyc/identity/', storage=client_profile_storage, null=True, blank=True)  # ID card, passport, driver's license (recto)
@@ -126,6 +137,9 @@ class Client(models.Model):
     
     # Méthodes de paiement disponibles pour le dépôt des fonds
     payment_methods = models.JSONField(default=list, blank=True)  # ex: ["virement", "carte_bancaire"]
+    
+    # Fonctionnalités diverses
+    trading_enabled = models.BooleanField(default=True)  # Activer le trading (afficher le bouton Trader dans les assets)
     
     # Relations
     managed_by = models.CharField(max_length=50, default="", blank=True)  # ID ou username du gestionnaire

@@ -2290,28 +2290,30 @@ export function ProductDetail() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
-          <Button 
-            style={{
-              backgroundColor: 'var(--platform-button-bg)',
-              color: 'white',
-              fontWeight: '600',
-              padding: '12px 24px',
-              borderRadius: 9999,
-              border: 'none',
-              cursor: 'pointer',
-              width: isMobile ? '100%' : 'auto',
+        {currentUser?.tradingEnabled !== false && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
+            <Button 
+              style={{
+                backgroundColor: 'var(--platform-button-bg)',
+                color: 'white',
+                fontWeight: '600',
+                padding: '12px 24px',
+                borderRadius: 9999,
+                border: 'none',
+                cursor: 'pointer',
+                width: isMobile ? '100%' : 'auto',
+              }}
+            onClick={() => {
+              setTradeAmountEur('');
+              setFxError(null);
+              setTradeOrderSuccess(null);
+              setShowTradeModal(true);
             }}
-          onClick={() => {
-            setTradeAmountEur('');
-            setFxError(null);
-            setTradeOrderSuccess(null);
-            setShowTradeModal(true);
-          }}
-          >
-            Trader
-          </Button>
-        </div>
+            >
+              Trader
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Trade modal (client enters amount in EUR) */}

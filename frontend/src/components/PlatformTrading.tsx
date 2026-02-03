@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './ui/textarea';
 import { Check } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { useIsMobile } from './ui/use-mobile';
@@ -64,6 +65,51 @@ export function PlatformTrading() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transferDialogOpen, clientRibs.length, pendingAmount]);
+
+  // Pre-fill withdrawal form with client's RIB data when dialog opens
+  useEffect(() => {
+    if (withdrawDialogOpen && currentUser?.id) {
+      // Always reset all RIB fields first to avoid stale data
+      // This ensures clean state regardless of previous values
+      setWithdrawBeneficiaryName('');
+      setWithdrawIban('');
+      setWithdrawBic('');
+      setWithdrawBankName('');
+      
+      // Then load fresh client data to get RIB information using client endpoint
+      const loadClientRibData = async () => {
+        try {
+          // Use /api/client/current/ which accepts client_ tokens
+          const clientData = await apiCall(`/api/client/current/`);
+          const client = (clientData as any).client;
+          
+          // Pre-fill with RIB data from client profile (only if data exists)
+          // Always set values explicitly, even if empty, to ensure clean state
+          setWithdrawBeneficiaryName(client?.ribAccountHolder || '');
+          setWithdrawIban(client?.ribIban || '');
+          setWithdrawBic(client?.ribBic || '');
+          setWithdrawBankName(client?.ribBankName || '');
+        } catch (error) {
+          console.error('Error loading client RIB data:', error);
+          // Fallback to currentUser data if available (only if data exists)
+          // Always set values explicitly, even if empty
+          setWithdrawBeneficiaryName(currentUser?.ribAccountHolder || '');
+          setWithdrawIban(currentUser?.ribIban || '');
+          setWithdrawBic(currentUser?.ribBic || '');
+          setWithdrawBankName(currentUser?.ribBankName || '');
+        }
+      };
+      
+      loadClientRibData();
+    } else if (!withdrawDialogOpen) {
+      // Clear all fields when dialog closes to prevent stale data
+      setWithdrawBeneficiaryName('');
+      setWithdrawIban('');
+      setWithdrawBic('');
+      setWithdrawBankName('');
+      setWithdrawNote('');
+    }
+  }, [withdrawDialogOpen, currentUser?.id]);
 
   const loadClientRibs = async () => {
     if (!currentUser?.id) return;
@@ -291,6 +337,21 @@ export function PlatformTrading() {
     }
   };
 
+  // Extract RIB information from French IBAN
+  const extractRibFromIban = (iban: string) => {
+    const ibanNorm = normalizeIban(iban);
+    if (ibanNorm.startsWith('FR') && ibanNorm.length >= 27) {
+      // French IBAN format: FR + 2 check digits + 23 chars (bank 5 + branch 5 + account 11 + key 2)
+      return {
+        bankCode: ibanNorm.substring(4, 9), // positions 4-8
+        branchCode: ibanNorm.substring(9, 14), // positions 9-13
+        accountNumber: ibanNorm.substring(14, 25), // positions 14-24
+        ribKey: ibanNorm.substring(25, 27), // positions 25-26
+      };
+    }
+    return null;
+  };
+
   const submitWithdrawRequest = async () => {
     const amountNum = parseFloat(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
@@ -314,6 +375,8 @@ export function PlatformTrading() {
 
     try {
       setSubmitting(true);
+      
+      // Create withdrawal transaction
       await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
@@ -332,12 +395,71 @@ export function PlatformTrading() {
         }),
       });
 
+      // Save RIB information to client profile
+      // Use a separate try-catch to prevent RIB save errors from affecting withdrawal
+      try {
+        const ribInfo = extractRibFromIban(ibanNorm);
+        const ribUpdateData: any = {
+          ribAccountHolder: beneficiaryName,
+          ribIban: ibanNorm,
+        };
+
+        if (withdrawBankName.trim()) {
+          ribUpdateData.ribBankName = withdrawBankName.trim();
+        }
+        if (withdrawBic.trim()) {
+          ribUpdateData.ribBic = withdrawBic.trim();
+        }
+        if (ribInfo) {
+          ribUpdateData.ribBankCode = ribInfo.bankCode;
+          ribUpdateData.ribBranchCode = ribInfo.branchCode;
+          ribUpdateData.ribAccountNumber = ribInfo.accountNumber;
+          ribUpdateData.ribKey = ribInfo.ribKey;
+        }
+
+        // Use client_update_identity endpoint which is designed for clients to update their own profile
+        try {
+          console.log('Saving RIB data to client profile:', ribUpdateData);
+          
+          await apiCall(`/api/client/identity/`, {
+            method: 'PATCH',
+            body: JSON.stringify(ribUpdateData),
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          console.log('RIB saved successfully to client profile');
+          toast.success('RIB sauvegardé dans votre profil');
+        } catch (ribSaveError: any) {
+          // Check if it's a redirect error
+          if (ribSaveError?.isRedirecting || ribSaveError?.message?.includes('Redirecting')) {
+            // This is a redirect error, ignore it silently
+            console.warn('RIB save skipped due to redirect');
+          } else {
+            // Log the error but don't fail the withdrawal
+            console.error('Failed to save RIB to client profile:', ribSaveError);
+            const errorMessage = ribSaveError?.response?.detail || ribSaveError?.message || 'Erreur inconnue';
+            console.error('Error details:', {
+              status: ribSaveError?.status,
+              message: errorMessage,
+              error: ribSaveError
+            });
+            // Show a warning toast but don't fail the withdrawal
+            toast.warning('Le retrait a été créé mais le RIB n\'a pas pu être sauvegardé dans votre profil');
+          }
+        }
+      } catch (ribError: any) {
+        // Don't fail the withdrawal if RIB save fails, just log it
+        console.error('Unexpected error saving RIB to client profile:', ribError);
+        toast.warning('Le retrait a été créé mais le RIB n\'a pas pu être sauvegardé');
+      }
+
       toast.success('Demande de retrait envoyée');
       setWithdrawDialogOpen(false);
-      setWithdrawBeneficiaryName('');
-      setWithdrawIban('');
-      setWithdrawBic('');
-      setWithdrawBankName('');
+      // Don't clear the form fields - keep them for next time
+      // setWithdrawBeneficiaryName('');
+      // setWithdrawIban('');
+      // setWithdrawBic('');
+      // setWithdrawBankName('');
       setWithdrawNote('');
       setAmount('');
       loadData();
@@ -481,7 +603,9 @@ export function PlatformTrading() {
           <Dialog
             open={withdrawDialogOpen}
             onOpenChange={(open) => {
-              if (!submitting) setWithdrawDialogOpen(open);
+              if (!submitting) {
+                setWithdrawDialogOpen(open);
+              }
             }}
           >
             <DialogContent>

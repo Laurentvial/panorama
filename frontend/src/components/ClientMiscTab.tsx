@@ -32,6 +32,8 @@ export function ClientMiscTab({
   const [isAddLinkDialogOpen, setIsAddLinkDialogOpen] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
+  const [tradingEnabled, setTradingEnabled] = useState<boolean>(true);
+  const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
 
   // Initialize payment methods from client data
   useEffect(() => {
@@ -39,6 +41,15 @@ export function ClientMiscTab({
       setPaymentMethods(client.paymentMethods);
     } else {
       setPaymentMethods([]);
+    }
+  }, [client]);
+
+  // Initialize trading enabled from client data
+  useEffect(() => {
+    if (client?.tradingEnabled !== undefined) {
+      setTradingEnabled(client.tradingEnabled);
+    } else {
+      setTradingEnabled(true); // Default to true
     }
   }, [client]);
 
@@ -69,6 +80,28 @@ export function ClientMiscTab({
       }
     } finally {
       setSavingPaymentMethods(false);
+    }
+  }
+
+  async function handleSaveTradingEnabled() {
+    setSavingTradingEnabled(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ tradingEnabled: tradingEnabled }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Paramètre de trading mis à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving trading enabled:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour du paramètre de trading');
+      // Revert to original value on error
+      if (client?.tradingEnabled !== undefined) {
+        setTradingEnabled(client.tradingEnabled);
+      }
+    } finally {
+      setSavingTradingEnabled(false);
     }
   }
 
@@ -142,6 +175,39 @@ export function ClientMiscTab({
 
   return (
     <div className="space-y-6">
+      {/* Trading Enabled Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Activer le trading</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Si désactivé, le client ne verra pas le bouton "Trader" dans les assets sur sa plateforme.
+            </p>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="tradingEnabled"
+                checked={tradingEnabled}
+                onCheckedChange={(checked) => setTradingEnabled(checked === true)}
+              />
+              <Label htmlFor="tradingEnabled" className="font-normal cursor-pointer">
+                Activer le trading
+              </Label>
+            </div>
+            <div className="pt-2">
+              <Button
+                onClick={handleSaveTradingEnabled}
+                disabled={savingTradingEnabled}
+                size="sm"
+              >
+                {savingTradingEnabled ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Payment Methods Section */}
       <Card>
         <CardHeader>

@@ -159,6 +159,71 @@
   }
 }
 
+/* Text selection styles - ensure selected text is visible */
+/* Placed outside @layer to ensure it takes precedence */
+::selection {
+  background-color: #2563eb !important; /* Blue background for better visibility */
+  color: #ffffff !important; /* White text */
+}
+
+::-moz-selection {
+  background-color: #2563eb !important; /* Blue background for better visibility */
+  color: #ffffff !important; /* White text */
+}
+
+/* Override Tailwind selection classes for input elements specifically */
+/* These rules are more specific than the Tailwind utility classes */
+input::selection,
+input::-moz-selection,
+textarea::selection,
+textarea::-moz-selection {
+  background-color: #2563eb !important; /* Blue background for better visibility */
+  color: #ffffff !important; /* White text */
+}
+
+/* Override Tailwind selection classes with even higher specificity */
+input.selection\:bg-primary::selection,
+input.selection\:bg-primary::-moz-selection,
+textarea.selection\:bg-primary::selection,
+textarea.selection\:bg-primary::-moz-selection {
+  background-color: #2563eb !important;
+}
+
+input.selection\:text-primary-foreground::selection,
+input.selection\:text-primary-foreground::-moz-selection,
+textarea.selection\:text-primary-foreground::selection,
+textarea.selection\:text-primary-foreground::-moz-selection {
+  color: #ffffff !important;
+}
+
+/* Target all input types */
+input[type="text"]::selection,
+input[type="email"]::selection,
+input[type="password"]::selection,
+input[type="number"]::selection,
+input[type="tel"]::selection,
+input[type="search"]::selection,
+input[type="url"]::selection,
+input[type="text"]::-moz-selection,
+input[type="email"]::-moz-selection,
+input[type="password"]::-moz-selection,
+input[type="number"]::-moz-selection,
+input[type="tel"]::-moz-selection,
+input[type="search"]::-moz-selection,
+input[type="url"]::-moz-selection {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* Use data-slot attribute for maximum specificity override */
+input[data-slot="input"]::selection,
+input[data-slot="input"]::-moz-selection,
+textarea[data-slot="textarea"]::selection,
+textarea[data-slot="textarea"]::-moz-selection {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
 /**
  * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
  */

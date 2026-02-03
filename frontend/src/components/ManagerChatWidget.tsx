@@ -607,7 +607,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                     rows={2}
                     style={{ borderRadius: 12 }}
                   />
-                  <Button type="submit" disabled={sending || !draft.trim()} style={{ height: 42, borderRadius: 12, padding: '0 12px' }}>
+                  <Button type="submit" disabled={sending || !draft.trim()} style={{ height: 42, borderRadius: 12, padding: '0 16px' }}>
                     <Send size={16} />
                   </Button>
                 </form>

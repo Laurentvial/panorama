@@ -333,6 +333,17 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['nationality'] = ret.get('nationality', '') or ''
         ret['successor'] = ret.get('successor', '') or ''
         
+        # Convertir les champs RIB de snake_case à camelCase
+        ret['ribBankName'] = ret.get('rib_bank_name', '') or ''
+        ret['ribAccountHolder'] = ret.get('rib_account_holder', '') or ''
+        ret['ribBankCode'] = ret.get('rib_bank_code', '') or ''
+        ret['ribBranchCode'] = ret.get('rib_branch_code', '') or ''
+        ret['ribAccountNumber'] = ret.get('rib_account_number', '') or ''
+        ret['ribKey'] = ret.get('rib_key', '') or ''
+        ret['ribIban'] = ret.get('rib_iban', '') or ''
+        ret['ribBic'] = ret.get('rib_bic', '') or ''
+        ret['ribDomiciliation'] = ret.get('rib_domiciliation', '') or ''
+        
         # Convertir les champs patrimoniaux de snake_case à camelCase
         ret['professionalActivityStatus'] = ret.get('professional_activity_status', '') or ''
         ret['professionalActivityComment'] = ret.get('professional_activity_comment', '') or ''
@@ -366,6 +377,9 @@ class ClientSerializer(serializers.ModelSerializer):
         
         # Méthodes de paiement
         ret['paymentMethods'] = ret.get('payment_methods', []) or []
+        
+        # Fonctionnalités diverses
+        ret['tradingEnabled'] = bool(ret.get('trading_enabled', True))
         
         return ret
 

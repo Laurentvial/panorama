@@ -928,6 +928,26 @@ def client_detail(request, client_id):
         if 'successor' in request.data:
             client.successor = request.data.get('successor', '') or ''
         
+        # Update RIB fields
+        if 'ribBankName' in request.data:
+            client.rib_bank_name = request.data.get('ribBankName', '') or ''
+        if 'ribAccountHolder' in request.data:
+            client.rib_account_holder = request.data.get('ribAccountHolder', '') or ''
+        if 'ribBankCode' in request.data:
+            client.rib_bank_code = request.data.get('ribBankCode', '') or ''
+        if 'ribBranchCode' in request.data:
+            client.rib_branch_code = request.data.get('ribBranchCode', '') or ''
+        if 'ribAccountNumber' in request.data:
+            client.rib_account_number = request.data.get('ribAccountNumber', '') or ''
+        if 'ribKey' in request.data:
+            client.rib_key = request.data.get('ribKey', '') or ''
+        if 'ribIban' in request.data:
+            client.rib_iban = request.data.get('ribIban', '') or ''
+        if 'ribBic' in request.data:
+            client.rib_bic = request.data.get('ribBic', '') or ''
+        if 'ribDomiciliation' in request.data:
+            client.rib_domiciliation = request.data.get('ribDomiciliation', '') or ''
+        
         # Handle profile photo upload or removal
         if 'profilePhoto' in request.FILES:
             try:
@@ -1131,6 +1151,11 @@ def client_detail(request, client_id):
         if 'paymentMethods' in request.data:
             payment_methods = get_list(request.data.get('paymentMethods'))
             client.payment_methods = payment_methods
+        
+        # Update trading enabled if provided
+        if 'tradingEnabled' in request.data:
+            v = request.data.get('tradingEnabled')
+            client.trading_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
         
         client.save()
         serializer = ClientSerializer(client, context={'request': request})
@@ -1406,6 +1431,26 @@ def client_update_identity(request):
         client.annual_net_income = request.data.get('annualNetIncome', '') or ''
     if 'totalLiquidities' in request.data:
         client.total_liquidities = request.data.get('totalLiquidities', '') or ''
+    
+    # Update RIB fields
+    if 'ribBankName' in request.data:
+        client.rib_bank_name = request.data.get('ribBankName', '') or ''
+    if 'ribAccountHolder' in request.data:
+        client.rib_account_holder = request.data.get('ribAccountHolder', '') or ''
+    if 'ribBankCode' in request.data:
+        client.rib_bank_code = request.data.get('ribBankCode', '') or ''
+    if 'ribBranchCode' in request.data:
+        client.rib_branch_code = request.data.get('ribBranchCode', '') or ''
+    if 'ribAccountNumber' in request.data:
+        client.rib_account_number = request.data.get('ribAccountNumber', '') or ''
+    if 'ribKey' in request.data:
+        client.rib_key = request.data.get('ribKey', '') or ''
+    if 'ribIban' in request.data:
+        client.rib_iban = request.data.get('ribIban', '') or ''
+    if 'ribBic' in request.data:
+        client.rib_bic = request.data.get('ribBic', '') or ''
+    if 'ribDomiciliation' in request.data:
+        client.rib_domiciliation = request.data.get('ribDomiciliation', '') or ''
 
     # Handle KYC document uploads
     update_fields_list = []
@@ -1521,6 +1566,8 @@ def client_update_identity(request):
         'trading_objective', 'planned_investment_12m', 'risk_reward_profile',
         'compliance_family_flags', 'funds_sources',
         'primary_profession', 'employer_name', 'annual_net_income', 'total_liquidities',
+        'rib_bank_name', 'rib_account_holder', 'rib_bank_code', 'rib_branch_code',
+        'rib_account_number', 'rib_key', 'rib_iban', 'rib_bic', 'rib_domiciliation',
         'account_verified'
     ]
     all_update_fields = base_update_fields + update_fields_list
@@ -2475,7 +2522,25 @@ def client_products(request, client_id):
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    client_products = ClientProduct.objects.filter(client=client).select_related('product')
+    from datetime import date
+    today = date.today()
+    
+    # Filter client products and exclude those where:
+    # - availability_start is in the future (not yet available), OR
+    # - availability_end has passed (no longer available)
+    # Products are available if:
+    # - availability_start is None (always available from the start), OR availability_start is today or in the past (already started)
+    # - AND
+    # - availability_end is None (always available), OR availability_end is today or in the future (not yet ended)
+    client_products = ClientProduct.objects.filter(
+        client=client,
+        product__isnull=False  # Exclude products that have been deleted
+    ).filter(
+        Q(product__availability_start__isnull=True) | Q(product__availability_start__lte=today)
+    ).filter(
+        Q(product__availability_end__isnull=True) | Q(product__availability_end__gte=today)
+    ).select_related('product')
+    
     serializer = ClientProductSerializer(client_products, many=True, context={'request': request})
     return Response({'products': serializer.data})
 

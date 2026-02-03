@@ -19,6 +19,11 @@ interface ClientInfoTabProps {
 export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrimonialInfo, onClientUpdated }: ClientInfoTabProps) {
   const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
   const [isEditManagementOpen, setIsEditManagementOpen] = useState(false);
+  
+  // Check if client has RIB data
+  const hasRibData = client?.ribBankName || client?.ribAccountHolder || client?.ribBankCode || 
+                     client?.ribBranchCode || client?.ribAccountNumber || client?.ribKey || 
+                     client?.ribIban || client?.ribBic || client?.ribDomiciliation;
 
   return (
     <div className="space-y-6">
@@ -119,13 +124,93 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
       </Card>
 
       
-      {/* Client Management Info */}
-      {client && (
-        <ClientManagementInfo 
-          client={client}
-          onEdit={() => setIsEditManagementOpen(true)}
-        />
-      )}
+      {/* Client Management Info and RIB Section - Side by Side */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Client Management Info */}
+        {client && (
+          <ClientManagementInfo 
+            client={client}
+            onEdit={() => setIsEditManagementOpen(true)}
+          />
+        )}
+
+        {/* RIB Section */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>RIB</CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onOpenEditPersonalInfo}
+            >
+              <Pencil className="w-4 h-4 mr-2" />
+              Éditer
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {!hasRibData ? (
+              <p className="text-slate-500 text-center py-4">Aucun RIB renseigné pour ce client</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {client?.ribBankName && (
+                  <div>
+                    <Label className="text-slate-600">Banque</Label>
+                    <p>{client.ribBankName}</p>
+                  </div>
+                )}
+                {client?.ribAccountHolder && (
+                  <div>
+                    <Label className="text-slate-600">Titulaire</Label>
+                    <p>{client.ribAccountHolder}</p>
+                  </div>
+                )}
+                {client?.ribBankCode && (
+                  <div>
+                    <Label className="text-slate-600">Code banque</Label>
+                    <p className="font-mono text-sm">{client.ribBankCode}</p>
+                  </div>
+                )}
+                {client?.ribBranchCode && (
+                  <div>
+                    <Label className="text-slate-600">Code guichet</Label>
+                    <p className="font-mono text-sm">{client.ribBranchCode}</p>
+                  </div>
+                )}
+                {client?.ribAccountNumber && (
+                  <div>
+                    <Label className="text-slate-600">N° compte</Label>
+                    <p className="font-mono text-sm">{client.ribAccountNumber}</p>
+                  </div>
+                )}
+                {client?.ribKey && (
+                  <div>
+                    <Label className="text-slate-600">Clé RIB</Label>
+                    <p className="font-mono text-sm">{client.ribKey}</p>
+                  </div>
+                )}
+                {client?.ribIban && (
+                  <div>
+                    <Label className="text-slate-600">IBAN</Label>
+                    <p className="font-mono text-sm break-all">{client.ribIban}</p>
+                  </div>
+                )}
+                {client?.ribBic && (
+                  <div>
+                    <Label className="text-slate-600">BIC</Label>
+                    <p className="font-mono text-sm">{client.ribBic}</p>
+                  </div>
+                )}
+                {client?.ribDomiciliation && (
+                  <div>
+                    <Label className="text-slate-600">Domiciliation</Label>
+                    <p>{client.ribDomiciliation}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Fiche patrimoniale */}
       <Collapsible open={isPatrimonialOpen} onOpenChange={setIsPatrimonialOpen}>
@@ -314,7 +399,7 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           </CollapsibleContent>
         </Card>
       </Collapsible>
-      
+
       {/* Edit Management Modal */}
       <EditClientManagementModal
         isOpen={isEditManagementOpen}

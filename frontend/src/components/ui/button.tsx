@@ -3,6 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "./utils";
+import "../../styles/Button.css";
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive rounded-full",
@@ -22,10 +23,10 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-9 px-6 py-2 has-[>svg]:px-5",
-        sm: "h-9 gap-1.5 px-5 has-[>svg]:px-4",
-        lg: "h-10 px-8 has-[>svg]:px-6",
-        icon: "size-9",
+        default: "button-size-default",
+        sm: "gap-1.5 button-size-sm",
+        lg: "button-size-lg",
+        icon: "size-9 button-size-icon",
       },
     },
     defaultVariants: {
@@ -43,6 +44,7 @@ const Button = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button"
       <Comp
         data-slot="button"
         data-button-variant={variant}
+        data-button-size={size}
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}
