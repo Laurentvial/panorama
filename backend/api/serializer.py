@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -1156,3 +1156,56 @@ class NewsPostSerializer(serializers.ModelSerializer):
                 logger.error(f"Error getting image URL for news post {obj.id}: {str(e)}")
                 return None
         return None
+
+class ClientVerificationConfigSerializer(serializers.ModelSerializer):
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    clientName = serializers.SerializerMethodField()
+    stepsConfig = serializers.JSONField(source='steps_config', required=False)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientVerificationConfig
+        fields = ['id', 'client', 'clientId', 'clientName', 'stepsConfig', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'client', 'createdAt', 'updatedAt', 'clientId', 'clientName']
+    
+    def get_clientName(self, obj):
+        if obj.client:
+            return f"{obj.client.fname} {obj.client.lname}".strip()
+        return None
+    
+    def update(self, instance, validated_data):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Log what we received
+        logger.info(f'Serializer update - validated_data keys: {list(validated_data.keys())}')
+        logger.info(f'Serializer update - initial_data keys: {list(self.initial_data.keys()) if hasattr(self, "initial_data") else "N/A"}')
+        
+        # Explicitly handle stepsConfig -> steps_config mapping
+        # Check validated_data first (after DRF processing)
+        if 'steps_config' in validated_data:
+            steps_config_data = validated_data.pop('steps_config')
+            logger.info(f'Found steps_config in validated_data: {steps_config_data}')
+            instance.steps_config = steps_config_data if steps_config_data is not None else {}
+        # Also check initial_data in case DRF didn't process it (e.g., with partial=True)
+        elif hasattr(self, 'initial_data') and 'stepsConfig' in self.initial_data:
+            import json
+            steps_config_data = self.initial_data.get('stepsConfig')
+            logger.info(f'Found stepsConfig in initial_data: {steps_config_data}')
+            if isinstance(steps_config_data, str):
+                try:
+                    steps_config_data = json.loads(steps_config_data)
+                except Exception as e:
+                    logger.error(f'Error parsing stepsConfig JSON: {e}')
+                    steps_config_data = {}
+            instance.steps_config = steps_config_data if steps_config_data is not None else {}
+        else:
+            logger.warning('Neither steps_config nor stepsConfig found in request data!')
+        
+        logger.info(f'Setting instance.steps_config to: {instance.steps_config}')
+        
+        # Call parent update for other fields
+        result = super().update(instance, validated_data)
+        logger.info(f'After save, instance.steps_config is: {instance.steps_config}')
+        return result

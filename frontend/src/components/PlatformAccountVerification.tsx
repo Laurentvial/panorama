@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
 
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
+import { apiCall } from '../utils/api';
 
 import { useIsMobile } from './ui/use-mobile';
 
@@ -180,6 +181,8 @@ export function PlatformAccountVerification() {
   const [proofOfAddress, setProofOfAddress] = useState<File | null>(null);
 
   const [selfiePhoto, setSelfiePhoto] = useState<File | null>(null);
+  
+  const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
 
 
 
@@ -460,28 +463,161 @@ export function PlatformAccountVerification() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [step, subStep]);
 
+  // Load verification config
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const loadVerificationConfig = async () => {
+      try {
+        // Add cache-busting timestamp to ensure fresh data
+        const config = await apiCall(`/api/clients/${currentUser.id}/verification-config/?_t=${Date.now()}`).catch(() => ({ stepsConfig: {} }));
+        const stepsConfig = (config as any)?.stepsConfig || {};
+        setVerificationConfig(stepsConfig);
+        console.log('Loaded verification config for verification page:', stepsConfig, 'Step 3 enabled?', stepsConfig?.step_3?.enabled !== false);
+        console.log('Step 3 config object:', stepsConfig?.step_3);
+      } catch (error) {
+        console.error('Error loading verification config:', error);
+        setVerificationConfig({});
+      }
+    };
+    loadVerificationConfig();
+  }, [currentUser?.id]);
+
+  // Helper function to map UI step numbers to config step numbers
+  // UI Step 1 = Config Steps 1-2 (Identity + Address)
+  // UI Step 2 = Config Steps 3-7 (Profile, Preferences, Objectives, Compliance, Funds Sources)
+  // UI Step 3 = Config Step 8 (KYC)
+  const getConfigStepNumber = (uiStepNumber: number): number => {
+    if (uiStepNumber === 3) return 8; // KYC step
+    return uiStepNumber; // Steps 1 and 2 map directly
+  };
+
+  // Helper function to check if a config step is enabled
+  const isConfigStepEnabled = (configStepNumber: number): boolean => {
+    const stepKey = `step_${configStepNumber}`;
+    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
+      const stepConfig = verificationConfig[stepKey];
+      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+        return false;
+      }
+      return true;
+    }
+    return true; // Default to enabled
+  };
+
+  // Helper function to check if a UI step is enabled
+  const isStepEnabled = (stepNumber: number): boolean => {
+    // Special handling for UI Step 2: check if ANY of config steps 3-7 are enabled
+    if (stepNumber === 2) {
+      const hasAnyEnabled = [3, 4, 5, 6, 7].some(step => isConfigStepEnabled(step));
+      console.log(`[Verification] UI Step 2 (Config Steps 3-7) - at least one enabled:`, hasAnyEnabled);
+      return hasAnyEnabled;
+    }
+    
+    // For other steps, map UI step number to config step number
+    const configStepNumber = getConfigStepNumber(stepNumber);
+    const stepKey = `step_${configStepNumber}`;
+    // Si la config existe pour cette étape, vérifier la valeur enabled
+    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
+      const stepConfig = verificationConfig[stepKey];
+      // Si enabled est explicitement false, l'étape est désactivée
+      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+        console.log(`[Verification] UI Step ${stepNumber} (Config Step ${configStepNumber}) is DISABLED in config:`, stepConfig);
+        console.log(`[Verification] Full verificationConfig:`, verificationConfig);
+        return false;
+      }
+      // Si enabled est true ou non défini dans l'objet step, l'étape est activée
+      console.log(`[Verification] UI Step ${stepNumber} (Config Step ${configStepNumber}) is ENABLED in config:`, stepConfig);
+      return true;
+    }
+    // Si la config n'existe pas du tout pour cette étape, par défaut l'étape est activée (pour rétrocompatibilité)
+    console.log(`[Verification] UI Step ${stepNumber} (Config Step ${configStepNumber}) config not found, defaulting to ENABLED`);
+    console.log(`[Verification] Full verificationConfig:`, verificationConfig);
+    return true;
+  };
+
+  // Redirect to step selection if current step is disabled
+  useEffect(() => {
+    if (step !== null && !isStepEnabled(step)) {
+      setStep(null);
+    }
+  }, [step, verificationConfig]);
+
+  // Helper functions to check if specific config steps are completed
+  const isConfigStepCompleted = (configStepNumber: number): boolean => {
+    if (!currentUser) return false;
+    
+    switch (configStepNumber) {
+      case 1: // Identity
+        return !!(currentUser.firstName || currentUser.fname) && 
+               !!(currentUser.lastName || currentUser.lname) && 
+               currentUser.sex && 
+               (currentUser.birthDate || currentUser.birth_date);
+      
+      case 2: // Address
+        return !!(currentUser.address && currentUser.postalCode && currentUser.city);
+      
+      case 3: // Profile
+        return !!(currentUser.primaryProfession || currentUser.primary_profession) && 
+               !!(currentUser.employerName || currentUser.employer_name) && 
+               currentUser.annualNetIncome && 
+               currentUser.totalLiquidities;
+      
+      case 4: // Preferences
+        return Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
+      
+      case 5: // Objectives
+        return !!(currentUser.tradingObjective || currentUser.trading_objective) && 
+               !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
+      
+      case 6: // Compliance
+        return Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
+      
+      case 7: // Funds Sources
+        return Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
+      
+      case 8: // KYC
+        return currentUser.kycStatus === 'approved' || currentUser.kycStatus === 'submitted';
+      
+      default:
+        return false;
+    }
+  };
+
   // Check which steps are completed
   const isStep1Completed = useMemo(() => {
     if (!currentUser) return false;
-    const hasIdentity = !!(currentUser.firstName || currentUser.fname) && !!(currentUser.lastName || currentUser.lname) && currentUser.sex && (currentUser.birthDate || currentUser.birth_date);
-    const hasAddress = !!(currentUser.address && currentUser.postalCode && currentUser.city);
-    return hasIdentity && hasAddress;
-  }, [currentUser]);
+    // Step 1 requires Config Step 1 (Identity) - always required
+    const hasIdentity = isConfigStepCompleted(1);
+    // Only check address if Config Step 2 (Address) is enabled
+    if (isConfigStepEnabled(2)) {
+      const hasAddress = isConfigStepCompleted(2);
+      return hasIdentity && hasAddress;
+    }
+    // If Config Step 2 (Address) is disabled, Step 1 is complete with just identity
+    return hasIdentity;
+  }, [currentUser, verificationConfig]);
 
   const isStep2Completed = useMemo(() => {
     if (!currentUser) return false;
-    const hasProfile = !!(currentUser.primaryProfession || currentUser.primary_profession) && !!(currentUser.employerName || currentUser.employer_name) && currentUser.annualNetIncome && currentUser.totalLiquidities;
-    const hasPreferences = Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
-    const hasObjective = !!(currentUser.tradingObjective || currentUser.trading_objective) && !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
-    const hasCompliance = Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
-    const hasFundsSources = Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
-    return hasProfile && hasPreferences && hasObjective && hasCompliance && hasFundsSources;
-  }, [currentUser]);
+    // UI Step 2 consists of Config Steps 3-7
+    // Check each enabled config step - Step 2 is complete if ALL enabled steps are completed
+    const configSteps = [3, 4, 5, 6, 7];
+    const enabledSteps = configSteps.filter(step => isConfigStepEnabled(step));
+    
+    // If no steps are enabled, consider Step 2 as complete (nothing to fill)
+    if (enabledSteps.length === 0) return true;
+    
+    // Check if all enabled steps are completed
+    return enabledSteps.every(step => isConfigStepCompleted(step));
+  }, [currentUser, verificationConfig]);
 
   const isStep3Completed = useMemo(() => {
     if (!currentUser) return false;
-    return currentUser.kycStatus === 'approved' || currentUser.kycStatus === 'submitted';
-  }, [currentUser]);
+    // Step 3 in the UI corresponds to Config Step 8 (KYC) in the config
+    // Only check completion if Config Step 8 is enabled
+    if (!isConfigStepEnabled(8)) return false;
+    return isConfigStepCompleted(8);
+  }, [currentUser, verificationConfig]);
 
   const progress = useMemo(() => {
     if (!step) return { percent: 0, label: 'Sélection' };
@@ -567,7 +703,17 @@ export function PlatformAccountVerification() {
 
       toast.success('Informations enregistrées.');
 
-      setStep(2);
+      // Si l'étape 2 (Adresse) est désactivée, passer directement à l'étape 2 (Profil, Préférences, etc.)
+      // Sinon, aller à l'étape 2 (Adresse)
+      if (!isConfigStepEnabled(2)) {
+        // Étape 2 (Adresse) désactivée, passer directement à l'étape 2 (Profil, etc.)
+        setStep(2);
+        setSubStep(1);
+      } else {
+        // Étape 2 (Adresse) activée, aller à l'étape 2 (Adresse)
+        setStep(1);
+        setSubStep(2);
+      }
 
     } catch (error: any) {
 
@@ -907,10 +1053,16 @@ export function PlatformAccountVerification() {
 
       toast.success('Étape 2 complétée avec succès !');
       
-      // Close verification and return to home page
-      setTimeout(() => {
-        navigate('/platform');
-      }, 1500);
+      // Vérifier si l'étape 3 est activée avant d'y accéder
+      if (isStepEnabled(3)) {
+        setStep(3);
+        setSubStep(1);
+      } else {
+        // Si l'étape 3 n'est pas activée, retourner à la plateforme
+        setTimeout(() => {
+          navigate('/platform');
+        }, 1500);
+      }
 
     } catch (error: any) {
 
@@ -1006,7 +1158,12 @@ export function PlatformAccountVerification() {
     } else if (step === 1) {
       // Within step 1, navigate through substeps backwards
       if (subStep > 1) {
-        setSubStep(subStep - 1);
+        // If step 2 (Address) is disabled and we're at subStep 2, skip it and go to subStep 1
+        if (subStep === 2 && !isConfigStepEnabled(2)) {
+          setSubStep(1);
+        } else {
+          setSubStep(subStep - 1);
+        }
       } else {
         // From step 1 substep 1, go to step selection
         setStep(null);
@@ -1017,6 +1174,9 @@ export function PlatformAccountVerification() {
   };
 
   const handleStartStep = (stepNumber: Step) => {
+    if (!isStepEnabled(stepNumber)) {
+      return;
+    }
     setStep(stepNumber);
     setSubStep(1);
   };
@@ -1124,6 +1284,7 @@ export function PlatformAccountVerification() {
               
               <div className="space-y-4">
                 {/* Step 1 */}
+                {isStepEnabled(1) && (
                 <div
                   onClick={() => handleStartStep(1)}
                   style={{
@@ -1169,28 +1330,39 @@ export function PlatformAccountVerification() {
                     )}
                   </div>
                 </div>
+                )}
 
                 {/* Step 2 */}
+                {isStepEnabled(2) && (
                 <div
-                  onClick={() => !isStep1Completed ? toast.error('Veuillez d\'abord compléter l\'étape 1') : handleStartStep(2)}
+                  onClick={() => {
+                    const canAccess = !isStepEnabled(1) || isStep1Completed;
+                    if (canAccess) {
+                      handleStartStep(2);
+                    } else {
+                      toast.error('Veuillez d\'abord compléter l\'étape 1');
+                    }
+                  }}
                   style={{
                     padding: '20px',
                     border: '2px solid',
-                    borderColor: isStep2Completed ? '#10b981' : isStep1Completed ? '#e5e7eb' : '#d1d5db',
+                    borderColor: isStep2Completed ? '#10b981' : ((!isStepEnabled(1) || isStep1Completed) ? '#e5e7eb' : '#d1d5db'),
                     borderRadius: '12px',
-                    cursor: isStep1Completed ? 'pointer' : 'not-allowed',
-                    backgroundColor: isStep2Completed ? '#f0fdf4' : isStep1Completed ? '#ffffff' : '#f9fafb',
-                    opacity: isStep1Completed ? 1 : 0.6,
+                    cursor: (!isStepEnabled(1) || isStep1Completed) ? 'pointer' : 'not-allowed',
+                    backgroundColor: isStep2Completed ? '#f0fdf4' : ((!isStepEnabled(1) || isStep1Completed) ? '#ffffff' : '#f9fafb'),
+                    opacity: (!isStepEnabled(1) || isStep1Completed) ? 1 : 0.6,
                     transition: 'all 0.2s',
                   }}
                   onMouseEnter={(e) => {
-                    if (isStep1Completed && !isStep2Completed) {
+                    const canAccess = (!isStepEnabled(1) || isStep1Completed) && !isStep2Completed;
+                    if (canAccess) {
                       e.currentTarget.style.borderColor = '#3b82f6';
                       e.currentTarget.style.backgroundColor = '#f8fafc';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (isStep1Completed && !isStep2Completed) {
+                    const canAccess = (!isStepEnabled(1) || isStep1Completed) && !isStep2Completed;
+                    if (canAccess) {
                       e.currentTarget.style.borderColor = '#e5e7eb';
                       e.currentTarget.style.backgroundColor = '#ffffff';
                     }
@@ -1217,30 +1389,75 @@ export function PlatformAccountVerification() {
                     )}
                   </div>
                 </div>
+                )}
 
-                {/* Step 3 */}
+                {/* Step 3 - Note: Step 3 in UI corresponds to step 8 (KYC) in config */}
+                {isStepEnabled(8) && (
                 <div
-                  onClick={() => !isStep2Completed ? toast.error('Veuillez d\'abord compléter l\'étape 2') : handleStartStep(3)}
+                  onClick={() => {
+                    // If step 2 is disabled, allow access if step 1 is completed (or if step 1 is also disabled)
+                    // If step 2 is enabled, require step 2 to be completed
+                    const canAccess = isStepEnabled(2) 
+                      ? isStep2Completed 
+                      : (!isStepEnabled(1) || isStep1Completed);
+                    if (canAccess) {
+                      handleStartStep(3);
+                    } else {
+                      const requiredStep = isStepEnabled(2) ? 2 : 1;
+                      toast.error(`Veuillez d'abord compléter l'étape ${requiredStep}`);
+                    }
+                  }}
                   style={{
                     padding: '20px',
                     border: '2px solid',
-                    borderColor: isStep3Completed ? '#10b981' : isStep2Completed ? '#e5e7eb' : '#d1d5db',
+                    // Determine border color based on step 2 status
+                    borderColor: isStep3Completed ? '#10b981' : (
+                      isStepEnabled(2)
+                        ? (isStep2Completed ? '#e5e7eb' : '#d1d5db')
+                        : ((!isStepEnabled(1) || isStep1Completed) ? '#e5e7eb' : '#d1d5db')
+                    ),
                     borderRadius: '12px',
-                    cursor: isStep2Completed ? 'pointer' : 'not-allowed',
-                    backgroundColor: isStep3Completed ? '#f0fdf4' : isStep2Completed ? '#ffffff' : '#f9fafb',
-                    opacity: isStep2Completed ? 1 : 0.6,
+                    cursor: (
+                      isStepEnabled(2)
+                        ? (isStep2Completed ? 'pointer' : 'not-allowed')
+                        : ((!isStepEnabled(1) || isStep1Completed) ? 'pointer' : 'not-allowed')
+                    ),
+                    backgroundColor: isStep3Completed ? '#f0fdf4' : (
+                      isStepEnabled(2)
+                        ? (isStep2Completed ? '#ffffff' : '#f9fafb')
+                        : ((!isStepEnabled(1) || isStep1Completed) ? '#ffffff' : '#f9fafb')
+                    ),
+                    opacity: (
+                      isStepEnabled(2)
+                        ? (isStep2Completed ? 1 : 0.6)
+                        : ((!isStepEnabled(1) || isStep1Completed) ? 1 : 0.6)
+                    ),
                     transition: 'all 0.2s',
                   }}
                   onMouseEnter={(e) => {
-                    if (isStep2Completed && !isStep3Completed) {
+                    const canAccess = isStepEnabled(2)
+                      ? (isStep2Completed && !isStep3Completed)
+                      : ((!isStepEnabled(1) || isStep1Completed) && !isStep3Completed);
+                    if (canAccess) {
                       e.currentTarget.style.borderColor = '#3b82f6';
                       e.currentTarget.style.backgroundColor = '#f8fafc';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (isStep2Completed && !isStep3Completed) {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.backgroundColor = '#ffffff';
+                    const canAccess = isStepEnabled(2)
+                      ? (isStep2Completed && !isStep3Completed)
+                      : ((!isStepEnabled(1) || isStep1Completed) && !isStep3Completed);
+                    if (canAccess) {
+                      e.currentTarget.style.borderColor = isStep3Completed ? '#10b981' : (
+                        isStepEnabled(2)
+                          ? (isStep2Completed ? '#e5e7eb' : '#d1d5db')
+                          : ((!isStepEnabled(1) || isStep1Completed) ? '#e5e7eb' : '#d1d5db')
+                      );
+                      e.currentTarget.style.backgroundColor = isStep3Completed ? '#f0fdf4' : (
+                        isStepEnabled(2)
+                          ? (isStep2Completed ? '#ffffff' : '#f9fafb')
+                          : ((!isStepEnabled(1) || isStep1Completed) ? '#ffffff' : '#f9fafb')
+                      );
                     }
                   }}
                 >
@@ -1265,6 +1482,7 @@ export function PlatformAccountVerification() {
                     )}
                   </div>
                 </div>
+                )}
               </div>
             </div>
           ) : step === 1 && subStep === 1 ? (
@@ -1397,7 +1615,7 @@ export function PlatformAccountVerification() {
 
             </form>
 
-          ) : step === 1 && subStep === 2 ? (
+          ) : step === 1 && subStep === 2 && isConfigStepEnabled(2) ? (
 
             <form onSubmit={handleAddressSubmit} className="space-y-6">
 

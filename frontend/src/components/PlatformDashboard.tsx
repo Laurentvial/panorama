@@ -19,6 +19,7 @@ export function PlatformDashboard() {
   const [positions, setPositions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
 
 
   const loadDashboardData = async () => {
@@ -31,7 +32,7 @@ export function PlatformDashboard() {
         apiCall(`/api/clients/${currentUser.id}/products/`),
         apiCall(`/api/clients/${currentUser.id}/positions/`),
       ]);
-
+      
       setAllTransactions(transactionsResponse.transactions || []);
       // Extract assets from ClientAsset objects
       const clientAssets = (clientAssetsResponse as any)?.assets || [];
@@ -48,6 +49,21 @@ export function PlatformDashboard() {
       }).filter(Boolean);
       setProducts(productsList);
       setPositions((positionsResponse as any)?.positions || []);
+      
+      // Load verification config separately to avoid breaking the Promise.all if it fails
+      try {
+        // Add cache-busting timestamp to ensure fresh data
+        const verificationConfigResponse = await apiCall(`/api/clients/${currentUser.id}/verification-config/?_t=${Date.now()}`);
+        const config = (verificationConfigResponse as any)?.stepsConfig || {};
+        setVerificationConfig(config);
+        console.log('Loaded verification config for dashboard:', config);
+        console.log('Step 3 (UI) maps to Step 8 (Config/KYC). Step 8 enabled?', config?.step_8?.enabled !== false);
+        console.log('Step 8 (KYC) config object:', config?.step_8);
+      } catch (error: any) {
+        // Silently fail - config will default to all steps enabled
+        console.log('Verification config not available, using defaults');
+        setVerificationConfig({});
+      }
     } catch (error: any) {
       // If it's a redirect error, don't log it - page is navigating away
       if (error?.isRedirecting) {
@@ -459,29 +475,148 @@ export function PlatformDashboard() {
 
   const { gainers, losers } = getGainersAndLosers();
 
+  // Helper function to map UI step numbers to config step numbers
+  // UI Step 1 = Config Steps 1-2 (Identity + Address)
+  // UI Step 2 = Config Steps 3-7 (Profile, Preferences, Objectives, Compliance, Funds Sources)
+  // UI Step 3 = Config Step 8 (KYC)
+  const getConfigStepNumber = (uiStepNumber: number): number => {
+    if (uiStepNumber === 3) return 8; // KYC step
+    return uiStepNumber; // Steps 1 and 2 map directly
+  };
+
+  // Helper function to check if a config step is enabled
+  const isConfigStepEnabled = (configStepNumber: number): boolean => {
+    const stepKey = `step_${configStepNumber}`;
+    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
+      const stepConfig = verificationConfig[stepKey];
+      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+        return false;
+      }
+      return true;
+    }
+    return true; // Default to enabled
+  };
+
+  // Helper functions to check if specific config steps are completed
+  const isConfigStepCompleted = (configStepNumber: number): boolean => {
+    if (!currentUser) return false;
+    
+    switch (configStepNumber) {
+      case 1: // Identity
+        return !!(currentUser.firstName || currentUser.fname) && 
+               !!(currentUser.lastName || currentUser.lname) && 
+               currentUser.sex && 
+               (currentUser.birthDate || currentUser.birth_date);
+      
+      case 2: // Address
+        return !!(currentUser.address && currentUser.postalCode && currentUser.city);
+      
+      case 3: // Profile
+        return !!(currentUser.primaryProfession || currentUser.primary_profession) && 
+               !!(currentUser.employerName || currentUser.employer_name) && 
+               currentUser.annualNetIncome && 
+               currentUser.totalLiquidities;
+      
+      case 4: // Preferences
+        return Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
+      
+      case 5: // Objectives
+        return !!(currentUser.tradingObjective || currentUser.trading_objective) && 
+               !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
+      
+      case 6: // Compliance
+        return Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
+      
+      case 7: // Funds Sources
+        return Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
+      
+      case 8: // KYC
+        return currentUser.kycStatus === 'approved' || currentUser.kycStatus === 'submitted';
+      
+      default:
+        return false;
+    }
+  };
+
   // Check completion status for each step
   const isStep1Completed = (() => {
     if (!currentUser) return false;
-    const hasIdentity = !!(currentUser.firstName || currentUser.fname) && !!(currentUser.lastName || currentUser.lname) && currentUser.sex && (currentUser.birthDate || currentUser.birth_date);
-    const hasAddress = !!(currentUser.address && currentUser.postalCode && currentUser.city);
-    return hasIdentity && hasAddress;
+    // Step 1 requires Config Step 1 (Identity) - always required
+    const hasIdentity = isConfigStepCompleted(1);
+    // Only check address if Config Step 2 (Address) is enabled
+    if (isConfigStepEnabled(2)) {
+      const hasAddress = isConfigStepCompleted(2);
+      return hasIdentity && hasAddress;
+    }
+    // If Config Step 2 (Address) is disabled, Step 1 is complete with just identity
+    return hasIdentity;
   })();
 
   const isStep2Completed = (() => {
     if (!currentUser) return false;
-    const hasProfile = !!(currentUser.primaryProfession || currentUser.primary_profession) && !!(currentUser.employerName || currentUser.employer_name) && currentUser.annualNetIncome && currentUser.totalLiquidities;
-    const hasPreferences = Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
-    const hasObjective = !!(currentUser.tradingObjective || currentUser.trading_objective) && !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
-    const hasCompliance = Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
-    const hasFundsSources = Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
-    return hasProfile && hasPreferences && hasObjective && hasCompliance && hasFundsSources;
+    // UI Step 2 consists of Config Steps 3-7
+    // Check each enabled config step - Step 2 is complete if ALL enabled steps are completed
+    const configSteps = [3, 4, 5, 6, 7];
+    const enabledSteps = configSteps.filter(step => isConfigStepEnabled(step));
+    
+    // If no steps are enabled, consider Step 2 as complete (nothing to fill)
+    if (enabledSteps.length === 0) return true;
+    
+    // Check if all enabled steps are completed
+    return enabledSteps.every(step => isConfigStepCompleted(step));
   })();
 
-  const isStep3Completed = currentUser?.kycStatus === 'approved' || currentUser?.kycStatus === 'submitted';
+  const isStep3Completed = (() => {
+    if (!currentUser) return false;
+    // Step 3 in the UI corresponds to Config Step 8 (KYC) in the config
+    // Only check completion if Config Step 8 is enabled
+    if (!isConfigStepEnabled(8)) return false;
+    return isConfigStepCompleted(8);
+  })();
+
+  // Helper function to check if a UI step is enabled
+  const isStepEnabled = (stepNumber: number): boolean => {
+    // Special handling for UI Step 2: check if ANY of config steps 3-7 are enabled
+    if (stepNumber === 2) {
+      const hasAnyEnabled = [3, 4, 5, 6, 7].some(step => isConfigStepEnabled(step));
+      return hasAnyEnabled;
+    }
+    
+    // For other steps, map UI step number to config step number
+    const configStepNumber = getConfigStepNumber(stepNumber);
+    const stepKey = `step_${configStepNumber}`;
+    // Si la config existe pour cette étape, vérifier la valeur enabled
+    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
+      const stepConfig = verificationConfig[stepKey];
+      // Si enabled est explicitement false, l'étape est désactivée
+      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+        console.log(`[Dashboard] UI Step ${stepNumber} (Config Step ${configStepNumber}) is DISABLED in config:`, stepConfig);
+        console.log(`[Dashboard] Full verificationConfig:`, verificationConfig);
+        return false;
+      }
+      // Si enabled est true ou non défini dans l'objet step, l'étape est activée
+      console.log(`[Dashboard] UI Step ${stepNumber} (Config Step ${configStepNumber}) is ENABLED in config:`, stepConfig);
+      return true;
+    }
+    // Si la config n'existe pas du tout pour cette étape, par défaut l'étape est activée (pour rétrocompatibilité)
+    console.log(`[Dashboard] UI Step ${stepNumber} (Config Step ${configStepNumber}) config not found, defaulting to ENABLED`);
+    console.log(`[Dashboard] Full verificationConfig:`, verificationConfig);
+    return true;
+  };
   
   // Check if account is verified (server-side flag computed from all required onboarding fields)
-  // Also check if KYC step 3 is completed
-  const isVerified = Boolean(currentUser?.accountVerified || currentUser?.account_verified) && isStep3Completed;
+  // Also check if all enabled steps are completed
+  // Only consider enabled steps for verification status
+  const isVerified = Boolean(currentUser?.accountVerified || currentUser?.account_verified) && 
+                     (!isStepEnabled(1) || isStep1Completed) &&
+                     (!isStepEnabled(2) || isStep2Completed) &&
+                     (!isStepEnabled(3) || isStep3Completed);
+  
+  // Check if any enabled step is incomplete
+  const hasIncompleteEnabledSteps = (isStepEnabled(1) && !isStep1Completed) || 
+                                     (isStepEnabled(2) && !isStep2Completed) || 
+                                     (isStepEnabled(3) && !isStep3Completed);
+  
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   return (
@@ -492,7 +627,7 @@ export function PlatformDashboard() {
       ) : (
         <>
           {/* Account Verification Steps */}
-          {!isVerified && (
+          {hasIncompleteEnabledSteps && (
             <Card style={{ ...roundedCardStyle, marginBottom: isMobile ? '20px' : '30px', backgroundColor: '#f9fafb' }}>
               <CardContent style={{ padding: isMobile ? '20px' : '30px' }}>
                 {/* Progress Steps */}
@@ -505,6 +640,7 @@ export function PlatformDashboard() {
                   overflowX: 'auto',
                 }}>
                   {/* Step 1 */}
+                  {isStepEnabled(1) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
@@ -524,6 +660,11 @@ export function PlatformDashboard() {
                         <span style={{ fontSize: isMobile ? '14px' : '16px' }}>1</span>
                       )}
                     </div>
+                  </div>
+                  )}
+                  
+                  {/* Connector between Step 1 and Step 2 */}
+                  {isStepEnabled(1) && isStepEnabled(2) && (
                     <div style={{
                       width: isMobile ? '40px' : '60px',
                       height: '2px',
@@ -531,9 +672,10 @@ export function PlatformDashboard() {
                       borderStyle: 'dashed',
                       flexShrink: 0,
                     }}></div>
-                  </div>
+                  )}
 
                   {/* Step 2 */}
+                  {isStepEnabled(2) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
@@ -554,6 +696,11 @@ export function PlatformDashboard() {
                         '2'
                       )}
                     </div>
+                  </div>
+                  )}
+                  
+                  {/* Connector between Step 2 and Step 3 (only if step 2 is enabled) */}
+                  {isStepEnabled(2) && isStepEnabled(3) && (
                     <div style={{
                       width: isMobile ? '40px' : '60px',
                       height: '2px',
@@ -561,20 +708,45 @@ export function PlatformDashboard() {
                       borderStyle: 'dashed',
                       flexShrink: 0,
                     }}></div>
-                  </div>
+                  )}
+                  
+                  {/* Connector between Step 1 and Step 3 (when step 2 is disabled) */}
+                  {!isStepEnabled(2) && isStepEnabled(1) && isStepEnabled(3) && (
+                    <div style={{
+                      width: isMobile ? '40px' : '60px',
+                      height: '2px',
+                      backgroundColor: isStep1Completed ? '#10b981' : '#d1d5db',
+                      borderStyle: 'dashed',
+                      flexShrink: 0,
+                    }}></div>
+                  )}
 
                   {/* Step 3 */}
+                  {isStepEnabled(3) && (
                   <div style={{ flexShrink: 0 }}>
                     <div style={{
                       width: isMobile ? '32px' : '40px',
                       height: isMobile ? '32px' : '40px',
                       borderRadius: '50%',
-                      backgroundColor: isStep3Completed ? '#10b981' : (isStep2Completed ? 'white' : '#f3f4f6'),
-                      border: isStep3Completed ? 'none' : (isStep2Completed ? '2px solid #10b981' : '2px solid #d1d5db'),
+                      // If step 2 is disabled, check step 1 completion; otherwise check step 2
+                      backgroundColor: isStep3Completed ? '#10b981' : (
+                        isStepEnabled(2) 
+                          ? (isStep2Completed ? 'white' : '#f3f4f6')
+                          : (isStep1Completed ? 'white' : '#f3f4f6')
+                      ),
+                      border: isStep3Completed ? 'none' : (
+                        isStepEnabled(2)
+                          ? (isStep2Completed ? '2px solid #10b981' : '2px solid #d1d5db')
+                          : (isStep1Completed ? '2px solid #10b981' : '2px solid #d1d5db')
+                      ),
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: isStep3Completed ? 'white' : (isStep2Completed ? '#111827' : '#6b7280'),
+                      color: isStep3Completed ? 'white' : (
+                        isStepEnabled(2)
+                          ? (isStep2Completed ? '#111827' : '#6b7280')
+                          : (isStep1Completed ? '#111827' : '#6b7280')
+                      ),
                       fontWeight: 'bold',
                       fontSize: isMobile ? '14px' : '16px',
                     }}>
@@ -585,6 +757,7 @@ export function PlatformDashboard() {
                       )}
                     </div>
                   </div>
+                  )}
                 </div>
 
                 {/* Heading */}

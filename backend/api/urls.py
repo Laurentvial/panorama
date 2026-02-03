@@ -12,6 +12,7 @@ urlpatterns = [
     path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
     path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
     path('clients/<str:client_id>/delete/', api_views.client_delete, name='client-delete'),
+    path('clients/<str:client_id>/verification-config/', api_views.client_verification_config, name='client-verification-config'),
     # Teams endpoints
     path('teams/', api_views.team_list, name='team-list'),
     path('teams/create/', api_views.team_create, name='team-create'),  # POST for create

@@ -637,3 +637,24 @@ class NewsPost(models.Model):
     
     def __str__(self):
         return self.title
+
+class ClientVerificationConfig(models.Model):
+    """Table pour gérer l'activation/désactivation des étapes et questions de vérification par client"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='verification_configs')
+    
+    # Configuration des étapes (1-8)
+    # Structure: {"step_1": {"enabled": true, "questions": {"firstName": true, "middleName": false, ...}}, ...}
+    # Par défaut, toutes les étapes sont activées si non spécifié
+    steps_config = models.JSONField(default=dict, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['client']  # Un seul config par client
+        verbose_name = "Client Verification Config"
+        verbose_name_plural = "Client Verification Configs"
+    
+    def __str__(self):
+        return f"Verification Config for {self.client.fname} {self.client.lname}"

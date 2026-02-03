@@ -30,12 +30,13 @@ from .models import ClientProduct
 from .models import Position
 from .models import AppSettings
 from .models import NewsPost
+from .models import ClientVerificationConfig
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
-    ClientChatMessageSerializer, ClientConversationSerializer
+    ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
@@ -1149,6 +1150,89 @@ def client_delete(request, client_id):
     client = get_object_or_404(Client, id=client_id)
     client.delete()
     return Response({'message': 'Client supprimé avec succès'}, status=status.HTTP_200_OK)
+
+@api_view(['GET', 'PUT'])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
+def client_verification_config(request, client_id):
+    """Récupérer ou mettre à jour la configuration de vérification d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Check authentication manually - tokens must be in Authorization header only (not query params for security)
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    token = auth_header.replace('Bearer ', '')
+    
+    # Check if it's a client token accessing their own config
+    is_client_access = False
+    is_admin_access = False
+    
+    if token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id == client_id:
+            is_client_access = True
+            if not client.platform_access or not client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    else:
+        # Try to validate JWT token manually for admin access
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                is_admin_access = True
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # For PUT requests, only admins can modify
+    if request.method == 'PUT' and is_client_access:
+        return Response({'error': 'Seuls les administrateurs peuvent modifier la configuration'}, status=status.HTTP_403_FORBIDDEN)
+    
+    if request.method == 'GET':
+        # Récupérer ou créer la config si elle n'existe pas
+        config, created = ClientVerificationConfig.objects.get_or_create(
+            client=client,
+            defaults={'id': uuid.uuid4().hex[:12], 'steps_config': {}}
+        )
+        serializer = ClientVerificationConfigSerializer(config, context={'request': request})
+        response = Response(serializer.data)
+        # Add cache-control headers to prevent caching
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+    
+    elif request.method == 'PUT':
+        # Mettre à jour la config (admin only)
+        config, created = ClientVerificationConfig.objects.get_or_create(
+            client=client,
+            defaults={'id': uuid.uuid4().hex[:12], 'steps_config': {}}
+        )
+        # Log the incoming data for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f'Updating verification config for client {client_id}: {request.data}')
+        
+        serializer = ClientVerificationConfigSerializer(config, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            # Log the saved data to verify it was saved correctly
+            config.refresh_from_db()
+            logger.info(f'Verification config saved for client {client_id}. steps_config: {config.steps_config}')
+            response = Response(serializer.data)
+            # Add cache-control headers to prevent caching
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
+        logger.error(f'Serializer errors for client {client_id}: {serializer.errors}')
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

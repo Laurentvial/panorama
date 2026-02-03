@@ -345,7 +345,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Verification Tab */}
         <TabsContent value="verification">
-          <ClientVerificationTab client={client} />
+          <ClientVerificationTab client={client} clientId={clientId} />
         </TabsContent>
 
         {/* Misc Tab */}
