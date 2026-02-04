@@ -105,16 +105,10 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     loadProducts();
   }, []);
 
-  const filtered = useMemo(() => {
+  // Filter by product and search (without status filter)
+  const filteredByProductAndSearch = useMemo(() => {
     const q = search.trim().toLowerCase();
     return positions.filter((p) => {
-      const isUpcoming = upcomingStatuses.has(p.status);
-      const isOpen = openStatuses.has(p.status);
-      const isClosed = closedStatuses.has(p.status);
-      if (activeTab === 'upcoming' && !isUpcoming) return false;
-      if (activeTab === 'open' && !isOpen) return false;
-      if (activeTab === 'closed' && !isClosed) return false;
-      
       // Filter by product
       if (selectedProductId && p.productId !== selectedProductId) return false;
       
@@ -128,19 +122,33 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
         (p.transactionId || '').toLowerCase().includes(q)
       );
     });
-  }, [positions, search, selectedProductId, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [positions, search, selectedProductId]);
 
+  // Filter by product, search AND active tab status
+  const filtered = useMemo(() => {
+    return filteredByProductAndSearch.filter((p) => {
+      const isUpcoming = upcomingStatuses.has(p.status);
+      const isOpen = openStatuses.has(p.status);
+      const isClosed = closedStatuses.has(p.status);
+      if (activeTab === 'upcoming' && !isUpcoming) return false;
+      if (activeTab === 'open' && !isOpen) return false;
+      if (activeTab === 'closed' && !isClosed) return false;
+      return true;
+    });
+  }, [filteredByProductAndSearch, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+
+  // Counts should reflect filtered positions (by product and search, but not by active tab)
   const counts = useMemo(() => {
     let upcoming = 0;
     let open = 0;
     let closed = 0;
-    for (const p of positions) {
+    for (const p of filteredByProductAndSearch) {
       if (upcomingStatuses.has(p.status)) upcoming += 1;
       else if (openStatuses.has(p.status)) open += 1;
       else if (closedStatuses.has(p.status)) closed += 1;
     }
     return { upcoming, open, closed };
-  }, [positions, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [filteredByProductAndSearch, upcomingStatuses, openStatuses, closedStatuses]);
 
   return (
     <Card>

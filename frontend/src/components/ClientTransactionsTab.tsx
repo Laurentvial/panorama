@@ -80,6 +80,7 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
   const [isPositionGenerationModalOpen, setIsPositionGenerationModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [transactionForPositionGeneration, setTransactionForPositionGeneration] = useState<any>(null);
+  const [isWithdrawalForPositionGeneration, setIsWithdrawalForPositionGeneration] = useState(false);
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
@@ -269,14 +270,28 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
       // Convert datetime-local format to ISO string
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
       
-      await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+      // Check if this is a transfert transaction with status "termine"
+      // If so, we'll show the position generation modal instead of auto-generating
+      const isTransfert = transactionForm.type === 'transfert';
+      const isTermine = transactionForm.status === 'termine';
+      
+      // If it's a transfert with status "termine", create it with temporary status "en_cours"
+      // and show modal instead. We'll update to "termine" after position generation completes.
+      const shouldShowModal = isTransfert && isTermine;
+      
+      // Use temporary status "en_cours" if we'll show the modal, so transaction isn't finalized
+      // until position generation is complete
+      const transactionStatus = shouldShowModal ? 'en_cours' : transactionForm.status;
+      
+      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
           type: transactionForm.type,
           amount: parseFloat(transactionForm.amount),
           description: transactionForm.description,
-          status: transactionForm.status,
+          status: transactionStatus, // Use temporary status if modal will be shown
           datetime: datetimeISO,
+          skip_position_generation: true, // Always skip auto-generation when showing modal
           ...(transactionForm.type === 'transfert'
             ? {
                 from_field: transactionForm.from_field || 'balance',
@@ -289,6 +304,52 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             : {}),
         })
       });
+      
+      // If we should show the modal, open it instead of closing the dialog
+      if (shouldShowModal && response) {
+        // Determine if this is an investment or withdrawal based on the actual transaction
+        const transferTo = response.transfer_to || 
+                          response.to_field || 
+                          response.to || 
+                          response.transferTo ||
+                          null;
+        const transferFrom = response.transfer_from || 
+                            response.from_field || 
+                            response.from ||
+                            null;
+        
+        // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
+        const isInvestment = transferTo && 
+                            String(transferTo) !== 'balance' && 
+                            String(transferTo) !== 'trading';
+        const isWithdrawal = transferTo === 'balance' && 
+                            transferFrom && 
+                            String(transferFrom) !== 'balance';
+        
+        // Only show modal for investments or withdrawals (not balance-to-balance transfers)
+        if (isInvestment || isWithdrawal) {
+          // Set the transaction for position generation
+          setTransactionForPositionGeneration(response);
+          setIsWithdrawalForPositionGeneration(isWithdrawal);
+          setIsPositionGenerationModalOpen(true);
+          // Keep the dialog closed (it was already closed or will be closed)
+          setIsTransactionDialogOpen(false);
+          // Reset form
+          setTransactionForm({
+            type: 'depot',
+            amount: '',
+            description: '',
+            status: 'en_attente_paiement',
+            datetime: '',
+            from_field: 'balance',
+            to_field: 'balance',
+            productId: '',
+            visibleByClient: true
+          });
+          // Don't call onRefresh yet - wait for modal to complete
+          return;
+        }
+      }
       
       toast.success('Transaction créée avec succès');
       setIsTransactionDialogOpen(false);
@@ -860,17 +921,45 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           transaction={transactionForPositionGeneration}
           clientId={clientId}
           onClose={() => {
+            // If user closes modal without completing, delete the temporary transaction
+            // or keep it in "en_cours" status (user can complete it later)
+            // For now, we'll keep it in "en_cours" so user can retry later
             setIsPositionGenerationModalOpen(false);
             setTransactionForPositionGeneration(null);
+            setIsWithdrawalForPositionGeneration(false);
             setIsTransactionDialogOpen(false);
+            toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
+            onRefresh();
           }}
-          onSuccess={() => {
+          onSuccess={async () => {
+            // Update transaction status to "termine" after position generation completes
+            if (transactionForPositionGeneration) {
+              try {
+                const datetimeISO = new Date(transactionForPositionGeneration.datetime || new Date()).toISOString();
+                await apiCall(`/api/clients/${clientId}/transactions/${transactionForPositionGeneration.id}/`, {
+                  method: 'PUT',
+                  body: JSON.stringify({
+                    type: transactionForPositionGeneration.type,
+                    amount: parseFloat(transactionForPositionGeneration.amount),
+                    description: transactionForPositionGeneration.description,
+                    status: 'termine', // Update to final status
+                    datetime: datetimeISO,
+                    skip_position_generation: true // Skip since positions already generated
+                  })
+                });
+              } catch (error: any) {
+                console.error('Error updating transaction status:', error);
+                toast.error('Erreur lors de la mise à jour du statut de la transaction');
+              }
+            }
             setIsPositionGenerationModalOpen(false);
             setTransactionForPositionGeneration(null);
+            setIsWithdrawalForPositionGeneration(false);
             setIsTransactionDialogOpen(false);
             toast.success('Transaction créée avec succès');
             onRefresh();
           }}
+          isWithdrawal={isWithdrawalForPositionGeneration}
         />
       )}
     </div>

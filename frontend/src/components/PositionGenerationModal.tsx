@@ -64,6 +64,25 @@ export function PositionGenerationModal({
   const [positions, setPositions] = useState<Position[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [avoidLosses, setAvoidLosses] = useState<boolean>(false);
+  const [positionsSaved, setPositionsSaved] = useState<boolean>(false);
+  const [readyToConfirm, setReadyToConfirm] = useState<boolean>(false);
+  const [deletedPositions, setDeletedPositions] = useState<{
+    total_count: number;
+    deleted_by_transaction: Record<string, number>;
+    positions: Array<{
+      id: string;
+      transaction_id: string;
+      asset_id: string | null;
+      asset_name: string | null;
+      invested_amount: string;
+      profit_loss: string;
+      opened_at: string | null;
+      closed_at: string | null;
+      period_index: number | null;
+      period_date: string | null;
+    }>;
+    note: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (isOpen && transaction) {
@@ -74,6 +93,9 @@ export function PositionGenerationModal({
       setPositions([]);
       setError(null);
       setAvoidLosses(false);
+      setPositionsSaved(false);
+      setReadyToConfirm(false);
+      setDeletedPositions(null);
       
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
@@ -215,6 +237,16 @@ export function PositionGenerationModal({
       
       const positionsData = (response as any).positions || [];
       setPositions(positionsData);
+      
+      // Store deleted positions info if available (for preview before validation)
+      if ((response as any).deleted_positions) {
+        console.log('Deleted positions preview received:', (response as any).deleted_positions);
+        setDeletedPositions((response as any).deleted_positions);
+      } else {
+        console.log('No deleted positions preview in response');
+        setDeletedPositions(null);
+      }
+      
       setStep('review-positions');
     } catch (err: any) {
       console.error('Error generating positions:', err);
@@ -225,12 +257,26 @@ export function PositionGenerationModal({
   };
 
   const handleValidate = async () => {
+    // For withdrawals, just mark as ready to confirm (don't save yet)
+    // The deleted positions info is already available from the generate_positions call
+    if (isWithdrawal) {
+      setReadyToConfirm(true); // Mark as ready to confirm, but don't save yet
+      setPositionsSaved(false); // Not saved yet, waiting for confirmation
+      // Stay on review-positions step to show the information
+      setStep('review-positions');
+      return;
+    }
+    
+    // For investments, save immediately
+    await handleConfirm();
+  };
+
+  const handleConfirm = async () => {
     try {
       setStep('saving');
       setError(null);
       
       // Prepare rates_used and period_summaries for history (for both investments and withdrawals)
-      // Prepare rates_used and period_summaries for history
       const ratesUsed: Record<string, string> = {};
       Object.entries(editedRates).forEach(([periodIdx, rate]) => {
         ratesUsed[periodIdx] = rate;
@@ -277,7 +323,7 @@ export function PositionGenerationModal({
       
       // For withdrawals, save only the history (no positions are created for the withdrawal itself)
       // For investments, save positions and history
-      await apiCall(
+      const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/save-positions/`,
         {
           method: 'POST',
@@ -289,9 +335,20 @@ export function PositionGenerationModal({
         }
       );
       
+      // Store deleted positions info for display (works for both investments and withdrawals)
+      if ((response as any).deleted_positions) {
+        console.log('Deleted positions info received:', (response as any).deleted_positions);
+        setDeletedPositions((response as any).deleted_positions);
+      } else {
+        console.log('No deleted positions info in response');
+      }
+      
+      // Mark positions as saved
+      setPositionsSaved(true);
+      
       if (isWithdrawal) {
-        // For withdrawals, just close the modal and call onSuccess to update the transaction status
-        // Don't show toast here - EditTransactionModal will show it
+        // For withdrawals, close after saving
+        toast.success('Retrait confirmé et positions recalculées avec succès');
         handleClose();
         onSuccess();
       } else {
@@ -399,7 +456,7 @@ export function PositionGenerationModal({
       <div className="modal-content" style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">
-            {isWithdrawal ? 'Confirmation de retrait' : 'Génération des positions'}
+            Génération des positions
           </h2>
           <Button
             type="button"
@@ -430,15 +487,6 @@ export function PositionGenerationModal({
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
               <p style={{ fontSize: '16px', color: '#64748b' }}>Génération des taux de rentabilité...</p>
-            </div>
-          )}
-
-          {step === 'saving' && (
-            <div style={{ textAlign: 'center', padding: '40px' }}>
-              <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
-              <p style={{ fontSize: '16px', color: '#64748b' }}>
-                {isWithdrawal ? 'Enregistrement de la transaction et recalcul des positions...' : 'Enregistrement des positions...'}
-              </p>
             </div>
           )}
 
@@ -558,6 +606,81 @@ export function PositionGenerationModal({
 
           {step === 'review-positions' && (
             <div>
+              {deletedPositions && deletedPositions.total_count > 0 && (
+                <div style={{ 
+                  padding: '16px', 
+                  backgroundColor: '#fef3c7', 
+                  border: '1px solid #fbbf24', 
+                  borderRadius: '8px', 
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ fontSize: '16px', fontWeight: '600', color: '#92400e', marginBottom: '12px' }}>
+                    ⚠️ Positions qui seront supprimées
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#78350f', marginBottom: '12px' }}>
+                    <strong>{deletedPositions.total_count}</strong> position(s) en attente seront supprimées avant la génération des nouvelles positions.
+                    {deletedPositions.note && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', fontStyle: 'italic' }}>
+                        {deletedPositions.note}
+                      </div>
+                    )}
+                  </div>
+                  {Object.keys(deletedPositions.deleted_by_transaction).length > 0 && (
+                    <div style={{ marginTop: '12px', fontSize: '13px' }}>
+                      <strong>Répartition par transaction :</strong>
+                      <ul style={{ marginTop: '8px', marginLeft: '20px' }}>
+                        {Object.entries(deletedPositions.deleted_by_transaction).map(([txnId, count]) => (
+                          <li key={txnId}>
+                            Transaction {txnId}: {count} position(s)
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {deletedPositions.positions.length > 0 && (
+                    <details style={{ marginTop: '12px' }}>
+                      <summary style={{ cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>
+                        Voir les détails ({deletedPositions.positions.length} position(s) affichée(s))
+                      </summary>
+                      <div style={{ marginTop: '12px', maxHeight: '300px', overflowY: 'auto', fontSize: '12px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #d1d5db', backgroundColor: '#f9fafb' }}>
+                              <th style={{ padding: '6px', textAlign: 'left' }}>ID</th>
+                              <th style={{ padding: '6px', textAlign: 'left' }}>Transaction</th>
+                              <th style={{ padding: '6px', textAlign: 'left' }}>Actif</th>
+                              <th style={{ padding: '6px', textAlign: 'right' }}>Montant</th>
+                              <th style={{ padding: '6px', textAlign: 'right' }}>Profit/Perte</th>
+                              <th style={{ padding: '6px', textAlign: 'left' }}>Date ouverture</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {deletedPositions.positions.map((pos) => (
+                              <tr key={pos.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                <td style={{ padding: '6px', fontFamily: 'monospace', fontSize: '10px' }}>{pos.id}</td>
+                                <td style={{ padding: '6px', fontFamily: 'monospace', fontSize: '10px' }}>{pos.transaction_id}</td>
+                                <td style={{ padding: '6px' }}>{pos.asset_name || 'N/A'}</td>
+                                <td style={{ padding: '6px', textAlign: 'right' }}>{formatCurrency(pos.invested_amount)}</td>
+                                <td style={{ 
+                                  padding: '6px', 
+                                  textAlign: 'right',
+                                  color: parseFloat(pos.profit_loss) >= 0 ? '#16a34a' : '#dc2626'
+                                }}>
+                                  {formatCurrency(pos.profit_loss)}
+                                </td>
+                                <td style={{ padding: '6px', fontSize: '10px' }}>
+                                  {pos.opened_at ? formatDateTime(pos.opened_at) : 'N/A'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+              
               <p style={{ marginBottom: '20px', color: '#64748b' }}>
                 {positions.length} position(s) générée(s). Veuillez vérifier avant de valider :
               </p>
@@ -632,12 +755,26 @@ export function PositionGenerationModal({
               </div>
 
               <div className="modal-form-actions">
-                <Button type="button" variant="outline" onClick={() => setStep('review-rates')}>
-                  Retour
-                </Button>
-                <Button type="button" onClick={handleValidate}>
-                  Valider
-                </Button>
+                {isWithdrawal && readyToConfirm && !positionsSaved ? (
+                  // For withdrawals after clicking "Valider", show confirm button to actually save
+                  <>
+                    <Button type="button" variant="outline" onClick={() => setStep('review-rates')}>
+                      Retour
+                    </Button>
+                    <Button type="button" onClick={handleConfirm}>
+                      Confirmer
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button type="button" variant="outline" onClick={() => setStep('review-rates')}>
+                      Retour
+                    </Button>
+                    <Button type="button" onClick={handleValidate}>
+                      Valider
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -645,7 +782,9 @@ export function PositionGenerationModal({
           {step === 'saving' && (
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
-              <p style={{ fontSize: '16px', color: '#64748b' }}>Enregistrement des positions...</p>
+              <p style={{ fontSize: '16px', color: '#64748b' }}>
+                {isWithdrawal ? 'Enregistrement de la transaction et recalcul des positions...' : 'Enregistrement des positions...'}
+              </p>
             </div>
           )}
         </div>

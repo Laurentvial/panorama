@@ -52,6 +52,7 @@ from datetime import datetime, date, timedelta
 from django.utils import timezone
 from django.db.models import Q
 from django.db import IntegrityError
+from django.db import transaction as db_transaction
 from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import (
     create_positions_for_investment,
@@ -4768,40 +4769,100 @@ def client_transaction_create(request, client_id):
                 'error': f'Fonds insuffisants. Solde disponible: {available_funds:.2f} EUR, montant demandé: {transaction_amount:.2f} EUR'
             }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Create transaction
-    transaction = Transaction.objects.create(
-        id=transaction_id,
-        client=client,
-        type=request.data.get('type'),
-        amount=request.data.get('amount'),
-        description=request.data.get('description', ''),
-        status=request.data.get('status', 'en_cours'),
-        datetime=transaction_datetime,
-        # Subscription details
-        subscription_details=subscription_details_data or {},
-        product=product,
-        subscription_first_name=subscription_details_data.get('firstName', '') if subscription_details_data else '',
-        subscription_last_name=subscription_details_data.get('lastName', '') if subscription_details_data else '',
-        subscription_birth_date=subscription_details_data.get('birthDate', '') if subscription_details_data else '',
-        subscription_city=subscription_details_data.get('city', '') if subscription_details_data else '',
-        subscription_ip=subscription_details_data.get('ip', '') if subscription_details_data else '',
-        subscription_date=subscription_details_data.get('subscriptionDate', '') if subscription_details_data else '',
-        subscription_duration=subscription_details_data.get('duration', '') if subscription_details_data else '',
-        subscription_interest_period=subscription_details_data.get('interestPeriod', '') if subscription_details_data else '',
-        subscription_profitability=subscription_details_data.get('profitability', '') if subscription_details_data else '',
-        subscription_investment=subscription_details_data.get('investment') if subscription_details_data else None,
-        subscription_profits=subscription_details_data.get('profits') if subscription_details_data else None,
-        subscription_total=subscription_details_data.get('total') if subscription_details_data else None,
-        subscription_contract_end=subscription_details_data.get('contractEnd', '') if subscription_details_data else '',
-        subscription_signature=subscription_details_data.get('signature', '') if subscription_details_data else '',
-        # Transfer direction fields
-        transfer_from=transfer_from,
-        transfer_to=transfer_to,
+    # Check if this is an investment transaction that will be created with status 'termine'
+    # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
+    transaction_status = request.data.get('status', 'en_cours')
+    skip_position_generation = request.data.get('skip_position_generation', False)
+    is_investment_transfert = (
+        transaction_type == 'transfert' 
+        and transfer_to 
+        and transfer_to != 'balance'
     )
+    # IMPORTANT: For investment transactions with status 'termine', we MUST generate positions
+    # even if skip_position_generation is True (which is set by frontend to show modal).
+    # The frontend will handle showing the modal, but if the user closes it without completing,
+    # the transaction should still have positions generated automatically.
+    # Only skip if it's explicitly a withdrawal or non-investment transaction.
+    should_generate_positions_before_create = (
+        is_investment_transfert 
+        and transaction_status == 'termine'
+    )
+    
+    # Create transaction and generate positions together in an atomic transaction
+    # This ensures that positions are generated BEFORE the transaction is committed,
+    # and if position generation fails, the transaction is not created either
+    with db_transaction.atomic():
+        # Create transaction instance first (without saving)
+        # Set skip flag BEFORE saving to prevent signal from generating positions
+        transaction = Transaction(
+            id=transaction_id,
+            client=client,
+            type=request.data.get('type'),
+            amount=request.data.get('amount'),
+            description=request.data.get('description', ''),
+            status=transaction_status,
+            datetime=transaction_datetime,
+            # Subscription details
+            subscription_details=subscription_details_data or {},
+            product=product,
+            subscription_first_name=subscription_details_data.get('firstName', '') if subscription_details_data else '',
+            subscription_last_name=subscription_details_data.get('lastName', '') if subscription_details_data else '',
+            subscription_birth_date=subscription_details_data.get('birthDate', '') if subscription_details_data else '',
+            subscription_city=subscription_details_data.get('city', '') if subscription_details_data else '',
+            subscription_ip=subscription_details_data.get('ip', '') if subscription_details_data else '',
+            subscription_date=subscription_details_data.get('subscriptionDate', '') if subscription_details_data else '',
+            subscription_duration=subscription_details_data.get('duration', '') if subscription_details_data else '',
+            subscription_interest_period=subscription_details_data.get('interestPeriod', '') if subscription_details_data else '',
+            subscription_profitability=subscription_details_data.get('profitability', '') if subscription_details_data else '',
+            subscription_investment=subscription_details_data.get('investment') if subscription_details_data else None,
+            subscription_profits=subscription_details_data.get('profits') if subscription_details_data else None,
+            subscription_total=subscription_details_data.get('total') if subscription_details_data else None,
+            subscription_contract_end=subscription_details_data.get('contractEnd', '') if subscription_details_data else '',
+            subscription_signature=subscription_details_data.get('signature', '') if subscription_details_data else '',
+            # Transfer direction fields
+            transfer_from=transfer_from,
+            transfer_to=transfer_to,
+        )
+        
+        # Set skip flag BEFORE saving (so signal doesn't try to regenerate positions)
+        # This prevents the signal from running when transaction is saved
+        # We always skip signal generation because we handle it manually in the atomic block
+        if should_generate_positions_before_create:
+            transaction._skip_auto_position_generation = True
+        elif skip_position_generation:
+            # If skip_position_generation is True but it's not an investment, still skip signal
+            transaction._skip_auto_position_generation = True
+        
+        # If this is an investment transaction with status 'termine', set validated_at
+        if should_generate_positions_before_create:
+            transaction.validated_at = transaction_datetime
+        
+        # Now save the transaction (signal will see the skip flag)
+        transaction.save()
+        
+        # If this is an investment transaction with status 'termine', generate positions NOW
+        # This happens BEFORE the transaction is committed, ensuring positions are ready
+        # when the transaction becomes visible in the database
+        if should_generate_positions_before_create:
+            # Generate positions BEFORE transaction commit
+            # This ensures positions are created in the same atomic transaction
+            try:
+                create_positions_for_investment(transaction, trigger="api_transaction_create")
+            except Exception as pos_err:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to generate positions for transaction {transaction_id}: {str(pos_err)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Transaction will be rolled back automatically due to atomic block
+                return Response({
+                    'error': f'Erreur lors de la génération des positions: {str(pos_err)}'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # IMPORTANT: do NOT generate investment positions on client subscription.
-    # Positions must be generated only when an admin validates the transaction (status == 'termine'),
-    # which is handled by the Transaction post_save signal and the admin update endpoint.
+    # IMPORTANT: For investment transactions created with status 'termine',
+    # positions are now generated BEFORE the transaction is committed (but after it's created in the atomic block).
+    # This ensures positions are ready when the transaction becomes visible in the database.
+    # The signal will be skipped because _skip_auto_position_generation is set.
 
     # If this transfert is a client trading order (balance -> trading wallet), create a Position (ordre).
     # The trading order is represented by:
@@ -5428,7 +5489,79 @@ def transaction_generate_positions(request, client_id, transaction_id):
                     'status': p.status,
                 }
             positions_data.append(pos_data)
-        return Response({'positions': positions_data})
+        
+        # Get information about pending positions that will be deleted when saving
+        # This allows the frontend to display them before validation
+        deleted_positions_preview = None
+        try:
+            # Determine product ID
+            product_id = None
+            if is_investment and transaction.transfer_to:
+                product_id = transaction.transfer_to
+            elif is_withdrawal:
+                # For withdrawals, get product from transfer_from
+                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                    product_id = transaction.transfer_from
+                elif transaction.product:
+                    product_id = transaction.product.id
+            
+            if product_id:
+                from .models import Position
+                from django.db.models import Count
+                
+                all_pending_positions = Position.objects.filter(
+                    product_id=product_id,
+                    client_id=transaction.client_id,
+                    status='pending'
+                ).select_related('transaction', 'asset')
+                
+                total_pending_count = all_pending_positions.count()
+                deleted_by_transaction = {}
+                deleted_positions_list = []
+                
+                if total_pending_count > 0:
+                    # Get breakdown by transaction
+                    pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
+                        count=Count('id')
+                    )
+                    for item in pending_by_transaction:
+                        txn_id = item['transaction_id']
+                        count = item['count']
+                        deleted_by_transaction[txn_id] = count
+                    
+                    # Get detailed position information (limit to first 100)
+                    positions_to_delete = list(all_pending_positions[:100])
+                    for pos in positions_to_delete:
+                        deleted_positions_list.append({
+                            'id': pos.id,
+                            'transaction_id': pos.transaction_id,
+                            'asset_id': pos.asset_id,
+                            'asset_name': pos.asset.name if pos.asset else None,
+                            'invested_amount': str(pos.invested_amount),
+                            'profit_loss': str(pos.profit_loss) if pos.profit_loss else '0',
+                            'opened_at': pos.opened_at.isoformat() if pos.opened_at else None,
+                            'closed_at': pos.closed_at.isoformat() if pos.closed_at else None,
+                            'period_index': pos.period_index,
+                            'period_date': pos.period_date.isoformat() if pos.period_date else None,
+                        })
+                    
+                    deleted_positions_preview = {
+                        'total_count': total_pending_count,
+                        'deleted_by_transaction': deleted_by_transaction,
+                        'positions': deleted_positions_list,
+                        'note': f'{len(deleted_positions_list)} positions shown (out of {total_pending_count} total)' if total_pending_count > len(deleted_positions_list) else None
+                    }
+        except Exception as preview_err:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to get pending positions preview for transaction {transaction.id}: {str(preview_err)}", exc_info=True)
+            # Don't fail the request if preview fails
+        
+        response_data = {'positions': positions_data}
+        if deleted_positions_preview:
+            response_data['deleted_positions'] = deleted_positions_preview
+        
+        return Response(response_data)
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -5499,17 +5632,119 @@ def transaction_save_positions(request, client_id, transaction_id):
                 period_summaries=period_summaries,
                 positions_data=positions_data,
             )
-            return Response({'positions': [], 'count': 0, 'message': 'Historique de génération enregistré pour le retrait'})
+            
+            # Collect information about positions that will be deleted before recalculation
+            # IMPORTANT: Always recalculate positions for withdrawals when save-positions is called,
+            # regardless of transaction status. This ensures positions are recalculated even if
+            # the frontend creates withdrawals with status 'en_cours' and fails to update to 'termine'.
+            # The save-positions call indicates the user is finalizing the withdrawal.
+            deleted_positions_info = None
+            try:
+                # Get product from withdrawal transaction
+                product = None
+                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                    from .models import Product
+                    try:
+                        product = Product.objects.get(id=transaction.transfer_from)
+                    except Product.DoesNotExist:
+                        pass
+                
+                if product is None and transaction.product:
+                    product = transaction.product
+                
+                if product:
+                    # Find all pending positions that will be deleted
+                    from .models import Position
+                    from django.db.models import Count
+                    
+                    all_pending_positions = Position.objects.filter(
+                        product_id=product.id,
+                        client_id=transaction.client_id,
+                        status='pending'
+                    ).select_related('transaction', 'asset')
+                    
+                    total_pending_count = all_pending_positions.count()
+                    deleted_by_transaction = {}
+                    deleted_positions_list = []
+                    
+                    if total_pending_count > 0:
+                        # Get breakdown by transaction
+                        pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
+                            count=Count('id')
+                        )
+                        for item in pending_by_transaction:
+                            txn_id = item['transaction_id']
+                            count = item['count']
+                            deleted_by_transaction[txn_id] = count
+                        
+                        # Get detailed position information (limit to first 100)
+                        positions_to_delete = list(all_pending_positions[:100])
+                        for pos in positions_to_delete:
+                            deleted_positions_list.append({
+                                'id': pos.id,
+                                'transaction_id': pos.transaction_id,
+                                'asset_id': pos.asset_id,
+                                'asset_name': pos.asset.name if pos.asset else None,
+                                'invested_amount': str(pos.invested_amount),
+                                'profit_loss': str(pos.profit_loss) if pos.profit_loss else '0',
+                                'opened_at': pos.opened_at.isoformat() if pos.opened_at else None,
+                                'closed_at': pos.closed_at.isoformat() if pos.closed_at else None,
+                                'period_index': pos.period_index,
+                                'period_date': pos.period_date.isoformat() if pos.period_date else None,
+                            })
+                        
+                        deleted_positions_info = {
+                            'total_count': total_pending_count,
+                            'deleted_by_transaction': deleted_by_transaction,
+                            'positions': deleted_positions_list,
+                            'note': f'{len(deleted_positions_list)} positions shown (out of {total_pending_count} total)' if total_pending_count > len(deleted_positions_list) else None
+                        }
+                
+                # Now recalculate positions (this will delete the pending positions)
+                # This happens regardless of transaction status to ensure positions are always recalculated
+                # when save-positions is called for a withdrawal
+                # Use force_recalculate=True to bypass status check since frontend may call this with status 'en_cours'
+                recalculate_positions_for_product_withdrawal(transaction, force_recalculate=True)
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Recalculated positions for product after withdrawal {transaction.id} via save-positions API "
+                           f"(status={transaction.status})")
+            except Exception as recalc_err:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to recalculate positions after withdrawal {transaction.id} via save-positions API: {str(recalc_err)}", exc_info=True)
+                # Don't fail the request if recalculation fails, but log the error
+            
+            response_data = {
+                'positions': [], 
+                'count': 0, 
+                'message': 'Historique de génération enregistré pour le retrait'
+            }
+            
+            if deleted_positions_info:
+                response_data['deleted_positions'] = deleted_positions_info
+            
+            return Response(response_data)
         else:
             # For investments, save positions and history
-            created_positions = save_generated_positions(
+            created_positions, deletion_info = save_generated_positions(
                 transaction, 
                 positions_data,
                 rates_used=rates_used,
                 period_summaries=period_summaries,
             )
             serializer = PositionSerializer(created_positions, many=True)
-            return Response({'positions': serializer.data, 'count': len(created_positions)})
+            
+            response_data = {
+                'positions': serializer.data, 
+                'count': len(created_positions)
+            }
+            
+            # Add deletion info if there were positions deleted
+            if deletion_info['total_count'] > 0:
+                response_data['deleted_positions'] = deletion_info
+            
+            return Response(response_data)
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
