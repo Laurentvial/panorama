@@ -548,10 +548,10 @@ export function PlatformPortfolio() {
           currency: string;
           avgPaid: null;
           currentPrice: null;
-          investedEur: null;
+          investedEur: number | null; // valeur investie en EUR (from positions)
           investedAsset: null;
-          pnl: null;
-          pnlPct: null;
+          pnl: number | null; // P&L en EUR (from positions)
+          pnlPct: number | null;
         };
 
     const rows: Row[] = [];
@@ -620,6 +620,52 @@ export function PlatformPortfolio() {
         product?.type || product?.subcategory || product?.categoryName || product?.category || ''
       ).trim();
       const productReferenceFromProduct = String(product?.reference || '').trim();
+      
+      // Calculate invested value and P&L from positions (open and done, excluding pending)
+      let totalInvested = 0;
+      let totalPnl = 0;
+      
+      for (const pos of positions || []) {
+        // Only include open and done positions, exclude pending
+        if (pos?.status !== 'open' && pos?.status !== 'done') continue;
+        
+        // Check if this position belongs to this product
+        const posProductId = pos?.productId || pos?.product_id || null;
+        if (!posProductId || String(posProductId) !== String(p.productId)) continue;
+        
+        // Sum invested amount
+        const investedNum = typeof pos.invested_amount === 'string' ? parseFloat(pos.invested_amount) : Number(pos.invested_amount);
+        if (Number.isFinite(investedNum) && investedNum > 0) {
+          totalInvested += investedNum;
+        }
+        
+        // Sum P&L
+        const pnlNum = pos.profit_loss == null ? null : typeof pos.profit_loss === 'string' ? parseFloat(pos.profit_loss) : Number(pos.profit_loss);
+        if (pnlNum != null && Number.isFinite(pnlNum)) {
+          // Handle FX conversion if needed
+          const assetCurrency = (pos?.assetCurrency || pos?.asset_currency || pos?.asset?.currency || 'EUR').trim().toUpperCase();
+          const fxNum =
+            pos?.fx_rate_eur_to_asset == null
+              ? null
+              : typeof pos.fx_rate_eur_to_asset === 'string'
+                ? parseFloat(pos.fx_rate_eur_to_asset)
+                : Number(pos.fx_rate_eur_to_asset);
+          const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+          
+          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+            // profit_loss is in asset currency, convert to EUR
+            totalPnl += pnlNum / fxRate;
+          } else {
+            // Already in EUR
+            totalPnl += pnlNum;
+          }
+        }
+      }
+      
+      const investedEur = totalInvested > 0 ? totalInvested : null;
+      const pnl = totalPnl !== 0 ? totalPnl : null;
+      const pnlPct = investedEur != null && investedEur > 0 && pnl != null ? (pnl / investedEur) * 100 : null;
+      
       rows.push({
         kind: 'product',
         key: `product-${p.productId}`,
@@ -632,10 +678,10 @@ export function PlatformPortfolio() {
         currency: 'EUR',
         avgPaid: null,
         currentPrice: null,
-        investedEur: null,
+        investedEur: investedEur != null && Number.isFinite(investedEur) ? investedEur : null,
         investedAsset: null,
-        pnl: null,
-        pnlPct: null,
+        pnl: pnl != null && Number.isFinite(pnl) ? pnl : null,
+        pnlPct: pnlPct != null && Number.isFinite(pnlPct) ? pnlPct : null,
       });
     }
 
@@ -651,7 +697,7 @@ export function PlatformPortfolio() {
       if (ta !== tb) return tb - ta;
       return a.kind === b.kind ? 0 : a.kind === 'asset' ? -1 : 1;
     });
-  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions]);
+  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions, positions]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -659,7 +705,7 @@ export function PlatformPortfolio() {
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // Only achat + investissement + transfert (balance -> product)
+    let calculatedTotalInvesti = 0; // achat + transfert (balance -> product) - transfert (product -> balance) when status is 'termine'
 
     const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
 
@@ -679,7 +725,6 @@ export function PlatformPortfolio() {
           calculatedInvestedCapital += amt;
           break;
         case 'achat':
-        case 'investissement':
           calculatedTradingPortfolio += amt;
           calculatedTotalInvesti += amt;
           break;
@@ -703,6 +748,8 @@ export function PlatformPortfolio() {
             calculatedTradingPortfolio += amt;
           } else if (transferTo === 'balance') {
             // product -> balance
+            // When status is 'termine', subtract from totalInvesti (capital returned from terminated product)
+            calculatedTotalInvesti -= amt;
             calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
             // Fallback: assume subscription (balance -> product)
@@ -750,7 +797,7 @@ export function PlatformPortfolio() {
   const profitLoss = useMemo(() => {
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte)
-    // 2. Toutes les positions de trading (open, done, et cancelled si elles ont un profit_loss)
+    // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
     
     // Create assets map locally for this useMemo (matching PlatformDashboard pattern)
     const assetsMap = new Map<string, any>();
@@ -764,11 +811,11 @@ export function PlatformPortfolio() {
     
     // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      // Inclure les positions ouvertes, terminées, annulées, et pending avec profit_loss
-      // Exclure seulement les positions pending sans profit_loss
-      if (p?.status === 'pending' && (p?.profit_loss == null || p?.profit_loss === '')) continue;
-      // Inclure open, done, cancelled, et pending (les pending sans profit_loss ont déjà été exclus ci-dessus)
-      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled' && p?.status !== 'pending') continue;
+      // Inclure uniquement les positions ouvertes (open) et fermées (done)
+      // Exclure toutes les positions pending
+      if (p?.status === 'pending') continue;
+      // Inclure seulement open, done, et cancelled (si elles ont un profit_loss)
+      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
@@ -928,7 +975,7 @@ export function PlatformPortfolio() {
           delta = amount;
           typeLabel = resolveTypeLabel(t);
         }
-      } else if (t?.type === 'achat' || t?.type === 'investissement') {
+      } else if (t?.type === 'achat') {
         delta = amount;
         typeLabel = resolveTypeLabel(t);
       } else if (t?.type === 'vente') {
@@ -999,7 +1046,7 @@ export function PlatformPortfolio() {
                 <div className="text-2xl font-bold">
                   {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit)</p>
+                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance terminé)</p>
               </CardContent>
             </Card>
 
@@ -1144,16 +1191,26 @@ export function PlatformPortfolio() {
                                 }
                               }
                             } else {
-                              // Position EUR : EUR uniquement
-                              investedLabelMain = r.kind === 'asset' && r.investedEur != null ? formatCurrency(r.investedEur) : '—';
+                              // Position EUR ou produit : EUR uniquement
+                              if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
+                                investedLabelMain = formatCurrency(r.investedEur);
+                              } else if (r.kind === 'asset' && r.investedEur != null) {
+                                investedLabelMain = formatCurrency(r.investedEur);
+                              } else {
+                                investedLabelMain = '—';
+                              }
                             }
                             
                             // P&L : pour les positions non-EUR, afficher devise de l'actif en principal, EUR en secondaire
+                            // Pour les produits, afficher P&L en EUR
                             const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
                             let pnlLabelMain: string;
                             let pnlLabelSub: string | null = null;
                             
-                            if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
+                            if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
+                              // Produit interne : P&L en EUR uniquement
+                              pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                            } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
                               if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null && 
                                   Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
                                 // Position non-EUR : devise de l'actif en principal
@@ -1280,6 +1337,10 @@ export function PlatformPortfolio() {
                         const isTradingTransfer =
                           t.type === 'transfert' &&
                           (t.to === 'trading' || t.to_field === 'trading' || t.transfer_to === 'trading');
+                        
+                        const isTransferToBalance =
+                          t.type === 'transfert' &&
+                          (t.to === 'balance' || t.to_field === 'balance' || t.transfer_to === 'balance');
 
                         const typeLabel =
                           t.type === 'depot'
@@ -1291,9 +1352,7 @@ export function PlatformPortfolio() {
                                 : t.type === 'vente'
                                   ? 'Vente'
                                   : t.type === 'transfert'
-                                    ? (isTradingTransfer ? (t.assetType || 'Trading') : 'Investissement')
-                                    : t.type === 'investissement'
-                                      ? 'Investissement'
+                                    ? (isTradingTransfer ? (t.assetType || 'Trading') : isTransferToBalance ? 'Transfert' : 'Investissement')
                                   : t.type === 'bonus'
                                     ? 'Bonus'
                                     : t.type === 'interets'
@@ -1379,8 +1438,6 @@ export function PlatformPortfolio() {
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix d'achat</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Quantité</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date d'ouverture</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date de fermeture</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
@@ -1552,8 +1609,6 @@ export function PlatformPortfolio() {
                             <td style={{ padding: '10px 8px' }}>{assetLabel}</td>
                             <td style={{ padding: '10px 8px' }}>{productTypeLabel}</td>
                             <td style={{ padding: '10px 8px' }}>{refLabel}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>{entryPriceLabel}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>{qtyLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{openedLabel}</td>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{closedLabel}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right' }}>

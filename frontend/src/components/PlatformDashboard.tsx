@@ -173,7 +173,6 @@ export function PlatformDashboard() {
           calculatedInvestedCapital += amount;
           break;
         case 'achat':
-        case 'investissement':
           calculatedTradingPortfolio += amount;
           break;
         case 'vente':
@@ -235,7 +234,7 @@ export function PlatformDashboard() {
   const profitLoss = React.useMemo(() => {
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte) - pas de calculatedValues ici car pas de transactions chargées
-    // 2. Toutes les positions de trading (open, done, et cancelled si elles ont un profit_loss)
+    // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
     
     // Commencer avec 0 (pas de calculatedValues dans Dashboard)
     let total = 0;
@@ -249,9 +248,10 @@ export function PlatformDashboard() {
     
     // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      // Inclure les positions ouvertes, terminées, et annulées (si elles ont un profit_loss)
-      // Exclure seulement les positions pending sans profit_loss
-      if (p?.status === 'pending' && (p?.profit_loss == null || p?.profit_loss === '')) continue;
+      // Inclure uniquement les positions ouvertes (open) et fermées (done)
+      // Exclure toutes les positions pending
+      if (p?.status === 'pending') continue;
+      // Inclure seulement open, done, et cancelled (si elles ont un profit_loss)
       if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
 
       const profitLossNum =
@@ -404,7 +404,7 @@ export function PlatformDashboard() {
           delta = amount;
           typeLabel = resolveTypeLabel(t);
         }
-      } else if (t?.type === 'achat' || t?.type === 'investissement') {
+      } else if (t?.type === 'achat') {
         delta = amount;
         typeLabel = resolveTypeLabel(t);
       } else if (t?.type === 'vente') {

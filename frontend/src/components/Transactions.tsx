@@ -146,7 +146,6 @@ export function Transactions() {
     vente: 'Vente',
     interets: 'Intérêts',
     frais: 'Frais',
-    investissement: 'Investissement',
     transfert: 'Transfert',
     perte: 'Perte',
   };

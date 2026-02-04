@@ -688,7 +688,7 @@ export function ProductDetail() {
         calculatedInvestedCapital -= txnAmount;
       } else if (transaction.type === 'bonus') {
         calculatedInvestedCapital += txnAmount;
-      } else if (transaction.type === 'achat' || transaction.type === 'investissement') {
+      } else if (transaction.type === 'achat') {
         calculatedTradingPortfolio += txnAmount;
       } else if (transaction.type === 'vente') {
         calculatedTradingPortfolio -= txnAmount;
@@ -768,7 +768,7 @@ export function ProductDetail() {
       const transactionData = {
         type: 'transfert',
         amount: amount,
-        description: `Transfert de Balance Cash vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}. Montant: ${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR. Période d'intérêt: ${subscriptionData.interestPeriod || productData.interestPeriod || 'N/A'}. Date de fin de contrat: ${formatDateToFrench(new Date().toISOString().split('T')[0])}. Signature incluse.`,
+        description: `Transfert de Balance Cash vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}.`,
         status: 'en_cours',
         datetime: new Date().toISOString(),
         to_field: productData.id, // Transfer to product (investment: balance → product)

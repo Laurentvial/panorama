@@ -92,7 +92,6 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           runningInvestedCapital += amount;
           break;
         case 'achat':
-        case 'investissement':
           runningTradingPortfolio += amount;
           break;
         case 'vente':

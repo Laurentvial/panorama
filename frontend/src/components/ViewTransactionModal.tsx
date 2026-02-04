@@ -193,6 +193,11 @@ export function ViewTransactionModal({
   const subscriptionDetails = parseSubscriptionDetails(transaction);
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
+  
+  // Check if this is an investment transfert (transfer_to is a product ID, not 'balance')
+  const isInvestmentTransfer = transaction.type === 'transfert' && 
+                               transaction.transfer_to && 
+                               transaction.transfer_to !== 'balance';
 
   const findAssetOrProduct = () => {
     if (assetInfo.reference) {
@@ -361,7 +366,51 @@ export function ViewTransactionModal({
               </div>
             </div>
             
-            {transaction.type === 'transfert' && subscriptionDetails && (
+            {/* Transfer direction information for transfert transactions */}
+            {transaction.type === 'transfert' && (
+              <div className="border-t pt-4 mt-4">
+                <h3 className="text-lg font-semibold mb-4">Détails du transfert</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <Label className="text-slate-600 font-semibold">Transfert de</Label>
+                    <p className="text-slate-900 mt-1">
+                      {(() => {
+                        const fromField = transaction.transfer_from || transaction.from_field || 'balance';
+                        if (fromField === 'balance') {
+                          return 'Balance Cash';
+                        }
+                        const fromProduct = products.find((p: any) => p.id === fromField);
+                        if (fromProduct) {
+                          return fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                        }
+                        return fromField;
+                      })()}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-slate-600 font-semibold">Transfert vers</Label>
+                    <p className="text-slate-900 mt-1">
+                      {(() => {
+                        const toField = transaction.transfer_to || transaction.to_field || 'balance';
+                        if (toField === 'balance') {
+                          return 'Balance Cash';
+                        }
+                        if (toField === 'trading') {
+                          return 'Trading';
+                        }
+                        const toProduct = products.find((p: any) => p.id === toField);
+                        if (toProduct) {
+                          return toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                        }
+                        return toField;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {transaction.type === 'transfert' && subscriptionDetails && isInvestmentTransfer && (
               <>
                 <div className="border-t pt-4 mt-4">
                   <h3 className="text-lg font-semibold mb-4">Formulaire de Souscription</h3>
@@ -662,7 +711,7 @@ export function ViewTransactionModal({
                                     <td className="p-2 text-slate-700 text-xs">
                                       {period.startDate ? new Date(period.startDate).toLocaleDateString('fr-FR') : '-'} - {period.endDate ? new Date(period.endDate).toLocaleDateString('fr-FR') : '-'}
                                     </td>
-                                    <td className="p-2 text-right text-slate-900 font-medium">{parseFloat(period.ratePct || 0).toFixed(2)}%</td>
+                                    <td className="p-2 text-right text-slate-900 font-medium">{parseFloat(period.baseRatePct || period.ratePct || 0).toFixed(2)}%</td>
                                     <td className="p-2 text-right text-slate-700">
                                       {parseFloat(period.capitalBase || 0).toLocaleString('fr-FR', {
                                         minimumFractionDigits: 2,

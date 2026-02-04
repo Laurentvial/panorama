@@ -194,7 +194,6 @@ export function PlatformTrading() {
           investedCapital += amt;
           break;
         case 'achat':
-        case 'investissement':
           tradingPortfolio += amt;
           break;
         case 'vente':

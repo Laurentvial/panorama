@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -65,6 +66,8 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
   const [search, setSearch] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
+  const [products, setProducts] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
@@ -90,6 +93,18 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        const productsData = await apiCall('/api/products/').catch(() => ({ products: [] }));
+        setProducts(productsData.products || productsData || []);
+      } catch (error) {
+        console.error('Error loading products:', error);
+      }
+    };
+    loadProducts();
+  }, []);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return positions.filter((p) => {
@@ -99,6 +114,11 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       if (activeTab === 'upcoming' && !isUpcoming) return false;
       if (activeTab === 'open' && !isOpen) return false;
       if (activeTab === 'closed' && !isClosed) return false;
+      
+      // Filter by product
+      if (selectedProductId && p.productId !== selectedProductId) return false;
+      
+      // Filter by search query
       if (!q) return true;
       return (
         (p.productName || '').toLowerCase().includes(q) ||
@@ -108,7 +128,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
         (p.transactionId || '').toLowerCase().includes(q)
       );
     });
-  }, [positions, search, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [positions, search, selectedProductId, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
 
   const counts = useMemo(() => {
     let upcoming = 0;
@@ -132,12 +152,32 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="w-full md:w-[420px]">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher (produit, asset, transaction...)"
-          />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="w-full md:w-[420px]">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher (produit, asset, transaction...)"
+            />
+          </div>
+          <div className="w-full md:w-[300px]">
+            <Select 
+              value={selectedProductId || 'all'} 
+              onValueChange={(value) => setSelectedProductId(value === 'all' ? undefined : value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Filtrer par produit" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les produits</SelectItem>
+                {products.map((product: any) => (
+                  <SelectItem key={product.id} value={product.id}>
+                    {product.name}{product.reference ? ` (${product.reference})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>

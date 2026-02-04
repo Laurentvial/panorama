@@ -9,7 +9,6 @@ export const getTypeLabel = (type: string): string => {
     'vente': 'Vente',
     'interets': 'Intérêts',
     'frais': 'Frais',
-    'investissement': 'Investissement',
     'transfert': 'Transfert',
     'perte': 'Perte',
   };
@@ -36,7 +35,6 @@ export const getTypeColors = (type: string): { bg: string; text: string } => {
     'vente': { bg: '#dcfce7', text: '#15803d' }, // green
     'interets': { bg: '#d1fae5', text: '#065f46' }, // dark green
     'frais': { bg: '#fee2e2', text: '#991b1b' }, // red
-    'investissement': { bg: '#e0e7ff', text: '#3730a3' }, // indigo
     'transfert': { bg: '#fce7f3', text: '#9f1239' }, // pink
     'perte': { bg: '#fee2e2', text: '#991b1b' }, // red
   };
@@ -46,12 +44,15 @@ export const getTypeColors = (type: string): { bg: string; text: string } => {
 export const extractAssetInfo = (description: string): { name: string; reference: string | null; displayText: string } => {
   if (!description) return { name: '-', reference: null, displayText: '-' };
   
-  // Pattern for transfert: "Transfert de Balance Cash vers Nom (Référence)"
-  const transfertPattern = /Transfert de Balance Cash vers\s+([^(]+?)(?:\s*\(([^)]+)\))?/i;
+  // Pattern for transfert: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (Référence)"
+  // Support both old and new formats
+  // Use .*? (non-greedy) instead of [^v]+? to handle product names containing 'v' (e.g., "Volkswagen")
+  const transfertPattern = /Transfert de\s+(.*?)\s+vers\s+([^(]+?)(?:\s*\(([^)]+)\))?/i;
   const transfertMatch = description.match(transfertPattern);
   if (transfertMatch) {
-    const name = transfertMatch[1].trim();
-    const reference = transfertMatch[2] ? transfertMatch[2].trim() : null;
+    // Extract the destination (to) which is what we're interested in
+    const name = transfertMatch[2].trim();
+    const reference = transfertMatch[3] ? transfertMatch[3].trim() : null;
     return {
       name,
       reference,
@@ -103,10 +104,6 @@ export const TRANSACTION_TYPES = {
   },
   frais: {
     label: 'Frais',
-    statuses: ['en_cours', 'termine', 'annule']
-  },
-  investissement: {
-    label: 'Investissement',
     statuses: ['en_cours', 'termine', 'annule']
   },
   transfert: {

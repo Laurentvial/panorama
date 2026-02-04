@@ -52,7 +52,7 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // Only achat and transfert (balance → product)
+    let calculatedTotalInvesti = 0; // achat + transfert (balance → product) - transfert (product → balance) when status is 'termine'
 
     // Only consider completed transactions (status === 'termine')
     const completedTransactions = transactions.filter((transaction: any) => 
@@ -77,7 +77,6 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
           calculatedInvestedCapital += amount;
           break;
         case 'achat':
-        case 'investissement':
           // Purchases increase trading portfolio (money invested in assets)
           calculatedTradingPortfolio += amount;
           // Don't affect profit/loss - investments start at 0 profit/loss
@@ -116,6 +115,8 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
             // Profit/loss will only change when position values change (future feature)
           } else if (transferTo === 'balance') {
             // Withdrawal: product → balance
+            // When status is 'termine', subtract from totalInvesti (capital returned from terminated product)
+            calculatedTotalInvesti -= amount;
             calculatedTradingPortfolio -= amount;
             // Note: Withdrawal profit/loss will be calculated based on position values when that feature is implemented
             // For now, we don't adjust profit/loss for withdrawals since we don't track position values
@@ -185,18 +186,18 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
   const profitLoss = useMemo(() => {
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte)
-    // 2. Toutes les positions de trading (open, done, et cancelled si elles ont un profit_loss)
+    // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
     
     // Commencer avec le profit/loss des transactions
     let total = hasCompletedTransactions ? calculatedValues.profitLoss : 0;
     
     // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      // Inclure les positions ouvertes, terminées, annulées, et pending avec profit_loss
-      // Exclure seulement les positions pending sans profit_loss
-      if (p?.status === 'pending' && (p?.profit_loss == null || p?.profit_loss === '')) continue;
-      // Inclure open, done, cancelled, et pending (les pending sans profit_loss ont déjà été exclus ci-dessus)
-      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled' && p?.status !== 'pending') continue;
+      // Inclure uniquement les positions ouvertes (open) et fermées (done)
+      // Exclure toutes les positions pending
+      if (p?.status === 'pending') continue;
+      // Inclure seulement open, done, et cancelled (si elles ont un profit_loss)
+      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
@@ -338,7 +339,7 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
             <div className="text-2xl font-bold">
               {formatCurrency(totalInvesti)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit)</p>
+            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance terminé)</p>
           </CardContent>
         </Card>
 

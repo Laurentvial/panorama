@@ -58,6 +58,8 @@ from .position_service import (
     generate_rates_for_investment,
     generate_positions_with_rates,
     save_generated_positions,
+    save_position_generation_history,
+    recalculate_positions_for_product_withdrawal,
 )
 
 
@@ -4691,9 +4693,20 @@ def client_transaction_create(request, client_id):
             product = Product.objects.get(id=transfer_to)
         except Product.DoesNotExist:
             product = None
+    
+    # For withdrawals (transfert product -> balance), set product to source product (transfer_from)
+    # This ensures recalculate_positions_for_product_withdrawal can identify the product correctly
+    if transaction_type == 'transfert' and transfer_to == 'balance':
+        # If transfer_from is a product ID (not 'balance'), set product to that product
+        if transfer_from and transfer_from != 'balance':
+            try:
+                product = Product.objects.get(id=transfer_from)
+            except Product.DoesNotExist:
+                product = None  # Product doesn't exist, keep product as None
 
     # If admin created a transfert without subscription form, auto-fill all possible subscription details
-    if transaction_type == 'transfert' and product:
+    # Only for investments (balance → product), not for withdrawals (product → balance)
+    if transaction_type == 'transfert' and product and transfer_to and transfer_to != 'balance':
         try:
             amount_dec = Decimal(str(request.data.get('amount') or 0))
         except Exception:
@@ -4728,7 +4741,7 @@ def client_transaction_create(request, client_id):
             elif txn.type == 'bonus':
                 calculated_bonus += amount
                 calculated_invested_capital += amount
-            elif txn.type in ['achat', 'investissement']:
+            elif txn.type == 'achat':
                 calculated_trading_portfolio += amount
             elif txn.type == 'vente':
                 calculated_trading_portfolio -= amount
@@ -5021,6 +5034,18 @@ def client_transaction_update(request, client_id, transaction_id):
         if not transaction.transfer_from:
             transaction.transfer_from = 'balance'
     
+    # For withdrawals (transfert product -> balance), set product field to point to source product
+    # This ensures recalculate_positions_for_product_withdrawal can identify the product correctly
+    if transaction.type == 'transfert' and transaction.transfer_to == 'balance':
+        # If transfer_from is a product ID (not 'balance'), set product field to that product
+        if transaction.transfer_from and transaction.transfer_from != 'balance':
+            try:
+                from .models import Product
+                source_product = Product.objects.get(id=transaction.transfer_from)
+                transaction.product = source_product
+            except Product.DoesNotExist:
+                pass  # Product doesn't exist, keep product field as is
+    
     # Set skip flag BEFORE saving if needed (so signal can check it)
     skip_position_generation = request.data.get('skip_position_generation', False)
     if skip_position_generation:
@@ -5097,6 +5122,24 @@ def client_transaction_update(request, client_id, transaction_id):
                 logger.error(f"Failed to create positions for transaction {transaction.id} on status termine: {str(pos_err)}")
                 import traceback
                 logger.error(traceback.format_exc())
+    
+    # If a withdrawal becomes "termine", recalculate positions for all investment transactions on the same product
+    # A withdrawal is specifically when transfer_to == 'balance'
+    is_withdrawal = (
+        transaction.type == 'transfert' and
+        transaction.transfer_to == 'balance'
+    )
+    if is_withdrawal and transaction.status == 'termine' and not skip_position_generation:
+        if previous_status != 'termine':
+            try:
+                recalculate_positions_for_product_withdrawal(transaction)
+            except Exception as pos_err:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to recalculate positions after withdrawal transaction {transaction.id}: {str(pos_err)}")
+                import traceback
+                logger.error(traceback.format_exc())
+    
     if is_investment and not was_investment:
         # Transaction now represents an investment start: create positions
         try:
@@ -5158,18 +5201,61 @@ def transaction_generate_rates(request, client_id, transaction_id):
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    # Check if this is an investment transaction
+    # Check if this is an investment or withdrawal transaction
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
         and transaction.transfer_to != 'balance'
     )
     
-    if not is_investment:
-        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    is_withdrawal = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to == 'balance'
+    )
+    
+    if not is_investment and not is_withdrawal:
+        return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        rates = generate_rates_for_investment(transaction)
+        # For withdrawals, we need to generate rates for the product source
+        # Create a temporary transaction-like object pointing to the source product
+        if is_withdrawal:
+            # Determine the product from which capital is being withdrawn
+            product = None
+            if transaction.transfer_from and transaction.transfer_from != 'balance':
+                try:
+                    from .models import Product
+                    product = Product.objects.get(id=transaction.transfer_from)
+                except Product.DoesNotExist:
+                    pass
+            
+            if product is None and transaction.product:
+                product = transaction.product
+            
+            if product is None:
+                return Response({'error': 'Impossible de déterminer le produit source pour ce retrait'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Create a temporary transaction object for rate generation
+            # This simulates an investment transaction on the source product
+            # We mark it as a withdrawal by keeping the original description which contains "vers Balance Cash"
+            temp_transaction = Transaction(
+                id=transaction.id,
+                client_id=transaction.client_id,
+                type='transfert',
+                amount=transaction.amount,
+                description=transaction.description,  # Keep original description to detect withdrawal
+                status=transaction.status,
+                datetime=transaction.datetime,
+                transfer_to=product.id,  # Point to source product
+                transfer_from='balance',  # This helps identify it as a temp transaction for withdrawal
+                product=product,
+                subscription_details=transaction.subscription_details or {}
+            )
+            # Mark this as a withdrawal temp transaction so build_investment_context can handle it correctly
+            temp_transaction._is_withdrawal_temp = True
+            rates = generate_rates_for_investment(temp_transaction)
+        else:
+            rates = generate_rates_for_investment(transaction)
         return Response({'rates': rates})
     except Exception as e:
         import logging
@@ -5198,15 +5284,20 @@ def transaction_generate_positions(request, client_id, transaction_id):
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    # Check if this is an investment transaction
+    # Check if this is an investment or withdrawal transaction
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
         and transaction.transfer_to != 'balance'
     )
     
-    if not is_investment:
-        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    is_withdrawal = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to == 'balance'
+    )
+    
+    if not is_investment and not is_withdrawal:
+        return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Parse custom rates from request
     custom_rates_data = request.data.get('rates', {})
@@ -5218,11 +5309,62 @@ def transaction_generate_positions(request, client_id, transaction_id):
             int(period_idx): Decimal(str(rate))
             for period_idx, rate in custom_rates_data.items()
         }
+        # Debug: log received rates
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Received custom rates for transaction {transaction.id}: {custom_rates}")
+        logger.info(f"Raw rates data from request: {custom_rates_data}")
     except (ValueError, InvalidOperation) as e:
         return Response({'error': f'Format de taux invalide: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Parse avoid_losses option
+    avoid_losses = request.data.get('avoid_losses', False)
+    if not isinstance(avoid_losses, bool):
+        avoid_losses = str(avoid_losses).lower() in ('true', '1', 'yes', 'on')
+    
     try:
-        positions = generate_positions_with_rates(transaction, custom_rates=custom_rates, save_to_db=False)
+        # For withdrawals, create a temporary transaction pointing to source product
+        txn_to_use = transaction
+        if is_withdrawal:
+            # Determine the product from which capital is being withdrawn
+            product = None
+            if transaction.transfer_from and transaction.transfer_from != 'balance':
+                try:
+                    from .models import Product
+                    product = Product.objects.get(id=transaction.transfer_from)
+                except Product.DoesNotExist:
+                    pass
+            
+            if product is None and transaction.product:
+                product = transaction.product
+            
+            if product is None:
+                return Response({'error': 'Impossible de déterminer le produit source pour ce retrait'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Create a temporary transaction object for position generation
+            # This simulates an investment transaction on the source product
+            txn_to_use = Transaction(
+                id=transaction.id,
+                client_id=transaction.client_id,
+                type='transfert',
+                amount=transaction.amount,
+                description=transaction.description,  # Keep original description to detect withdrawal
+                status=transaction.status,
+                datetime=transaction.datetime,
+                transfer_to=product.id,  # Point to source product
+                transfer_from='balance',  # This helps identify it as a temp transaction for withdrawal
+                product=product,
+                subscription_details=transaction.subscription_details or {}
+            )
+            # Mark this as a withdrawal temp transaction so build_investment_context can handle it correctly
+            txn_to_use._is_withdrawal_temp = True
+        
+        positions = generate_positions_with_rates(
+            txn_to_use, 
+            custom_rates=custom_rates, 
+            save_to_db=False,
+            avoid_losses=avoid_losses
+        )
         # Convert Position objects to dicts if needed
         positions_data = []
         for p in positions:
@@ -5314,15 +5456,20 @@ def transaction_save_positions(request, client_id, transaction_id):
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    # Check if this is an investment transaction
+    # Check if this is an investment or withdrawal transaction
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
         and transaction.transfer_to != 'balance'
     )
     
-    if not is_investment:
-        return Response({'error': 'Cette transaction n\'est pas un investissement'}, status=status.HTTP_400_BAD_REQUEST)
+    is_withdrawal = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to == 'balance'
+    )
+    
+    if not is_investment and not is_withdrawal:
+        return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Parse positions data from request
     positions_data = request.data.get('positions', [])
@@ -5344,18 +5491,29 @@ def transaction_save_positions(request, client_id, transaction_id):
         period_summaries = None
     
     try:
-        created_positions = save_generated_positions(
-            transaction, 
-            positions_data,
-            rates_used=rates_used,
-            period_summaries=period_summaries,
-        )
-        serializer = PositionSerializer(created_positions, many=True)
-        return Response({'positions': serializer.data, 'count': len(created_positions)})
+        if is_withdrawal:
+            # For withdrawals, only save the generation history (no positions are created for the withdrawal itself)
+            save_position_generation_history(
+                transaction,
+                rates_used=rates_used,
+                period_summaries=period_summaries,
+                positions_data=positions_data,
+            )
+            return Response({'positions': [], 'count': 0, 'message': 'Historique de génération enregistré pour le retrait'})
+        else:
+            # For investments, save positions and history
+            created_positions = save_generated_positions(
+                transaction, 
+                positions_data,
+                rates_used=rates_used,
+                period_summaries=period_summaries,
+            )
+            serializer = PositionSerializer(created_positions, many=True)
+            return Response({'positions': serializer.data, 'count': len(created_positions)})
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Failed to save positions for transaction {transaction.id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to save positions/history for transaction {transaction.id}: {str(e)}", exc_info=True)
         return Response({'error': f'Erreur lors de l\'enregistrement des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

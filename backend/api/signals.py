@@ -7,7 +7,7 @@ from django.core.signals import request_finished
 from django.db import close_old_connections, connections
 
 from .models import Transaction, Position
-from .position_service import create_positions_for_investment
+from .position_service import create_positions_for_investment, recalculate_positions_for_product_withdrawal
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,47 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         create_positions_for_investment(instance, trigger="signal")
     except Exception as e:
         logger.error("Failed to auto-generate positions for transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)
+
+
+@receiver(post_save, sender=Transaction)
+def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transaction, created: bool, **kwargs):
+    """
+    Recalculate positions for all investment transactions on the same product
+    when a withdrawal (product -> balance) is validated.
+    
+    This ensures that when capital is withdrawn, future positions are recalculated
+    with the new (reduced) invested capital.
+    """
+    try:
+        # Check if this is a withdrawal (transfert from product to balance)
+        # A withdrawal is specifically when transfer_to == 'balance'
+        is_withdrawal = (
+            instance.type == "transfert"
+            and instance.transfer_to == "balance"
+        )
+        if not is_withdrawal:
+            return
+        
+        if instance.status != "termine":
+            return
+        
+        # Skip if flag is set
+        if getattr(instance, "_skip_auto_position_generation", False):
+            logger.debug("Skipping position recalculation for withdrawal transaction %s (skip flag set)", getattr(instance, "id", None))
+            return
+        
+        previous_status = getattr(instance, "_previous_status", None)
+        status_changed_to_termine = previous_status != "termine"
+        
+        # Only recalculate if status just changed to "termine"
+        # (to avoid recalculating multiple times if transaction is saved multiple times)
+        if not status_changed_to_termine:
+            return
+        
+        logger.info("Recalculating positions after withdrawal transaction %s (status changed to termine)", getattr(instance, "id", None))
+        recalculate_positions_for_product_withdrawal(instance)
+    except Exception as e:
+        logger.error("Failed to recalculate positions after withdrawal transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)
 
 
 @receiver(request_finished)

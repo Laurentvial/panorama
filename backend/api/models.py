@@ -397,7 +397,6 @@ class Transaction(models.Model):
         ('vente', 'Vente'),
         ('interets', 'Intérêts'),
         ('frais', 'Frais'),
-        ('investissement', 'Investissement'),
         ('transfert', 'Transfert'),
         ('perte', 'Perte'),
     ]

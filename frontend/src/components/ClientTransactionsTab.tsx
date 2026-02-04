@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
+import { PositionGenerationModal } from './PositionGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS, parseSubscriptionDetails } from './transactionUtils';
 import '../styles/Modal.css';
 
@@ -53,10 +54,6 @@ const TRANSACTION_TYPES = {
     label: 'Frais',
     statuses: ['en_cours', 'termine', 'annule']
   },
-  investissement: {
-    label: 'Investissement',
-    statuses: ['en_cours', 'termine', 'annule']
-  },
   transfert: {
     label: 'Transfert',
     statuses: ['en_cours', 'termine', 'annule']
@@ -80,7 +77,9 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
   const [isEditTransactionModalOpen, setIsEditTransactionModalOpen] = useState(false);
+  const [isPositionGenerationModalOpen, setIsPositionGenerationModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  const [transactionForPositionGeneration, setTransactionForPositionGeneration] = useState<any>(null);
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
@@ -201,6 +200,57 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
       setTransactionForm(prev => ({ ...prev, datetime: `${year}-${month}-${day}T${hours}:${minutes}` }));
     }
   }, [isTransactionDialogOpen]);
+
+  // Auto-generate description for transfert transactions
+  useEffect(() => {
+    if (transactionForm.type === 'transfert' && (transactionForm.from_field || transactionForm.to_field)) {
+      const fromField = transactionForm.from_field || 'balance';
+      const toField = transactionForm.to_field || 'balance';
+      
+      // Find product names
+      let fromName = 'Balance Cash';
+      let toName = 'Balance Cash';
+      
+      if (fromField !== 'balance') {
+        const fromProduct = products.find((p: any) => p.id === fromField);
+        if (fromProduct) {
+          fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+        }
+      }
+      
+      if (toField !== 'balance') {
+        const toProduct = products.find((p: any) => p.id === toField);
+        if (toProduct) {
+          toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+        }
+      }
+      
+      // Generate description: "Transfert de [from] vers [to]."
+      const generatedDescription = `Transfert de ${fromName} vers ${toName}.`;
+      
+      const currentDesc = transactionForm.description || '';
+      
+      // Check if description matches old auto-generated pattern (with Montant, Période, etc.)
+      const isOldAutoPattern = currentDesc.startsWith('Transfert de') && 
+                               (currentDesc.includes('Montant:') || currentDesc.includes('Période d\'intérêt') || currentDesc.includes('Date de fin de contrat'));
+      
+      // Check if description matches the new simplified format pattern
+      const isNewFormatPattern = currentDesc.match(/^Transfert de\s+.+?\s+vers\s+.+?\.?$/);
+      
+      // Update description if:
+      // 1. Description is empty
+      // 2. Description matches old auto-generated pattern (needs update)
+      // 3. Description matches new format but doesn't match current values (needs update)
+      // This allows users to manually edit the description without it being overwritten, unless they change the transfer fields
+      if (!currentDesc.trim() || isOldAutoPattern || (isNewFormatPattern && currentDesc.trim() !== generatedDescription.trim())) {
+        setTransactionForm(prev => ({ ...prev, description: generatedDescription }));
+      }
+    } else if (transactionForm.type !== 'transfert' && transactionForm.description && 
+               transactionForm.description.startsWith('Transfert de')) {
+      // Clear transfer description if type changes away from transfert
+      setTransactionForm(prev => ({ ...prev, description: '' }));
+    }
+  }, [transactionForm.type, transactionForm.from_field, transactionForm.to_field, products]);
 
   async function handleCreateTransaction(e: React.FormEvent) {
     e.preventDefault();
@@ -347,6 +397,22 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
     }
     return `${filters.types.length} types sélectionnés`;
   };
+
+  // Check if we should show warning for product without available funds
+  const shouldShowWarning = transactionForm.type === 'transfert' && 
+                            transactionForm.from_field && 
+                            transactionForm.from_field !== 'balance' && 
+                            transactionForm.to_field === 'balance';
+  
+  const sourceProduct = shouldShowWarning 
+    ? products.find((p: any) => p.id === transactionForm.from_field)
+    : null;
+  
+  const hasAvailableFunds = sourceProduct 
+    ? (sourceProduct.availableFunds ?? sourceProduct.available_funds ?? false)
+    : true;
+  
+  const showAvailableFundsWarning = shouldShowWarning && !hasAvailableFunds;
 
   return (
     <div className="space-y-6">
@@ -550,46 +616,41 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
               {transactionForm.type === 'transfert' && (
                 <>
                   <div className="modal-form-field">
-                    <Label>Produit</Label>
+                    <Label>Transfert de</Label>
                     <Select
-                      value={transactionForm.productId || 'none'}
+                      value={transactionForm.from_field || 'balance'}
                       onValueChange={(value) => {
-                        const nextProductId = value === 'none' ? '' : value;
+                        const nextFrom = value || 'balance';
+                        // Set productId to the source product (from_field) if it's a product
+                        // Otherwise, if transferring to a product, use that as productId
+                        const nextProductId = nextFrom !== 'balance' ? nextFrom : (transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
+                        
+                        // Update description based on new values
+                        const toField = transactionForm.to_field || 'balance';
+                        let fromName = 'Balance Cash';
+                        let toName = 'Balance Cash';
+                        
+                        if (nextFrom !== 'balance') {
+                          const fromProduct = products.find((p: any) => p.id === nextFrom);
+                          if (fromProduct) {
+                            fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                          }
+                        }
+                        
+                        if (toField !== 'balance') {
+                          const toProduct = products.find((p: any) => p.id === toField);
+                          if (toProduct) {
+                            toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                          }
+                        }
+                        
+                        const newDescription = `Transfert de ${fromName} vers ${toName}.`;
+                        
                         setTransactionForm({
                           ...transactionForm,
+                          from_field: nextFrom,
                           productId: nextProductId,
-                          // keep transfer_to consistent
-                          to_field: nextProductId ? nextProductId : transactionForm.to_field,
-                          from_field: transactionForm.from_field || 'balance',
-                        });
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Sélectionner un produit" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Aucun</SelectItem>
-                        {products.map((p: any) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}{p.reference ? ` (${p.reference})` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="modal-form-field">
-                    <Label>Transfert vers</Label>
-                    <Select
-                      value={transactionForm.to_field || 'balance'}
-                      onValueChange={(value) => {
-                        const nextTo = value || 'balance';
-                        setTransactionForm({
-                          ...transactionForm,
-                          to_field: nextTo,
-                          from_field: transactionForm.from_field || 'balance',
-                          // if transferring to balance, clear product
-                          productId: nextTo === 'balance' ? '' : nextTo,
+                          description: newDescription,
                         });
                       }}
                     >
@@ -606,6 +667,71 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
                       </SelectContent>
                     </Select>
                   </div>
+
+                  <div className="modal-form-field">
+                    <Label>Transfert vers</Label>
+                    <Select
+                      value={transactionForm.to_field || 'balance'}
+                      onValueChange={(value) => {
+                        const nextTo = value || 'balance';
+                        // Set productId to the source product (from_field) if it's a product
+                        // Otherwise, if transferring to a product, use that as productId
+                        const nextProductId = transactionForm.from_field !== 'balance' ? transactionForm.from_field : (nextTo !== 'balance' ? nextTo : '');
+                        
+                        // Update description based on new values
+                        const fromField = transactionForm.from_field || 'balance';
+                        let fromName = 'Balance Cash';
+                        let toName = 'Balance Cash';
+                        
+                        if (fromField !== 'balance') {
+                          const fromProduct = products.find((p: any) => p.id === fromField);
+                          if (fromProduct) {
+                            fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                          }
+                        }
+                        
+                        if (nextTo !== 'balance') {
+                          const toProduct = products.find((p: any) => p.id === nextTo);
+                          if (toProduct) {
+                            toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                          }
+                        }
+                        
+                        const newDescription = `Transfert de ${fromName} vers ${toName}.`;
+                        
+                        setTransactionForm({
+                          ...transactionForm,
+                          to_field: nextTo,
+                          productId: nextProductId,
+                          description: newDescription,
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="balance">Balance Cash</SelectItem>
+                        {products.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}{p.reference ? ` (${p.reference})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Warning message for products without available funds */}
+                  {showAvailableFundsWarning && (
+                    <div className="modal-form-field">
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div className="font-semibold text-yellow-800 mb-1">⚠️ Attention</div>
+                        <div className="text-sm text-yellow-700">
+                          Ce produit ne permet pas le retrait des fonds avant la fin du contrat.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -726,6 +852,27 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           onRefresh();
         }}
       />
+
+      {/* Position Generation Modal - Shows after creating/editing transaction with status "termine" */}
+      {transactionForPositionGeneration && (
+        <PositionGenerationModal
+          isOpen={isPositionGenerationModalOpen}
+          transaction={transactionForPositionGeneration}
+          clientId={clientId}
+          onClose={() => {
+            setIsPositionGenerationModalOpen(false);
+            setTransactionForPositionGeneration(null);
+            setIsTransactionDialogOpen(false);
+          }}
+          onSuccess={() => {
+            setIsPositionGenerationModalOpen(false);
+            setTransactionForPositionGeneration(null);
+            setIsTransactionDialogOpen(false);
+            toast.success('Transaction créée avec succès');
+            onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }

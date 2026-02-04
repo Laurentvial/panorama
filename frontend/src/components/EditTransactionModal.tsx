@@ -35,6 +35,7 @@ export function EditTransactionModal({
   });
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
+  const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
 
   // Initialize form when transaction changes
   useEffect(() => {
@@ -98,53 +99,88 @@ export function EditTransactionModal({
       return;
     }
     
-    // Check if this is an investment transaction changing to "termine"
-    // Check multiple possible field names for transfer_to (as returned by serializer)
-    const transferTo = transaction.transfer_to || 
-                       transaction.to_field || 
-                       transaction.to || 
-                       transaction.transferTo ||
-                       transaction.productId ||
-                       transaction.product_id ||
-                       null;
-    
-    // Also check subscription_details for productId
-    const productIdFromSubscription = transaction.subscription_details?.productId || 
-                                      transaction.subscriptionDetails?.productId ||
-                                      null;
-    
-    const finalProductId = transferTo || productIdFromSubscription;
-    
-    const isInvestment = transactionForm.type === 'transfert' && 
-                         finalProductId && 
-                         String(finalProductId) !== 'balance' &&
-                         String(finalProductId) !== 'trading';
+    // Check if this is a transfert transaction changing to "termine"
+    // Only show modal if status is changing FROM something else TO "termine"
+    // If status was already "termine", no need to regenerate positions
+    const isTransfert = transactionForm.type === 'transfert';
+    const wasAlreadyTermine = transaction.status === 'termine';
     const isChangingToTermine = transactionForm.status === 'termine' && 
-                                 transaction.status !== 'termine';
+                                 !wasAlreadyTermine;
     
-    // Debug logging
-    console.log('EditTransactionModal - Checking investment:', {
-      type: transactionForm.type,
-      transferTo,
-      productIdFromSubscription,
-      finalProductId,
-      isInvestment,
-      currentStatus: transaction.status,
-      newStatus: transactionForm.status,
-      isChangingToTermine
-    });
-    
-    if (isInvestment && isChangingToTermine) {
-      // Show position generation modal instead of directly updating
-      console.log('EditTransactionModal - Showing position generation modal');
-      setPendingStatusUpdate(transactionForm.status);
-      setShowPositionModal(true);
-      return;
+    if (isTransfert && isChangingToTermine) {
+      // Check multiple possible field names for transfer_to (as returned by serializer)
+      const transferTo = transaction.transfer_to || 
+                         transaction.to_field || 
+                         transaction.to || 
+                         transaction.transferTo ||
+                         transaction.productId ||
+                         transaction.product_id ||
+                         null;
+      
+      // Also check subscription_details for productId
+      const productIdFromSubscription = transaction.subscription_details?.productId || 
+                                        transaction.subscriptionDetails?.productId ||
+                                        null;
+      
+      const finalProductId = transferTo || productIdFromSubscription;
+      
+      // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
+      const isInvestment = finalProductId && 
+                           String(finalProductId) !== 'balance' &&
+                           String(finalProductId) !== 'trading';
+      
+      // Check if this is a withdrawal (transfert from product to balance)
+      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const isWithdrawal = (transferTo === 'balance' || transferFrom !== null) && !isInvestment;
+      
+      // Debug logging
+      console.log('EditTransactionModal - Checking transfert:', {
+        type: transactionForm.type,
+        transferTo,
+        transferFrom,
+        productIdFromSubscription,
+        finalProductId,
+        isInvestment,
+        isWithdrawal,
+        currentStatus: transaction.status,
+        newStatus: transactionForm.status,
+        isChangingToTermine
+      });
+      
+      if (isInvestment) {
+        // Show position generation modal for investments
+        console.log('EditTransactionModal - Showing position generation modal for investment');
+        setIsWithdrawalTransaction(false);
+        setPendingStatusUpdate(transactionForm.status);
+        setShowPositionModal(true);
+        return;
+      } else if (isWithdrawal) {
+        // Show modal for withdrawals too, but with different content
+        console.log('EditTransactionModal - Showing position generation modal for withdrawal');
+        setIsWithdrawalTransaction(true);
+        setPendingStatusUpdate(transactionForm.status);
+        setShowPositionModal(true);
+        return;
+      }
     }
     
     try {
       // Convert datetime-local format to ISO string
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
+      
+      // Check if this is a withdrawal (transfert from product to balance)
+      // Only recalculate if status is changing TO "termine" (not if it was already "termine")
+      const transferTo = transaction.transfer_to || 
+                         transaction.to_field || 
+                         transaction.to || 
+                         transaction.transferTo ||
+                         null;
+      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const wasAlreadyTermine = transaction.status === 'termine';
+      const isWithdrawal = transactionForm.type === 'transfert' && 
+                          transactionForm.status === 'termine' &&
+                          !wasAlreadyTermine && // Only if status is changing TO "termine"
+                          (transferTo === 'balance' || (transferFrom && transferFrom !== 'balance'));
       
       await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
         method: 'PUT',
@@ -154,11 +190,15 @@ export function EditTransactionModal({
           description: transactionForm.description,
           status: transactionForm.status,
           datetime: datetimeISO,
-          skip_position_generation: false // Normal update, allow auto-generation
+          skip_position_generation: wasAlreadyTermine // Skip if already "termine" (no regeneration needed)
         })
       });
       
-      toast.success('Transaction modifiée avec succès');
+      if (isWithdrawal) {
+        toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
+      } else {
+        toast.success('Transaction modifiée avec succès');
+      }
       handleClose();
       onSuccess();
     } catch (error: any) {
@@ -168,7 +208,7 @@ export function EditTransactionModal({
   }
 
   const handlePositionModalSuccess = async () => {
-    // After positions are generated, update transaction status to termine
+    // After positions are generated (or withdrawal confirmed), update transaction status to termine
     if (pendingStatusUpdate) {
       try {
         const datetimeISO = new Date(transactionForm.datetime).toISOString();
@@ -181,13 +221,19 @@ export function EditTransactionModal({
             description: transactionForm.description,
             status: pendingStatusUpdate,
             datetime: datetimeISO,
-            skip_position_generation: true // Skip auto-generation since we already generated via modal
+            skip_position_generation: !isWithdrawalTransaction // For withdrawals, allow signal to recalculate; for investments, skip since modal already generated
           })
         });
         
-        toast.success('Transaction modifiée avec succès');
+        // Show toast for both investments and withdrawals
+        if (isWithdrawalTransaction) {
+          toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
+        } else {
+          toast.success('Transaction modifiée avec succès');
+        }
         setShowPositionModal(false);
         setPendingStatusUpdate(null);
+        setIsWithdrawalTransaction(false);
         handleClose();
         onSuccess();
       } catch (error: any) {
@@ -294,6 +340,7 @@ export function EditTransactionModal({
           clientId={clientId}
           onClose={handlePositionModalClose}
           onSuccess={handlePositionModalSuccess}
+          isWithdrawal={isWithdrawalTransaction}
         />
       )}
     </>

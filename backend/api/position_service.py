@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
+import pytz
 from django.db import transaction as db_transaction
 from django.utils import timezone
 from django.db.models import Q, Sum
 
-from .models import Product, Transaction, Position, ProductAssetAllocation, Log
+from .models import Product, Transaction, Position, ProductAssetAllocation, Log, Asset
 
 
 @dataclass(frozen=True)
@@ -196,18 +197,28 @@ def _distribute_pnl_total(target_total: Decimal, amounts: list[Decimal]) -> list
     return parts
 
 
-def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal]) -> list[Decimal]:
+def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal], *, avoid_losses: bool = False) -> list[Decimal]:
     """
     Distribute total P&L across positions, but cap each position's P&L
     to keep it "logical" relative to its amount.
+    
+    If avoid_losses=True, all positions will have profit_loss >= 0 (no losses).
     """
     n = len(amounts)
     if n == 0:
         return []
     target_total = target_total.quantize(Decimal('0.01'))
+    
+    # If avoid_losses is True and target_total is negative, we can't avoid losses
+    # In this case, we'll set all positions to 0 (no profit, no loss)
+    if avoid_losses and target_total < 0:
+        return [Decimal('0.00')] * n
+    
     if n == 1:
         cap = (amounts[0] * _pick_pnl_cap_pct()).quantize(Decimal('0.01'))
         v = max(-cap, min(cap, target_total))
+        if avoid_losses:
+            v = max(Decimal('0'), v)
         return [v]
 
     # Start with an unconstrained distribution
@@ -216,6 +227,10 @@ def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal]) 
     # Apply per-position caps
     caps = [(a * _pick_pnl_cap_pct()).quantize(Decimal('0.01')) for a in amounts]
     parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
+    
+    # If avoid_losses is True, ensure all parts are >= 0
+    if avoid_losses:
+        parts = [max(Decimal('0'), p).quantize(Decimal('0.01')) for p in parts]
 
     # Adjust drift while respecting caps
     drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
@@ -231,7 +246,11 @@ def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal]) 
             if direction > 0:
                 slack = caps[i] - parts[i]
             else:
-                slack = parts[i] + caps[i]
+                # If avoid_losses is True, we can't go below 0
+                if avoid_losses:
+                    slack = parts[i]  # Can only reduce to 0
+                else:
+                    slack = parts[i] + caps[i]
             if slack >= step:
                 candidates.append((i, slack))
 
@@ -245,6 +264,9 @@ def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal]) 
         if delta < step:
             break
         parts[i] = (parts[i] + (delta if direction > 0 else -delta)).quantize(Decimal('0.01'))
+        # Ensure we don't go below 0 if avoid_losses is True
+        if avoid_losses:
+            parts[i] = max(Decimal('0'), parts[i])
         drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
 
     return parts
@@ -345,14 +367,15 @@ def _choose_total_trades_with_min_per_day(
     max_per_day: int = 3,
 ) -> int:
     """
-    Choose a total number of trades across the duration, but guarantee:
-    - at least 1 trade per tradable day
-    - at most max_per_day per day
+    Choose a total number of trades across the duration.
+    - No guarantee of 1 trade per day (allows days with 0 trades)
+    - At most max_per_day per day
     """
     if trading_days_count <= 0:
         return 0
     base = _choose_trade_count_for_duration(total_amount, duration_months)
-    total = max(trading_days_count, base)
+    # Don't force minimum of trading_days_count - allows fewer trades than days
+    total = base
     total = min(total, trading_days_count * max_per_day)
     # Safety cap (still allows long durations)
     total = min(total, 5000)
@@ -361,20 +384,20 @@ def _choose_total_trades_with_min_per_day(
 
 def _build_day_targets(trading_days: list[date], total_trades: int, *, max_per_day: int, rng: random.Random) -> dict[date, int]:
     """
-    Build per-day trade targets such that each day has >=1 and <= max_per_day.
+    Build per-day trade targets such that each day has >=0 and <= max_per_day.
+    Avoids having exactly 1 trade per day every day - allows some days with 0 trades.
     """
     if not trading_days:
         return {}
-    total_trades = max(len(trading_days), total_trades)
     total_trades = min(total_trades, len(trading_days) * max_per_day)
 
-    targets: dict[date, int] = {d: 1 for d in trading_days}
-    remaining = total_trades - len(trading_days)
-    if remaining <= 0:
-        return targets
-
-    # Distribute remaining trades randomly across days, capped per day.
+    # Start with all days at 0 (no guarantee of 1 trade per day)
+    targets: dict[date, int] = {d: 0 for d in trading_days}
+    
+    # Distribute trades randomly across days, capped per day.
+    # This allows some days to have 0 trades, avoiding the pattern of exactly 1 trade per day.
     candidates = list(trading_days)
+    remaining = total_trades
     while remaining > 0 and candidates:
         day = rng.choice(candidates)
         if targets[day] < max_per_day:
@@ -383,6 +406,70 @@ def _build_day_targets(trading_days: list[date], total_trades: int, *, max_per_d
         else:
             candidates = [d for d in candidates if targets[d] < max_per_day]
     return targets
+
+
+def _get_market_hours_for_asset(asset: Asset | None, *, reference_date: date | None = None) -> tuple[time, time]:
+    """
+    Determine market hours for an asset in French time (Europe/Paris).
+    
+    Returns (market_open_time, market_close_time) in French timezone.
+    
+    Rules:
+    - NASDAQ/NYSE/US markets: 9:30 - 16:00 ET, converted to French time based on reference_date
+    - EURONEXT/European markets: 9:00 - 17:30 French time (local)
+    - Crypto: 24/7 (but we'll use default hours for consistency)
+    - Default: 9:30 - 16:00 French time
+    
+    The base timezone is France (Europe/Paris), and times are returned in that timezone.
+    The reference_date is used to correctly handle daylight saving time transitions for US markets.
+    """
+    if asset is None:
+        # Default market hours (French time)
+        return time(9, 30), time(16, 0)
+    
+    exchange = (asset.exchange or '').upper()
+    region = (asset.region or '').lower()
+    asset_type = (asset.type or '').lower()
+    
+    # Crypto markets are 24/7, but we'll use default hours for consistency
+    if 'crypto' in asset_type or 'cryptocurrency' in asset_type:
+        return time(9, 30), time(16, 0)
+    
+    # US markets (NASDAQ, NYSE, etc.)
+    if ('NASDAQ' in exchange or 'NYSE' in exchange or 'AMEX' in exchange or 
+        'NYSEARCA' in exchange or 'BATS' in exchange or
+        'united' in region or region == 'us' or 'usa' in region):
+        # US market hours: 9:30 - 16:00 ET
+        # Convert to French time based on reference_date to handle DST correctly
+        if reference_date is None:
+            # If no reference date provided, use today's date
+            reference_date = timezone.now().date()
+        
+        # US Eastern timezone (handles EST/EDT automatically)
+        us_eastern = pytz.timezone('US/Eastern')
+        # French timezone
+        french_tz = pytz.timezone('Europe/Paris')
+        
+        # Create datetime objects for market open and close in US Eastern time
+        # Use the reference_date to determine if DST is in effect
+        us_open_dt = us_eastern.localize(datetime.combine(reference_date, time(9, 30)))
+        us_close_dt = us_eastern.localize(datetime.combine(reference_date, time(16, 0)))
+        
+        # Convert to French time
+        french_open_dt = us_open_dt.astimezone(french_tz)
+        french_close_dt = us_close_dt.astimezone(french_tz)
+        
+        # Extract time components
+        return french_open_dt.time(), french_close_dt.time()
+    
+    # European markets (EURONEXT, etc.)
+    if ('EURONEXT' in exchange or 'france' in region or 'paris' in region or
+        'belgium' in region or 'netherlands' in region or 'portugal' in region):
+        # European market hours: 9:00 - 17:30 local time (French time)
+        return time(9, 0), time(17, 30)
+    
+    # Default: standard market hours
+    return time(9, 30), time(16, 0)
 
 
 def _day_market_window(
@@ -432,8 +519,8 @@ def _schedule_trades_for_day(
                 opened_at = day_close - timedelta(minutes=5)
             else:
                 break
-        # duration <= 5h, but must fit before market close
-        duration_minutes = rng.randint(5, 5 * 60)
+        # duration <= 1h30 (90 minutes), but must fit before market close
+        duration_minutes = rng.randint(5, 90)
         closed_at = opened_at + timedelta(minutes=duration_minutes)
         if closed_at > day_close:
             closed_at = day_close
@@ -620,8 +707,9 @@ def _create_trade_positions_compounding(
 ) -> list[Position]:
     """
     Create trade-like positions across the whole duration with:
-    - at least 1 trade per tradable day (Mon-Fri)
-    - market hours only
+    - Multiple trades possible per day, but not guaranteed (avoids 1 trade/day pattern)
+    - Market hours only (specific to each asset's exchange/region, in French time)
+    - Maximum trade duration: 1h30
     - profitability_period support (mensuel/trimestriel/semestriel/annuel/fin de contrat)
     - compounding: profits credited at each profitability period boundary
 
@@ -663,9 +751,6 @@ def _create_trade_positions_compounding(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
     does_compound = _product_compounds(product)
-
-    market_open = time(9, 30)
-    market_close = time(16, 0)
 
     assets_weighted: list[tuple[object, Decimal]] = []
     if allocations:
@@ -745,11 +830,20 @@ def _create_trade_positions_compounding(
                     amt = Decimal('50.00')
                 invested_amounts.append(amt)
 
-            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts)
+            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts, avoid_losses=False)
             created_profit_this_period = _safe_decimal_sum(pnl_parts).quantize(Decimal('0.01'))
             created_count_this_period = len(pnl_parts)
 
             for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
+                # Determine asset first to get market-specific hours
+                asset_obj = None
+                if assets_weighted:
+                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
+                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+                
+                # Get market hours for this specific asset (in French time)
+                market_open, market_close = _get_market_hours_for_asset(asset_obj, reference_date=day)
+                
                 win = _day_market_window(
                     day=day,
                     start_dt=start_dt,
@@ -767,11 +861,6 @@ def _create_trade_positions_compounding(
                 if not windows:
                     continue
                 opened_at, closed_at = windows[0]
-
-                asset_obj = None
-                if assets_weighted:
-                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
-                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
 
                 asset_currency = None
                 fx_rate = None
@@ -896,17 +985,18 @@ def generate_rates_for_investment(
     does_compound = _product_compounds(product)
 
     # Calculate initial capital: if compounding, add profits from all closed and open positions
+    # IMPORTANT: Exclude ALL pending positions (even those with opened_at <= now) because they will
+    # be regenerated with new rates. Only count positions that are already closed (done) or currently
+    # open - these cannot be changed. This must match the logic in the per-period profit calculation.
     capital = invested_total.quantize(Decimal('0.01'))
     if does_compound:
-        now = timezone.now()
         existing_profits = Position.objects.filter(
             transaction_id=ctx.transaction_id
         ).filter(
-            # Count closed positions (done) and open positions (opened_at <= now)
-            # Exclude only future positions (pending with opened_at > now)
+            # Only count positions that are already closed (done) or currently open
+            # Exclude ALL pending positions - they will be regenerated with new rates
             Q(status='done') | 
-            Q(status='open') | 
-            (Q(status='pending') & Q(opened_at__lte=now))
+            Q(status='open')
         ).aggregate(
             total_profit=Sum('profit_loss')
         )['total_profit'] or Decimal('0')
@@ -928,7 +1018,10 @@ def generate_rates_for_investment(
             period_idx += 1
             continue
 
-        # Calculate existing profit from CLOSED and OPEN positions (ignore only future positions)
+        # Calculate existing profit from CLOSED and OPEN positions only
+        # IMPORTANT: When using custom rates, exclude ALL pending positions (even those with opened_at <= now)
+        # because they were generated with old rates and will be regenerated with new rates.
+        # Only count positions that are already closed (done) or currently open - these cannot be changed.
         now = timezone.now()
         existing_profit = Decimal('0.00')
         existing_positions = Position.objects.filter(
@@ -936,11 +1029,10 @@ def generate_rates_for_investment(
             period_date__gte=period_days[0],
             period_date__lte=period_days[-1],
         ).filter(
-            # Count closed positions (done) and open positions (opened_at <= now)
-            # Exclude only future positions (pending with opened_at > now)
+            # Only count positions that are already closed (done) or currently open
+            # Exclude ALL pending positions - they will be regenerated with new rates
             Q(status='done') | 
-            Q(status='open') | 
-            (Q(status='pending') & Q(opened_at__lte=now))
+            Q(status='open')
         )
         for pos in existing_positions:
             if pos.profit_loss is not None:
@@ -989,11 +1081,13 @@ def generate_positions_with_rates(
     *,
     custom_rates: dict[int, Decimal],
     save_to_db: bool = False,
+    avoid_losses: bool = False,
 ) -> list[Position | dict]:
     """
     Generate positions using custom rates without saving to database (unless save_to_db=True).
     
     custom_rates: Dict mapping period_index to rate percentage (before proration)
+    avoid_losses: If True, only generate positions with profit_loss >= 0 (no losses)
     Returns list of Position objects (if saved) or dict representations (if not saved)
     """
     ctx = build_investment_context(txn)
@@ -1030,6 +1124,11 @@ def generate_positions_with_rates(
     if invested_total <= 0:
         return []
 
+    # IMPORTANT: When generating with custom rates, we should exclude future positions
+    # from existing_profit calculation, because they will be regenerated with new rates.
+    # Only count CLOSED and currently OPEN positions (not future pending positions).
+    now = timezone.now()
+
     max_per_day = 3
     rng = random.Random(str(txn.id))
 
@@ -1049,8 +1148,7 @@ def generate_positions_with_rates(
     profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
     does_compound = _product_compounds(product)
 
-    market_open = time(9, 30)
-    market_close = time(16, 0)
+    # Market hours will be determined per asset in the loop
     tz = timezone.get_current_timezone()
 
     assets_weighted: list[tuple[object, Decimal]] = []
@@ -1067,17 +1165,18 @@ def generate_positions_with_rates(
             logger.warning(f"Product {product.id if product else 'unknown'} has {len(allocations)} allocations but no valid assets")
 
     # Calculate initial capital: if compounding, add profits from all closed and open positions
+    # IMPORTANT: Exclude ALL pending positions (even those with opened_at <= now) because they will
+    # be regenerated with new rates. Only count positions that are already closed (done) or currently
+    # open - these cannot be changed. This must match the logic in the per-period profit calculation.
     capital = invested_total.quantize(Decimal('0.01'))
     if does_compound:
-        now = timezone.now()
         existing_profits = Position.objects.filter(
             transaction_id=ctx.transaction_id
         ).filter(
-            # Count closed positions (done) and open positions (opened_at <= now)
-            # Exclude only future positions (pending with opened_at > now)
+            # Only count positions that are already closed (done) or currently open
+            # Exclude ALL pending positions - they will be regenerated with new rates
             Q(status='done') | 
-            Q(status='open') | 
-            (Q(status='pending') & Q(opened_at__lte=now))
+            Q(status='open')
         ).aggregate(
             total_profit=Sum('profit_loss')
         )['total_profit'] or Decimal('0')
@@ -1099,7 +1198,10 @@ def generate_positions_with_rates(
             period_idx += 1
             continue
 
-        # Calculate existing profit from CLOSED and OPEN positions (ignore only future positions)
+        # Calculate existing profit from CLOSED and OPEN positions only
+        # IMPORTANT: Exclude future pending positions (opened_at > now) because they will be
+        # regenerated with the new custom rates. We only want to preserve profit from positions
+        # that are already closed or currently open.
         now = timezone.now()
         existing_profit = Decimal('0.00')
         existing_positions = Position.objects.filter(
@@ -1107,11 +1209,10 @@ def generate_positions_with_rates(
             period_date__gte=period_days[0],
             period_date__lte=period_days[-1],
         ).filter(
-            # Count closed positions (done) and open positions (opened_at <= now)
-            # Exclude only future positions (pending with opened_at > now)
+            # Only count positions that are already closed (done) or currently open
+            # Exclude future positions (pending with opened_at > now) - they will be regenerated
             Q(status='done') | 
-            Q(status='open') | 
-            (Q(status='pending') & Q(opened_at__lte=now))
+            Q(status='open')
         )
         for pos in existing_positions:
             if pos.profit_loss is not None:
@@ -1120,8 +1221,20 @@ def generate_positions_with_rates(
                 except Exception:
                     continue
 
-        # Use custom rate
-        period_rate_pct = custom_rates.get(period_idx, Decimal('0'))
+        # Use custom rate - must be provided
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if period_idx not in custom_rates:
+            # This should not happen if frontend sends all rates, but log for debugging
+            logger.warning(f"Missing rate for period {period_idx} in custom_rates. Available periods: {list(custom_rates.keys())}")
+            # Fallback: use 0 (should not happen in normal flow)
+            period_rate_pct = Decimal('0')
+        else:
+            period_rate_pct = custom_rates[period_idx]
+            # Debug: log which rate is being used
+            logger.info(f"Period {period_idx}: Using custom rate {period_rate_pct}% (received from frontend)")
+        
         proration = (
             (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
             if profit_period_months and step_months != profit_period_months
@@ -1132,8 +1245,13 @@ def generate_positions_with_rates(
         capital_base = capital if does_compound else invested_total
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
         profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
+        
+        # Debug logging
+        logger.info(f"Period {period_idx}: capital_base={capital_base}, effective_rate={effective_rate_pct}%, target_profit={target_profit}, existing_profit={existing_profit}, profit_remaining={profit_remaining}")
 
-        # Count CLOSED and OPEN positions for existing counts (ignore only future positions)
+        # Count CLOSED and OPEN positions for existing counts
+        # IMPORTANT: When using custom rates, exclude ALL pending positions because they will be regenerated
+        # Only count positions that are already closed (done) or currently open
         now = timezone.now()
         existing_counts_by_day = {}
         if save_to_db:
@@ -1142,11 +1260,10 @@ def generate_positions_with_rates(
                 period_date__gte=period_days[0],
                 period_date__lte=period_days[-1],
             ).filter(
-                # Count closed positions (done) and open positions (opened_at <= now)
-                # Exclude only future positions (pending with opened_at > now)
+                # Only count positions that are already closed (done) or currently open
+                # Exclude ALL pending positions - they will be regenerated with new rates
                 Q(status='done') | 
-                Q(status='open') | 
-                (Q(status='pending') & Q(opened_at__lte=now))
+                Q(status='open')
             ).values_list('period_date', flat=True)
             for day in period_days:
                 existing_counts_by_day[day] = sum(1 for pd in existing_positions_by_day if pd == day)
@@ -1171,9 +1288,22 @@ def generate_positions_with_rates(
                     amt = Decimal('50.00')
                 invested_amounts.append(amt)
 
-            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts)
+            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts, avoid_losses=avoid_losses)
 
             for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
+                # Determine asset first to get market-specific hours
+                asset_obj = None
+                if assets_weighted:
+                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
+                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+                    # Ensure asset_obj is an Asset object, not None
+                    if asset_obj is None and assets_weighted:
+                        # Fallback: use first asset if weighted choice fails
+                        asset_obj = assets_weighted[0][0]
+                
+                # Get market hours for this specific asset (in French time)
+                market_open, market_close = _get_market_hours_for_asset(asset_obj, reference_date=day)
+                
                 win = _day_market_window(
                     day=day,
                     start_dt=start_dt,
@@ -1191,15 +1321,6 @@ def generate_positions_with_rates(
                 if not windows:
                     continue
                 opened_at, closed_at = windows[0]
-
-                asset_obj = None
-                if assets_weighted:
-                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
-                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
-                    # Ensure asset_obj is an Asset object, not None
-                    if asset_obj is None and assets_weighted:
-                        # Fallback: use first asset if weighted choice fails
-                        asset_obj = assets_weighted[0][0]
 
                 asset_currency = None
                 fx_rate = None
@@ -1411,6 +1532,73 @@ def save_generated_positions(
     return created
 
 
+def save_position_generation_history(
+    txn: Transaction,
+    *,
+    rates_used: dict[int, Decimal] | None = None,
+    period_summaries: list[dict] | None = None,
+    positions_data: list[dict] | None = None,
+) -> None:
+    """
+    Save position generation history for a transaction without creating positions.
+    Used for withdrawals where we want to record the rates and periods that were shown
+    but don't create positions (they are recalculated for other investment transactions).
+    """
+    from django.utils import timezone
+    
+    now = timezone.now()
+    
+    # Calculate summary from positions_data if provided
+    total_invested = Decimal('0')
+    total_profit = Decimal('0')
+    positions_by_asset = {}
+    
+    if positions_data:
+        for pos_data in positions_data:
+            invested = _to_decimal(pos_data.get('invested_amount', 0)) or Decimal('0')
+            profit = _to_decimal(pos_data.get('profit_loss', 0)) or Decimal('0')
+            total_invested += invested
+            total_profit += profit
+            
+            asset_id = str(pos_data.get('asset_id', '')) if pos_data.get('asset_id') else 'none'
+            if asset_id not in positions_by_asset:
+                positions_by_asset[asset_id] = {
+                    "count": 0,
+                    "total_invested": Decimal('0'),
+                    "total_profit": Decimal('0'),
+                }
+            positions_by_asset[asset_id]["count"] += 1
+            positions_by_asset[asset_id]["total_invested"] += invested
+            positions_by_asset[asset_id]["total_profit"] += profit
+    
+    # Convert Decimal to string for JSON serialization
+    for asset_id, summary in positions_by_asset.items():
+        positions_by_asset[asset_id]["total_invested"] = str(summary["total_invested"].quantize(Decimal('0.01')))
+        positions_by_asset[asset_id]["total_profit"] = str(summary["total_profit"].quantize(Decimal('0.01')))
+    
+    history_entry = {
+        "timestamp": now.isoformat(),
+        "rates_used": {str(k): str(v) for k, v in (rates_used or {}).items()},
+        "period_summaries": period_summaries or [],
+        "summary": {
+            "positions_generated": len(positions_data) if positions_data else 0,
+            "total_invested": str(total_invested.quantize(Decimal('0.01'))),
+            "total_profit": str(total_profit.quantize(Decimal('0.01'))),
+            "positions_by_asset": positions_by_asset,
+        },
+        "deleted_future_positions": {
+            "count": 0,
+            "position_ids": [],
+        },
+    }
+    
+    # Append to transaction history
+    if txn.position_generation_history is None:
+        txn.position_generation_history = []
+    txn.position_generation_history.append(history_entry)
+    txn.save(update_fields=['position_generation_history'])
+
+
 def get_or_create_product_for_asset(asset: Asset) -> Product:
     """
     Get or create a Product that represents an Asset for trading positions.
@@ -1440,18 +1628,86 @@ def get_or_create_product_for_asset(asset: Asset) -> Product:
     return product
 
 
+def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_datetime: datetime | None = None, exclude_transaction_id: str | None = None) -> Decimal:
+    """
+    Calculate the real invested capital in a product for a client.
+    
+    This sums all completed transfers TO the product and subtracts all completed transfers FROM the product.
+    Only considers transactions with status='termine' (completed).
+    Transactions with status='en_cours' are NOT included here - they should be added manually
+    if they are the current transaction being processed.
+    
+    Args:
+        client_id: Client ID
+        product_id: Product ID
+        up_to_datetime: Optional datetime to only consider transactions up to this point
+        exclude_transaction_id: Optional transaction ID to exclude from calculation
+    
+    Returns:
+        Total invested capital (positive = net investment, negative = net withdrawal)
+    """
+    from .models import Transaction
+    
+    # Query for completed transactions only
+    # Do NOT include 'en_cours' transactions here - only the current transaction (if 'en_cours')
+    # should be added manually in build_investment_context
+    qs = Transaction.objects.filter(
+        client_id=client_id,
+        type='transfert',
+        status='termine'
+    )
+    
+    if up_to_datetime:
+        qs = qs.filter(datetime__lte=up_to_datetime)
+    
+    # Exclude specific transaction if provided (e.g., current transaction if not yet 'termine')
+    if exclude_transaction_id:
+        qs = qs.exclude(id=exclude_transaction_id)
+    
+    total = Decimal('0')
+    
+    # Sum transfers TO the product (investments)
+    # Investment: transfer_to = product_id
+    investments = qs.filter(transfer_to=product_id)
+    for txn in investments:
+        amount = _to_decimal(txn.amount) or Decimal('0')
+        total += amount
+    
+    # Subtract transfers FROM the product (withdrawals)
+    # Withdrawal can be identified by:
+    # 1. transfer_to='balance' AND product_id=product_id (product field set on transaction)
+    # 2. transfer_to='balance' AND transfer_from=product_id (transfer_from field set)
+    # 3. transfer_from=product_id (regardless of transfer_to, if transfer_from is set)
+    # We use distinct() to avoid counting the same transaction twice
+    withdrawals = qs.filter(
+        Q(transfer_to='balance', product_id=product_id) |
+        Q(transfer_to='balance', transfer_from=product_id) |
+        Q(transfer_from=product_id)
+    ).distinct()
+    for txn in withdrawals:
+        amount = _to_decimal(txn.amount) or Decimal('0')
+        total -= amount
+    
+    return total.quantize(Decimal('0.01'))
+
+
 def _extract_product_from_description(description: str) -> Product | None:
     """
     Best-effort inference used when admin edits a transaction but transfer_to/product
-    isn't set. Matches frontend format: "Transfert de Balance Cash vers Nom (REF)".
+    isn't set. Matches frontend format: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (REF)".
+    Supports both old and new simplified formats.
     """
     if not description:
         return None
-    m = re.search(r"Transfert de Balance Cash vers\s+([^(]+?)(?:\s*\(([^)]+)\))?", description, flags=re.IGNORECASE)
+    # Pattern matches: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (REF)"
+    # Use .*? (non-greedy) instead of [^v]+? to handle product names containing 'v' (e.g., "Volkswagen")
+    m = re.search(r"Transfert de\s+(.*?)\s+vers\s+([^(]+?)(?:\s*\(([^)]+)\))?", description, flags=re.IGNORECASE)
     if not m:
         return None
-    name = (m.group(1) or '').strip()
-    ref = (m.group(2) or '').strip() or None
+    # Extract the destination (to) which is what we're interested in
+    # Group 1 is "from" (ignored), Group 2 is product name, Group 3 is reference
+    name = (m.group(2) or '').strip()
+    ref = (m.group(3) or '').strip() or None
     if ref:
         p = Product.objects.filter(reference=ref).first()
         if p:
@@ -1470,8 +1726,8 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
     - Link each generated position to an Asset linked to the Smart Portfolio (ProductAssetAllocation).
     - If product has no linked assets, do nothing.
     - Generate positions from txn start datetime until +duration (product/transaction duration).
-    - Generate a random number of positions per day (market hours only).
-    - Each position duration <= 5 hours.
+    - Generate a random number of positions per day (market hours only, specific to each asset).
+    - Each position duration <= 1h30 (90 minutes).
     - Total P&L over the period should approximate product profitability (±10%).
     """
     ctx = build_investment_context(txn)
@@ -1615,7 +1871,85 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
 
     months = _parse_months(duration_str)
 
-    invested_amount = _to_decimal(txn.amount) or Decimal('0')
+    # Calculate real invested capital: sum of all completed transfers to/from this product
+    # This takes into account all previous transactions (deposits and withdrawals)
+    # Only counts transactions with status='termine' (completed)
+    
+    # Exclude current transaction from calculation (we'll add it manually below)
+    real_invested_capital = _calculate_real_invested_capital(
+        client_id=txn.client_id,
+        product_id=product.id,
+        up_to_datetime=txn.datetime if txn.datetime else None,
+        exclude_transaction_id=txn.id  # Always exclude current transaction, add it manually below
+    )
+    
+    # Include current transaction if it's 'termine' or 'en_cours' (in progress)
+    # This ensures that ONLY the current transaction is included if it's 'en_cours',
+    # not other 'en_cours' transactions
+    if txn.status in ['termine', 'en_cours']:
+        current_txn_amount = _to_decimal(txn.amount) or Decimal('0')
+        # Check if this is a withdrawal by looking at the original transaction
+        # For withdrawals, we create a temp transaction with transfer_to=product.id to simulate investment
+        # But we need to check the original transaction's transfer_to to know if it's a withdrawal
+        # We can detect this by checking if transfer_from was originally 'balance' (meaning it's a temp transaction for withdrawal)
+        # OR by checking if the transaction ID matches a withdrawal pattern
+        # Actually, the safest way is to check: if transfer_to == product.id AND transfer_from == 'balance',
+        # AND the transaction was originally a withdrawal (we can't know this directly, so we need another way)
+        # Better approach: check if this is a withdrawal by looking at the description or by checking
+        # if transfer_from == 'balance' AND we're in a withdrawal context
+        
+        # For withdrawals, the temp transaction has transfer_to=product.id and transfer_from='balance'
+        # But we need to subtract, not add. We can detect this by checking if transfer_from == 'balance'
+        # AND the transaction is being used for withdrawal recalculation
+        # Actually, simpler: if transfer_to == product.id AND transfer_from == 'balance' AND 
+        # the transaction ID is the same as a withdrawal transaction, it's a withdrawal
+        
+        # The issue is: when we create a temp transaction for withdrawal, it looks like an investment
+        # but we need to subtract it. We can detect this by checking the original transaction.
+        # Since we don't have access to the original transaction here, we need to pass a flag
+        # OR we can check: if transfer_from == 'balance' AND transfer_to == product.id, 
+        # it might be a temp transaction for withdrawal. But this is ambiguous.
+        
+        # Better solution: Check if the transaction description indicates a withdrawal
+        # OR: Pass a flag through the context, OR: Check if transfer_from == 'balance' 
+        # which would indicate this is a temp transaction created for withdrawal
+        
+        # Actually, the simplest fix: if transfer_from == 'balance' AND transfer_to == product.id,
+        # this is likely a temp transaction for withdrawal, so we should check the original transaction
+        # But we don't have it here. Let's check the description pattern instead.
+        
+        # Check if this is a temporary transaction created for withdrawal recalculation
+        # These have transfer_to=product.id and transfer_from='balance' but represent a withdrawal
+        is_withdrawal_temp_transaction = (
+            getattr(txn, '_is_withdrawal_temp', False) or
+            (txn.transfer_from == 'balance' and 
+             txn.transfer_to == product.id and
+             ('vers Balance Cash' in (txn.description or '') or 
+              'vers balance' in (txn.description or '').lower() or
+              'Balance Cash' in (txn.description or '')))
+        )
+        
+        # Add if it's an investment (transfer_to = product_id), subtract if it's a withdrawal
+        if txn.transfer_to == product.id and not is_withdrawal_temp_transaction:
+            real_invested_capital += current_txn_amount
+        elif txn.transfer_to == 'balance' or txn.transfer_from == product.id or is_withdrawal_temp_transaction:
+            real_invested_capital -= current_txn_amount
+    
+    # Use real invested capital instead of just this transaction's amount
+    # This ensures that when capital is added/removed, we use the net invested amount
+    invested_amount = real_invested_capital
+    
+    # Ensure we don't have negative or zero invested amount
+    if invested_amount <= 0:
+        # If no capital is invested, use the current transaction amount as fallback
+        # This handles the case of the first investment
+        current_txn_amount = _to_decimal(txn.amount) or Decimal('0')
+        if current_txn_amount > 0 and txn.transfer_to == product.id:
+            # First investment: use the transaction amount
+            invested_amount = current_txn_amount
+        else:
+            # No capital invested and current transaction is not a positive investment
+            invested_amount = Decimal('0')
 
     total_profit = None
     total_amount = None
@@ -1669,15 +2003,116 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
     if not trading_days:
         return []
 
-    market_open = time(9, 30)
-    market_close = time(16, 0)
-    tz = timezone.get_current_timezone()
+    # Check if product has asset allocations (even if not a Smart Portfolio)
+    allocations = None
+    if product is not None:
+        allocations_list = list(
+            ProductAssetAllocation.objects.select_related('asset')
+            .filter(product_id=product.id)
+        )
+        if allocations_list:
+            allocations = allocations_list
 
     return _create_trade_positions_compounding(
         txn=txn,
         product=product,
         ctx=ctx,
-        allocations=None,
+        allocations=allocations,
         trigger=trigger,
     )
+
+
+def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction) -> None:
+    """
+    Recalculate future positions for all investment transactions on the same product
+    when a withdrawal (product -> balance) is validated.
+    
+    This ensures that when capital is withdrawn, all future positions are recalculated
+    with the new (reduced) invested capital.
+    
+    Args:
+        withdrawal_txn: Transaction with type='transfert', transfer_to='balance' or transfer_from=product_id
+    """
+    if withdrawal_txn.type != 'transfert':
+        return
+    
+    if withdrawal_txn.status != 'termine':
+        return
+    
+    # Determine the product from which capital is being withdrawn
+    # For withdrawals (transfert product -> balance), the product is the source (transfer_from)
+    product: Product | None = None
+    
+    # First, try to get product from transfer_from (most reliable for withdrawals)
+    if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
+        try:
+            product = Product.objects.get(id=withdrawal_txn.transfer_from)
+        except Product.DoesNotExist:
+            pass
+    
+    # If not found, try the product field on the transaction (may be set for withdrawals)
+    if product is None and withdrawal_txn.product:
+        product = withdrawal_txn.product
+    
+    # If still not found and transfer_to == 'balance', try to extract from description
+    if product is None and withdrawal_txn.transfer_to == 'balance':
+        product = _extract_product_from_description(withdrawal_txn.description or '')
+    
+    # If we still don't have a product, we can't proceed
+    if product is None:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Cannot determine product for withdrawal transaction {withdrawal_txn.id}. "
+                      f"transfer_from={withdrawal_txn.transfer_from}, transfer_to={withdrawal_txn.transfer_to}, "
+                      f"product={withdrawal_txn.product}")
+        return
+    
+    # Verify this is indeed a withdrawal
+    is_withdrawal = (
+        withdrawal_txn.transfer_to == 'balance' or
+        withdrawal_txn.transfer_from == product.id
+    )
+    if not is_withdrawal:
+        return
+    
+    # Find all investment transactions (transfer_to = product_id) for the same client and product
+    # that are 'termine' and have positions
+    investment_transactions = Transaction.objects.filter(
+        client_id=withdrawal_txn.client_id,
+        type='transfert',
+        transfer_to=product.id,
+        status='termine'
+    ).exclude(id=withdrawal_txn.id)  # Exclude the withdrawal transaction itself
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Recalculating positions for {investment_transactions.count()} investment transactions "
+                f"on product {product.id} after withdrawal transaction {withdrawal_txn.id}")
+    
+    # For each investment transaction, recalculate positions
+    # This will use the updated capital (which now excludes the withdrawal)
+    for inv_txn in investment_transactions:
+        try:
+            # Delete future positions for this investment transaction
+            now = timezone.now()
+            future_positions = Position.objects.filter(
+                transaction_id=inv_txn.id
+            ).filter(
+                # Future positions: pending with opened_at > now
+                Q(status='pending', opened_at__gt=now) |
+                (Q(status='pending') & Q(opened_at__isnull=True))
+            )
+            future_count = future_positions.count()
+            if future_count > 0:
+                logger.info(f"Deleting {future_count} future positions for investment transaction {inv_txn.id} "
+                           f"before recalculation after withdrawal")
+                future_positions.delete()
+            
+            # Regenerate positions for this investment transaction
+            # This will use the updated capital (reduced by the withdrawal)
+            create_positions_for_investment(inv_txn, trigger="withdrawal_recalculation")
+            logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after withdrawal")
+        except Exception as e:
+            logger.error(f"Failed to recalculate positions for investment transaction {inv_txn.id} "
+                        f"after withdrawal {withdrawal_txn.id}: {str(e)}", exc_info=True)
 

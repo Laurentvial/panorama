@@ -16,6 +16,7 @@ interface PeriodRate {
   baseRatePct: string;
   capitalBase: string;
   targetProfit: string;
+  // Note: months represents step_months, we may need profit_period_months for accurate proration
 }
 
 interface Position {
@@ -44,6 +45,7 @@ interface PositionGenerationModalProps {
   clientId: string;
   onClose: () => void;
   onSuccess: () => void;
+  isWithdrawal?: boolean; // If true, this is a withdrawal transaction
 }
 
 type Step = 'loading-rates' | 'review-rates' | 'loading-positions' | 'review-positions' | 'saving';
@@ -53,13 +55,15 @@ export function PositionGenerationModal({
   transaction,
   clientId,
   onClose,
-  onSuccess
+  onSuccess,
+  isWithdrawal = false
 }: PositionGenerationModalProps) {
   const [step, setStep] = useState<Step>('loading-rates');
   const [rates, setRates] = useState<PeriodRate[]>([]);
   const [editedRates, setEditedRates] = useState<Record<number, string>>({});
   const [positions, setPositions] = useState<Position[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [avoidLosses, setAvoidLosses] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen && transaction) {
@@ -69,11 +73,13 @@ export function PositionGenerationModal({
       setEditedRates({});
       setPositions([]);
       setError(null);
+      setAvoidLosses(false);
       
-      // Start generating rates
+      // For both investments and withdrawals, generate rates
+      // For withdrawals, rates will be generated for the source product
       generateRates();
     }
-  }, [isOpen, transaction]);
+  }, [isOpen, transaction, isWithdrawal]);
 
   const generateRates = async () => {
     if (!transaction) return;
@@ -82,12 +88,49 @@ export function PositionGenerationModal({
       setStep('loading-rates');
       setError(null);
       
+      console.log('PositionGenerationModal - Calling generate-rates API for transaction:', transaction.id);
+      console.log('PositionGenerationModal - Transaction details:', {
+        id: transaction.id,
+        type: transaction.type,
+        transfer_to: transaction.transfer_to,
+        transfer_from: transaction.transfer_from,
+        status: transaction.status,
+        product: transaction.product
+      });
+      
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-rates/`,
         { method: 'POST' }
       );
       
+      console.log('PositionGenerationModal - Response from generate-rates:', response);
+      
+      // Check if API returned an error
+      if ((response as any).error) {
+        const errorMsg = (response as any).error;
+        console.error('PositionGenerationModal - API returned error:', errorMsg);
+        setError(errorMsg);
+        setStep('review-rates'); // Still show the review step so user can see the error
+        toast.error(errorMsg);
+        return;
+      }
+      
       const ratesData = (response as any).rates || [];
+      console.log('PositionGenerationModal - Parsed rates data:', ratesData);
+      
+      if (!ratesData || ratesData.length === 0) {
+        const errorMsg = 'Aucune période trouvée pour cette transaction. Vérifiez que :\n' +
+          '- La transaction est un investissement (transfert vers un produit)\n' +
+          '- Le produit a une durée configurée\n' +
+          '- Le capital investi est supérieur à 0\n' +
+          '- Il y a des jours de trading entre la date de début et la fin';
+        console.error('PositionGenerationModal - No rates returned:', errorMsg);
+        setError(errorMsg.replace(/\n/g, ' ')); // Replace newlines with spaces for display
+        setStep('review-rates'); // Still show the review step so user can see the error
+        toast.error('Aucune période trouvée pour cette transaction');
+        return;
+      }
+      
       setRates(ratesData);
       
       // Initialize edited rates with original rates
@@ -100,8 +143,20 @@ export function PositionGenerationModal({
       setStep('review-rates');
     } catch (err: any) {
       console.error('Error generating rates:', err);
-      setError(err?.message || 'Erreur lors de la génération des taux');
-      toast.error('Erreur lors de la génération des taux');
+      // Check if error has response with error message
+      let errorMessage = 'Erreur lors de la génération des taux';
+      if (err?.response?.error) {
+        errorMessage = err.response.error;
+      } else if (err?.response?.detail) {
+        errorMessage = err.response.detail;
+      } else if (err?.message) {
+        errorMessage = err.message;
+      } else if (err?.error) {
+        errorMessage = err.error;
+      }
+      setError(errorMessage);
+      setStep('review-rates'); // Show review step so user can see the error
+      toast.error(errorMessage);
     }
   };
 
@@ -119,23 +174,42 @@ export function PositionGenerationModal({
       setStep('loading-positions');
       setError(null);
       
-      // Validate rates
+      // Validate rates - ensure all periods have valid rates
       const ratesToUse: Record<number, number> = {};
-      for (const [periodIdx, rateStr] of Object.entries(editedRates)) {
-        const rate = parseFloat(rateStr);
-        if (isNaN(rate) || rate < 0) {
-          toast.error(`Le taux pour la période ${parseInt(periodIdx) + 1} est invalide`);
+      
+      // Process all rates from the rates array (which contains all periods)
+      for (const rate of rates) {
+        const periodIdx = rate.periodIndex;
+        const rateStr = editedRates[periodIdx];
+        
+        // Use edited rate if available and valid, otherwise fall back to baseRatePct
+        let rateValue: number;
+        if (rateStr !== undefined && rateStr !== '' && !isNaN(parseFloat(rateStr))) {
+          rateValue = parseFloat(rateStr);
+        } else {
+          // Fallback to original baseRatePct
+          rateValue = parseFloat(rate.baseRatePct);
+        }
+        
+        if (isNaN(rateValue) || rateValue < 0) {
+          toast.error(`Le taux pour la période ${periodIdx + 1} est invalide`);
           setStep('review-rates');
           return;
         }
-        ratesToUse[parseInt(periodIdx)] = rate;
+        ratesToUse[periodIdx] = rateValue;
       }
+      
+      console.log('Sending rates to backend:', ratesToUse); // Debug log
+      console.log('Edited rates state:', editedRates); // Debug log
       
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-positions/`,
         {
           method: 'POST',
-          body: JSON.stringify({ rates: ratesToUse })
+          body: JSON.stringify({ 
+            rates: ratesToUse,
+            avoid_losses: avoidLosses
+          })
         }
       );
       
@@ -155,12 +229,54 @@ export function PositionGenerationModal({
       setStep('saving');
       setError(null);
       
+      // Prepare rates_used and period_summaries for history (for both investments and withdrawals)
       // Prepare rates_used and period_summaries for history
       const ratesUsed: Record<string, string> = {};
       Object.entries(editedRates).forEach(([periodIdx, rate]) => {
         ratesUsed[periodIdx] = rate;
       });
       
+      // Recalculate period_summaries with edited rates and recalculated target profits
+      const recalculatedPeriodSummaries = rates.map(rate => {
+        const editedRate = editedRates[rate.periodIndex];
+        const rateValue = editedRate !== undefined && editedRate !== '' 
+          ? parseFloat(editedRate) 
+          : parseFloat(rate.baseRatePct);
+        
+        // Calculate proration factor
+        const baseRateValue = parseFloat(rate.baseRatePct);
+        const originalEffectiveRate = parseFloat(rate.ratePct);
+        let proration = 1;
+        if (baseRateValue > 0 && originalEffectiveRate > 0) {
+          proration = originalEffectiveRate / baseRateValue;
+          if (Math.abs(proration - 1) < 0.0001) {
+            proration = 1;
+          }
+        }
+        
+        // Calculate target profit with edited rate
+        const capitalBase = parseFloat(rate.capitalBase);
+        const effectiveRate = rateValue * proration;
+        const targetProfit = capitalBase * (effectiveRate / 100);
+        const roundedProfit = Math.round(targetProfit * 100) / 100;
+        
+        // Debug: log the calculation
+        console.log(`Period ${rate.periodIndex}: rateValue=${rateValue}, proration=${proration}, effectiveRate=${effectiveRate}, capitalBase=${capitalBase}, targetProfit=${roundedProfit}`);
+        
+        return {
+          periodIndex: rate.periodIndex,
+          months: rate.months,
+          startDate: rate.startDate,
+          endDate: rate.endDate,
+          ratePct: (rateValue * proration).toFixed(4), // effective rate (with proration)
+          baseRatePct: rateValue.toFixed(2), // base rate (edited, before proration) - this is what should be displayed
+          capitalBase: rate.capitalBase,
+          targetProfit: roundedProfit.toFixed(2), // recalculated with edited rate
+        };
+      });
+      
+      // For withdrawals, save only the history (no positions are created for the withdrawal itself)
+      // For investments, save positions and history
       await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/save-positions/`,
         {
@@ -168,22 +284,21 @@ export function PositionGenerationModal({
           body: JSON.stringify({ 
             positions,
             rates_used: ratesUsed,
-            period_summaries: rates.map(rate => ({
-              periodIndex: rate.periodIndex,
-              months: rate.months,
-              startDate: rate.startDate,
-              endDate: rate.endDate,
-              ratePct: editedRates[rate.periodIndex] || rate.baseRatePct,
-              capitalBase: rate.capitalBase,
-              targetProfit: rate.targetProfit,
-            }))
+            period_summaries: recalculatedPeriodSummaries
           })
         }
       );
       
-      toast.success('Positions générées avec succès');
-      handleClose();
-      onSuccess();
+      if (isWithdrawal) {
+        // For withdrawals, just close the modal and call onSuccess to update the transaction status
+        // Don't show toast here - EditTransactionModal will show it
+        handleClose();
+        onSuccess();
+      } else {
+        toast.success('Positions générées avec succès');
+        handleClose();
+        onSuccess();
+      }
     } catch (err: any) {
       console.error('Error saving positions:', err);
       setError(err?.message || 'Erreur lors de l\'enregistrement des positions');
@@ -232,13 +347,60 @@ export function PositionGenerationModal({
     }
   };
 
+  const calculateTargetProfit = (rate: PeriodRate, editedRate: string | undefined): string => {
+    // Use edited rate if available and valid, otherwise use baseRatePct
+    const rateStr = editedRate !== undefined && editedRate !== '' ? editedRate : rate.baseRatePct;
+    const rateValue = parseFloat(rateStr);
+    
+    if (isNaN(rateValue) || rateValue < 0) {
+      return formatCurrency('0');
+    }
+    
+    // Parse capital base
+    const capitalBase = parseFloat(rate.capitalBase);
+    if (isNaN(capitalBase) || capitalBase <= 0) {
+      return formatCurrency('0');
+    }
+    
+    // Calculate proration factor
+    // The backend calculates: effective_rate = base_rate * proration
+    // Where proration = step_months / profit_period_months
+    // We can derive proration from: proration = effective_rate / base_rate
+    const baseRateValue = parseFloat(rate.baseRatePct);
+    const originalEffectiveRate = parseFloat(rate.ratePct);
+    let proration = 1;
+    
+    if (baseRateValue > 0 && originalEffectiveRate > 0) {
+      // Proration = effective_rate / base_rate
+      proration = originalEffectiveRate / baseRateValue;
+      // If proration is very close to 1 (within 0.0001), treat it as exactly 1
+      // This avoids floating point precision issues that cause 1999.99 instead of 2000.00
+      if (Math.abs(proration - 1) < 0.0001) {
+        proration = 1;
+      }
+    }
+    
+    // Calculate target profit: capitalBase * (editedRate / 100) * proration
+    // This matches the backend calculation: capital_base * effective_rate_pct / 100
+    const effectiveRate = rateValue * proration;
+    const targetProfit = capitalBase * (effectiveRate / 100);
+    
+    // Round to 2 decimal places to match backend quantization
+    // Use Math.round for proper rounding (rounds half up)
+    const roundedProfit = Math.round(targetProfit * 100) / 100;
+    
+    return formatCurrency(roundedProfit.toString());
+  };
+
   if (!isOpen || !transaction) return null;
 
   return (
     <div className="modal-overlay" onClick={handleClose}>
       <div className="modal-content" style={{ maxWidth: '900px', maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">Génération des positions</h2>
+          <h2 className="modal-title">
+            {isWithdrawal ? 'Confirmation de retrait' : 'Génération des positions'}
+          </h2>
           <Button
             type="button"
             variant="ghost"
@@ -271,26 +433,66 @@ export function PositionGenerationModal({
             </div>
           )}
 
+          {step === 'saving' && (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
+              <p style={{ fontSize: '16px', color: '#64748b' }}>
+                {isWithdrawal ? 'Enregistrement de la transaction et recalcul des positions...' : 'Enregistrement des positions...'}
+              </p>
+            </div>
+          )}
+
           {step === 'review-rates' && (
             <div>
-              <p style={{ marginBottom: '20px', color: '#64748b' }}>
-                Veuillez vérifier et modifier si nécessaire les taux de rentabilité pour chaque période :
-              </p>
-              
-              <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Période</th>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Durée</th>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Dates</th>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Capital de base</th>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Taux (%)</th>
-                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Profit cible</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rates.map((rate) => (
+              {rates.length === 0 ? (
+                <div style={{ 
+                  padding: '20px', 
+                  backgroundColor: '#fef3c7', 
+                  border: '1px solid #fbbf24', 
+                  borderRadius: '8px', 
+                  marginBottom: '20px',
+                  textAlign: 'center'
+                }}>
+                  <p style={{ fontSize: '16px', fontWeight: '600', color: '#92400e', marginBottom: '12px' }}>
+                    Aucune période trouvée
+                  </p>
+                  <div style={{ fontSize: '14px', color: '#78350f', textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
+                    {error ? (
+                      <p style={{ marginBottom: '8px' }}>{error}</p>
+                    ) : (
+                      <>
+                        <p style={{ marginBottom: '8px', fontWeight: '500' }}>Impossible de générer les périodes pour cette transaction.</p>
+                        <p style={{ marginBottom: '4px' }}>Vérifiez que :</p>
+                        <ul style={{ marginLeft: '20px', marginTop: '8px', marginBottom: '0' }}>
+                          <li>La transaction est un investissement (transfert vers un produit)</li>
+                          <li>Le produit a une durée configurée</li>
+                          <li>Le capital investi est supérieur à 0</li>
+                          <li>Il y a des jours de trading entre la date de début et la fin</li>
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p style={{ marginBottom: '20px', color: '#64748b' }}>
+                    Veuillez vérifier et modifier si nécessaire les taux de rentabilité pour chaque période :
+                  </p>
+                  
+                  <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Période</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Durée</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Dates</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Capital de base</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Taux (%)</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Profit cible</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rates.map((rate) => (
                       <tr key={rate.periodIndex} style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <td style={{ padding: '12px' }}>{rate.periodIndex + 1}</td>
                         <td style={{ padding: '12px' }}>{rate.months} mois</td>
@@ -308,20 +510,41 @@ export function PositionGenerationModal({
                             style={{ width: '100px' }}
                           />
                         </td>
-                        <td style={{ padding: '12px' }}>{formatCurrency(rate.targetProfit)}</td>
+                        <td style={{ padding: '12px' }}>
+                          {calculateTargetProfit(rate, editedRates[rate.periodIndex])}
+                        </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ marginBottom: '20px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '14px' }}>
+                      <input
+                        type="checkbox"
+                        checked={avoidLosses}
+                        onChange={(e) => setAvoidLosses(e.target.checked)}
+                        style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontWeight: '500' }}>Eviter les pertes</span>
+                    </label>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', marginLeft: '24px' }}>
+                      Si activé, toutes les positions générées seront gagnantes ou neutres (aucune perte)
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="modal-form-actions">
                 <Button type="button" variant="outline" onClick={handleClose}>
                   Annuler
                 </Button>
-                <Button type="button" onClick={handleContinue}>
-                  Continuer
-                </Button>
+                {rates.length > 0 && (
+                  <Button type="button" onClick={handleContinue}>
+                    Continuer
+                  </Button>
+                )}
               </div>
             </div>
           )}
