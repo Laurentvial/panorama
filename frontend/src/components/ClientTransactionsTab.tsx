@@ -271,16 +271,40 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
       
       // Check if this is a transfert transaction with status "termine"
-      // If so, we'll show the position generation modal instead of auto-generating
       const isTransfert = transactionForm.type === 'transfert';
       const isTermine = transactionForm.status === 'termine';
       
-      // If it's a transfert with status "termine", create it with temporary status "en_cours"
-      // and show modal instead. We'll update to "termine" after position generation completes.
-      const shouldShowModal = isTransfert && isTermine;
+      // For transfert transactions, determine if this is an investment or withdrawal BEFORE creating
+      // This prevents creating transactions with wrong status if they don't qualify for position generation
+      let shouldShowModal = false;
+      let isInvestment = false;
+      let isWithdrawal = false;
       
-      // Use temporary status "en_cours" if we'll show the modal, so transaction isn't finalized
-      // until position generation is complete
+      if (isTransfert && isTermine) {
+        // Check transfer direction from form fields to determine if this qualifies for position generation
+        const transferTo = transactionForm.to_field || 'balance';
+        const transferFrom = transactionForm.from_field || 'balance';
+        
+        // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
+        // Investment: transferTo is a product ID (not 'balance' or 'trading')
+        isInvestment = transferTo && 
+                      transferTo !== 'balance' && 
+                      transferTo !== 'trading' &&
+                      String(transferTo).trim() !== '';
+        
+        // Withdrawal: transferTo is 'balance' and transferFrom is a product ID (not 'balance')
+        isWithdrawal = transferTo === 'balance' && 
+                      transferFrom && 
+                      transferFrom !== 'balance' &&
+                      transferFrom !== 'trading' &&
+                      String(transferFrom).trim() !== '';
+        
+        // Only show modal for actual investments or withdrawals (not balance-to-balance or balance-to-trading)
+        shouldShowModal = isInvestment || isWithdrawal;
+      }
+      
+      // Use temporary status "en_cours" ONLY if we're actually going to show the modal
+      // This prevents transactions from being stuck in "en_cours" status
       const transactionStatus = shouldShowModal ? 'en_cours' : transactionForm.status;
       
       const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
@@ -289,9 +313,9 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           type: transactionForm.type,
           amount: parseFloat(transactionForm.amount),
           description: transactionForm.description,
-          status: transactionStatus, // Use temporary status if modal will be shown
+          status: transactionStatus, // Use temporary status only if modal will be shown
           datetime: datetimeISO,
-          skip_position_generation: true, // Always skip auto-generation when showing modal
+          skip_position_generation: shouldShowModal, // Skip auto-generation only if showing modal
           ...(transactionForm.type === 'transfert'
             ? {
                 from_field: transactionForm.from_field || 'balance',
@@ -307,30 +331,31 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
       
       // If we should show the modal, open it instead of closing the dialog
       if (shouldShowModal && response) {
-        // Determine if this is an investment or withdrawal based on the actual transaction
-        const transferTo = response.transfer_to || 
-                          response.to_field || 
-                          response.to || 
-                          response.transferTo ||
-                          null;
-        const transferFrom = response.transfer_from || 
-                            response.from_field || 
-                            response.from ||
-                            null;
+        // Verify the transaction response matches our expectations
+        const responseTransferTo = response.transfer_to || 
+                                   response.to_field || 
+                                   response.to || 
+                                   response.transferTo ||
+                                   null;
+        const responseTransferFrom = response.transfer_from || 
+                                    response.from_field || 
+                                    response.from ||
+                                    null;
         
-        // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
-        const isInvestment = transferTo && 
-                            String(transferTo) !== 'balance' && 
-                            String(transferTo) !== 'trading';
-        const isWithdrawal = transferTo === 'balance' && 
-                            transferFrom && 
-                            String(transferFrom) !== 'balance';
+        // Double-check that this is still an investment or withdrawal based on actual response
+        const responseIsInvestment = responseTransferTo && 
+                                    String(responseTransferTo) !== 'balance' && 
+                                    String(responseTransferTo) !== 'trading';
+        const responseIsWithdrawal = responseTransferTo === 'balance' && 
+                                    responseTransferFrom && 
+                                    String(responseTransferFrom) !== 'balance' &&
+                                    String(responseTransferFrom) !== 'trading';
         
-        // Only show modal for investments or withdrawals (not balance-to-balance transfers)
-        if (isInvestment || isWithdrawal) {
+        // Only show modal if response confirms it's an investment or withdrawal
+        if (responseIsInvestment || responseIsWithdrawal) {
           // Set the transaction for position generation
           setTransactionForPositionGeneration(response);
-          setIsWithdrawalForPositionGeneration(isWithdrawal);
+          setIsWithdrawalForPositionGeneration(responseIsWithdrawal);
           setIsPositionGenerationModalOpen(true);
           // Keep the dialog closed (it was already closed or will be closed)
           setIsTransactionDialogOpen(false);
@@ -348,6 +373,23 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           });
           // Don't call onRefresh yet - wait for modal to complete
           return;
+        } else {
+          // Transaction was created with 'en_cours' but doesn't qualify for modal
+          // Update it back to 'termine' to match user's intent
+          console.warn('Transaction created with en_cours status but does not qualify for position generation modal. Updating to termine.');
+          try {
+            await apiCall(`/api/clients/${clientId}/transactions/${response.id}/`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                ...response,
+                status: 'termine',
+                skip_position_generation: false // Allow backend to handle position generation if needed
+              })
+            });
+          } catch (error: any) {
+            console.error('Error updating transaction status back to termine:', error);
+            toast.error('Erreur lors de la mise à jour du statut de la transaction');
+          }
         }
       }
       

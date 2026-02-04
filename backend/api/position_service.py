@@ -743,8 +743,9 @@ def _create_trade_positions_compounding(
     )
     day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
 
-    existing_count_before = Position.objects.filter(transaction_id=ctx.transaction_id).count()
-    existing_counts, max_idx = _existing_trade_counts(ctx.transaction_id)
+    # CRITICAL: Always use txn.id directly to ensure correct transaction linkage
+    existing_count_before = Position.objects.filter(transaction_id=txn.id).count()
+    existing_counts, max_idx = _existing_trade_counts(txn.id)
     next_idx = max_idx + 1
 
     # Profitability config (rate unit is product.profitability_period)
@@ -878,12 +879,15 @@ def _create_trade_positions_compounding(
                 while Position.objects.filter(id=position_id).exists():
                     position_id = uuid.uuid4().hex[:12]
 
+                # CRITICAL: Always use txn.id for transaction_id to ensure correct linkage
+                transaction_id_to_use = txn.id
+                
                 created.append(
                     Position.objects.create(
                         id=position_id,
                         client_id=ctx.client_id,
                         product_id=ctx.product_id,
-                        transaction_id=ctx.transaction_id,
+                        transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
                         asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
                         opened_at=opened_at,
                         closed_at=closed_at,
@@ -1358,12 +1362,15 @@ def generate_positions_with_rates(
                     while Position.objects.filter(id=position_id).exists():
                         position_id = uuid.uuid4().hex[:12]
 
+                    # CRITICAL: Always use txn.id for transaction_id to ensure correct linkage
+                    transaction_id_to_use = txn.id
+                    
                     created.append(
                         Position.objects.create(
                             id=position_id,
                             client_id=ctx.client_id,
                             product_id=ctx.product_id,
-                            transaction_id=ctx.transaction_id,
+                            transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
                             asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
                             opened_at=opened_at,
                             closed_at=closed_at,
@@ -1451,6 +1458,30 @@ def save_generated_positions(
             'note': None
         }
         return [], empty_deletion_info
+    
+    # CRITICAL: Ensure we're using the correct transaction ID
+    # Log to verify the transaction ID is correct
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"DEBUG: save_generated_positions called for transaction {txn.id}, "
+               f"ctx.transaction_id={ctx.transaction_id}, "
+               f"txn.id={txn.id}")
+    
+    # Verify transaction ID matches
+    if ctx.transaction_id != txn.id:
+        logger.error(f"ERROR: Transaction ID mismatch! ctx.transaction_id={ctx.transaction_id}, txn.id={txn.id}")
+        # Use the transaction ID from the parameter, not from context
+        ctx = InvestmentContext(
+            client_id=ctx.client_id,
+            product_id=ctx.product_id,
+            transaction_id=txn.id,  # Force use of the correct transaction ID
+            start_date=ctx.start_date,
+            duration_months=ctx.duration_months,
+            invested_amount=ctx.invested_amount,
+            total_expected_profit=ctx.total_expected_profit,
+            total_expected_amount=ctx.total_expected_amount,
+        )
+        logger.warning(f"Fixed transaction ID mismatch: using txn.id={txn.id}")
 
     # CRITICAL: Delete ALL pending positions for ALL investment transactions on the same product
     # This is necessary because when regenerating positions, we recalculate based on the total
@@ -1577,7 +1608,8 @@ def save_generated_positions(
         logger.warning(f"Cannot delete pending positions: no product_id in context for transaction {txn.id}")
     
     # Check existing positions for current transaction (for logging)
-    all_existing_positions = Position.objects.filter(transaction_id=ctx.transaction_id)
+    # CRITICAL: Use txn.id directly to ensure we're checking the correct transaction
+    all_existing_positions = Position.objects.filter(transaction_id=txn.id)
     total_existing = all_existing_positions.count()
     pending_count = all_existing_positions.filter(status='pending').count()
     open_count = all_existing_positions.filter(status='open').count()
@@ -1609,12 +1641,22 @@ def save_generated_positions(
         if timezone.is_naive(closed_at):
             closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
 
+        # CRITICAL: Always use txn.id for transaction_id, not pos_data.get('transaction_id')
+        # This ensures positions are linked to the correct transaction even if pos_data contains wrong transaction_id
+        transaction_id_to_use = txn.id  # Always use the transaction passed as parameter
+        
+        # Log first position to verify transaction ID
+        if idx == 0:
+            logger.info(f"DEBUG: Creating first position with transaction_id={transaction_id_to_use} "
+                       f"(txn.id={txn.id}, ctx.transaction_id={ctx.transaction_id}, "
+                       f"pos_data.transaction_id={pos_data.get('transaction_id', 'N/A')})")
+        
         created.append(
             Position.objects.create(
                 id=position_id,
                 client_id=ctx.client_id,
                 product_id=ctx.product_id,
-                transaction_id=ctx.transaction_id,
+                transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
                 asset_id=pos_data.get('asset_id'),
                 opened_at=opened_at,
                 closed_at=closed_at,
@@ -1632,14 +1674,29 @@ def save_generated_positions(
     
     logger.info(f"DEBUG: Created {len(created)} positions for transaction {txn.id}")
     
+    # Verify that all created positions have the correct transaction_id
+    if created:
+        for pos in created[:5]:  # Check first 5 positions
+            if pos.transaction_id != txn.id:
+                logger.error(f"ERROR: Position {pos.id} has wrong transaction_id! Expected {txn.id}, got {pos.transaction_id}")
+            else:
+                logger.debug(f"DEBUG: Position {pos.id} correctly linked to transaction {txn.id}")
+    
     # Check total pending positions for product/client after creating new ones
     total_pending_after_create = Position.objects.filter(
         product_id=ctx.product_id,
         client_id=ctx.client_id,
         status='pending'
     ).count() if ctx.product_id else 0
+    
+    # Check positions specifically for the current transaction
+    positions_for_current_txn = Position.objects.filter(
+        transaction_id=txn.id,
+        status='pending'
+    ).count()
     logger.info(f"DEBUG: Total pending positions for product {ctx.product_id} AFTER creating new positions: {total_pending_after_create} "
                f"(expected: {total_pending_before_create} + {len(created)} = {total_pending_before_create + len(created)})")
+    logger.info(f"DEBUG: Pending positions for current transaction {txn.id}: {positions_for_current_txn} (expected: {len(created)})")
 
     # IMPORTANT: When capital changes on a product, all other investment transactions
     # on the same product must have their future positions recalculated.
@@ -1651,15 +1708,17 @@ def save_generated_positions(
         
         # Find all other investment transactions (transfer_to = product_id) for the same client and product
         # that are 'termine' and have positions
+        # CRITICAL: Use txn.id directly to exclude the current transaction, not ctx.transaction_id
+        # This ensures we don't accidentally include the current transaction in the recalculation
         other_investment_transactions = Transaction.objects.filter(
             client_id=ctx.client_id,
             type='transfert',
             transfer_to=ctx.product_id,
             status='termine'
-        ).exclude(id=ctx.transaction_id)  # Exclude the current transaction
+        ).exclude(id=txn.id)  # Exclude the current transaction using txn.id directly
         
         logger.info(f"Recalculating positions for {other_investment_transactions.count()} other investment transactions "
-                    f"on product {ctx.product_id} after updating transaction {ctx.transaction_id}")
+                    f"on product {ctx.product_id} after updating transaction {txn.id}")
         
         # For each other investment transaction, recalculate future positions
         # This ensures that when capital changes, all future positions are recalculated
@@ -1675,32 +1734,101 @@ def save_generated_positions(
         ).count()
         logger.info(f"DEBUG: Pending positions count BEFORE regeneration of other transactions: {pending_before_regen}")
         
+        # Track failed regenerations to prevent data loss
+        failed_regenerations = []
+        max_retries = 2  # Retry failed regenerations up to 2 times
+        
         for other_txn in other_investment_transactions:
-            try:
-                # Check pending positions for this transaction before regeneration
-                pending_for_txn_before = Position.objects.filter(
+            # Check pending positions for this transaction before regeneration
+            pending_for_txn_before = Position.objects.filter(
+                transaction_id=other_txn.id,
+                status='pending'
+            ).count()
+            logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_before} pending positions before regeneration")
+            
+            # Attempt regeneration with retries
+            regeneration_successful = False
+            last_error = None
+            created_positions = []
+            
+            for attempt in range(max_retries + 1):  # 0, 1, 2 = 3 attempts total
+                try:
+                    # Regenerate positions for this investment transaction
+                    # This will use the updated capital (which includes the change from the current transaction)
+                    # delete_pending=False because we already deleted all pending positions above (for all transactions)
+                    created_positions = create_positions_for_investment(other_txn, trigger="capital_update_recalculation", delete_pending=False)
+                    logger.info(f"DEBUG: Transaction {other_txn.id}: Created {len(created_positions)} new positions (attempt {attempt + 1}/{max_retries + 1})")
+                    
+                    # Verify that positions were actually created
+                    pending_for_txn_after = Position.objects.filter(
+                        transaction_id=other_txn.id,
+                        status='pending'
+                    ).count()
+                    
+                    # Check if regeneration was successful
+                    # Success criteria: either positions were created, or there were no positions before (normal case)
+                    if len(created_positions) > 0 or pending_for_txn_before == 0:
+                        regeneration_successful = True
+                        logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_after} pending positions after regeneration (expected {len(created_positions)})")
+                        logger.info(f"Regenerated positions for investment transaction {other_txn.id} after capital update")
+                        break  # Success, exit retry loop
+                    else:
+                        # No positions created but we had positions before - this is a problem
+                        if attempt < max_retries:
+                            logger.warning(f"WARNING: Transaction {other_txn.id}: No positions created on attempt {attempt + 1}. "
+                                         f"Had {pending_for_txn_before} positions before deletion. Retrying...")
+                            last_error = 'No positions created despite having positions before deletion'
+                            continue  # Retry
+                        else:
+                            # Final attempt failed
+                            logger.error(f"ERROR: Transaction {other_txn.id}: Position regeneration failed after {max_retries + 1} attempts! "
+                                       f"Had {pending_for_txn_before} positions before deletion, but 0 positions after regeneration. "
+                                       f"This indicates a potential data loss.")
+                            failed_regenerations.append({
+                                'transaction_id': other_txn.id,
+                                'positions_before': pending_for_txn_before,
+                                'positions_created': len(created_positions),
+                                'positions_after': pending_for_txn_after,
+                                'error': last_error or 'No positions created despite having positions before deletion'
+                            })
+                            break  # Give up after max retries
+                            
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < max_retries:
+                        logger.warning(f"WARNING: Transaction {other_txn.id}: Exception during regeneration attempt {attempt + 1}: {str(e)}. Retrying...")
+                        continue  # Retry
+                    else:
+                        # Final attempt failed with exception
+                        logger.error(f"CRITICAL ERROR: Failed to regenerate positions for investment transaction {other_txn.id} "
+                                   f"after {max_retries + 1} attempts following capital update on transaction {txn.id}. "
+                                   f"This transaction had {pending_for_txn_before} positions before deletion, "
+                                   f"which are now permanently lost unless manually regenerated. "
+                                   f"Error: {str(e)}", exc_info=True)
+                        failed_regenerations.append({
+                            'transaction_id': other_txn.id,
+                            'positions_before': pending_for_txn_before,
+                            'positions_created': 0,
+                            'positions_after': 0,
+                            'error': str(e)
+                        })
+                        break  # Give up after max retries
+            
+            if not regeneration_successful and pending_for_txn_before > 0:
+                # Final check: verify positions exist
+                final_pending_count = Position.objects.filter(
                     transaction_id=other_txn.id,
                     status='pending'
                 ).count()
-                logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_before} pending positions before regeneration")
-                
-                # Regenerate positions for this investment transaction
-                # This will use the updated capital (which includes the change from the current transaction)
-                # delete_pending=False because we already deleted all pending positions above (for all transactions)
-                created_positions = create_positions_for_investment(other_txn, trigger="capital_update_recalculation", delete_pending=False)
-                logger.info(f"DEBUG: Transaction {other_txn.id}: Created {len(created_positions)} new positions")
-                
-                # Check pending positions for this transaction after regeneration
-                pending_for_txn_after = Position.objects.filter(
-                    transaction_id=other_txn.id,
-                    status='pending'
-                ).count()
-                logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_after} pending positions after regeneration (expected {len(created_positions)})")
-                
-                logger.info(f"Regenerated positions for investment transaction {other_txn.id} after capital update")
-            except Exception as e:
-                logger.error(f"Failed to recalculate positions for investment transaction {other_txn.id} "
-                           f"after capital update on transaction {ctx.transaction_id}: {str(e)}", exc_info=True)
+                if final_pending_count == 0:
+                    logger.error(f"CRITICAL: Transaction {other_txn.id} has lost {pending_for_txn_before} positions due to failed regeneration!")
+        
+        # Log summary of failed regenerations
+        if failed_regenerations:
+            logger.error(f"CRITICAL: {len(failed_regenerations)} transaction(s) failed position regeneration after capital update on transaction {txn.id}:")
+            for failure in failed_regenerations:
+                logger.error(f"  - Transaction {failure['transaction_id']}: {failure['positions_before']} positions lost. Error: {failure['error']}")
+            logger.error(f"These transactions need manual position regeneration to recover lost positions.")
         
         # Check pending positions count after all regenerations
         pending_after_regen = Position.objects.filter(
@@ -1708,7 +1836,20 @@ def save_generated_positions(
             client_id=ctx.client_id,
             status='pending'
         ).count()
+        
+        # CRITICAL: Verify that positions for the current transaction still exist after recalculation
+        positions_for_current_txn_after_regen = Position.objects.filter(
+            transaction_id=txn.id,
+            status='pending'
+        ).count()
         logger.info(f"DEBUG: Pending positions count AFTER regeneration of other transactions: {pending_after_regen}")
+        logger.info(f"DEBUG: Pending positions for current transaction {txn.id} AFTER recalculation: {positions_for_current_txn_after_regen} "
+                   f"(expected: {len(created)})")
+        
+        if positions_for_current_txn_after_regen != len(created):
+            logger.error(f"ERROR: Position count mismatch for transaction {txn.id}! "
+                        f"Expected {len(created)} positions, but found {positions_for_current_txn_after_regen} after recalculation. "
+                        f"This suggests positions were deleted during recalculation.")
         
         if pending_after_regen != len(created):
             logger.warning(f"DEBUG: Mismatch! Created {len(created)} positions for current transaction, "
@@ -1721,7 +1862,10 @@ def save_generated_positions(
         logger.info(f"DEBUG: - Deleted {deleted_count} pending positions")
         logger.info(f"DEBUG: - Created {len(created)} new positions for current transaction")
         logger.info(f"DEBUG: - Regenerated positions for {other_investment_transactions.count()} other transactions")
+        logger.info(f"DEBUG: - Failed regenerations: {len(failed_regenerations)}")
         logger.info(f"DEBUG: - Final pending positions count: {pending_after_regen}")
+        if failed_regenerations:
+            logger.error(f"DEBUG: - WARNING: {len(failed_regenerations)} transaction(s) have lost positions and need manual regeneration!")
         logger.info(f"DEBUG: ============================================")
     
     # Record generation history in transaction (without duplicating position details)
@@ -1992,6 +2136,26 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
     ctx = build_investment_context(txn)
     if ctx is None:
         return []
+    
+    # CRITICAL: Ensure we're using the correct transaction ID
+    # Verify transaction ID matches
+    if ctx.transaction_id != txn.id:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"ERROR: Transaction ID mismatch in create_trade_positions_for_smart_portfolio_investment! "
+                    f"ctx.transaction_id={ctx.transaction_id}, txn.id={txn.id}")
+        # Use the transaction ID from the parameter, not from context
+        ctx = InvestmentContext(
+            client_id=ctx.client_id,
+            product_id=ctx.product_id,
+            transaction_id=txn.id,  # Force use of the correct transaction ID
+            start_date=ctx.start_date,
+            duration_months=ctx.duration_months,
+            invested_amount=ctx.invested_amount,
+            total_expected_profit=ctx.total_expected_profit,
+            total_expected_amount=ctx.total_expected_amount,
+        )
+        logger.warning(f"Fixed transaction ID mismatch: using txn.id={txn.id}")
 
     # Resolve product
     product: Product | None = txn.product
@@ -2346,11 +2510,29 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
     import logging
     logger = logging.getLogger(__name__)
     
+    # CRITICAL: Ensure we're using the correct transaction ID
+    # Verify transaction ID matches
+    if ctx.transaction_id != txn.id:
+        logger.error(f"ERROR: Transaction ID mismatch in create_positions_for_investment! "
+                    f"ctx.transaction_id={ctx.transaction_id}, txn.id={txn.id}")
+        # Use the transaction ID from the parameter, not from context
+        ctx = InvestmentContext(
+            client_id=ctx.client_id,
+            product_id=ctx.product_id,
+            transaction_id=txn.id,  # Force use of the correct transaction ID
+            start_date=ctx.start_date,
+            duration_months=ctx.duration_months,
+            invested_amount=ctx.invested_amount,
+            total_expected_profit=ctx.total_expected_profit,
+            total_expected_amount=ctx.total_expected_amount,
+        )
+        logger.warning(f"Fixed transaction ID mismatch: using txn.id={txn.id}")
+    
     # Delete all pending positions before creating new ones (unless idempotent mode)
     if delete_pending:
         now = timezone.now()
         pending_positions = Position.objects.filter(
-            transaction_id=ctx.transaction_id,
+            transaction_id=txn.id,  # Use txn.id directly to ensure correct transaction
             status='pending'
         )
         pending_count = pending_positions.count()
