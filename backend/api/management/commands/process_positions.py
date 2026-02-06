@@ -4,7 +4,10 @@ from django.core.management.base import BaseCommand
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
-from api.models import Position
+from api.models import Position, Transaction, Product
+from api.position_service import _product_compounds, create_interest_transaction_for_period_if_complete
+from decimal import Decimal
+import uuid
 
 
 class Command(BaseCommand):
@@ -44,12 +47,71 @@ class Command(BaseCommand):
             )
             return
 
+        # Get IDs of positions to close before updating (since .update() doesn't return objects)
+        positions_to_close_ids = list(close_qs.values_list('id', flat=True))
+        
         opened = open_qs.update(status="open")
         closed = close_qs.update(status="done")
+        
+        # After closing positions, create interest transfers for non-compounding products
+        # Note: .update() doesn't trigger signals, so we need to process manually
+        if closed > 0 and positions_to_close_ids:
+            self._create_interest_transfers_for_closed_positions(positions_to_close_ids)
 
         self.stdout.write(
             self.style.SUCCESS(
                 f"Opened {opened} position(s), closed {closed} position(s). now={now.isoformat()}"
             )
         )
+    
+    def _create_interest_transfers_for_closed_positions(self, position_ids):
+        """
+        Create interest transactions for completed periods on non-compounding products.
+        This handles the case where positions are closed via .update() which doesn't trigger signals.
+        """
+        # Get the actual closed positions (after the update)
+        closed_positions = Position.objects.filter(
+            id__in=position_ids,
+            status='done'
+        ).select_related('client', 'product', 'transaction')
+        
+        # Group positions by transaction and period_index
+        periods_to_check = {}
+        for position in closed_positions:
+            if not position.transaction_id or position.period_index is None:
+                continue
+            
+            key = (position.transaction_id, position.period_index)
+            if key not in periods_to_check:
+                periods_to_check[key] = position
+        
+        interest_transactions_created = 0
+        for (txn_id, period_idx), position in periods_to_check.items():
+            try:
+                if not position.transaction:
+                    continue
+                
+                # Try to create interest transaction for this period
+                interest_txn = create_interest_transaction_for_period_if_complete(
+                    position.transaction,
+                    period_idx,
+                    trigger="process_positions_command"
+                )
+                
+                if interest_txn:
+                    interest_transactions_created += 1
+                    
+            except Exception as e:
+                self.stdout.write(
+                    self.style.ERROR(
+                        f"Failed to create interest transaction for transaction {txn_id}, period {period_idx}: {e}"
+                    )
+                )
+        
+        if interest_transactions_created > 0:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Created {interest_transactions_created} automatic interest transaction(s) for completed periods."
+                )
+            )
 

@@ -4742,6 +4742,9 @@ def client_transaction_create(request, client_id):
             elif txn.type == 'bonus':
                 calculated_bonus += amount
                 calculated_invested_capital += amount
+            elif txn.type == 'interets':
+                # Interest transactions credit gains to cash balance
+                calculated_invested_capital += amount
             elif txn.type == 'achat':
                 calculated_trading_portfolio += amount
             elif txn.type == 'vente':

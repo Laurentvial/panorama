@@ -732,7 +732,12 @@ export function PlatformPortfolio() {
           calculatedTradingPortfolio -= amt;
           break;
         case 'interets':
-          calculatedProfitLoss += amt;
+          // Interest transactions credit gains to cash balance
+          // They increase investedCapital (available funds) because they add money to the cash balance
+          calculatedInvestedCapital += amt;
+          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          calculatedProfitLoss -= amt;
           break;
         case 'frais':
         case 'perte':
@@ -901,6 +906,20 @@ export function PlatformPortfolio() {
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
+  // Calculate gains/losses from interest transactions (these are credited to cash balance)
+  const interestGainsInCash = useMemo(() => {
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    let total = 0;
+    completedTransactions.forEach((transaction: any) => {
+      if (transaction.type === 'interets') {
+        const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
+        const amt = Number.isFinite(amount) ? amount : 0;
+        total += amt;
+      }
+    });
+    return total;
+  }, [transactions]);
+
   const portfolioValue = useMemo(
     () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
     [availableFunds, tradingPortfolio, profitLoss]
@@ -1033,6 +1052,11 @@ export function PlatformPortfolio() {
                 <div className="text-2xl font-bold">
                   {Math.max(0, availableFunds).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
+                {interestGainsInCash !== 0 && (
+                  <p className={`text-xs mt-1 ${interestGainsInCash >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    dont {interestGainsInCash.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € de {interestGainsInCash >= 0 ? 'gains' : 'pertes'}
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">Fonds disponibles pour investir</p>
               </CardContent>
             </Card>

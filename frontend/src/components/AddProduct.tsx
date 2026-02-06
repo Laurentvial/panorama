@@ -813,6 +813,8 @@ La responsabilité de l'établissement est limitée aux conditions prévues par 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Aucune période</SelectItem>
+                        <SelectItem value="Quotidien">Quotidien</SelectItem>
+                        <SelectItem value="Hebdomadaire">Hebdomadaire</SelectItem>
                         <SelectItem value="Mensuel">Mensuel</SelectItem>
                         <SelectItem value="Trimestrielle">Trimestrielle</SelectItem>
                         <SelectItem value="Semestrielle">Semestrielle</SelectItem>

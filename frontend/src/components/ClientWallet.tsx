@@ -98,7 +98,12 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           runningTradingPortfolio -= amount;
           break;
         case 'interets':
-          runningProfitLoss += amount;
+          // Interest transactions credit gains to cash balance
+          // They increase investedCapital (available funds) because they add money to the cash balance
+          runningInvestedCapital += amount;
+          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          runningProfitLoss -= amount;
           break;
         case 'frais':
         case 'perte':

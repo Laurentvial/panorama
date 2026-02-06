@@ -172,6 +172,10 @@ export function PlatformDashboard() {
         case 'bonus':
           calculatedInvestedCapital += amount;
           break;
+        case 'interets':
+          // Interest transactions credit gains to cash balance
+          calculatedInvestedCapital += amount;
+          break;
         case 'achat':
           calculatedTradingPortfolio += amount;
           break;

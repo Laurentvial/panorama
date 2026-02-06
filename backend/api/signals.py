@@ -1,4 +1,6 @@
 import logging
+import uuid
+from decimal import Decimal
 
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
@@ -6,8 +8,13 @@ from django.utils import timezone
 from django.core.signals import request_finished
 from django.db import close_old_connections, connections
 
-from .models import Transaction, Position
-from .position_service import create_positions_for_investment, recalculate_positions_for_product_withdrawal
+from .models import Transaction, Position, Product
+from .position_service import (
+    create_positions_for_investment,
+    recalculate_positions_for_product_withdrawal,
+    _product_compounds,
+    create_interest_transaction_for_period_if_complete,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +152,90 @@ def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transacti
         recalculate_positions_for_product_withdrawal(instance)
     except Exception as e:
         logger.error("Failed to recalculate positions after withdrawal transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)
+
+
+@receiver(pre_save, sender=Position)
+def _position_capture_previous_state(sender, instance: Position, **kwargs):
+    """
+    Capture previous status so post_save can detect when a position transitions to 'done'.
+    """
+    try:
+        if not instance.pk:
+            instance._previous_status = None
+        else:
+            prev = Position.objects.filter(pk=instance.pk).only("status").first()
+            instance._previous_status = getattr(prev, "status", None) if prev else None
+    except Exception as e:
+        logger.warning("Failed to capture previous Position state: %s", e)
+        instance._previous_status = None
+
+
+@receiver(post_save, sender=Position)
+def _position_create_interest_transaction_for_period(sender, instance: Position, created: bool, **kwargs):
+    """
+    Automatically create an 'interets' transaction when all positions of a period are closed ('done')
+    for a product without compounding (capitalisation_fonds = False).
+    
+    This creates one interest transaction per period (monthly, quarterly, etc.) with the total
+    profit_loss of all positions in that period.
+    """
+    try:
+        # Only process positions that just transitioned to 'done'
+        if instance.status != 'done':
+            return
+        
+        previous_status = getattr(instance, "_previous_status", None)
+        # Only process if status just changed to 'done' (not if it was already 'done')
+        if previous_status == 'done':
+            # Already processed, skip to avoid duplicates
+            return
+        
+        # Check if position is linked to a transaction and product
+        if not instance.transaction_id or not instance.product_id:
+            return
+        
+        # Get the transaction
+        try:
+            txn = instance.transaction
+        except Transaction.DoesNotExist:
+            logger.warning("Position %s references non-existent transaction %s", instance.id, instance.transaction_id)
+            return
+        
+        # Only process investment transactions (transfert balance -> product)
+        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'balance':
+            return
+        
+        # Get the product to check compounding setting
+        try:
+            product = instance.product
+        except Product.DoesNotExist:
+            logger.warning("Position %s references non-existent product %s", instance.id, instance.product_id)
+            return
+        
+        # Only create interest transactions for non-compounding products
+        if _product_compounds(product):
+            # Product compounds interests, no interest transaction needed
+            return
+        
+        # Check if position has a period_index
+        if instance.period_index is None:
+            # Position doesn't belong to a period (e.g., manual trading position)
+            return
+        
+        # Try to create interest transaction for this period if all positions are done
+        create_interest_transaction_for_period_if_complete(
+            txn,
+            instance.period_index,
+            trigger="position_closed"
+        )
+        
+    except Exception as e:
+        logger.error(
+            "Failed to create automatic interest transaction for position %s: %s",
+            getattr(instance, 'id', None),
+            e,
+            exc_info=True
+        )
 
 
 @receiver(request_finished)

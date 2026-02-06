@@ -369,7 +369,7 @@ export function ProductDetail() {
 
   // Get available interest period options from product
   const getInterestPeriodOptions = (product: any): string[] => {
-    const allOptions = ['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'];
+    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'];
     
     if (!product || !product.interestPeriod) {
       return allOptions;
@@ -687,6 +687,9 @@ export function ProductDetail() {
       } else if (transaction.type === 'retrait') {
         calculatedInvestedCapital -= txnAmount;
       } else if (transaction.type === 'bonus') {
+        calculatedInvestedCapital += txnAmount;
+      } else if (transaction.type === 'interets') {
+        // Interest transactions credit gains to cash balance
         calculatedInvestedCapital += txnAmount;
       } else if (transaction.type === 'achat') {
         calculatedTradingPortfolio += txnAmount;

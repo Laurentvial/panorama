@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.db.models import Q, Sum
 
 from .models import Product, Transaction, Position, ProductAssetAllocation, Log, Asset
+from django.db.models import Q, Sum
 
 
 @dataclass(frozen=True)
@@ -37,10 +38,19 @@ def _add_months(d: date, months: int) -> date:
     return date(year, month, 1)
 
 
-def _add_months_dt(dt: datetime, months: int) -> datetime:
+def _add_months_dt(dt: datetime, months: float | int) -> datetime:
     # Add months while keeping day-of-month when possible.
-    year = dt.year + (dt.month - 1 + months) // 12
-    month = (dt.month - 1 + months) % 12 + 1
+    # If months is a fraction (< 1), convert to days instead
+    if isinstance(months, float) and months < 1.0:
+        # Convert fraction of month to days (approximate: 30 days per month)
+        # Use round() instead of int() to properly handle fractional months
+        # Ensure at least 1 day for very small fractions (e.g., daily periods)
+        days = max(1, round(months * 30))
+        return dt + timedelta(days=days)
+    
+    months_int = int(months)
+    year = dt.year + (dt.month - 1 + months_int) // 12
+    month = (dt.month - 1 + months_int) % 12 + 1
     # Clamp day to last day of target month
     import calendar
     last_day = calendar.monthrange(year, month)[1]
@@ -48,30 +58,40 @@ def _add_months_dt(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
-def _period_months_from_profitability_period(period: str | None) -> int:
+def _period_months_from_profitability_period(period: str | None) -> float:
+    """
+    Convert profitability period string to number of months.
+    Returns float to support daily (0.033) and weekly (0.25) periods.
+    """
     if not period:
-        return 1
+        return 1.0
     p = str(period).strip().lower()
     # End of contract / maturity (caller should replace with full duration months)
     if 'fin' in p and ('contrat' in p or 'matur' in p):
-        return 0
+        return 0.0
+    # Daily period: ~1/30 of a month
+    if 'quotid' in p or p in {'daily', 'jour', 'journee'}:
+        return 1.0 / 30.0  # Approximately 0.033 months
+    # Weekly period: ~1/4 of a month
+    if 'hebdo' in p or 'semaine' in p or p in {'weekly', 'week'}:
+        return 1.0 / 4.0  # Approximately 0.25 months
     if 'mens' in p or p in {'month', 'mois'}:
-        return 1
+        return 1.0
     if 'trim' in p or p in {'quarter', 'trimestre'}:
-        return 3
+        return 3.0
     if 'sem' in p or p in {'semester', 'semestre'}:
-        return 6
+        return 6.0
     if 'ann' in p or p in {'year', 'année', 'an'}:
-        return 12
+        return 12.0
     # Fallback: try to parse number
     m = _DURATION_RE.search(p)
     if m:
         try:
             v = int(m.group(1))
-            return v if v > 0 else 1
+            return float(v) if v > 0 else 1.0
         except Exception:
-            return 1
-    return 1
+            return 1.0
+    return 1.0
 
 
 def _is_smart_portfolio(product: Product) -> bool:
@@ -552,6 +572,8 @@ def _choose_profitability_rate_pct(product: Product | None, *, rng: random.Rando
     Pick a profitability rate (percent) expressed in the unit of product.profitability_period.
 
     Examples:
+    - profitability_period == "Quotidien"      => rate is % per day
+    - profitability_period == "Hebdomadaire"   => rate is % per week
     - profitability_period == "Mensuelle"      => rate is % per month
     - profitability_period == "Trimestrielle"  => rate is % per trimester (3 months)
     - profitability_period == "Semestrielle"   => rate is % per semester (6 months)
@@ -750,7 +772,8 @@ def _create_trade_positions_compounding(
 
     # Profitability config (rate unit is product.profitability_period)
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
-    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
+    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _product_compounds(product)
 
     assets_weighted: list[tuple[object, Decimal]] = []
@@ -768,7 +791,7 @@ def _create_trade_positions_compounding(
     period_idx = 0
 
     while remaining_months > 0:
-        step_months = min(profit_period_months, remaining_months)
+        step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
 
         # Days within this profitability period
@@ -999,7 +1022,8 @@ def generate_rates_for_investment(
     logger.info(f"Generating rates for transaction {txn.id}: invested_amount={invested_total}, duration_months={ctx.duration_months}, trading_days={len(trading_days)}")
 
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
-    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
+    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _product_compounds(product)
 
     # Calculate initial capital: if compounding, add profits from all closed and open positions
@@ -1026,7 +1050,7 @@ def generate_rates_for_investment(
     period_idx = 0
 
     while remaining_months > 0:
-        step_months = min(profit_period_months, remaining_months)
+        step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
 
         period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
@@ -1168,7 +1192,8 @@ def generate_positions_with_rates(
     next_idx = max_idx + 1
 
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
-    profit_period_months = ctx.duration_months if pm == 0 else max(1, pm)
+    # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
+    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _product_compounds(product)
 
     # Market hours will be determined per asset in the loop
@@ -1211,7 +1236,7 @@ def generate_positions_with_rates(
     period_idx = 0
 
     while remaining_months > 0:
-        step_months = min(profit_period_months, remaining_months)
+        step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
 
         period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
@@ -2738,4 +2763,144 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
         except Exception as e:
             logger.error(f"Failed to recalculate positions for investment transaction {inv_txn.id} "
                         f"after withdrawal {withdrawal_txn.id}: {str(e)}", exc_info=True)
+
+
+@db_transaction.atomic
+def create_interest_transaction_for_period_if_complete(
+    txn: Transaction,
+    period_index: int,
+    *,
+    trigger: str | None = None,
+) -> Transaction | None:
+    """
+    Create an 'interets' transaction for a completed period if all positions of that period are 'done'
+    and the product doesn't compound (capitalisation_fonds = False).
+    
+    This function is idempotent: it checks if an interest transaction already exists for this period
+    before creating a new one.
+    
+    Args:
+        txn: Investment transaction (transfert balance -> product)
+        period_index: Period index to check (0-based)
+        trigger: Optional trigger string for logging
+    
+    Returns:
+        Created Transaction if created, None otherwise
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Verify this is an investment transaction
+        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'balance':
+            return None
+        
+        # Get the product
+        product = txn.product
+        if not product:
+            try:
+                product = Product.objects.get(id=txn.transfer_to)
+            except Product.DoesNotExist:
+                logger.warning(f"Cannot create interest transaction: product {txn.transfer_to} not found")
+                return None
+        
+        # Only create interest transactions for non-compounding products
+        if _product_compounds(product):
+            return None
+        
+        # Get all positions for this transaction and period
+        positions_in_period = Position.objects.filter(
+            transaction_id=txn.id,
+            period_index=period_index
+        )
+        
+        if not positions_in_period.exists():
+            # No positions for this period yet
+            return None
+        
+        # Check if all positions in this period are 'done'
+        total_positions = positions_in_period.count()
+        done_positions = positions_in_period.filter(status='done').count()
+        
+        if done_positions < total_positions:
+            # Period not yet complete
+            return None
+        
+        # Check if an interest transaction already exists for this period (idempotent)
+        # We identify it by checking for an 'interets' transaction with:
+        # - same client
+        # - same product
+        # - description containing the period index and transaction reference
+        period_ref = f"Période {period_index + 1}"
+        existing_interest = Transaction.objects.filter(
+            client=txn.client,
+            type='interets',
+            product=product,
+            description__icontains=period_ref
+        ).filter(
+            # Also check that it references this transaction's period
+            Q(description__icontains=f"transaction {txn.id}") |
+            Q(description__icontains=f"txn {txn.id}") |
+            # Or check by datetime proximity (within same period date range)
+            Q(datetime__gte=txn.datetime)
+        ).first()
+        
+        if existing_interest:
+            logger.debug(f"Interest transaction already exists for transaction {txn.id}, period {period_index} (transaction {existing_interest.id})")
+            return None
+        
+        # Calculate total profit_loss for this period
+        total_profit = positions_in_period.aggregate(
+            total=Sum('profit_loss')
+        )['total'] or Decimal('0')
+        
+        if total_profit <= 0:
+            # No profit to create interest transaction for
+            return None
+        
+        # Get period date range for description
+        period_positions = positions_in_period.order_by('period_date')
+        first_date = period_positions.first().period_date if period_positions.exists() else None
+        last_date = period_positions.last().period_date if period_positions.exists() else None
+        
+        # Create the interest transaction
+        transaction_id = uuid.uuid4().hex[:12]
+        while Transaction.objects.filter(id=transaction_id).exists():
+            transaction_id = uuid.uuid4().hex[:12]
+        
+        # Build description with transaction reference for better idempotence checking
+        product_name = product.name or f"Produit {product.id}"
+        period_info = f"Période {period_index + 1}"
+        if first_date and last_date:
+            if first_date == last_date:
+                period_info += f" ({first_date.strftime('%d/%m/%Y')})"
+            else:
+                period_info += f" ({first_date.strftime('%d/%m/%Y')} - {last_date.strftime('%d/%m/%Y')})"
+        description = f"Intérêts {product_name} - {period_info} - Transaction {txn.id}"
+        
+        # Create the interest transaction
+        interest_transaction = Transaction.objects.create(
+            id=transaction_id,
+            client=txn.client,
+            type='interets',
+            amount=total_profit,
+            description=description,
+            status='termine',  # Auto-completed since it's automatic
+            datetime=timezone.now(),
+            product=product,  # Link to the product for reference
+        )
+        
+        logger.info(
+            f"Created interest transaction {interest_transaction.id} for transaction {txn.id}, "
+            f"period {period_index} (client {txn.client_id}, product {product.id}, amount {total_profit}, trigger: {trigger})"
+        )
+        
+        return interest_transaction
+        
+    except Exception as e:
+        logger.error(
+            f"Failed to create interest transaction for transaction {txn.id}, period {period_index}: {e}",
+            exc_info=True
+        )
+        return None
 

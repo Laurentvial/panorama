@@ -91,8 +91,12 @@ export function ClientPortfolioTab({ client, clientId, transactions = [], onRefr
           // For now, we don't adjust profit/loss for sales since we don't track cost basis
           break;
         case 'interets':
-          // Interest increases profit
-          calculatedProfitLoss += amount;
+          // Interest transactions credit gains to cash balance
+          // They increase investedCapital (available funds) because they add money to the cash balance
+          calculatedInvestedCapital += amount;
+          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          calculatedProfitLoss -= amount;
           break;
         case 'frais':
         case 'perte':
