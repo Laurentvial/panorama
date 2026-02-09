@@ -125,6 +125,7 @@ urlpatterns = [
     path('products/<str:product_id>/update/', api_views.product_update, name='product-update'),
     path('products/<str:product_id>/delete/', api_views.product_delete, name='product-delete'),
     path('products/<str:product_id>/toggle-active/', api_views.product_toggle_active, name='product-toggle-active'),
+    path('products/<str:product_id>/duplicate/', api_views.product_duplicate, name='product-duplicate'),
     # App Settings endpoints
     path('settings/', api_views.app_settings, name='app-settings'),
     # News Posts endpoints

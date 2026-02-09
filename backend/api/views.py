@@ -7201,6 +7201,103 @@ def product_toggle_active(request, product_id):
     serializer = ProductSerializer(product)
     return Response(serializer.data)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def product_duplicate(request, product_id):
+    """Dupliquer un produit"""
+    original_product = get_object_or_404(Product, id=product_id)
+    
+    # Generate new product ID
+    new_product_id = uuid.uuid4().hex[:12]
+    while Product.objects.filter(id=new_product_id).exists():
+        new_product_id = uuid.uuid4().hex[:12]
+    
+    # Create new product with copied fields
+    # Append " (Copie)" to the name
+    new_name = f"{original_product.name} (Copie)"
+    
+    # Create the duplicated product
+    duplicated_product = Product.objects.create(
+        id=new_product_id,
+        name=new_name,
+        reference=original_product.reference,
+        type=original_product.type,
+        category=original_product.category,
+        subcategory=original_product.subcategory,
+        status='Brouillon',  # Set to draft status
+        profitability=original_product.profitability,
+        duration=original_product.duration,
+        description=original_product.description,
+        cgv=original_product.cgv,
+        # Gestion de la rentabilité
+        no_profitability=original_product.no_profitability,
+        is_variable_profitability=original_product.is_variable_profitability,
+        variable_profitability=original_product.variable_profitability,
+        profitability_period=original_product.profitability_period,
+        interest_period=original_product.interest_period,
+        capitalisation_fonds=original_product.capitalisation_fonds,
+        # Gestion du produit
+        availability_start=original_product.availability_start,
+        availability_end=original_product.availability_end,
+        link_to_assets=original_product.link_to_assets,
+        # Gestion des prix
+        min_entry_value=original_product.min_entry_value,
+        max_entry_value=original_product.max_entry_value,
+        default=original_product.default,
+        available_funds=original_product.available_funds,
+    )
+    
+    # Copy image if it exists
+    if original_product.image:
+        try:
+            # Get the original image file
+            original_image = original_product.image
+            # Get file extension from original filename
+            original_filename = original_image.name
+            _, ext = os.path.splitext(original_filename)
+            
+            # Create new filename with new product ID
+            new_filename = f'{new_product_id}{ext}'
+            
+            # Copy the image file
+            # For Cloudinary storage, we need to read the original and save it as new
+            if original_image.storage.exists(original_image.name):
+                # Open the original image file
+                with original_image.open('rb') as original_file:
+                    # Save it with the new filename
+                    duplicated_product.image.save(new_filename, original_file, save=True)
+        except Exception as e:
+            # Log error but don't fail the duplication
+            print(f"Warning: Could not copy image for product {new_product_id}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+    
+    # Copy ProductAssetAllocation entries if link_to_assets is 'Oui'
+    if original_product.link_to_assets == 'Oui':
+        try:
+            original_allocations = ProductAssetAllocation.objects.filter(product=original_product)
+            for original_alloc in original_allocations:
+                alloc_id = uuid.uuid4().hex[:12]
+                while ProductAssetAllocation.objects.filter(id=alloc_id).exists():
+                    alloc_id = uuid.uuid4().hex[:12]
+                ProductAssetAllocation.objects.create(
+                    id=alloc_id,
+                    product=duplicated_product,
+                    asset=original_alloc.asset,
+                    proportion=original_alloc.proportion,
+                )
+        except Exception as e:
+            # Log error but don't fail the duplication
+            print(f"Warning: Could not copy asset allocations for product {new_product_id}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+    
+    # Refresh from database to get auto-updated fields
+    duplicated_product.refresh_from_db()
+    
+    serializer = ProductSerializer(duplicated_product, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 # AI Generation endpoints
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

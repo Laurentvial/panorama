@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { Plus, Pencil, Trash2, Folder, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Folder, X, Copy } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/PageHeader.css';
@@ -137,6 +137,17 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
     } catch (error: any) {
       console.error('Error deleting product:', error);
       toast.error(error?.message || 'Erreur lors de la suppression du produit');
+    }
+  }
+
+  async function handleDuplicateProduct(productId: string) {
+    try {
+      await apiCall(`/api/products/${productId}/duplicate/`, { method: 'POST' });
+      toast.success('Produit dupliqué avec succès');
+      loadData();
+    } catch (error: any) {
+      console.error('Error duplicating product:', error);
+      toast.error(error?.message || 'Erreur lors de la duplication du produit');
     }
   }
 
@@ -303,6 +314,14 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                                   title="Modifier le produit"
                                 >
                                   <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => handleDuplicateProduct(product.id)}
+                                  title="Dupliquer le produit"
+                                >
+                                  <Copy className="w-4 h-4" />
                                 </Button>
                                 <Button 
                                   variant="ghost" 
