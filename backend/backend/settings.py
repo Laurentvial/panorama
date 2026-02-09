@@ -32,12 +32,21 @@ REST_FRAMEWORK = {
 }
 
 # Disable CSRF for API endpoints (using JWT instead)
+# Add Railway domain if RAILWAY_PUBLIC_DOMAIN is set
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
+# Add Railway domain dynamically
+railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+if railway_domain:
+    CSRF_TRUSTED_ORIGINS.append(f'https://{railway_domain}')
+# Also support RAILWAY_STATIC_URL if provided
+railway_static_url = os.getenv('RAILWAY_STATIC_URL')
+if railway_static_url:
+    CSRF_TRUSTED_ORIGINS.append(railway_static_url)
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
