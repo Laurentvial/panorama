@@ -5,7 +5,7 @@
     "buildCommand": "pip install -r requirements.txt"
   },
   "deploy": {
-    "startCommand": "python check_startup.py && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info --timeout 120",
+    "startCommand": "python check_startup.py && python manage.py migrate --noinput && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info --timeout 120",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
