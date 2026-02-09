@@ -1,0 +1,31 @@
+#!/bin/bash
+# Run migrations with graceful error handling, then start gunicorn
+# This allows the app to start even if migrations fail (e.g., database not accessible)
+
+echo "============================================================"
+echo "Running database migrations..."
+echo "============================================================"
+
+# Try to run migrations, but don't fail if database is not accessible
+if python manage.py migrate --noinput; then
+    echo "✓ Migrations completed successfully"
+else
+    MIGRATION_EXIT_CODE=$?
+    echo ""
+    echo "⚠️  WARNING: Migrations failed with exit code $MIGRATION_EXIT_CODE"
+    echo "   This may happen if:"
+    echo "   - Database is not accessible from Railway's network"
+    echo "   - DATABASE_URL is incorrect or hostname cannot be resolved"
+    echo "   - Database server is temporarily unavailable"
+    echo ""
+    echo "   The application will start anyway, but database operations may fail."
+    echo "   Check your DATABASE_URL and ensure the database is accessible."
+    echo ""
+fi
+
+echo "============================================================"
+echo "Starting gunicorn..."
+echo "============================================================"
+
+# Start gunicorn regardless of migration status
+exec gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info --timeout 120
