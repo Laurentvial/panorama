@@ -12,6 +12,7 @@ dj-database-url
 gunicorn
 google-genai
 django-cloudinary-storage
+django-storages
 cloudinary
 requests
 alpha_vantage
