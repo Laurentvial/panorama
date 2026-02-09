@@ -1273,8 +1273,11 @@ def client_login(request):
     email = request.data.get('email', '').strip().lower()
     password = request.data.get('password', '').strip()
     
-    # Log login attempt (without password for security)
+    # Log login attempt with detailed debugging
     logger.info(f"Client login attempt for email: {email}")
+    logger.info(f"Email after processing: {repr(email)}")
+    logger.info(f"Password length received: {len(password)}")
+    logger.info(f"Password first 3 chars: {repr(password[:3]) if len(password) >= 3 else repr(password)}")
     
     if not email or not password:
         logger.warning(f"Login attempt with missing credentials - email: {bool(email)}, password: {bool(password)}")
@@ -1304,8 +1307,17 @@ def client_login(request):
     # Verify password (simple string comparison for now - in production, use hashing)
     # Strip whitespace from stored password for comparison (defensive programming)
     stored_password = (client.password or '').strip()
+    
+    # Enhanced logging for password comparison
+    logger.info(f"Client found: {client.id}")
+    logger.info(f"Stored password length: {len(stored_password)}")
+    logger.info(f"Received password length: {len(password)}")
+    logger.info(f"Passwords match: {stored_password == password}")
+    
     if stored_password != password:
         logger.warning(f"Login attempt for client {client.id} with incorrect password")
+        logger.warning(f"Stored password (first 3): {repr(stored_password[:3]) if len(stored_password) >= 3 else repr(stored_password)}")
+        logger.warning(f"Received password (first 3): {repr(password[:3]) if len(password) >= 3 else repr(password)}")
         return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
     
     logger.info(f"Successful login for client {client.id} ({email})")
