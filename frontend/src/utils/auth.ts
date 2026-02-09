@@ -57,32 +57,59 @@ export async function signIn(username: string, password: string) {
 
 export async function clientSignIn(email: string, password: string) {
   try {
+    // Trim email and password to avoid whitespace issues
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+    
+    console.log('Attempting client login for email:', trimmedEmail);
+    console.log('API URL:', `${apiUrl}/api/client/login/`);
+    
     const response = await fetch(`${apiUrl}/api/client/login/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email: email,
-        password: password,
+        email: trimmedEmail,
+        password: trimmedPassword,
       }),
     });
 
+    console.log('Client login response status:', response.status);
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Invalid credentials' }));
-      throw new Error(error.error || 'Email ou mot de passe incorrect');
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // If response is not JSON, create a generic error
+        errorData = { error: 'Erreur de connexion au serveur' };
+      }
+      
+      console.error('Client login error response:', errorData);
+      const errorMessage = errorData.error || errorData.detail || 'Email ou mot de passe incorrect';
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
+    console.log('Client login successful');
     
     if (data.token) {
       // Store client token under a dedicated key so it doesn't overwrite admin auth.
       localStorage.setItem(CLIENT_ACCESS_TOKEN, data.token);
       localStorage.setItem('clientData', JSON.stringify(data.client));
+      localStorage.setItem('userType', 'client');
+    } else {
+      throw new Error('No token received from server');
     }
     
     return data;
   } catch (error: any) {
+    console.error('Client signIn error:', error);
+    // Re-throw with more context if it's a network error
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error('Erreur de connexion. Vérifiez votre connexion internet.');
+    }
     throw error;
   }
 }

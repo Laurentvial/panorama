@@ -1266,28 +1266,48 @@ def client_verification_config(request, client_id):
 @permission_classes([AllowAny])
 def client_login(request):
     """Client login endpoint - authenticates clients using email/password"""
-    email = request.data.get('email', '').strip()
-    password = request.data.get('password', '')
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    email = request.data.get('email', '').strip().lower()
+    password = request.data.get('password', '').strip()
+    
+    # Log login attempt (without password for security)
+    logger.info(f"Client login attempt for email: {email}")
     
     if not email or not password:
+        logger.warning(f"Login attempt with missing credentials - email: {bool(email)}, password: {bool(password)}")
         return Response({'error': 'Email et mot de passe requis'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        client = Client.objects.get(email=email)
+        # Use case-insensitive email lookup
+        client = Client.objects.get(email__iexact=email)
     except Client.DoesNotExist:
+        logger.warning(f"Login attempt with non-existent email: {email}")
         return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+    except Client.MultipleObjectsReturned:
+        # Should not happen due to unique constraint, but handle gracefully
+        logger.error(f"Multiple clients found for email: {email}")
+        client = Client.objects.filter(email__iexact=email).first()
     
     # Check if client has platform access
     if not client.platform_access:
+        logger.warning(f"Login attempt for client {client.id} without platform access")
         return Response({'error': 'Accès à la plateforme désactivé'}, status=status.HTTP_403_FORBIDDEN)
     
     # Check if client is active
     if not client.active:
+        logger.warning(f"Login attempt for inactive client {client.id}")
         return Response({'error': 'Compte désactivé'}, status=status.HTTP_403_FORBIDDEN)
     
     # Verify password (simple string comparison for now - in production, use hashing)
-    if client.password != password:
+    # Strip whitespace from stored password for comparison (defensive programming)
+    stored_password = (client.password or '').strip()
+    if stored_password != password:
+        logger.warning(f"Login attempt for client {client.id} with incorrect password")
         return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    logger.info(f"Successful login for client {client.id} ({email})")
 
     # Ensure account_verified is consistent with required fields
     changed_fields = _recompute_client_account_verified(client)
