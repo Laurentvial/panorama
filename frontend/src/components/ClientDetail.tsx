@@ -16,6 +16,7 @@ import { ClientAppointmentsTab } from './ClientAppointmentsTab';
 import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
 import { ClientVerificationTab } from './ClientVerificationTab';
+import { ClientDocumentsTab } from './ClientDocumentsTab';
 import '../styles/Clients.css';
 
 interface ClientDetailProps {
@@ -285,6 +286,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <TabsTrigger value="appointments">RDV</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
           <TabsTrigger value="verification">Vérification</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="misc">Fonctionnalités diverses</TabsTrigger>
         </TabsList>
 
@@ -346,6 +348,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         {/* Verification Tab */}
         <TabsContent value="verification">
           <ClientVerificationTab client={client} clientId={clientId} />
+        </TabsContent>
+
+        {/* Documents Tab */}
+        <TabsContent value="documents">
+          <ClientDocumentsTab clientId={clientId} transactions={transactions} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Misc Tab */}

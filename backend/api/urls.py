@@ -83,6 +83,10 @@ urlpatterns = [
     path('clients/<str:client_id>/ribs/', api_views.client_ribs, name='client-ribs'),
     path('clients/<str:client_id>/ribs/add/', api_views.client_rib_add, name='client-rib-add'),
     path('clients/<str:client_id>/ribs/<str:rib_id>/', api_views.client_rib_remove, name='client-rib-remove'),
+    # Client Documents endpoints
+    path('clients/<str:client_id>/documents/', api_views.client_documents, name='client-documents'),
+    path('clients/<str:client_id>/documents/create/', api_views.client_document_create, name='client-document-create'),
+    path('clients/<str:client_id>/documents/<str:document_id>/delete/', api_views.client_document_delete, name='client-document-delete'),
     # Useful Links endpoints
     path('useful-links/', api_views.useful_link_list, name='useful-link-list'),
     path('useful-links/create/', api_views.useful_link_create, name='useful-link-create'),

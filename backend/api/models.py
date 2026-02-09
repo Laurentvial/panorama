@@ -611,6 +611,34 @@ class ClientProduct(models.Model):
     def __str__(self):
         return f"{self.client.fname} {self.client.lname} - {self.product.name}"
 
+class ClientDocument(models.Model):
+    """Table pour stocker les documents clients (contrats, documents KYC, etc.)"""
+    DOCUMENT_TYPES = [
+        ('contract', 'Contrat'),
+        ('kyc', 'Document KYC'),
+        ('identity', 'Pièce d\'identité'),
+        ('address', 'Justificatif de domicile'),
+        ('financial', 'Document financier'),
+        ('other', 'Autre'),
+    ]
+    
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='documents')
+    transaction = models.ForeignKey('Transaction', on_delete=models.CASCADE, null=True, blank=True, related_name='documents')  # Contrats liés aux transactions
+    name = models.CharField(max_length=200, default="")  # Nom du document
+    document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES, default='other')
+    file = models.FileField(upload_to='client_documents/', storage=client_profile_storage, null=True, blank=True)
+    description = models.TextField(default="", blank=True)  # Description du document
+    uploaded_by = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_documents')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.name}"
+
 class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)

@@ -197,6 +197,14 @@ if not CLOUDINARY_STORAGE['CLOUD_NAME'] or not CLOUDINARY_STORAGE['API_KEY'] or 
         "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
     )
 
+# Configure Cloudinary globally to avoid "untrusted customer" errors
+import cloudinary
+cloudinary.config(
+    cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
+    api_key=CLOUDINARY_STORAGE['API_KEY'],
+    api_secret=CLOUDINARY_STORAGE['API_SECRET'],
+)
+
 # Use Cloudinary storage for ALL media files - no local storage fallback
 DEFAULT_FILE_STORAGE = 'api.storage.CloudinaryMediaStorage'
 # Set MEDIA_URL and MEDIA_ROOT for compatibility (even though Cloudinary handles URLs differently)

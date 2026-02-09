@@ -31,12 +31,13 @@ from .models import Position
 from .models import AppSettings
 from .models import NewsPost
 from .models import ClientVerificationConfig
+from .models import ClientDocument
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
-    ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer
+    ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
@@ -3809,6 +3810,120 @@ def client_rib_remove(request, client_id, rib_id):
     except ClientRIB.DoesNotExist:
         return Response({'error': 'Client RIB relationship not found'}, status=status.HTTP_404_NOT_FOUND)
 
+# Client Documents endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_documents(request, client_id):
+    """Liste tous les documents d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    transaction_id = request.GET.get('transactionId', None)
+    
+    # Filter documents
+    documents = ClientDocument.objects.filter(client=client)
+    
+    # If transactionId is provided, filter by transaction
+    if transaction_id:
+        documents = documents.filter(transaction_id=transaction_id)
+    
+    documents = documents.order_by('-created_at')
+    serializer = ClientDocumentSerializer(documents, many=True, context={'request': request})
+    return Response({'documents': serializer.data})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def client_document_create(request, client_id):
+    """Créer un nouveau document pour un client"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Generate document ID
+    document_id = uuid.uuid4().hex[:12]
+    while ClientDocument.objects.filter(id=document_id).exists():
+        document_id = uuid.uuid4().hex[:12]
+    
+    # Get document data
+    name = request.data.get('name', '')
+    document_type = request.data.get('documentType', 'other')
+    description = request.data.get('description', '')
+    transaction_id = request.data.get('transactionId', None)
+    file = request.FILES.get('file')
+    
+    if not name:
+        return Response({'error': 'Le nom du document est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not file:
+        return Response({'error': 'Le fichier est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate transaction relationship for contracts
+    transaction = None
+    if transaction_id:
+        try:
+            transaction = Transaction.objects.get(id=transaction_id, client=client)
+        except Transaction.DoesNotExist:
+            return Response({'error': 'Transaction introuvable ou n\'appartient pas au client'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # If document type is contract, transaction is required
+    if document_type == 'contract' and not transaction:
+        return Response({'error': 'Un contrat doit être lié à une transaction'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Create document
+    document = ClientDocument.objects.create(
+        id=document_id,
+        client=client,
+        transaction=transaction,
+        name=name,
+        document_type=document_type,
+        description=description,
+        uploaded_by=request.user
+    )
+    
+    # Handle file upload
+    try:
+        # Get file extension
+        original_filename = file.name
+        _, ext = os.path.splitext(original_filename)
+        # Create filename with document ID: {document_id}{ext}
+        custom_filename = f'{document_id}{ext}'
+        
+        print(f"Uploading document: {original_filename} as {custom_filename}")
+        
+        # Save with custom filename - this will upload to cloud storage
+        document.file.save(custom_filename, file, save=True)
+        
+        # Verify the file was saved
+        if not document.file:
+            document.delete()
+            return Response({'error': 'Erreur lors de l\'upload du fichier'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        print(f"Document uploaded successfully: {document.file.name}")
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"Error uploading document: {error_msg}")
+        print(traceback.format_exc())
+        document.delete()
+        return Response({'error': f'Erreur lors de l\'upload du fichier: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    serializer = ClientDocumentSerializer(document, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_document_delete(request, client_id, document_id):
+    """Supprimer un document d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    document = get_object_or_404(ClientDocument, id=document_id, client=client)
+    
+    # Delete the file if it exists
+    if document.file:
+        try:
+            document.file.delete(save=False)
+        except Exception as e:
+            print(f"Warning: Could not delete file: {str(e)}")
+    
+    document.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
 # Useful Links endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -5046,6 +5161,513 @@ def client_transaction_create(request, client_id):
         logger.error(f"Failed to create log entry for transaction {transaction_id}: {str(log_error)}")
         import traceback
         logger.error(traceback.format_exc())
+    
+    # Auto-create contract document for transfert transactions with products (subscriptions)
+    # Use the same detailed contract generation logic as product_contract_pdf
+    if transaction_type == 'transfert' and product and transfer_to and transfer_to != 'balance':
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            # Generate contract PDF using the same detailed logic as product_contract_pdf
+            from io import BytesIO
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import mm
+            from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+            from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+            from reportlab.lib.utils import ImageReader
+            import requests
+            from PIL import Image as PILImage
+            
+            # Get client info from subscription details or client object
+            investor_first_name = subscription_details_data.get('firstName', '') if subscription_details_data else (client.fname or '')
+            investor_last_name = subscription_details_data.get('lastName', '') if subscription_details_data else (client.lname or '')
+            investor_email = client.email or ''
+            investor_phone = client.phone or client.mobile or ''
+            investor_birth_date = subscription_details_data.get('birthDate', '') if subscription_details_data else (client.birth_date.strftime('%d/%m/%Y') if client.birth_date else '')
+            investor_city = subscription_details_data.get('city', '') if subscription_details_data else (client.city or '')
+            investor_name = f"{investor_first_name} {investor_last_name}".strip()
+            
+            # Get AppSettings for logo and company info
+            try:
+                app_settings = AppSettings.objects.get(id='settings001')
+                platform_name = app_settings.platform_name or 'Panorama'
+                platform_address = app_settings.address or ''
+                platform_website = app_settings.website or ''
+                platform_email = app_settings.email or ''
+                logo_url = None
+                if app_settings.logo:
+                    try:
+                        logo_url = app_settings.logo.url
+                        # If it's a Cloudinary URL, use it directly
+                        if not (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                            # Build absolute URL if needed
+                            logo_url = request.build_absolute_uri(logo_url)
+                    except Exception:
+                        logo_url = None
+            except AppSettings.DoesNotExist:
+                platform_name = 'Panorama'
+                platform_address = ''
+                platform_website = ''
+                platform_email = ''
+                logo_url = None
+            
+            # Company info (fallback to defaults if not in settings)
+            company_name = platform_name or 'CIM Banque SA'
+            company_address = platform_address or '16 rue Merle d\'Aubigné, 1207 Genève - SUISSE'
+            company_website = platform_website or 'web.interface-cim.fr'
+            company_email = platform_email or 'contact@interface-cim.fr'
+            
+            # Product data
+            product_name = product.name or ''
+            duration = subscription_details_data.get('duration', '') if subscription_details_data else (product.duration or '1 mois')
+            duration_months = _parse_months_from_duration(duration)
+            
+            # Amount
+            amount = float(transaction.amount)
+            
+            # Profitability
+            is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
+            profitability_period = product.profitability_period or 'mensuel'
+            
+            if is_variable and product.variable_profitability:
+                min_profit = float(product.profitability or 0)
+                max_profit = float(product.variable_profitability)
+                profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
+            elif product.profitability is not None:
+                profit = float(product.profitability)
+                profitability_text = f"{profit:.2f}% NET {profitability_period}"
+            else:
+                profitability_text = ''
+            
+            # Calculate contract dates
+            contract_start_date = transaction_datetime.date()
+            contract_end_date = _add_months_keep_day(contract_start_date, duration_months)
+            contract_end_date_str = contract_end_date.strftime('%d/%m/%Y')
+            
+            # Calculate interest
+            rate = _profitability_rate_for_calc(product)
+            interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))
+            interest_amount = float(interest_amount.quantize(Decimal('0.01')))
+            profitability_rate = float(rate)
+            
+            # Interest period
+            interest_period = subscription_details_data.get('interestPeriod', '') if subscription_details_data else (product.interest_period or 'Fin de contrat')
+            
+            # Auto-renewal
+            auto_renewal = 'OUI' if str(product.capitalisation_fonds or '').lower() == 'oui' else 'NON'
+            
+            # Today's date formatted
+            today_formatted = contract_start_date.strftime('%A %d %B %Y').replace('Monday', 'lundi').replace('Tuesday', 'mardi').replace('Wednesday', 'mercredi').replace('Thursday', 'jeudi').replace('Friday', 'vendredi').replace('Saturday', 'samedi').replace('Sunday', 'dimanche').replace('January', 'janvier').replace('February', 'février').replace('March', 'mars').replace('April', 'avril').replace('May', 'mai').replace('June', 'juin').replace('July', 'juillet').replace('August', 'août').replace('September', 'septembre').replace('October', 'octobre').replace('November', 'novembre').replace('December', 'décembre')
+            
+            # Subscription signature
+            subscription_signature = subscription_details_data.get('signature', '') if subscription_details_data else ''
+            
+            # Create PDF with header and footer
+            buffer = BytesIO()
+            
+            # Download logo if available
+            logo_data_bytes = None
+            logo_width_mm = None
+            logo_height_mm = None
+            if logo_url:
+                try:
+                    logo_response = requests.get(logo_url, timeout=10)
+                    if logo_response.status_code == 200:
+                        logo_data_bytes = BytesIO(logo_response.content)
+                        # Get image dimensions using PIL and handle transparency
+                        try:
+                            logo_data_bytes.seek(0)
+                            img = PILImage.open(logo_data_bytes)
+                            img_width, img_height = img.size
+                            
+                            # Handle all transparency modes: RGBA, LA, P (palette with transparency)
+                            if img.mode in ('RGBA', 'LA', 'P'):
+                                # Convert palette images with transparency to RGBA first
+                                if img.mode == 'P':
+                                    # Check if palette has transparency
+                                    if 'transparency' in img.info:
+                                        img = img.convert('RGBA')
+                                    else:
+                                        img = img.convert('RGB')
+                                
+                                # If still RGBA or LA, convert to RGB with white background
+                                if img.mode in ('RGBA', 'LA'):
+                                    # Create a white background
+                                    rgb_img = PILImage.new('RGB', img.size, (255, 255, 255))
+                                    if img.mode == 'RGBA':
+                                        # Paste the RGBA image onto the white background using alpha channel as mask
+                                        rgb_img.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+                                    else:  # LA mode
+                                        # LA mode: L is luminance, A is alpha
+                                        rgb_img.paste(img.convert('RGB'), mask=img.split()[1])  # Use alpha channel
+                                    img = rgb_img
+                                
+                                # Save to BytesIO
+                                logo_data_bytes = BytesIO()
+                                img.save(logo_data_bytes, format='PNG')
+                                logo_data_bytes.seek(0)
+                            elif img.mode != 'RGB':
+                                # Convert other modes to RGB
+                                img = img.convert('RGB')
+                                logo_data_bytes = BytesIO()
+                                img.save(logo_data_bytes, format='PNG')
+                                logo_data_bytes.seek(0)
+                            
+                            # Calculate size to fit in header (max 25mm height)
+                            max_height_mm = 25
+                            aspect_ratio = img_width / img_height
+                            logo_height_mm = min(max_height_mm, img_height * (max_height_mm / img_height))
+                            logo_width_mm = logo_height_mm * aspect_ratio
+                            logo_data_bytes.seek(0)  # Reset for use
+                        except Exception as e:
+                            logger.warning(f"Error processing logo image: {str(e)}")
+                            # If PIL fails, use default size
+                            logo_width_mm = 50
+                            logo_height_mm = 25
+                            logo_data_bytes.seek(0)
+                except Exception:
+                    logo_data_bytes = None
+            
+            # Define header function
+            def header(canvas, doc):
+                canvas.saveState()
+                # Header area
+                header_height = 30*mm
+                canvas.setFillColor(colors.white)
+                canvas.rect(0, A4[1] - header_height, A4[0], header_height, fill=1, stroke=0)
+                
+                # Logo (if available)
+                if logo_data_bytes:
+                    try:
+                        logo_data_bytes.seek(0)  # Reset to beginning
+                        # Use ImageReader to convert BytesIO to something reportlab can use
+                        img_reader = ImageReader(logo_data_bytes)
+                        # Center logo horizontally, align vertically in header
+                        x = (A4[0] - logo_width_mm*mm) / 2
+                        y = A4[1] - header_height + (header_height - logo_height_mm*mm) / 2
+                        # Draw image - mask=None to avoid green background, image already converted to RGB with white background
+                        canvas.drawImage(img_reader, x, y, width=logo_width_mm*mm, height=logo_height_mm*mm, preserveAspectRatio=True, mask=None)
+                        logo_data_bytes.seek(0)  # Reset for next page
+                    except Exception as e:
+                        logger.warning(f"Error drawing logo in PDF header: {str(e)}")
+                
+                canvas.restoreState()
+            
+            # Define footer function
+            def footer(canvas, doc):
+                canvas.saveState()
+                footer_height = 25*mm  # Increased height
+                footer_margin = 5*mm  # Margin from bottom
+                
+                # Footer background
+                canvas.setFillColor(colors.white)
+                canvas.rect(0, footer_margin, A4[0], footer_height - footer_margin, fill=1, stroke=0)
+                
+                # Footer text
+                canvas.setFont('Helvetica', 9)
+                canvas.setFillColor(colors.black)
+                
+                footer_lines = []
+                if company_name:
+                    footer_lines.append(company_name)
+                if company_address:
+                    footer_lines.append(company_address)
+                if company_website or company_email:
+                    contact_info = []
+                    if company_website:
+                        contact_info.append(company_website)
+                    if company_email:
+                        contact_info.append(company_email)
+                    footer_lines.append(' - '.join(contact_info))
+                
+                # Center footer text vertically within footer area
+                line_height = 11
+                total_height = len(footer_lines) * line_height
+                footer_top = footer_margin + footer_height - footer_margin
+                start_y = footer_margin + (footer_height - footer_margin - total_height) / 2 + line_height
+                
+                for i, line in enumerate(footer_lines):
+                    text_width = canvas.stringWidth(line, 'Helvetica', 9)
+                    x = (A4[0] - text_width) / 2
+                    y = start_y - (i * line_height)
+                    canvas.drawString(x, y, line)
+                
+                canvas.restoreState()
+            
+            # Create BaseDocTemplate with header and footer space
+            doc = BaseDocTemplate(
+                buffer,
+                pagesize=A4,
+                rightMargin=20*mm,
+                leftMargin=20*mm,
+                topMargin=35*mm,  # Extra space for header
+                bottomMargin=30*mm,  # Increased space for footer to prevent clipping
+            )
+            
+            # Create frame for content
+            frame = Frame(
+                doc.leftMargin,
+                doc.bottomMargin,
+                doc.width,
+                doc.height,
+                leftPadding=0,
+                bottomPadding=0,
+                rightPadding=0,
+                topPadding=0,
+            )
+            
+            # Create page template with header and footer
+            template = PageTemplate(id='contract_page', frames=[frame], onPage=header, onPageEnd=footer)
+            doc.addPageTemplates([template])
+            
+            # Styles
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.black,
+                alignment=TA_CENTER,
+                spaceAfter=12,
+            )
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontSize=14,
+                textColor=colors.black,
+                spaceAfter=6,
+                spaceBefore=12,
+            )
+            normal_style = ParagraphStyle(
+                'CustomNormal',
+                parent=styles['Normal'],
+                fontSize=11,
+                textColor=colors.black,
+                alignment=TA_JUSTIFY,
+                spaceAfter=6,
+            )
+            center_style = ParagraphStyle(
+                'CustomCenter',
+                parent=styles['Normal'],
+                fontSize=11,
+                textColor=colors.black,
+                alignment=TA_CENTER,
+            )
+            
+            # Build PDF content
+            story = []
+            
+            # Document title (in body, not header)
+            story.append(Paragraph(product_name, title_style))
+            story.append(Spacer(1, 10*mm))
+            
+            # Parties
+            story.append(Paragraph("La société : <b>" + company_name + "</b>", normal_style))
+            story.append(Paragraph("Exerçant sous l'enseigne : <b>" + company_website + "</b>", normal_style))
+            story.append(Paragraph("Ayant son siège social : <b>" + company_address + "</b>", normal_style))
+            story.append(Paragraph("Représentée à l'acte par son représentant légal domicilié en cette qualité au dit siège.", normal_style))
+            story.append(Paragraph("Ci-après dénommée « LA SOCIÉTÉ » d'une part et,", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            story.append(Paragraph("Nom : <b>" + investor_name + "</b>", normal_style))
+            story.append(Paragraph("Mail : <b>" + investor_email + "</b>", normal_style))
+            story.append(Paragraph("Tél : <b>" + investor_phone + "</b>", normal_style))
+            story.append(Paragraph("Date de naissance : <b>" + investor_birth_date + "</b>", normal_style))
+            story.append(Paragraph("Ci-après dénommée « L'INVESTISSEUR » d'autre part.", normal_style))
+            story.append(Spacer(1, 3*mm))
+            
+            italic_style = ParagraphStyle('Italic', parent=normal_style, fontName='Helvetica-Oblique')
+            story.append(Paragraph("CI-APRÈS DÉSIGNÉES ENSEMBLE « LES PARTIES » ET INDIVIDUELLEMENT « LA PARTIE »", italic_style))
+            story.append(Spacer(1, 5*mm))
+            
+            story.append(Paragraph(f"<b>{company_name}</b> est un groupe spécialisé dans l'investissement de produit financier.", normal_style))
+            story.append(Paragraph("À cet égard, LA SOCIÉTÉ entend proposer à ses clients qui investissent, une garantie contractuelle de capital initial dans les conditions prévues ci-après.", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            # Transition phrase
+            story.append(Paragraph("<b>CECI EXPOSÉ, IL EST CONVENU CE QUI SUIT</b>", ParagraphStyle('Transition', parent=normal_style, alignment=TA_CENTER, fontSize=12, spaceAfter=10)))
+            story.append(Spacer(1, 5*mm))
+            
+            # Object
+            story.append(Paragraph("1/ OBJET DU PROTOCOLE", heading_style))
+            story.append(Paragraph(f"a. Le protocole de garantie « <b>{product_name}</b> » est une garantie contractuelle permettant au souscripteur de l'épargne de récupérer, à la fin du placement, le montant du versement effectué à la souscription ainsi que les intérêts.", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            # Duration
+            story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
+            story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_months} {'mois' if duration_months > 1 else 'mois'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
+            story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
+            story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            # Payment
+            story.append(Paragraph("3/ MODALITÉS DE PAIEMENT", heading_style))
+            story.append(Paragraph("a. LA SOCIÉTÉ reconnaîtra la validité du versement comptant et en consentira quittance régulière dès réception du versement.", normal_style))
+            story.append(Paragraph(f"b. L'INVESTISSEUR percevra ses intérêts en « <b>{interest_period}</b> ».", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            # Summary box
+            # Format duration to add "Mois" if it's just a number
+            duration_display = duration
+            if duration and duration.strip().isdigit():
+                duration_display = f"{duration.strip()} Mois"
+            elif duration and not any(word.lower() in duration.lower() for word in ['mois', 'jour', 'an', 'année', 'semaine']):
+                # If duration doesn't contain time unit, try to extract number and add "Mois"
+                import re
+                match = re.search(r'(\d+)', duration)
+                if match:
+                    duration_display = f"{match.group(1)} Mois"
+            
+            summary_data = [
+                ['TITRE', product_name],
+                ['DURÉE', duration_display],
+                ['RENTABILITÉ', profitability_text],
+                ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+            ]
+            summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
+            summary_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('SummaryTitle', parent=heading_style, alignment=TA_CENTER)))
+            story.append(Spacer(1, 3*mm))
+            story.append(summary_table)
+            story.append(Spacer(1, 5*mm))
+            story.append(Paragraph("<b>SIGNATURE DE L'INVESTISSEUR :</b>", normal_style))
+            story.append(Spacer(1, 3*mm))
+            
+            # Add signature image if available
+            if subscription_signature:
+                try:
+                    # Decode base64 signature
+                    import base64
+                    # Remove data URL prefix if present (data:image/png;base64,...)
+                    signature_data = subscription_signature
+                    if ',' in signature_data:
+                        signature_data = signature_data.split(',')[1]
+                    
+                    signature_bytes = base64.b64decode(signature_data)
+                    signature_io = BytesIO(signature_bytes)
+                    
+                    # Get signature dimensions
+                    sig_img = PILImage.open(signature_io)
+                    sig_width, sig_height = sig_img.size
+                    # Resize signature to fit (max width 120mm, maintain aspect ratio)
+                    max_width_mm = 120
+                    aspect_ratio = sig_width / sig_height
+                    if sig_width > max_width_mm * 3.779527559:  # Convert mm to pixels (approx)
+                        sig_width_mm = max_width_mm
+                        sig_height_mm = sig_width_mm / aspect_ratio
+                    else:
+                        sig_width_mm = sig_width / 3.779527559
+                        sig_height_mm = sig_height / 3.779527559
+                    
+                    # Convert to RGB if needed
+                    if sig_img.mode != 'RGB':
+                        sig_rgb = PILImage.new('RGB', sig_img.size, (255, 255, 255))
+                        if sig_img.mode == 'RGBA':
+                            sig_rgb.paste(sig_img, mask=sig_img.split()[3])
+                        else:
+                            sig_rgb.paste(sig_img)
+                        sig_img = sig_rgb
+                    
+                    # Save image to a new BytesIO for ImageReader
+                    signature_io_final = BytesIO()
+                    sig_img.save(signature_io_final, format='PNG')
+                    signature_io_final.seek(0)
+                    
+                    # Create ImageReader and add to PDF
+                    sig_img_reader = ImageReader(signature_io_final)
+                    story.append(Image(sig_img_reader, width=sig_width_mm*mm, height=sig_height_mm*mm))
+                    story.append(Spacer(1, 3*mm))
+                except Exception as e:
+                    # If signature processing fails, continue without it
+                    logger.warning(f"Error processing signature image: {str(e)}")
+            
+            story.append(Paragraph("\" Bon pour accord \"<br/>\" J'accepte les Termes et Conditions \"", normal_style))
+            story.append(Spacer(1, 3*mm))
+            story.append(Paragraph(f"Fait le <b>{today_formatted}</b><br/>À : <b>{investor_city}</b>", normal_style))
+            story.append(Spacer(1, 5*mm))
+            
+            # Interest table
+            interest_data = [
+                ['Date', 'Intérêts payés', 'Performance'],
+                [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+            ]
+            interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
+            interest_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('InterestTitle', parent=heading_style, alignment=TA_CENTER)))
+            story.append(Spacer(1, 3*mm))
+            story.append(interest_table)
+            story.append(Spacer(1, 5*mm))
+            
+            # Terms & Conditions
+            if product.cgv:
+                story.append(Paragraph("TERMES & CONDITIONS", heading_style))
+                # Clean CGV text and convert to paragraphs
+                cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
+                story.append(Paragraph(cgv_text, ParagraphStyle('CGV', parent=normal_style, fontSize=10)))
+            
+            # Build PDF
+            doc.build(story)
+            pdf_content = buffer.getvalue()
+            buffer.close()
+            
+            # Create document
+            document_id = uuid.uuid4().hex[:12]
+            while ClientDocument.objects.filter(id=document_id).exists():
+                document_id = uuid.uuid4().hex[:12]
+            
+            # Save PDF to a temporary file-like object
+            from django.core.files.base import ContentFile
+            import re
+            # Clean product name for filename (remove special characters)
+            clean_product_name = re.sub(r'[^a-zA-Z0-9_-]', '_', product_name)[:50]  # Limit length
+            pdf_file = ContentFile(pdf_content)
+            pdf_file.name = f'contrat_{clean_product_name}_{transaction_id}.pdf'
+            
+            document = ClientDocument.objects.create(
+                id=document_id,
+                client=client,
+                transaction=transaction,
+                name=f"Contrat - {product_name}",
+                document_type='contract',
+                description=f"Contrat de souscription généré automatiquement pour la transaction {transaction_id}",
+                uploaded_by=None  # Auto-generated, no user
+            )
+            
+            # Save PDF file
+            document.file.save(pdf_file.name, pdf_file, save=True)
+            
+            logger.info(f"Auto-created contract document {document_id} for transaction {transaction_id}")
+        except Exception as contract_err:
+            # Log error but don't fail transaction creation
+            import logging
+            import traceback
+            contract_logger = logging.getLogger(__name__)
+            contract_logger.error(f"Failed to auto-create contract document for transaction {transaction_id}: {str(contract_err)}")
+            contract_logger.error(traceback.format_exc())
     
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -7790,6 +8412,7 @@ class CustomTokenRefreshView(TokenRefreshView):
 
 
 @api_view(['GET', 'HEAD', 'OPTIONS'])
+@authentication_classes([])  # Disable authentication - media files should be publicly accessible
 @permission_classes([AllowAny])
 def media_proxy(request, file_path):
     """
@@ -7815,34 +8438,54 @@ def media_proxy(request, file_path):
         
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"Media proxy requested for file: {file_path}")
+        logger.info(f"Media proxy requested for file: {file_path[:200]}...")
         
-        # Create storage instance
-        storage = CloudinaryMediaStorage()
+        # Decode URL if it's encoded (from serializer)
+        from urllib.parse import unquote
+        decoded_path = unquote(file_path)
+        
+        # Check if decoded_path is already a full Cloudinary URL
+        if decoded_path.startswith('http://') or decoded_path.startswith('https://'):
+            # Already a full URL, use it directly
+            file_url = decoded_path
+            logger.info(f"Using provided Cloudinary URL directly: {file_url[:150]}...")
+        else:
+            # Create storage instance
+            storage = CloudinaryMediaStorage()
 
-        # Generate the actual URL for the file
-        try:
-            file_url = storage.url(file_path)
-            logger.info(f"Generated storage URL: {file_url[:150] if file_url else 'None'}...")
-        except Exception as url_error:
-            logger.error(f"Error generating storage URL for {file_path}: {str(url_error)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return Response(
-                {'error': f'Failed to generate storage URL: {str(url_error)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            # Generate the actual URL for the file
+            # Use decoded_path instead of file_path - storage backends expect unencoded paths
+            try:
+                file_url = storage.url(decoded_path)
+                logger.info(f"Generated storage URL: {file_url[:150] if file_url else 'None'}...")
+            except Exception as url_error:
+                logger.error(f"Error generating storage URL for {decoded_path}: {str(url_error)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return Response(
+                    {'error': f'Failed to generate storage URL: {str(url_error)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
-        if not file_url:
-            logger.warning(f"Storage returned empty URL for file: {file_path}")
-            return Response(
-                {'error': 'File not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            if not file_url:
+                logger.warning(f"Storage returned empty URL for file: {file_path}")
+                return Response(
+                    {'error': 'File not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
         
         # Cloudinary URLs are already complete and public, no need to modify them
 
         # Fetch the file from Cloudinary (HEAD for HEAD requests, GET otherwise)
+        # If the file was uploaded as 'image' instead of 'raw', try both URLs
+        response = None
+        fallback_url = None
+        
+        # Check if we're trying to access a PDF via /raw/upload/ but it might be stored as /image/upload/
+        if '/raw/upload/' in file_url and '.pdf' in file_url.lower():
+            # Try raw URL first
+            fallback_url = file_url.replace('/raw/upload/', '/image/upload/')
+        
         try:
             if request.method == 'HEAD':
                 response = requests.head(file_url, timeout=30)
@@ -7854,6 +8497,20 @@ def media_proxy(request, file_path):
             logger.error(traceback.format_exc())
             raise
 
+        # If raw URL failed and we have a fallback, try the image URL
+        if response.status_code != 200 and fallback_url:
+            logger.info(f"Raw URL failed ({response.status_code}), trying fallback image URL: {fallback_url[:150]}...")
+            try:
+                if request.method == 'HEAD':
+                    response = requests.head(fallback_url, timeout=30)
+                else:
+                    response = requests.get(fallback_url, timeout=30)
+                if response.status_code == 200:
+                    file_url = fallback_url  # Update file_url for logging
+                    logger.info(f"Successfully fetched file using fallback image URL")
+            except Exception as fallback_error:
+                logger.error(f"Fallback URL also failed: {str(fallback_error)}")
+
         if response.status_code != 200:
             return Response(
                 {'error': 'Failed to fetch file from storage'},
@@ -7862,10 +8519,33 @@ def media_proxy(request, file_path):
 
         # Create Django response
         content_type = response.headers.get('content-type', 'application/octet-stream')
+        
+        # Detect file type from URL path (decoded) or file_path
+        # Check both decoded_path (full URL) and file_path (path only)
+        is_pdf = False
+        url_lower = decoded_path.lower()
+        path_lower = file_path.lower()
+        file_url_lower = file_url.lower() if file_url else ''
+        
+        # Check if it's a PDF - look for .pdf in the URL, path, or file_url
+        if '.pdf' in url_lower or path_lower.endswith('.pdf') or '.pdf' in file_url_lower:
+            content_type = 'application/pdf'
+            is_pdf = True
+        elif url_lower.endswith(('.jpg', '.jpeg')) or path_lower.endswith(('.jpg', '.jpeg')) or file_url_lower.endswith(('.jpg', '.jpeg')):
+            content_type = 'image/jpeg'
+        elif url_lower.endswith('.png') or path_lower.endswith('.png') or file_url_lower.endswith('.png'):
+            content_type = 'image/png'
+        elif url_lower.endswith('.gif') or path_lower.endswith('.gif') or file_url_lower.endswith('.gif'):
+            content_type = 'image/gif'
+        elif url_lower.endswith('.webp') or path_lower.endswith('.webp') or file_url_lower.endswith('.webp'):
+            content_type = 'image/webp'
+        
         if request.method == 'HEAD':
             # HEAD request - return headers only, no body
             django_response = HttpResponse()
             django_response['Content-Type'] = content_type
+            if is_pdf:
+                django_response['Content-Disposition'] = 'inline'
         else:
             # GET request - return file content
             django_response = HttpResponse(
@@ -7873,14 +8553,30 @@ def media_proxy(request, file_path):
                 content_type=content_type
             )
 
-        # Add CORS headers to allow the frontend to access the image
+        # Add CORS headers to allow the frontend to access the file
         django_response['Access-Control-Allow-Origin'] = '*'
         django_response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
         django_response['Access-Control-Allow-Headers'] = '*'
 
-        # Copy other relevant headers
-        if 'content-disposition' in response.headers:
+        # For PDFs, set Content-Disposition to 'inline' to allow preview in browser
+        # Override any attachment disposition from Cloudinary
+        if is_pdf:
+            # Extract filename from URL for Content-Disposition header
+            filename = None
+            if '/' in decoded_path:
+                filename = decoded_path.split('/')[-1]
+            elif '/' in file_path:
+                filename = file_path.split('/')[-1]
+            
+            if filename:
+                # Use inline with filename to allow browser preview
+                django_response['Content-Disposition'] = f'inline; filename="{filename}"'
+            else:
+                django_response['Content-Disposition'] = 'inline'
+        elif 'content-disposition' in response.headers:
             django_response['Content-Disposition'] = response.headers['content-disposition']
+        
+        # Copy other relevant headers
         if 'cache-control' in response.headers:
             django_response['Cache-Control'] = response.headers['cache-control']
         if 'etag' in response.headers:

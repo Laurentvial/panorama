@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart, FileText } from 'lucide-react';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
@@ -15,6 +15,7 @@ export function PlatformPortfolio() {
   const [productsIndex, setProductsIndex] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactionDocuments, setTransactionDocuments] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
   const ORDERS_PAGE_SIZE = 10;
@@ -112,6 +113,37 @@ export function PlatformPortfolio() {
         return !isFuture && !isUpcomingStatus;
       });
       setTransactions(filteredTransactions);
+      
+      // Load documents for transfert transactions with products (subscriptions)
+      const documentsMap: Record<string, any[]> = {};
+      const transfertTransactions = filteredTransactions.filter((t: any) => 
+        t.type === 'transfert' && 
+        t.transfer_to && 
+        t.transfer_to !== 'balance' && 
+        t.transfer_to !== 'trading'
+      );
+      
+      if (transfertTransactions.length > 0) {
+        try {
+          const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
+          const allDocuments = (documentsResponse as any)?.documents || [];
+          
+          // Group documents by transaction ID
+          transfertTransactions.forEach((t: any) => {
+            const contractDocs = allDocuments.filter((doc: any) => 
+              doc.transactionId === t.id && doc.documentType === 'contract'
+            );
+            if (contractDocs.length > 0) {
+              documentsMap[t.id] = contractDocs;
+            }
+          });
+        } catch (error) {
+          console.error('Error loading documents:', error);
+        }
+      }
+      
+      setTransactionDocuments(documentsMap);
+      
       // Extract assets from ClientAsset objects
       const clientAssets = (clientAssetsResponse as any)?.assets || [];
       const assetsList = clientAssets.map((ca: any) => {
@@ -1354,6 +1386,7 @@ export function PlatformPortfolio() {
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
+                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1390,6 +1423,15 @@ export function PlatformPortfolio() {
                           (isTradingTransfer ? (t.assetType || 'Trading') : '-');
                         const statusLabel = formatTransactionStatus(t.status);
                         const statusColor = getStatusColor(t.status);
+                        
+                        // Check if this transaction has a contract document
+                        const isInvestmentTransfer = t.type === 'transfert' && 
+                          t.transfer_to && 
+                          t.transfer_to !== 'balance' && 
+                          t.transfer_to !== 'trading';
+                        const contractDocs = isInvestmentTransfer ? (transactionDocuments[t.id] || []) : [];
+                        const hasContract = contractDocs.length > 0;
+                        
                         return (
                           <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatDateTime(t.datetime)}</td>
@@ -1406,6 +1448,27 @@ export function PlatformPortfolio() {
                               }}>
                                 {statusLabel}
                               </span>
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                              {hasContract ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const contractDoc = contractDocs[0];
+                                    if (contractDoc?.fileUrl) {
+                                      window.open(contractDoc.fileUrl, '_blank', 'noopener,noreferrer');
+                                    }
+                                  }}
+                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                >
+                                  <FileText style={{ width: 14, height: 14, marginRight: 4 }} />
+                                  Voir le contrat
+                                </Button>
+                              ) : (
+                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>—</span>
+                              )}
                             </td>
                           </tr>
                         );

@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -1226,3 +1226,96 @@ class ClientVerificationConfigSerializer(serializers.ModelSerializer):
         result = super().update(instance, validated_data)
         logger.info(f'After save, instance.steps_config is: {instance.steps_config}')
         return result
+
+class ClientDocumentSerializer(serializers.ModelSerializer):
+    """Serializer pour les documents clients"""
+    fileUrl = serializers.SerializerMethodField()
+    uploadedByName = serializers.SerializerMethodField()
+    documentType = serializers.CharField(source='document_type', required=False)
+    transactionId = serializers.CharField(source='transaction.id', read_only=True, allow_null=True)
+    uploadedBy = serializers.PrimaryKeyRelatedField(source='uploaded_by', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = ClientDocument
+        fields = ['id', 'name', 'documentType', 'file', 'fileUrl', 'description', 'transactionId', 'uploadedBy', 'uploadedByName', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'uploadedBy', 'fileUrl', 'uploadedByName', 'transactionId']
+        extra_kwargs = {
+            'transaction': {'write_only': True, 'required': False}
+        }
+    
+    def get_fileUrl(self, obj):
+        """Retourne l'URL du fichier"""
+        if obj.file:
+            try:
+                file_url = obj.file.url
+                # Check if it's a PDF file
+                is_pdf = obj.file.name.lower().endswith('.pdf') if obj.file.name else False
+                
+                # Cloudinary URLs are public by default, but for PDFs use media proxy to ensure correct Content-Type and Content-Disposition
+                if file_url and (file_url.startswith('http://') or file_url.startswith('https://')):
+                    # Verify it's a valid Cloudinary URL
+                    if 'res.cloudinary.com' in file_url:
+                        # For PDFs, ALWAYS use media proxy to ensure:
+                        # - Correct Content-Type (application/pdf)
+                        # - Content-Disposition: inline (for browser preview)
+                        # - Proper CORS headers
+                        if is_pdf:
+                            request = self.context.get('request')
+                            if request:
+                                # Use media proxy with the full Cloudinary URL encoded
+                                # This ensures proper headers for browser preview
+                                from urllib.parse import quote
+                                encoded_url = quote(file_url, safe='')
+                                return request.build_absolute_uri(f'/api/media/{encoded_url}/')
+                        # For non-PDFs, return Cloudinary URL directly
+                        return file_url
+                    # If it's another absolute URL, return as-is
+                    return file_url
+                else:
+                    # Local path - use media proxy for better CORS support
+                    request = self.context.get('request')
+                    if request and file_url:
+                        # Use media proxy endpoint for better compatibility
+                        # Remove leading slash if present
+                        clean_path = file_url.lstrip('/')
+                        return request.build_absolute_uri(f'/api/media/{clean_path}/')
+                    elif file_url:
+                        # Fallback: return relative path
+                        return file_url
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting file URL for document {obj.id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return ''
+        return ''
+    
+    def get_uploadedByName(self, obj):
+        """Retourne le nom de l'utilisateur qui a uploadé le document"""
+        if obj.uploaded_by:
+            return f"{obj.uploaded_by.first_name} {obj.uploaded_by.last_name}".strip() or obj.uploaded_by.username
+        return ''
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # Convertir les champs en camelCase
+        ret['documentType'] = instance.document_type
+        ret['uploadedBy'] = instance.uploaded_by.id if instance.uploaded_by else None
+        ret['transactionId'] = instance.transaction.id if instance.transaction else None
+        return ret
+    
+    def create(self, validated_data):
+        """Override create pour gérer documentType"""
+        document_type = validated_data.pop('document_type', 'other')
+        document = ClientDocument.objects.create(document_type=document_type, **validated_data)
+        return document
+    
+    def update(self, instance, validated_data):
+        """Override update pour gérer documentType"""
+        document_type = validated_data.pop('document_type', None)
+        if document_type is not None:
+            instance.document_type = document_type
+        return super().update(instance, validated_data)
