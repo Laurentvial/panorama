@@ -6267,6 +6267,562 @@ def product_detail(request, product_id):
     serializer = ProductSerializer(product, context={'request': request})
     return Response({'product': serializer.data}, status=status.HTTP_200_OK)
 
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
+@permission_classes([AllowAny])
+def product_contract_pdf(request, product_id):
+    """Générer le PDF du contrat produit"""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    from reportlab.lib.utils import ImageReader
+    from django.http import HttpResponse
+    import requests
+    from PIL import Image as PILImage
+    
+    # Check authentication: either Django user or valid client token
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+    
+    current_user = None
+    current_client = None
+    
+    if is_client_token:
+        # Validate client token
+        client_id = token.replace('client_', '')
+        try:
+            current_client = Client.objects.get(id=client_id)
+            if not current_client.platform_access or not current_client.active:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        except Client.DoesNotExist:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif token:
+        # Try to validate JWT token manually (token can come from header or query params)
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            current_user = jwt_auth.get_user(validated_token)
+            if not current_user or not current_user.is_authenticated:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Invalid token - require authentication
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        # No token provided
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    product = get_object_or_404(Product, id=product_id)
+    
+    # Get subscription data from query parameters or use defaults from user/client
+    subscription_first_name = request.GET.get('firstName', '')
+    subscription_last_name = request.GET.get('lastName', '')
+    subscription_birth_date = request.GET.get('birthDate', '')
+    subscription_city = request.GET.get('city', '')
+    subscription_amount = request.GET.get('amount', '')
+    subscription_interest_period = request.GET.get('interestPeriod', '')
+    subscription_signature = request.GET.get('signature', '')  # Base64 encoded signature image
+    
+    # Get user/client data for defaults
+    if current_client:
+        investor_first_name = subscription_first_name or (current_client.fname or '')
+        investor_last_name = subscription_last_name or (current_client.lname or '')
+        investor_email = current_client.email or ''
+        investor_phone = current_client.phone or current_client.mobile or ''
+        investor_birth_date = subscription_birth_date or (current_client.birth_date.strftime('%d/%m/%Y') if current_client.birth_date else '')
+        investor_city = subscription_city or (current_client.city or '')
+    elif current_user:
+        # Try to get user details if available
+        try:
+            user_details = UserDetails.objects.get(user=current_user)
+            investor_first_name = subscription_first_name or (user_details.fname or getattr(current_user, 'first_name', None) or '')
+            investor_last_name = subscription_last_name or (user_details.lname or getattr(current_user, 'last_name', None) or '')
+            investor_email = current_user.email or ''
+            investor_phone = user_details.phone or user_details.mobile or ''
+            investor_birth_date = subscription_birth_date or (user_details.birth_date.strftime('%d/%m/%Y') if user_details.birth_date else '')
+            investor_city = subscription_city or (user_details.city or '')
+        except UserDetails.DoesNotExist:
+            investor_first_name = subscription_first_name or (getattr(current_user, 'first_name', None) or '')
+            investor_last_name = subscription_last_name or (getattr(current_user, 'last_name', None) or '')
+            investor_email = current_user.email or ''
+            investor_phone = ''
+            investor_birth_date = subscription_birth_date or ''
+            investor_city = subscription_city or ''
+    else:
+        investor_first_name = subscription_first_name
+        investor_last_name = subscription_last_name
+        investor_email = ''
+        investor_phone = ''
+        investor_birth_date = subscription_birth_date
+        investor_city = subscription_city
+    
+    investor_name = f"{investor_first_name} {investor_last_name}".strip()
+    
+    # Get AppSettings for logo and company info
+    try:
+        app_settings = AppSettings.objects.get(id='settings001')
+        platform_name = app_settings.platform_name or 'Panorama'
+        platform_address = app_settings.address or ''
+        platform_website = app_settings.website or ''
+        platform_email = app_settings.email or ''
+        logo_url = None
+        if app_settings.logo:
+            try:
+                logo_url = app_settings.logo.url
+                # If it's a Cloudinary URL, use it directly
+                if not (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                    # Build absolute URL if needed
+                    logo_url = request.build_absolute_uri(logo_url)
+            except Exception:
+                logo_url = None
+    except AppSettings.DoesNotExist:
+        platform_name = 'Panorama'
+        platform_address = ''
+        platform_website = ''
+        platform_email = ''
+        logo_url = None
+    
+    # Company info (fallback to defaults if not in settings)
+    company_name = platform_name or 'CIM Banque SA'
+    company_address = platform_address or '16 rue Merle d\'Aubigné, 1207 Genève - SUISSE'
+    company_website = platform_website or 'web.interface-cim.fr'
+    company_email = platform_email or 'contact@interface-cim.fr'
+    
+    # Product data
+    product_name = product.name or ''
+    duration = product.duration or '1 mois'
+    duration_months = _parse_months_from_duration(duration)
+    
+    # Amount
+    try:
+        amount = float(subscription_amount) if subscription_amount else float(product.min_entry_value or 10000)
+    except (ValueError, TypeError):
+        amount = float(product.min_entry_value or 10000)
+    
+    # Profitability
+    is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
+    profitability_period = product.profitability_period or 'mensuel'
+    
+    if is_variable and product.variable_profitability:
+        min_profit = float(product.profitability or 0)
+        max_profit = float(product.variable_profitability)
+        profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
+    elif product.profitability is not None:
+        profit = float(product.profitability)
+        profitability_text = f"{profit:.2f}% NET {profitability_period}"
+    else:
+        profitability_text = ''
+    
+    # Calculate contract dates
+    contract_start_date = date.today()
+    contract_end_date = _add_months_keep_day(contract_start_date, duration_months)
+    contract_end_date_str = contract_end_date.strftime('%d/%m/%Y')
+    
+    # Calculate interest
+    rate = _profitability_rate_for_calc(product)
+    interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))
+    interest_amount = float(interest_amount.quantize(Decimal('0.01')))
+    profitability_rate = float(rate)
+    
+    # Interest period
+    interest_period = subscription_interest_period or product.interest_period or 'Fin de contrat'
+    
+    # Auto-renewal
+    auto_renewal = 'OUI' if str(product.capitalisation_fonds or '').lower() == 'oui' else 'NON'
+    
+    # Today's date formatted
+    today_formatted = contract_start_date.strftime('%A %d %B %Y').replace('Monday', 'lundi').replace('Tuesday', 'mardi').replace('Wednesday', 'mercredi').replace('Thursday', 'jeudi').replace('Friday', 'vendredi').replace('Saturday', 'samedi').replace('Sunday', 'dimanche').replace('January', 'janvier').replace('February', 'février').replace('March', 'mars').replace('April', 'avril').replace('May', 'mai').replace('June', 'juin').replace('July', 'juillet').replace('August', 'août').replace('September', 'septembre').replace('October', 'octobre').replace('November', 'novembre').replace('December', 'décembre')
+    
+    # Create PDF with header and footer
+    buffer = BytesIO()
+    
+    # Download logo if available
+    logo_data_bytes = None
+    logo_width_mm = None
+    logo_height_mm = None
+    if logo_url:
+        try:
+            logo_response = requests.get(logo_url, timeout=10)
+            if logo_response.status_code == 200:
+                logo_data_bytes = BytesIO(logo_response.content)
+                # Get image dimensions using PIL and handle transparency
+                try:
+                    logo_data_bytes.seek(0)
+                    img = PILImage.open(logo_data_bytes)
+                    img_width, img_height = img.size
+                    
+                    # Handle all transparency modes: RGBA, LA, P (palette with transparency)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        # Convert palette images with transparency to RGBA first
+                        if img.mode == 'P':
+                            # Check if palette has transparency
+                            if 'transparency' in img.info:
+                                img = img.convert('RGBA')
+                            else:
+                                img = img.convert('RGB')
+                        
+                        # If still RGBA or LA, convert to RGB with white background
+                        if img.mode in ('RGBA', 'LA'):
+                            # Create a white background
+                            rgb_img = PILImage.new('RGB', img.size, (255, 255, 255))
+                            if img.mode == 'RGBA':
+                                # Paste the RGBA image onto the white background using alpha channel as mask
+                                rgb_img.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+                            else:  # LA mode
+                                # LA mode: L is luminance, A is alpha
+                                rgb_img.paste(img.convert('RGB'), mask=img.split()[1])  # Use alpha channel
+                            img = rgb_img
+                        
+                        # Save to BytesIO
+                        logo_data_bytes = BytesIO()
+                        img.save(logo_data_bytes, format='PNG')
+                        logo_data_bytes.seek(0)
+                    elif img.mode != 'RGB':
+                        # Convert other modes to RGB
+                        img = img.convert('RGB')
+                        logo_data_bytes = BytesIO()
+                        img.save(logo_data_bytes, format='PNG')
+                        logo_data_bytes.seek(0)
+                    
+                    # Calculate size to fit in header (max 25mm height)
+                    max_height_mm = 25
+                    aspect_ratio = img_width / img_height
+                    logo_height_mm = min(max_height_mm, img_height * (max_height_mm / img_height))
+                    logo_width_mm = logo_height_mm * aspect_ratio
+                    logo_data_bytes.seek(0)  # Reset for use
+                except Exception as e:
+                    # Log error but continue with default size
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Error processing logo image: {str(e)}")
+                    # If PIL fails, use default size
+                    logo_width_mm = 50
+                    logo_height_mm = 25
+                    logo_data_bytes.seek(0)
+        except Exception:
+            logo_data_bytes = None
+    
+    # Define header function
+    def header(canvas, doc):
+        canvas.saveState()
+        # Header area
+        header_height = 30*mm
+        canvas.setFillColor(colors.white)
+        canvas.rect(0, A4[1] - header_height, A4[0], header_height, fill=1, stroke=0)
+        
+        # Logo (if available)
+        if logo_data_bytes:
+            try:
+                logo_data_bytes.seek(0)  # Reset to beginning
+                # Use ImageReader to convert BytesIO to something reportlab can use
+                img_reader = ImageReader(logo_data_bytes)
+                # Center logo horizontally, align vertically in header
+                x = (A4[0] - logo_width_mm*mm) / 2
+                y = A4[1] - header_height + (header_height - logo_height_mm*mm) / 2
+                # Draw image - mask=None to avoid green background, image already converted to RGB with white background
+                canvas.drawImage(img_reader, x, y, width=logo_width_mm*mm, height=logo_height_mm*mm, preserveAspectRatio=True, mask=None)
+                logo_data_bytes.seek(0)  # Reset for next page
+            except Exception as e:
+                # Log error but continue without logo
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Error drawing logo in PDF header: {str(e)}")
+        
+        canvas.restoreState()
+    
+    # Define footer function
+    def footer(canvas, doc):
+        canvas.saveState()
+        footer_height = 25*mm  # Increased height
+        footer_margin = 5*mm  # Margin from bottom
+        
+        # Footer background
+        canvas.setFillColor(colors.white)
+        canvas.rect(0, footer_margin, A4[0], footer_height - footer_margin, fill=1, stroke=0)
+        
+        # Footer text
+        canvas.setFont('Helvetica', 9)
+        canvas.setFillColor(colors.black)
+        
+        footer_lines = []
+        if company_name:
+            footer_lines.append(company_name)
+        if company_address:
+            footer_lines.append(company_address)
+        if company_website or company_email:
+            contact_info = []
+            if company_website:
+                contact_info.append(company_website)
+            if company_email:
+                contact_info.append(company_email)
+            footer_lines.append(' - '.join(contact_info))
+        
+        # Center footer text vertically within footer area
+        line_height = 11
+        total_height = len(footer_lines) * line_height
+        footer_top = footer_margin + footer_height - footer_margin
+        start_y = footer_margin + (footer_height - footer_margin - total_height) / 2 + line_height
+        
+        for i, line in enumerate(footer_lines):
+            text_width = canvas.stringWidth(line, 'Helvetica', 9)
+            x = (A4[0] - text_width) / 2
+            y = start_y - (i * line_height)
+            canvas.drawString(x, y, line)
+        
+        canvas.restoreState()
+    
+    # Create BaseDocTemplate with header and footer space
+    doc = BaseDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=35*mm,  # Extra space for header
+        bottomMargin=30*mm,  # Increased space for footer to prevent clipping
+    )
+    
+    # Create frame for content
+    frame = Frame(
+        doc.leftMargin,
+        doc.bottomMargin,
+        doc.width,
+        doc.height,
+        leftPadding=0,
+        bottomPadding=0,
+        rightPadding=0,
+        topPadding=0,
+    )
+    
+    # Create page template with header and footer
+    template = PageTemplate(id='contract_page', frames=[frame], onPage=header, onPageEnd=footer)
+    doc.addPageTemplates([template])
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.black,
+        alignment=TA_CENTER,
+        spaceAfter=12,
+    )
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        textColor=colors.black,
+        spaceAfter=6,
+        spaceBefore=12,
+    )
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.black,
+        alignment=TA_JUSTIFY,
+        spaceAfter=6,
+    )
+    center_style = ParagraphStyle(
+        'CustomCenter',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.black,
+        alignment=TA_CENTER,
+    )
+    
+    # Build PDF content
+    story = []
+    
+    # Document title (in body, not header)
+    story.append(Paragraph(product_name, title_style))
+    story.append(Spacer(1, 10*mm))
+    
+    # Parties
+    story.append(Paragraph("La société : <b>" + company_name + "</b>", normal_style))
+    story.append(Paragraph("Exerçant sous l'enseigne : <b>" + company_website + "</b>", normal_style))
+    story.append(Paragraph("Ayant son siège social : <b>" + company_address + "</b>", normal_style))
+    story.append(Paragraph("Représentée à l'acte par son représentant légal domicilié en cette qualité au dit siège.", normal_style))
+    story.append(Paragraph("Ci-après dénommée « LA SOCIÉTÉ » d'une part et,", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    story.append(Paragraph("Nom : <b>" + investor_name + "</b>", normal_style))
+    story.append(Paragraph("Mail : <b>" + investor_email + "</b>", normal_style))
+    story.append(Paragraph("Tél : <b>" + investor_phone + "</b>", normal_style))
+    story.append(Paragraph("Date de naissance : <b>" + investor_birth_date + "</b>", normal_style))
+    story.append(Paragraph("Ci-après dénommée « L'INVESTISSEUR » d'autre part.", normal_style))
+    story.append(Spacer(1, 3*mm))
+    
+    italic_style = ParagraphStyle('Italic', parent=normal_style, fontName='Helvetica-Oblique')
+    story.append(Paragraph("CI-APRÈS DÉSIGNÉES ENSEMBLE « LES PARTIES » ET INDIVIDUELLEMENT « LA PARTIE »", italic_style))
+    story.append(Spacer(1, 5*mm))
+    
+    story.append(Paragraph(f"<b>{company_name}</b> est un groupe spécialisé dans l'investissement de produit financier.", normal_style))
+    story.append(Paragraph("À cet égard, LA SOCIÉTÉ entend proposer à ses clients qui investissent, une garantie contractuelle de capital initial dans les conditions prévues ci-après.", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    # Transition phrase
+    story.append(Paragraph("<b>CECI EXPOSÉ, IL EST CONVENU CE QUI SUIT</b>", ParagraphStyle('Transition', parent=normal_style, alignment=TA_CENTER, fontSize=12, spaceAfter=10)))
+    story.append(Spacer(1, 5*mm))
+    
+    # Object
+    story.append(Paragraph("1/ OBJET DU PROTOCOLE", heading_style))
+    story.append(Paragraph(f"a. Le protocole de garantie « <b>{product_name}</b> » est une garantie contractuelle permettant au souscripteur de l'épargne de récupérer, à la fin du placement, le montant du versement effectué à la souscription ainsi que les intérêts.", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    # Duration
+    story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
+    story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_months} {'mois' if duration_months > 1 else 'mois'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
+    story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
+    story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    # Payment
+    story.append(Paragraph("3/ MODALITÉS DE PAIEMENT", heading_style))
+    story.append(Paragraph("a. LA SOCIÉTÉ reconnaîtra la validité du versement comptant et en consentira quittance régulière dès réception du versement.", normal_style))
+    story.append(Paragraph(f"b. L'INVESTISSEUR percevra ses intérêts en « <b>{interest_period}</b> ».", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    # Summary box
+    # Format duration to add "Mois" if it's just a number
+    duration_display = duration
+    if duration and duration.strip().isdigit():
+        duration_display = f"{duration.strip()} Mois"
+    elif duration and not any(word.lower() in duration.lower() for word in ['mois', 'jour', 'an', 'année', 'semaine']):
+        # If duration doesn't contain time unit, try to extract number and add "Mois"
+        import re
+        match = re.search(r'(\d+)', duration)
+        if match:
+            duration_display = f"{match.group(1)} Mois"
+    
+    summary_data = [
+        ['TITRE', product_name],
+        ['DURÉE', duration_display],
+        ['RENTABILITÉ', profitability_text],
+        ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+    ]
+    summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
+    summary_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('SummaryTitle', parent=heading_style, alignment=TA_CENTER)))
+    story.append(Spacer(1, 3*mm))
+    story.append(summary_table)
+    story.append(Spacer(1, 5*mm))
+    story.append(Paragraph("<b>SIGNATURE DE L'INVESTISSEUR :</b>", normal_style))
+    story.append(Spacer(1, 3*mm))
+    
+    # Add signature image if available
+    if subscription_signature:
+        try:
+            # Decode base64 signature
+            import base64
+            # Remove data URL prefix if present (data:image/png;base64,...)
+            signature_data = subscription_signature
+            if ',' in signature_data:
+                signature_data = signature_data.split(',')[1]
+            
+            signature_bytes = base64.b64decode(signature_data)
+            signature_io = BytesIO(signature_bytes)
+            
+            # Get signature dimensions
+            sig_img = PILImage.open(signature_io)
+            sig_width, sig_height = sig_img.size
+            # Resize signature to fit (max width 120mm, maintain aspect ratio)
+            max_width_mm = 120
+            aspect_ratio = sig_width / sig_height
+            if sig_width > max_width_mm * 3.779527559:  # Convert mm to pixels (approx)
+                sig_width_mm = max_width_mm
+                sig_height_mm = sig_width_mm / aspect_ratio
+            else:
+                sig_width_mm = sig_width / 3.779527559
+                sig_height_mm = sig_height / 3.779527559
+            
+            # Convert to RGB if needed
+            if sig_img.mode != 'RGB':
+                sig_rgb = PILImage.new('RGB', sig_img.size, (255, 255, 255))
+                if sig_img.mode == 'RGBA':
+                    sig_rgb.paste(sig_img, mask=sig_img.split()[3])
+                else:
+                    sig_rgb.paste(sig_img)
+                sig_img = sig_rgb
+            
+            # Save image to a new BytesIO for ImageReader
+            signature_io_final = BytesIO()
+            sig_img.save(signature_io_final, format='PNG')
+            signature_io_final.seek(0)
+            
+            # Create ImageReader and add to PDF
+            sig_img_reader = ImageReader(signature_io_final)
+            story.append(Image(sig_img_reader, width=sig_width_mm*mm, height=sig_height_mm*mm))
+            story.append(Spacer(1, 3*mm))
+        except Exception as e:
+            # If signature processing fails, continue without it
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error processing signature image: {str(e)}")
+    
+    story.append(Paragraph("\" Bon pour accord \"<br/>\" J'accepte les Termes et Conditions \"", normal_style))
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph(f"Fait le <b>{today_formatted}</b><br/>À : <b>{investor_city}</b>", normal_style))
+    story.append(Spacer(1, 5*mm))
+    
+    # Interest table
+    interest_data = [
+        ['Date', 'Intérêts payés', 'Performance'],
+        [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+    ]
+    interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
+    interest_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('InterestTitle', parent=heading_style, alignment=TA_CENTER)))
+    story.append(Spacer(1, 3*mm))
+    story.append(interest_table)
+    story.append(Spacer(1, 5*mm))
+    
+    # Terms & Conditions
+    if product.cgv:
+        story.append(Paragraph("TERMES & CONDITIONS", heading_style))
+        # Clean CGV text and convert to paragraphs
+        cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
+        story.append(Paragraph(cgv_text, ParagraphStyle('CGV', parent=normal_style, fontSize=10)))
+    
+    # Build PDF
+    doc.build(story)
+    
+    # Get PDF content
+    pdf_content = buffer.getvalue()
+    buffer.close()
+    
+    # Create HTTP response
+    response = HttpResponse(pdf_content, content_type='application/pdf')
+    response['Content-Disposition'] = 'inline; filename="contrat_' + product_name.replace(' ', '_') + '.pdf"'
+    return response
+
 @api_view(['PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def product_update(request, product_id):
@@ -6687,11 +7243,30 @@ La description doit être:
 - Environ 3-4 phrases
 - En français
 - Sans caractères spéciaux de formatage (pas de markdown)
+- INTERDICTION ABSOLUE d'utiliser des symboles spéciaux:
+  * PAS de # (dièse/hashtag)
+  * PAS de * (astérisque) - JAMAIS utiliser le symbole * dans le texte
+  * PAS de - utilisé comme puce ou séparateur
+  * PAS de symboles décoratifs ou de formatage
+- Texte pur, sans puces ni listes à puces
 
 Description:"""
         
         response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         description = (response.text or '').strip()
+        
+        # Nettoyer les symboles spéciaux indésirables
+        import re
+        # Supprimer TOUS les symboles "*" du texte (peu importe leur position)
+        description = re.sub(r'\*+', '', description)  # Supprimer tous les astérisques
+        # Supprimer les # restants
+        description = re.sub(r'#+', '', description)
+        # Supprimer les lignes de séparation ---
+        description = re.sub(r'^---+$', '', description, flags=re.MULTILINE)
+        # Nettoyer les espaces multiples créés par la suppression
+        description = re.sub(r' {2,}', ' ', description)
+        # Nettoyer les lignes vides multiples
+        description = re.sub(r'\n{3,}', '\n\n', description).strip()
         
         return Response({'description': description, 'text': description})
     
@@ -6751,11 +7326,30 @@ Contraintes:
 - En français
 - Sans markdown ni puces
 - Ne pas inventer de chiffres précis (ex: CA, bénéfices) si non fournis
+- INTERDICTION ABSOLUE d'utiliser des symboles spéciaux:
+  * PAS de # (dièse/hashtag)
+  * PAS de * (astérisque) - JAMAIS utiliser le symbole * dans le texte
+  * PAS de - utilisé comme puce ou séparateur
+  * PAS de symboles décoratifs ou de formatage
+- Texte pur, sans puces ni listes à puces
 
 Description:"""
 
         response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         description = (response.text or '').strip()
+
+        # Nettoyer les symboles spéciaux indésirables
+        import re
+        # Supprimer TOUS les symboles "*" du texte (peu importe leur position)
+        description = re.sub(r'\*+', '', description)  # Supprimer tous les astérisques
+        # Supprimer les # restants
+        description = re.sub(r'#+', '', description)
+        # Supprimer les lignes de séparation ---
+        description = re.sub(r'^---+$', '', description, flags=re.MULTILINE)
+        # Nettoyer les espaces multiples créés par la suppression
+        description = re.sub(r' {2,}', ' ', description)
+        # Nettoyer les lignes vides multiples
+        description = re.sub(r'\n{3,}', '\n\n', description).strip()
 
         return Response({'description': description, 'text': description})
 
@@ -6785,38 +7379,77 @@ def product_generate_cgv(request):
         
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
-        name = request.data.get('name', '')
-        category_id = request.data.get('categoryId', '')
+        # Récupérer les champs essentiels
+        name = request.data.get('name', '').strip() or 'd\'investissement'
+        min_entry_value = request.data.get('minEntryValue', '').strip()
+        max_entry_value = request.data.get('maxEntryValue', '').strip()
+        duration = request.data.get('duration', '').strip()
+        no_profitability = request.data.get('noProfitability', True)
+        profitability_rate = request.data.get('profitabilityRate', '').strip()
+        profitability_min = request.data.get('profitabilityMin', '').strip()
+        profitability_max = request.data.get('profitabilityMax', '').strip()
+        is_variable_profitability = request.data.get('isVariableProfitability', 'Non').strip()
         
-        # Get category name if available
-        category_name = ''
-        if category_id:
-            try:
-                category = ProductCategory.objects.get(id=category_id)
-                category_name = category.title
-            except ProductCategory.DoesNotExist:
-                pass
+        # Construire le texte de rentabilité
+        if no_profitability:
+            rentability_text = "non applicable"
+        elif is_variable_profitability == 'Oui' and profitability_min and profitability_max:
+            rentability_text = f"{profitability_min}% à {profitability_max}%"
+        elif profitability_rate:
+            rentability_text = f"{profitability_rate}%"
+        else:
+            rentability_text = "à définir"
         
-        prompt = f"""Génère des Conditions Générales de Vente (CGV) complètes et professionnelles en français pour un produit d'investissement financier avec les caractéristiques suivantes:
-- Nom du produit: {name or 'Non spécifié'}
-- Catégorie: {category_name or 'Non spécifiée'}
+        # Prompt simplifié
+        prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
 
-Les CGV doivent inclure les sections suivantes:
-1. OBJET - Description du produit et des présentes conditions
-2. CARACTÉRISTIQUES DU PRODUIT - Détails du produit
-3. CONDITIONS D'ACQUISITION - Modalités d'achat
-4. DROIT DE RÉTRACTATION - Délai et modalités
-5. RESPONSABILITÉ - Limites de responsabilité
-6. PROTECTION DES DONNÉES - Confidentialité
+Informations:
+- Investissement minimum: {min_entry_value or 'à définir'}€
+- Investissement maximum: {max_entry_value or 'à définir'}€
+- Durée: {duration or 'à définir'}
+- Rentabilité: {rentability_text}
 
-Format: Utilise des listes à puces (•) et numérotées (1., 2., etc.) pour structurer le texte.
-Langue: Français
-Style: Professionnel et conforme à la réglementation financière française
+Structure (14 sections obligatoires, toutes complètes):
+1. Objet
+2. Versement (2.1 Montant min/max, 2.2 Modalités)
+3. Durée (3.1 Engagement, 3.2 Blocage, 3.3 Retrait)
+4. Rémunération (4.1 Taux, 4.2 Période, 4.3 Versement)
+5. Frais de Gestion (5.1 Frais, 5.2 Prélèvement)
+6. Clôture (6.1 Échéance, 6.2 Transfert)
+7. Fiscalité (7.1 Applicable, 7.2 Responsabilité)
+8. Risques (8.1 Description, 8.2 Garanties)
+9. Modification (9.1 Droit, 9.2 Notification)
+10. Loi applicable (10.1 Droit français, 10.2 Juridiction)
+11. Décès (11.1 Modalités, 11.2 Ayants droit)
+12. Confidentialité (12.1 Engagement, 12.2 RGPD)
+13. LCB/FT (13.1 Obligations, 13.2 Engagement titulaire)
+14. Réclamations (14.1 Procédure, 14.2 Médiation)
 
-CGV:"""
+Règles:
+- Chaque sous-section: 2-3 phrases minimum
+- Pas de placeholders [ ], pas de symboles #, *, -
+- Texte professionnel et juridique français
+- Document complet et utilisable directement
+- Environ 500-700 mots au total
+
+Génère le document complet:"""
         
-        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        # Génération simple
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        
         cgv = (response.text or '').strip()
+        
+        # Nettoyage simplifié
+        import re
+        cgv = re.sub(r'\[.*?\]', '', cgv)  # Supprimer placeholders
+        cgv = re.sub(r'\*+', '', cgv)  # Supprimer astérisques
+        cgv = re.sub(r'#+', '', cgv)  # Supprimer dièses
+        cgv = re.sub(r'^---+$', '', cgv, flags=re.MULTILINE)  # Supprimer lignes de séparation
+        cgv = re.sub(r' {2,}', ' ', cgv)  # Nettoyer espaces multiples
+        cgv = re.sub(r'\n{3,}', '\n\n', cgv).strip()  # Nettoyer lignes vides
         
         return Response({'cgv': cgv, 'text': cgv})
     
@@ -6867,6 +7500,9 @@ def app_settings(request):
             id='settings001',  # Single settings instance
             defaults={
                 'platform_name': 'Panorama',
+                'address': '',
+                'website': '',
+                'email': '',
                 'primary_color': '#030213',
                 'secondary_color': '',
                 'accent_color': ''
@@ -6887,6 +7523,9 @@ def app_settings(request):
                 return Response({
                     'id': settings_obj.id,
                     'platform_name': getattr(settings_obj, 'platform_name', 'Panorama'),
+                    'address': getattr(settings_obj, 'address', ''),
+                    'website': getattr(settings_obj, 'website', ''),
+                    'email': getattr(settings_obj, 'email', ''),
                     'logo': None,
                     'logo_url': None,
                     'login_background_image': None,
@@ -6990,9 +7629,16 @@ def app_settings(request):
                     traceback.print_exc()
                     return Response({'error': f'Background upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Update colors from request data
+            # Update platform info from request data
             if 'platform_name' in data:
                 settings_obj.platform_name = (data.get('platform_name') or 'Panorama').strip()[:80]
+            if 'address' in data:
+                settings_obj.address = (data.get('address') or '').strip()[:200]
+            if 'website' in data:
+                settings_obj.website = (data.get('website') or '').strip()[:200]
+            if 'email' in data:
+                settings_obj.email = (data.get('email') or '').strip()[:100]
+            # Update colors from request data
             if 'primary_color' in data:
                 settings_obj.primary_color = data.get('primary_color', '#030213')
             if 'secondary_color' in data:

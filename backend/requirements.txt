@@ -15,3 +15,4 @@ django-cloudinary-storage
 cloudinary
 requests
 alpha_vantage
+reportlab

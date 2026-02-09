@@ -615,6 +615,9 @@ class AppSettings(models.Model):
     """Table pour stocker les paramètres de personnalisation de l'application"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     platform_name = models.CharField(max_length=80, default='Panorama')
+    address = models.CharField(max_length=200, default='', blank=True)
+    website = models.URLField(max_length=200, default='', blank=True)
+    email = models.EmailField(max_length=100, default='', blank=True)
     logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     login_background_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)

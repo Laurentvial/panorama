@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
 import { useIsMobile } from './ui/use-mobile';
 import { StockChart } from './StockChart';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -41,7 +42,6 @@ export function ProductDetail() {
   const [fxLoading, setFxLoading] = useState(false);
   const [fxError, setFxError] = useState<string | null>(null);
   const [showCGVModal, setShowCGVModal] = useState(false);
-  const [showContractPreview, setShowContractPreview] = useState(false);
   const [signature, setSignature] = useState<string | null>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -823,6 +823,77 @@ export function ProductDetail() {
     }
   };
 
+  // Open contract PDF in new tab
+  const openContractPDF = () => {
+    if (dataType !== 'product' || !data || !currentUser) {
+      toast.error('Données manquantes pour générer le contrat');
+      return;
+    }
+
+    const product = data;
+
+    // Get API base URL
+    const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+    
+    // Get authentication token (same logic as apiCall)
+    const path = window.location?.pathname || '';
+    const isAdminRoute = path.startsWith('/admin');
+    let token: string | null = null;
+    
+    if (!isAdminRoute) {
+      // Check sessionStorage first (for impersonated clients)
+      const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+      const sessionUserType = sessionStorage.getItem('userType');
+      if (sessionToken && (sessionUserType === 'client' || sessionToken.startsWith('client_'))) {
+        token = sessionToken;
+      } else {
+        // Check localStorage for client token
+        const clientToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
+        if (clientToken) {
+          token = clientToken;
+        }
+      }
+    }
+    
+    // Fallback to admin token
+    if (!token) {
+      token = localStorage.getItem(ACCESS_TOKEN);
+    }
+    
+    // Build query parameters
+    const params = new URLSearchParams();
+    if (token) {
+      params.append('token', token);
+    }
+    if (subscriptionData.firstName) {
+      params.append('firstName', subscriptionData.firstName);
+    }
+    if (subscriptionData.lastName) {
+      params.append('lastName', subscriptionData.lastName);
+    }
+    if (subscriptionData.birthDate) {
+      params.append('birthDate', subscriptionData.birthDate);
+    }
+    if (subscriptionData.city) {
+      params.append('city', subscriptionData.city);
+    }
+    if (subscriptionData.amount) {
+      params.append('amount', subscriptionData.amount);
+    }
+    if (subscriptionData.interestPeriod) {
+      params.append('interestPeriod', subscriptionData.interestPeriod);
+    }
+    if (signature) {
+      params.append('signature', signature);
+    }
+    
+    // Build URL
+    const pdfUrl = `${apiUrl}/api/products/${product.id}/contract-pdf/?${params.toString()}`;
+    
+    // Open in new tab
+    window.open(pdfUrl, '_blank');
+  };
+
   // Generate contract preview
   const generateContractPreview = (productData: any) => {
     if (!productData || !currentUser) return null;
@@ -1597,18 +1668,6 @@ export function ProductDetail() {
                     </div>
                     
                     <div style={{ marginTop: '10px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Prévisualisation du contrat</div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowContractPreview(true)}
-                        style={{ width: '100%' }}
-                      >
-                        Voir le contrat
-                      </Button>
-                    </div>
-                    
-                    <div style={{ marginTop: '10px' }}>
                       <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Signature</div>
                       <div style={{ 
                         padding: '16px', 
@@ -1731,6 +1790,18 @@ export function ProductDetail() {
                       </div>
                     </div>
                     
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Prévisualisation du contrat</div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={openContractPDF}
+                        style={{ width: '100%' }}
+                      >
+                        Voir le contrat
+                      </Button>
+                    </div>
+                    
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                         <input
@@ -1819,163 +1890,6 @@ export function ProductDetail() {
           </div>
         )}
 
-        {/* Contract Preview Modal */}
-        {showContractPreview && (
-          <div className="modal-overlay" onClick={() => setShowContractPreview(false)}>
-            <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: isMobile ? '95vw' : '900px' }}>
-              {(() => {
-                const contractData = generateContractPreview(product);
-                if (!contractData) return <div>Chargement...</div>;
-
-                return (
-                  <>
-                    <div className="modal-header">
-                      <h2 className="modal-title">Prévisualisation du contrat</h2>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="modal-close"
-                        onClick={() => setShowContractPreview(false)}
-                      >
-                        <X className="planning-icon-md" />
-                      </Button>
-                    </div>
-                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '12px' }}>{contractData.productName}</div>
-                    <div style={{ 
-                      fontFamily: 'Arial, sans-serif',
-                      padding: isMobile ? '16px 0' : '20px 0',
-                      color: '#374151',
-                      lineHeight: '1.6',
-                    }}>
-                      {/* Header */}
-                      <div style={{ marginBottom: '30px', textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: '20px' }}>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>{contractData.productName}</div>
-                        <div style={{ fontSize: '14px' }}>{contractData.companyName}</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>{contractData.companyAddress}</div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>{contractData.companyWebsite} - {contractData.companyEmail}</div>
-                      </div>
-
-                      {/* Parties */}
-                      <div style={{ marginBottom: '30px' }}>
-                        <p style={{ marginBottom: '15px', fontSize: '14px' }}>
-                          La société : {contractData.companyName}<br />
-                          Exerçant sous l'enseigne : {contractData.companyWebsite}<br />
-                          Ayant son siège social : {contractData.companyAddress}<br />
-                          Représentée à l'acte par son représentant légal domicilié en cette qualité au dit siège.<br />
-                          Ci-après dénommée « LA SOCIÉTÉ » d'une part et,
-                        </p>
-                        <p style={{ marginBottom: '15px', fontSize: '14px' }}>
-                          Nom : {contractData.investorName}<br />
-                          Mail : {contractData.investorEmail}<br />
-                          Tél : {contractData.investorPhone}<br />
-                          Date de naissance : {contractData.investorBirthDate}<br />
-                          Ci-après dénommée « L'INVESTISSEUR » d'autre part.
-                        </p>
-                        <p style={{ fontSize: '14px', fontStyle: 'italic' }}>
-                          CI-APRÈS DÉSIGNÉES ENSEMBLE « LES PARTIES » ET INDIVIDUELLEMENT « LA PARTIE »
-                        </p>
-                        <p style={{ marginTop: '15px', fontSize: '14px' }}>
-                          {contractData.companyName} est un groupe spécialisé dans l'investissement de produit financier.<br />
-                          À cet égard, LA SOCIÉTÉ entend proposer à ses clients qui investissent, une garantie contractuelle de capital initial dans les conditions prévues ci-après.
-                        </p>
-                      </div>
-
-                      {/* Object */}
-                      <div style={{ marginBottom: '30px' }}>
-                        <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px' }}>1/ OBJET DU PROTOCOLE</h3>
-                        <p style={{ fontSize: '14px' }}>
-                          a. Le protocole de garantie « {contractData.productName} » est une garantie contractuelle permettant au souscripteur de l'épargne de récupérer, à la fin du placement, le montant du versement effectué à la souscription ainsi que les intérêts.
-                        </p>
-                      </div>
-
-                      {/* Duration */}
-                      <div style={{ marginBottom: '30px' }}>
-                        <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px' }}>2/ DURÉE DU CONTRAT</h3>
-                        <p style={{ fontSize: '14px' }}>
-                          a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br />
-                          {contractData.durationMonths} {contractData.durationMonths > 1 ? 'mois' : 'mois'} avec une rentabilité garantie de {contractData.profitabilityText}.
-                        </p>
-                        <p style={{ fontSize: '14px' }}>
-                          b. La date d'échéance est donc fixée au {contractData.contractEndDateStr}.
-                        </p>
-                        <p style={{ fontSize: '14px' }}>
-                          c. Reconduction automatique du contrat : {contractData.autoRenewal}.
-                        </p>
-                      </div>
-
-                      {/* Payment */}
-                      <div style={{ marginBottom: '30px' }}>
-                        <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px' }}>3/ MODALITÉS DE PAIEMENT</h3>
-                        <p style={{ fontSize: '14px' }}>
-                          a. LA SOCIÉTÉ reconnaîtra la validité du versement comptant et en consentira quittance régulière dès réception du versement.
-                        </p>
-                        <p style={{ fontSize: '14px' }}>
-                          b. L'INVESTISSEUR percevra ses intérêts en « {contractData.interestPeriod} ».
-                        </p>
-                      </div>
-
-                      {/* Summary */}
-                      <div style={{ marginBottom: '30px', border: '1px solid #000', padding: '20px' }}>
-                        <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', textAlign: 'center' }}>RÉCAPITULATIF DE VOTRE SOUSCRIPTION</h3>
-                        <div style={{ fontSize: '14px', marginBottom: '10px' }}>
-                          <strong>TITRE</strong> {contractData.productName}
-                        </div>
-                        <div style={{ fontSize: '14px', marginBottom: '10px' }}>
-                          <strong>DURÉE</strong> {contractData.duration}
-                        </div>
-                        <div style={{ fontSize: '14px', marginBottom: '10px' }}>
-                          <strong>RENTABILITÉ</strong> {contractData.profitabilityText}
-                        </div>
-                        <div style={{ fontSize: '14px', marginBottom: '10px' }}>
-                          <strong>TOTAL NET</strong> {contractData.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                        </div>
-                        <div style={{ marginTop: '30px', fontSize: '14px' }}>
-                          <strong>SIGNATURE DE L'INVESTISSEUR :</strong><br />
-                          " Bon pour accord "<br />
-                          " J'accepte les Termes et Conditions "
-                        </div>
-                        <div style={{ marginTop: '20px', fontSize: '14px' }}>
-                          Fait le {contractData.todayFormatted}<br />
-                          À : {contractData.investorCity}
-                        </div>
-                      </div>
-
-                      {/* Interest Table */}
-                      <div style={{ marginBottom: '30px', border: '1px solid #000', padding: '20px' }}>
-                        <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '20px', textAlign: 'center' }}>RÉCAPITULATIF DE VOTRE SOUSCRIPTION</h3>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                          <thead>
-                            <tr style={{ borderBottom: '1px solid #000' }}>
-                              <th style={{ padding: '10px', textAlign: 'left' }}>Date</th>
-                              <th style={{ padding: '10px', textAlign: 'right' }}>Intérêts payés</th>
-                              <th style={{ padding: '10px', textAlign: 'right' }}>Performance</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td style={{ padding: '10px' }}>{contractData.contractEndDateStr}</td>
-                              <td style={{ padding: '10px', textAlign: 'right' }}>{contractData.interestAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
-                              <td style={{ padding: '10px', textAlign: 'right' }}>{contractData.profitabilityRate.toFixed(2)} %</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Terms & Conditions */}
-                      {contractData.cgv && (
-                        <div style={{ marginBottom: '30px' }}>
-                          <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '20px' }}>TERMES & CONDITIONS</h3>
-                          <div style={{ fontSize: '12px', whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: contractData.cgv.replace(/\n/g, '<br />') }} />
-                        </div>
-                      )}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        )}
       </div>
     );
   }

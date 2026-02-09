@@ -239,37 +239,79 @@ export function AddProduct() {
     }
   }
 
+  // Fonction helper pour vérifier si une valeur est valide
+  function isValidValue(value: any): boolean {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') {
+      const trimmed = value.trim().toLowerCase();
+      const invalidValues = [
+        '', 'non défini', 'non définie', 'non spécifié', 'non spécifiée',
+        'non renseigné', 'non renseignée', 'aucun', 'aucune', 'null',
+        'undefined', 'none', 'n/a', 'na', 'non', 'non applicable'
+      ];
+      return !invalidValues.includes(trimmed) && trimmed.length > 0;
+    }
+    if (typeof value === 'number') return !isNaN(value);
+    if (typeof value === 'boolean') return true;
+    if (Array.isArray(value)) return value.length > 0;
+    return Boolean(value);
+  }
+
   async function generateAICGV(): Promise<string> {
     try {
+      // Filtrer les valeurs invalides avant l'envoi
+      const payload: any = {
+        name: isValidValue(formData.name) ? formData.name : '',
+        reference: isValidValue(formData.reference) ? formData.reference : '',
+        type: isValidValue(formData.type) ? formData.type : '',
+        categoryId: isValidValue(formData.categoryId) ? formData.categoryId : '',
+        subcategory: isValidValue(formData.subcategory) ? formData.subcategory : '',
+        description: isValidValue(formData.description) ? formData.description : '',
+        // Gestion de la rentabilité
+        noProfitability: formData.noProfitability,
+        isVariableProfitability: formData.isVariableProfitability,
+        profitabilityRate: isValidValue(formData.profitabilityRate) ? formData.profitabilityRate : '',
+        profitabilityMin: isValidValue(formData.profitabilityMin) ? formData.profitabilityMin : '',
+        profitabilityMax: isValidValue(formData.profitabilityMax) ? formData.profitabilityMax : '',
+        profitabilityPeriod: isValidValue(formData.profitabilityPeriod) ? formData.profitabilityPeriod : '',
+        interestPeriod: Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 
+          ? formData.interestPeriod.filter(p => isValidValue(p)) 
+          : [],
+        capitalisationFonds: formData.capitalisationFonds,
+        // Gestion des prix
+        minEntryValue: isValidValue(formData.minEntryValue) ? formData.minEntryValue : '',
+        maxEntryValue: isValidValue(formData.maxEntryValue) ? formData.maxEntryValue : '',
+        // Durée et disponibilité
+        duration: isValidValue(formData.duration) ? formData.duration : '',
+        availabilityStart: isValidValue(formData.availabilityStart) ? formData.availabilityStart : '',
+        availabilityEnd: isValidValue(formData.availabilityEnd) ? formData.availabilityEnd : '',
+        // Options du produit
+        linkToAssets: formData.linkToAssets,
+        default: formData.default,
+        availableFunds: formData.availableFunds
+      };
+
       // Appel à l'API pour générer les CGV avec l'IA
       const response = await apiCall('/api/products/generate-cgv/', {
         method: 'POST',
-        body: JSON.stringify({
-          name: formData.name,
-          categoryId: formData.categoryId
-        })
+        body: JSON.stringify(payload)
       });
-      return response?.cgv || response?.text || '';
-    } catch (error) {
-      // Si l'API n'existe pas encore, générer un texte de base
-      return `CONDITIONS GÉNÉRALES DE VENTE
-
-1. OBJET
-Les présentes conditions générales de vente régissent la commercialisation du produit "${formData.name || 'd\'investissement'}".
-
-2. CARACTÉRISTIQUES DU PRODUIT
-${formData.minEntryValue ? `• Investissement minimum: ${formData.minEntryValue}€` : ''}
-• Rentabilité: ${formData.profitability || 'Non définie'}%
-${formData.duration ? `• Durée: ${formData.duration}` : ''}
-
-3. CONDITIONS D'ACQUISITION
-L'acquisition de ce produit est soumise à l'acceptation des présentes conditions générales.
-
-4. DROIT DE RÉTRACTATION
-Conformément à la législation en vigueur, le client dispose d'un délai de rétractation.
-
-5. RESPONSABILITÉ
-La responsabilité de l'établissement est limitée aux conditions prévues par la réglementation en vigueur.`;
+      
+      // Vérifier que la réponse contient bien du contenu généré
+      const generatedText = response?.cgv || response?.text || '';
+      if (!generatedText || generatedText.trim().length === 0) {
+        throw new Error('L\'IA n\'a pas généré de contenu. Veuillez réessayer.');
+      }
+      
+      return generatedText;
+    } catch (error: any) {
+      // Logger l'erreur pour le débogage
+      console.error('Erreur lors de la génération des CGV par IA:', error);
+      
+      // Propager l'erreur au lieu de retourner un texte pré-rempli
+      // Le composant RichTextEditor affichera l'erreur via toast
+      const errorMessage = error?.message || error?.response?.error || 'Erreur lors de la génération des CGV par IA';
+      throw new Error(errorMessage);
     }
   }
 

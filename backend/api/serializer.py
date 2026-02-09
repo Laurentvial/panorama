@@ -1078,6 +1078,9 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'platform_name',
+            'address',
+            'website',
+            'email',
             # Writable file fields (required for uploads)
             'logo',
             'login_background_image',

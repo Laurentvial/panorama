@@ -13,6 +13,9 @@ export function Customization() {
   const { settings, loadSettings, updateSettings, loading: themeLoading } = useTheme();
   const [loading, setLoading] = useState(false);
   const [platformName, setPlatformName] = useState('Panorama');
+  const [address, setAddress] = useState('');
+  const [website, setWebsite] = useState('');
+  const [email, setEmail] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [shouldRemoveLogo, setShouldRemoveLogo] = useState(false);
@@ -28,6 +31,9 @@ export function Customization() {
   useEffect(() => {
     if (settings) {
       setPlatformName(settings.platform_name || 'Panorama');
+      setAddress(settings.address || '');
+      setWebsite(settings.website || '');
+      setEmail(settings.email || '');
       setColors({
         primary: settings.primary_color || '#030213',
         secondary: settings.secondary_color || '',
@@ -104,6 +110,9 @@ export function Customization() {
       const formData = new FormData();
       
       formData.append('platform_name', platformName);
+      formData.append('address', address);
+      formData.append('website', website);
+      formData.append('email', email);
       
       if (logoFile) {
         formData.append('logo', logoFile);
@@ -149,10 +158,13 @@ export function Customization() {
 
   const handleReset = () => {
     setPlatformName(settings?.platform_name || 'Panorama');
+    setAddress(settings?.address || '');
+    setWebsite(settings?.website || '');
+    setEmail(settings?.email || '');
     setColors({
-      primary: '#030213',
-      secondary: '',
-      accent: ''
+      primary: settings?.primary_color || '#030213',
+      secondary: settings?.secondary_color || '',
+      accent: settings?.accent_color || ''
     });
     setLogoFile(null);
     setShouldRemoveLogo(false);
@@ -189,15 +201,47 @@ export function Customization() {
           </CardDescription>
         </CardHeader>
         <CardContent className="customization-card-content">
-          <div className="space-y-2">
-            <Label htmlFor="platform-name">Nom de la plateforme</Label>
-            <Input
-              id="platform-name"
-              type="text"
-              value={platformName}
-              onChange={(e) => setPlatformName(e.target.value)}
-              placeholder="Panorama"
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="platform-name">Nom de la plateforme</Label>
+              <Input
+                id="platform-name"
+                type="text"
+                value={platformName}
+                onChange={(e) => setPlatformName(e.target.value)}
+                placeholder="Panorama"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="address">Adresse</Label>
+              <Input
+                id="address"
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="123 Rue Example, 75001 Paris"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="website">Site web</Label>
+              <Input
+                id="website"
+                type="url"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://www.example.com"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="contact@example.com"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
