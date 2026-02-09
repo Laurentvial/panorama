@@ -384,7 +384,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
                     <th>Téléphone</th>
                     <th>E-Mail</th>
                     <th>Créé le</th>
-                    <th>Support</th>
                     <th>Gestionnaire</th>
                     <th>Source</th>
                     <th>Capital</th>
@@ -427,7 +426,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
                           : '-'
                         }
                       </td>
-                      <td>{client.support || '-'}</td>
                       <td>{client.managerName || client.manager || '-'}</td>
                       <td>{client.source || '-'}</td>
                       <td>

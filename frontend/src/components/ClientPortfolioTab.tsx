@@ -7,13 +7,54 @@ import { apiCall } from '../utils/api';
 interface ClientPortfolioTabProps {
   client: any;
   clientId?: string;
-  transactions?: any[];
   onRefresh?: () => void;
 }
 
-export function ClientPortfolioTab({ client, clientId, transactions = [], onRefresh }: ClientPortfolioTabProps) {
+export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfolioTabProps) {
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
+
+  useEffect(() => {
+    async function loadTransactions() {
+      if (!clientId) {
+        setTransactions([]);
+        return;
+      }
+      try {
+        setLoadingTransactions(true);
+        // Load all transactions for portfolio calculations by paginating through all pages
+        const allTransactions: any[] = [];
+        let page = 1;
+        const limit = 500; // Backend max limit
+        let hasMore = true;
+
+        while (hasMore) {
+          const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+          const transactions = (data as any).transactions || [];
+          allTransactions.push(...transactions);
+          
+          const pagination = (data as any).pagination;
+          if (pagination && page >= pagination.total_pages) {
+            hasMore = false;
+          } else if (transactions.length < limit) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        }
+        
+        setTransactions(allTransactions);
+      } catch (error) {
+        console.error('Error loading client transactions for portfolio:', error);
+        setTransactions([]);
+      } finally {
+        setLoadingTransactions(false);
+      }
+    }
+    loadTransactions();
+  }, [clientId]);
 
   useEffect(() => {
     async function loadPositions() {

@@ -12,7 +12,6 @@ import { ClientAssetsTab } from './ClientAssetsTab';
 import { ClientPortfolioTab } from './ClientPortfolioTab';
 import { ClientTransactionsTab } from './ClientTransactionsTab';
 import { ClientPositionsTab } from './ClientPositionsTab';
-import { ClientAppointmentsTab } from './ClientAppointmentsTab';
 import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
 import { ClientVerificationTab } from './ClientVerificationTab';
@@ -26,8 +25,13 @@ interface ClientDetailProps {
 
 export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [client, setClient] = useState<any>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Track which tabs have been loaded
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['info']));
+  const [loadingTab, setLoadingTab] = useState<string | null>(null);
+  
+  // Data for tabs (loaded lazily)
   const [notes, setNotes] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
   const [availableAssets, setAvailableAssets] = useState<any[]>([]);
@@ -37,97 +41,100 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [availableRibs, setAvailableRibs] = useState<any[]>([]);
   const [clientUsefulLinks, setClientUsefulLinks] = useState<any[]>([]);
   const [availableUsefulLinks, setAvailableUsefulLinks] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   
   // Dialogs
   const [isEditPersonalInfoOpen, setIsEditPersonalInfoOpen] = useState(false);
   const [isEditPatrimonialInfoOpen, setIsEditPatrimonialInfoOpen] = useState(false);
   
-
+  // Load only essential client data on mount
   useEffect(() => {
-    loadClientData();
+    loadEssentialClientData();
   }, [clientId]);
 
-  async function loadClientData() {
+  async function loadEssentialClientData() {
     try {
-      const [
-        clientData,
-        notesData,
-        assetsData,
-        availableAssetsData,
-        productsData,
-        availableProductsData,
-        ribsData,
-        availableRibsData,
-        usefulLinksData,
-        availableUsefulLinksData
-      ] = await Promise.all([
-        apiCall(`/api/clients/${clientId}/`),
-        apiCall(`/api/notes/`),
-        apiCall(`/api/clients/${clientId}/assets/`),
-        apiCall(`/api/assets/`),
-        apiCall(`/api/clients/${clientId}/products/`),
-        apiCall(`/api/products/`),
-        apiCall(`/api/clients/${clientId}/ribs/`),
-        apiCall(`/api/ribs/`),
-        apiCall(`/api/clients/${clientId}/useful-links/`),
-        apiCall(`/api/useful-links/`)
-      ]);
-      
+      setLoading(true);
+      const clientData = await apiCall(`/api/clients/${clientId}/`);
       setClient((clientData as any).client);
-      // Filter notes for this client - notes API returns array directly
-      const notesArray = Array.isArray(notesData) ? notesData : ((notesData as any).notes || notesData || []);
-      const clientNotes = notesArray.filter((note: any) => note.clientId === clientId);
-      setNotes(clientNotes);
-      
-      // Events endpoint was removed - set appointments to empty array
-      setAppointments([]);
-      
-      // Set client assets
-      const assetsArray = (assetsData as any).assets || [];
-      setClientAssets(assetsArray);
-      
-      // Set available assets
-      const availableAssetsArray = (availableAssetsData as any).assets || [];
-      setAvailableAssets(availableAssetsArray);
-      
-      // Set client products
-      const productsArray = (productsData as any).products || [];
-      setClientProducts(productsArray);
-      
-      // Set available products
-      const availableProductsArray = (availableProductsData as any).products || [];
-      setAvailableProducts(availableProductsArray);
-      
-      // Set client RIBs
-      const ribsArray = (ribsData as any).ribs || [];
-      setClientRibs(ribsArray);
-      
-      // Set available RIBs
-      const availableRibsArray = (availableRibsData as any).ribs || [];
-      setAvailableRibs(availableRibsArray);
-      
-      // Set client useful links
-      const usefulLinksArray = (usefulLinksData as any).usefulLinks || [];
-      setClientUsefulLinks(usefulLinksArray);
-      
-      // Set available useful links
-      const availableUsefulLinksArray = (availableUsefulLinksData as any).usefulLinks || [];
-      setAvailableUsefulLinks(availableUsefulLinksArray);
-      
-      // Load transactions
-      try {
-        const transactionsData = await apiCall(`/api/clients/${clientId}/transactions/`);
-        const transactionsArray = (transactionsData as any).transactions || [];
-        setTransactions(transactionsArray);
-      } catch (error) {
-        console.error('Error loading transactions:', error);
-        setTransactions([]);
-      }
     } catch (error) {
       console.error('Error loading client data:', error);
+      toast.error('Erreur lors du chargement des données du client');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Load tab data lazily when tab is accessed
+  async function loadTabData(tabName: string, forceReload: boolean = false) {
+    if (!forceReload && loadedTabs.has(tabName)) {
+      return; // Already loaded, skip unless forced
+    }
+
+    setLoadingTab(tabName);
+    try {
+      switch (tabName) {
+        case 'notes':
+          const notesData = await apiCall(`/api/notes/`);
+          const notesArray = Array.isArray(notesData) ? notesData : ((notesData as any).notes || notesData || []);
+          const clientNotes = notesArray.filter((note: any) => note.clientId === clientId);
+          setNotes(clientNotes);
+          setLoadedTabs(prev => new Set(prev).add('notes'));
+          break;
+        
+        case 'assets':
+          const [assetsData, availableAssetsData, productsData, availableProductsData] = await Promise.all([
+            apiCall(`/api/clients/${clientId}/assets/`),
+            apiCall(`/api/assets/`),
+            apiCall(`/api/clients/${clientId}/products/`),
+            apiCall(`/api/products/`)
+          ]);
+          setClientAssets((assetsData as any).assets || []);
+          setAvailableAssets((availableAssetsData as any).assets || []);
+          setClientProducts((productsData as any).products || []);
+          setAvailableProducts((availableProductsData as any).products || []);
+          setLoadedTabs(prev => new Set(prev).add('assets'));
+          break;
+        
+        case 'misc':
+          const [ribsData, availableRibsData, usefulLinksData, availableUsefulLinksData] = await Promise.all([
+            apiCall(`/api/clients/${clientId}/ribs/`),
+            apiCall(`/api/ribs/`),
+            apiCall(`/api/clients/${clientId}/useful-links/`),
+            apiCall(`/api/useful-links/`)
+          ]);
+          setClientRibs((ribsData as any).ribs || []);
+          setAvailableRibs((availableRibsData as any).ribs || []);
+          setClientUsefulLinks((usefulLinksData as any).usefulLinks || []);
+          setAvailableUsefulLinks((availableUsefulLinksData as any).usefulLinks || []);
+          setLoadedTabs(prev => new Set(prev).add('misc'));
+          break;
+        
+        // Transactions, positions, documents, portfolio, verification tabs load their own data
+        default:
+          setLoadedTabs(prev => new Set(prev).add(tabName));
+          break;
+      }
+    } catch (error) {
+      console.error(`Error loading tab data for ${tabName}:`, error);
+      toast.error(`Erreur lors du chargement des données de l'onglet`);
+    } finally {
+      setLoadingTab(null);
+    }
+  }
+
+  // Handle tab change to load data lazily
+  function handleTabChange(value: string) {
+    loadTabData(value);
+  }
+
+  async function loadClientData() {
+    // Refresh essential client data
+    await loadEssentialClientData();
+    // Reload currently loaded tabs (force reload to refresh data after mutations)
+    for (const tab of loadedTabs) {
+      if (tab !== 'info') {
+        await loadTabData(tab, true); // Force reload even if already loaded
+      }
     }
   }
 
@@ -172,8 +179,9 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex flex-col items-center justify-center h-screen">
         <LoadingIndicator />
+        <p className="mt-4 text-slate-600">Chargement des informations du client...</p>
       </div>
     );
   }
@@ -276,14 +284,13 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
 
       {/* Client Details Tabs */}
-      <Tabs defaultValue="info" className="space-y-6">
+      <Tabs defaultValue="info" className="space-y-6" onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="info">Informations</TabsTrigger>
           <TabsTrigger value="assets">Actifs visibles</TabsTrigger>
           <TabsTrigger value="portfolio">Portefeuille</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="positions">Positions</TabsTrigger>
-          <TabsTrigger value="appointments">RDV</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
           <TabsTrigger value="verification">Vérification</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -303,7 +310,6 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         {/* Transactions Tab */}
         <TabsContent value="transactions">
           <ClientTransactionsTab 
-            transactions={transactions}
             onRefresh={loadClientData}
             clientId={clientId}
           />
@@ -314,35 +320,44 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <ClientPositionsTab clientId={clientId} />
         </TabsContent>
 
-        {/* Appointments Tab */}
-        <TabsContent value="appointments">
-          <ClientAppointmentsTab appointments={appointments} />
-        </TabsContent>
-
         {/* Assets Tab */}
         <TabsContent value="assets">
-          <ClientAssetsTab 
-            clientId={clientId}
-            clientAssets={clientAssets}
-            availableAssets={availableAssets}
-            clientProducts={clientProducts}
-            availableProducts={availableProducts}
-            onRefresh={loadClientData}
-          />
+          {loadingTab === 'assets' ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-600">Chargement des actifs...</p>
+            </div>
+          ) : (
+            <ClientAssetsTab 
+              clientId={clientId}
+              clientAssets={clientAssets}
+              availableAssets={availableAssets}
+              clientProducts={clientProducts}
+              availableProducts={availableProducts}
+              onRefresh={loadClientData}
+            />
+          )}
         </TabsContent>
 
         {/* Portfolio Tab */}
         <TabsContent value="portfolio">
-          <ClientPortfolioTab client={client} clientId={clientId} transactions={transactions} onRefresh={loadClientData} />
+          <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Notes Tab */}
         <TabsContent value="notes">
-          <ClientNotesTab 
-            notes={notes}
-            clientId={clientId}
-            onRefresh={loadClientData}
-          />
+          {loadingTab === 'notes' ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-600">Chargement des notes...</p>
+            </div>
+          ) : (
+            <ClientNotesTab 
+              notes={notes}
+              clientId={clientId}
+              onRefresh={loadClientData}
+            />
+          )}
         </TabsContent>
 
         {/* Verification Tab */}
@@ -352,20 +367,27 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Documents Tab */}
         <TabsContent value="documents">
-          <ClientDocumentsTab clientId={clientId} transactions={transactions} onRefresh={loadClientData} />
+          <ClientDocumentsTab clientId={clientId} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Misc Tab */}
         <TabsContent value="misc">
-          <ClientMiscTab
-            clientId={clientId}
-            client={client}
-            clientRibs={clientRibs}
-            availableRibs={availableRibs}
-            clientUsefulLinks={clientUsefulLinks}
-            availableUsefulLinks={availableUsefulLinks}
-            onRefresh={loadClientData}
-          />
+          {loadingTab === 'misc' ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-600">Chargement des fonctionnalités diverses...</p>
+            </div>
+          ) : (
+            <ClientMiscTab
+              clientId={clientId}
+              client={client}
+              clientRibs={clientRibs}
+              availableRibs={availableRibs}
+              clientUsefulLinks={clientUsefulLinks}
+              availableUsefulLinks={availableUsefulLinks}
+              onRefresh={loadClientData}
+            />
+          )}
         </TabsContent>
       </Tabs>
 

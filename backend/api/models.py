@@ -49,8 +49,6 @@ class Client(models.Model):
     account_verified = models.BooleanField(default=False)
     platform_access = models.BooleanField(default=True)  # Connexion à la plateforme
     active = models.BooleanField(null=False, default=True)
-    template = models.CharField(max_length=100, default="", blank=True)
-    support = models.CharField(max_length=100, default="", blank=True)
     password = models.CharField(max_length=100, default="Access@123")
     phone = models.CharField(max_length=20, default="", blank=True)
     mobile = models.CharField(max_length=20, default="", blank=True)

@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import LoadingIndicator from './LoadingIndicator';
 
 type ClientPositionRow = {
   id: string;
@@ -65,6 +66,8 @@ const formatPositionRange = (p: ClientPositionRow) => {
 export function ClientPositionsTab({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
+  const [allPositions, setAllPositions] = useState<ClientPositionRow[]>([]); // All positions for counts
+  const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [search, setSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [products, setProducts] = useState<any[]>([]);
@@ -74,11 +77,55 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   const openStatuses = useMemo(() => new Set(['open']), []);
   const closedStatuses = useMemo(() => new Set(['done', 'cancelled']), []);
 
-  async function loadPositions() {
+  // Load all positions for counts (paginate through all pages)
+  async function loadAllPositionsForCounts() {
+    try {
+      // Load all positions by paginating through all pages to get accurate counts
+      const allPositionsList: ClientPositionRow[] = [];
+      let page = 1;
+      const limit = 500; // Backend max limit
+      let hasMore = true;
+
+      while (hasMore) {
+        const data = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`);
+        const positions = (data as any)?.positions || [];
+        allPositionsList.push(...positions);
+        
+        const pagination = (data as any).pagination;
+        if (pagination && page >= pagination.total_pages) {
+          hasMore = false;
+        } else if (positions.length < limit) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
+      
+      setAllPositions(allPositionsList);
+    } catch (error: any) {
+      console.error('Error loading all positions for counts:', error);
+      setAllPositions([]);
+    }
+  }
+
+  async function loadPositions(page: number = 1, limit: number = 50) {
     try {
       setLoading(true);
-      const data = await apiCall(`/api/clients/${clientId}/positions/`);
+      // Pass status filter to backend for proper sorting
+      // For upcoming tab, pass status=pending so backend sorts ascending (sooner to later)
+      let url = `/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`;
+      if (activeTab === 'upcoming') {
+        url += '&status=pending';
+      } else if (activeTab === 'open') {
+        url += '&status=open';
+      } else if (activeTab === 'closed') {
+        url += '&status=done,cancelled';
+      }
+      const data = await apiCall(url);
       setPositions((data as any)?.positions || []);
+      if ((data as any).pagination) {
+        setPagination((data as any).pagination);
+      }
     } catch (error: any) {
       console.error('Error loading client positions:', error);
       toast.error(error?.message || 'Erreur lors du chargement des positions');
@@ -88,10 +135,17 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     }
   }
 
+  // Load all positions for counts on mount and when clientId changes
   useEffect(() => {
-    loadPositions();
+    loadAllPositionsForCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  // Load paginated positions when tab changes
+  useEffect(() => {
+    loadPositions(1, 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, activeTab]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -105,8 +159,27 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     loadProducts();
   }, []);
 
-  // Filter by product and search (without status filter)
+  // Filter by product and search (without status filter) - use allPositions for counts
   const filteredByProductAndSearch = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allPositions.filter((p) => {
+      // Filter by product
+      if (selectedProductId && p.productId !== selectedProductId) return false;
+      
+      // Filter by search query
+      if (!q) return true;
+      return (
+        (p.productName || '').toLowerCase().includes(q) ||
+        (p.productId || '').toLowerCase().includes(q) ||
+        (p.assetName || '').toLowerCase().includes(q) ||
+        (p.assetId || '').toLowerCase().includes(q) ||
+        (p.transactionId || '').toLowerCase().includes(q)
+      );
+    });
+  }, [allPositions, search, selectedProductId]);
+
+  // Filter paginated positions by product and search (for display)
+  const filteredPaginatedByProductAndSearch = useMemo(() => {
     const q = search.trim().toLowerCase();
     return positions.filter((p) => {
       // Filter by product
@@ -124,9 +197,9 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     });
   }, [positions, search, selectedProductId]);
 
-  // Filter by product, search AND active tab status
+  // Filter paginated positions by product, search AND active tab status, with sorting for upcoming tab
   const filtered = useMemo(() => {
-    return filteredByProductAndSearch.filter((p) => {
+    let result = filteredPaginatedByProductAndSearch.filter((p) => {
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
@@ -135,7 +208,34 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       if (activeTab === 'closed' && !isClosed) return false;
       return true;
     });
-  }, [filteredByProductAndSearch, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+    
+    // Sort upcoming positions from sooner to later (ascending by opened_at or period_date)
+    if (activeTab === 'upcoming') {
+      result = [...result].sort((a, b) => {
+        // Use opened_at if available, otherwise period_date, otherwise created_at
+        const getDate = (p: ClientPositionRow): number => {
+          if (p.opened_at) {
+            const d = new Date(p.opened_at).getTime();
+            if (!Number.isNaN(d)) return d;
+          }
+          if (p.period_date) {
+            const d = new Date(p.period_date).getTime();
+            if (!Number.isNaN(d)) return d;
+          }
+          // Fallback to a very far future date if no date available
+          return Infinity;
+        };
+        
+        const dateA = getDate(a);
+        const dateB = getDate(b);
+        
+        // Sort ascending (sooner first)
+        return dateA - dateB;
+      });
+    }
+    
+    return result;
+  }, [filteredPaginatedByProductAndSearch, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
 
   // Counts should reflect filtered positions (by product and search, but not by active tab)
   const counts = useMemo(() => {
@@ -153,8 +253,11 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
-        <CardTitle>Positions</CardTitle>
-        <Button variant="outline" onClick={loadPositions} disabled={loading}>
+        <CardTitle>Positions ({loading ? '...' : pagination.total})</CardTitle>
+        <Button variant="outline" onClick={() => {
+          loadAllPositionsForCounts();
+          loadPositions(pagination.page, pagination.limit);
+        }} disabled={loading}>
           <RefreshCw className="w-4 h-4 mr-2" />
           {loading ? 'Chargement...' : 'Rafraîchir'}
         </Button>
@@ -188,35 +291,156 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-          <TabsList>
-            <TabsTrigger value="upcoming">À venir ({counts.upcoming})</TabsTrigger>
-            <TabsTrigger value="open">Ouvertes ({counts.open})</TabsTrigger>
-            <TabsTrigger value="closed">Fermées ({counts.closed})</TabsTrigger>
-          </TabsList>
+        {loading && positions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <LoadingIndicator />
+            <p className="mt-4 text-slate-500">Chargement des positions...</p>
+          </div>
+        ) : (
+          <>
+            {loading && positions.length > 0 && (
+              <div className="flex items-center justify-center py-4">
+                <LoadingIndicator />
+              </div>
+            )}
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+              <TabsList>
+                <TabsTrigger value="upcoming">À venir ({counts.upcoming})</TabsTrigger>
+                <TabsTrigger value="open">Ouvertes ({counts.open})</TabsTrigger>
+                <TabsTrigger value="closed">Fermées ({counts.closed})</TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="upcoming" className="mt-4">
-            {!filtered.length ? (
-              <div className="text-sm text-slate-600">Aucune position.</div>
-            ) : (
-              <PositionsTable rows={filtered} />
+              <TabsContent value="upcoming" className="mt-4">
+                {loading && positions.length > 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <LoadingIndicator />
+                  </div>
+                ) : !filtered.length ? (
+                  <div className="text-sm text-slate-600">Aucune position.</div>
+                ) : (
+                  <PositionsTable rows={filtered} />
+                )}
+              </TabsContent>
+              <TabsContent value="open" className="mt-4">
+                {loading && positions.length > 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <LoadingIndicator />
+                  </div>
+                ) : !filtered.length ? (
+                  <div className="text-sm text-slate-600">Aucune position.</div>
+                ) : (
+                  <PositionsTable rows={filtered} />
+                )}
+              </TabsContent>
+              <TabsContent value="closed" className="mt-4">
+                {loading && positions.length > 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <LoadingIndicator />
+                  </div>
+                ) : !filtered.length ? (
+                  <div className="text-sm text-slate-600">Aucune position.</div>
+                ) : (
+                  <PositionsTable rows={filtered} />
+                )}
+              </TabsContent>
+            </Tabs>
+            
+            {/* Pagination Controls */}
+            {pagination.total_pages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200">
+                <div className="text-sm text-slate-600">
+                  Page {pagination.page} sur {pagination.total_pages} ({pagination.total} positions)
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (pagination.page > 1) {
+                        loadPositions(1, pagination.limit);
+                      }
+                    }}
+                    disabled={pagination.page <= 1 || loading}
+                    title="Première page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-4 h-4 -ml-2" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (pagination.page > 1) {
+                        loadPositions(pagination.page - 1, pagination.limit);
+                      }
+                    }}
+                    disabled={pagination.page <= 1 || loading}
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Précédent
+                  </Button>
+                  
+                  {/* Page Numbers */}
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
+                      let pageNum: number;
+                      if (pagination.total_pages <= 5) {
+                        pageNum = i + 1;
+                      } else if (pagination.page <= 3) {
+                        pageNum = i + 1;
+                      } else if (pagination.page >= pagination.total_pages - 2) {
+                        pageNum = pagination.total_pages - 4 + i;
+                      } else {
+                        pageNum = pagination.page - 2 + i;
+                      }
+                      
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={pagination.page === pageNum ? "default" : "outline"}
+                          size="sm"
+                          className="min-w-[2.5rem]"
+                          onClick={() => loadPositions(pageNum, pagination.limit)}
+                          disabled={loading}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (pagination.page < pagination.total_pages) {
+                        loadPositions(pagination.page + 1, pagination.limit);
+                      }
+                    }}
+                    disabled={pagination.page >= pagination.total_pages || loading}
+                  >
+                    Suivant
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (pagination.page < pagination.total_pages) {
+                        loadPositions(pagination.total_pages, pagination.limit);
+                      }
+                    }}
+                    disabled={pagination.page >= pagination.total_pages || loading}
+                    title="Dernière page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-4 h-4 -ml-2" />
+                  </Button>
+                </div>
+              </div>
             )}
-          </TabsContent>
-          <TabsContent value="open" className="mt-4">
-            {!filtered.length ? (
-              <div className="text-sm text-slate-600">Aucune position.</div>
-            ) : (
-              <PositionsTable rows={filtered} />
-            )}
-          </TabsContent>
-          <TabsContent value="closed" className="mt-4">
-            {!filtered.length ? (
-              <div className="text-sm text-slate-600">Aucune position.</div>
-            ) : (
-              <PositionsTable rows={filtered} />
-            )}
-          </TabsContent>
-        </Tabs>
+          </>
+        )}
       </CardContent>
     </Card>
   );

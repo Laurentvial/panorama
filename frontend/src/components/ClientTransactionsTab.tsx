@@ -7,7 +7,7 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
-import { Plus, X, Filter, ChevronDown } from 'lucide-react';
+import { Plus, X, Filter, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -16,10 +16,10 @@ import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { PositionGenerationModal } from './PositionGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS, parseSubscriptionDetails } from './transactionUtils';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';
 
 interface ClientTransactionsTabProps {
-  transactions: any[];
   onRefresh: () => void;
   clientId: string;
 }
@@ -72,8 +72,11 @@ const STATUS_LABELS: { [key: string]: string } = {
   annule: 'Annulé'
 };
 
-export function ClientTransactionsTab({ transactions, onRefresh, clientId }: ClientTransactionsTabProps) {
+export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransactionsTabProps) {
   const navigate = useNavigate();
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
   const [isEditTransactionModalOpen, setIsEditTransactionModalOpen] = useState(false);
@@ -83,6 +86,29 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
   const [isWithdrawalForPositionGeneration, setIsWithdrawalForPositionGeneration] = useState(false);
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+
+  // Load transactions with pagination
+  const loadTransactions = async (page: number = 1, limit: number = 50) => {
+    try {
+      setLoading(true);
+      const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+      setTransactions((data as any).transactions || []);
+      if ((data as any).pagination) {
+        setPagination((data as any).pagination);
+      }
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+      toast.error('Erreur lors du chargement des transactions');
+      setTransactions([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load transactions on mount and when clientId changes
+  useEffect(() => {
+    loadTransactions(1, 50);
+  }, [clientId]);
 
   // Load assets and products to find IDs
   useEffect(() => {
@@ -406,6 +432,8 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
         productId: '',
         visibleByClient: true
       });
+      // Reload transactions to show the new one
+      loadTransactions(pagination.page, pagination.limit);
       onRefresh();
     } catch (error: any) {
       console.error('Error creating transaction:', error);
@@ -908,24 +936,133 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
 
       <Card>
         <CardHeader>
-          <CardTitle>Transactions ({transactions.length})</CardTitle>
+          <CardTitle>Transactions ({loading ? '...' : pagination.total})</CardTitle>
         </CardHeader>
         <CardContent>
-          <TransactionList
-            transactions={filteredTransactions}
-            assets={assets}
-            products={products}
-            showClientColumn={false}
-            showIcons={false}
-            onView={(transaction) => {
-              setSelectedTransaction(transaction);
-              setIsViewTransactionModalOpen(true);
-            }}
-            onEdit={(transaction) => {
-              openEditModal(transaction);
-            }}
-            emptyMessage="Aucune transaction"
-          />
+          {loading && transactions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-500">Chargement des transactions...</p>
+            </div>
+          ) : (
+            <>
+              {loading && transactions.length > 0 && (
+                <div className="flex items-center justify-center py-4 mb-4">
+                  <LoadingIndicator />
+                </div>
+              )}
+              <TransactionList
+                transactions={filteredTransactions}
+                assets={assets}
+                products={products}
+                showClientColumn={false}
+                showIcons={false}
+                onView={(transaction) => {
+                  setSelectedTransaction(transaction);
+                  setIsViewTransactionModalOpen(true);
+                }}
+                onEdit={(transaction) => {
+                  openEditModal(transaction);
+                }}
+                emptyMessage="Aucune transaction"
+              />
+              
+              {/* Pagination Controls */}
+              {pagination.total_pages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-slate-200">
+                  <div className="text-sm text-slate-600">
+                    Page {pagination.page} sur {pagination.total_pages} ({pagination.total} transactions)
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (pagination.page > 1) {
+                          loadTransactions(1, pagination.limit);
+                        }
+                      }}
+                      disabled={pagination.page <= 1 || loading}
+                      title="Première page"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <ChevronLeft className="w-4 h-4 -ml-2" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (pagination.page > 1) {
+                          loadTransactions(pagination.page - 1, pagination.limit);
+                        }
+                      }}
+                      disabled={pagination.page <= 1 || loading}
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Précédent
+                    </Button>
+                    
+                    {/* Page Numbers */}
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
+                        let pageNum: number;
+                        if (pagination.total_pages <= 5) {
+                          pageNum = i + 1;
+                        } else if (pagination.page <= 3) {
+                          pageNum = i + 1;
+                        } else if (pagination.page >= pagination.total_pages - 2) {
+                          pageNum = pagination.total_pages - 4 + i;
+                        } else {
+                          pageNum = pagination.page - 2 + i;
+                        }
+                        
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={pagination.page === pageNum ? "default" : "outline"}
+                            size="sm"
+                            className="min-w-[2.5rem]"
+                            onClick={() => loadTransactions(pageNum, pagination.limit)}
+                            disabled={loading}
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (pagination.page < pagination.total_pages) {
+                          loadTransactions(pagination.page + 1, pagination.limit);
+                        }
+                      }}
+                      disabled={pagination.page >= pagination.total_pages || loading}
+                    >
+                      Suivant
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (pagination.page < pagination.total_pages) {
+                          loadTransactions(pagination.total_pages, pagination.limit);
+                        }
+                      }}
+                      disabled={pagination.page >= pagination.total_pages || loading}
+                      title="Dernière page"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-4 h-4 -ml-2" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -952,6 +1089,7 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
           setSelectedTransaction(null);
         }}
         onSuccess={() => {
+          loadTransactions(pagination.page, pagination.limit);
           onRefresh();
         }}
       />
@@ -971,6 +1109,7 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             setIsWithdrawalForPositionGeneration(false);
             setIsTransactionDialogOpen(false);
             toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
+            loadTransactions(pagination.page, pagination.limit);
             onRefresh();
           }}
           onSuccess={async () => {
@@ -999,6 +1138,7 @@ export function ClientTransactionsTab({ transactions, onRefresh, clientId }: Cli
             setIsWithdrawalForPositionGeneration(false);
             setIsTransactionDialogOpen(false);
             toast.success('Transaction créée avec succès');
+            loadTransactions(pagination.page, pagination.limit);
             onRefresh();
           }}
           isWithdrawal={isWithdrawalForPositionGeneration}

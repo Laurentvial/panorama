@@ -164,7 +164,35 @@ class ClientSerializer(serializers.ModelSerializer):
         return obj.team.id if obj.team else None
     
     def get_capital(self, obj):
-        return float(obj.total_wealth) if obj.total_wealth else 0
+        # Calculate invested capital from completed transactions
+        # Use prefetched completed_transactions if available (from ClientView optimization)
+        if hasattr(obj, 'completed_transactions'):
+            transactions = obj.completed_transactions
+        else:
+            from .models import Transaction
+            transactions = Transaction.objects.filter(
+                client=obj,
+                status='termine'
+            )
+        
+        calculated_invested_capital = 0
+        for txn in transactions:
+            amount = float(txn.amount) if txn.amount else 0
+            if txn.type == 'depot':
+                calculated_invested_capital += amount
+            elif txn.type == 'retrait':
+                calculated_invested_capital -= amount
+            elif txn.type == 'bonus':
+                calculated_invested_capital += amount
+            elif txn.type == 'interets':
+                # Interest transactions credit gains to cash balance
+                calculated_invested_capital += amount
+        
+        # Use calculated value if transactions exist, otherwise fallback to stored value
+        if transactions:
+            return calculated_invested_capital
+        else:
+            return float(obj.invested_capital) if obj.invested_capital else 0
     
     def get_manager(self, obj):
         return obj.managed_by or ''
@@ -180,7 +208,35 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['lastName'] = instance.lname
         ret['fullName'] = f"{instance.fname} {instance.lname}".strip()
         ret['createdAt'] = instance.created_at
-        ret['capital'] = float(instance.total_wealth) if instance.total_wealth else 0
+        # Calculate capital from transactions (invested capital)
+        # Use prefetched completed_transactions if available (from ClientView optimization)
+        if hasattr(instance, 'completed_transactions'):
+            transactions = instance.completed_transactions
+        else:
+            from .models import Transaction
+            transactions = Transaction.objects.filter(
+                client=instance,
+                status='termine'
+            )
+        
+        calculated_invested_capital = 0
+        for txn in transactions:
+            amount = float(txn.amount) if txn.amount else 0
+            if txn.type == 'depot':
+                calculated_invested_capital += amount
+            elif txn.type == 'retrait':
+                calculated_invested_capital -= amount
+            elif txn.type == 'bonus':
+                calculated_invested_capital += amount
+            elif txn.type == 'interets':
+                # Interest transactions credit gains to cash balance
+                calculated_invested_capital += amount
+        
+        # Use calculated value if transactions exist, otherwise fallback to stored value
+        if transactions:
+            ret['capital'] = calculated_invested_capital
+        else:
+            ret['capital'] = float(instance.invested_capital) if instance.invested_capital else 0
         ret['source'] = instance.source or ''
         ret['teamId'] = instance.team.id if instance.team else None
         ret['teamName'] = instance.team.name if instance.team else ''
@@ -249,8 +305,6 @@ class ClientSerializer(serializers.ModelSerializer):
         else:
             ret['profilePhoto'] = ''
         ret['civility'] = ret.get('civility', '') or ''
-        ret['template'] = ret.get('template', '') or ''
-        ret['support'] = ret.get('support', '') or ''
         ret['password'] = ret.get('password', '') or ''
         ret['platformAccess'] = bool(ret.get('platform_access', True))
         ret['active'] = bool(ret.get('active', True))

@@ -29,8 +29,6 @@ export function EditPersonalInfoModal({
     civility: '',
     firstName: '',
     lastName: '',
-    template: '',
-    support: '',
     password: '',
     phone: '',
     mobile: '',
@@ -63,8 +61,6 @@ export function EditPersonalInfoModal({
         civility: client.civility || '',
         firstName: client.firstName || '',
         lastName: client.lastName || '',
-        template: client.template || '',
-        support: client.support || '',
         password: client.password || '',
         phone: client.phone || '',
         mobile: client.mobile || '',
@@ -124,8 +120,6 @@ export function EditPersonalInfoModal({
         civility: editPersonalInfoForm.civility || '',
         firstName: editPersonalInfoForm.firstName || '',
         lastName: editPersonalInfoForm.lastName || '',
-        template: editPersonalInfoForm.template || '',
-        support: editPersonalInfoForm.support || '',
         password: editPersonalInfoForm.password || '',
         phone: editPersonalInfoForm.phone || '',
         mobile: editPersonalInfoForm.mobile || '',
@@ -301,25 +295,6 @@ export function EditPersonalInfoModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <div className="modal-form-field">
-              <Label htmlFor="editTemplate">Template</Label>
-              <Input
-                id="editTemplate"
-                value={editPersonalInfoForm.template}
-                onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, template: e.target.value })}
-                placeholder="Template"
-              />
-            </div>
-
-            <div className="modal-form-field">
-              <Label htmlFor="editSupport">Support</Label>
-              <Input
-                id="editSupport"
-                value={editPersonalInfoForm.support}
-                onChange={(e) => setEditPersonalInfoForm({ ...editPersonalInfoForm, support: e.target.value })}
-                placeholder="Support"
-              />
-            </div>
           </div>
 
           <div className="modal-form-field">

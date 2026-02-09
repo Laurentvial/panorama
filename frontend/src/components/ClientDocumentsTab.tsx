@@ -12,7 +12,6 @@ import '../styles/Modal.css';
 
 interface ClientDocumentsTabProps {
   clientId: string;
-  transactions?: any[];
   onRefresh: () => void;
 }
 
@@ -38,9 +37,11 @@ const DOCUMENT_TYPES = [
   { value: 'other', label: 'Autre' },
 ];
 
-export function ClientDocumentsTab({ clientId, transactions = [], onRefresh }: ClientDocumentsTabProps) {
+export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   
@@ -54,6 +55,43 @@ export function ClientDocumentsTab({ clientId, transactions = [], onRefresh }: C
 
   useEffect(() => {
     loadDocuments();
+  }, [clientId]);
+
+  useEffect(() => {
+    async function loadTransferTransactions() {
+      try {
+        setLoadingTransactions(true);
+        // Load all transactions by paginating through all pages to filter transfert type
+        const allTransactions: any[] = [];
+        let page = 1;
+        const limit = 500; // Backend max limit
+        let hasMore = true;
+
+        while (hasMore) {
+          const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+          const transactions = (data as any).transactions || [];
+          allTransactions.push(...transactions);
+          
+          const pagination = (data as any).pagination;
+          if (pagination && page >= pagination.total_pages) {
+            hasMore = false;
+          } else if (transactions.length < limit) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        }
+        
+        // Filter only transfert transactions for contract linking
+        setTransactions(allTransactions.filter((t: any) => t.type === 'transfert'));
+      } catch (error) {
+        console.error('Error loading transactions for documents:', error);
+        setTransactions([]);
+      } finally {
+        setLoadingTransactions(false);
+      }
+    }
+    loadTransferTransactions();
   }, [clientId]);
 
   async function loadDocuments() {

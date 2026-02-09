@@ -548,7 +548,16 @@ class NoteDeleteView(generics.DestroyAPIView):
         return Note.objects.filter(userId=user)
 
 class ClientView(generics.ListAPIView):
-    queryset = Client.objects.all()
+    from django.db.models import Prefetch
+    from .models import Transaction
+    
+    queryset = Client.objects.select_related('team').prefetch_related(
+        Prefetch(
+            'transactions',
+            queryset=Transaction.objects.filter(status='termine'),
+            to_attr='completed_transactions'
+        )
+    )
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated]  # Explicitly set permission
     
@@ -619,8 +628,6 @@ def client_create(request):
         'account_verified': request.data.get('accountVerified', False),
         'platform_access': request.data.get('platformAccess', True),
         'active': request.data.get('active', True),
-        'template': request.data.get('template', '') or '',
-        'support': request.data.get('support', '') or '',
         'password': request.data.get('password', 'Access@123') or 'Access@123',
         'phone': request.data.get('phone', '') or '',
         'mobile': request.data.get('mobile', '') or '',
@@ -861,10 +868,6 @@ def client_detail(request, client_id):
         if 'accountVerified' in request.data:
             v = request.data.get('accountVerified')
             client.account_verified = (v.lower() == 'true') if isinstance(v, str) else bool(v)
-        if 'template' in request.data:
-            client.template = request.data.get('template', '') or ''
-        if 'support' in request.data:
-            client.support = request.data.get('support', '') or ''
         if 'password' in request.data:
             client.password = request.data.get('password', '') or ''
         if 'phone' in request.data:
@@ -4310,14 +4313,59 @@ def client_positions(request, client_id):
     # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
     _sync_positions_statuses(qs)
 
+    # Determine sorting based on status filter
+    statuses = []
     if status_param:
         statuses = [s.strip() for s in str(status_param).split(',') if s.strip()]
         if statuses:
             qs = qs.filter(status__in=statuses)
-
-    qs = qs.order_by('-opened_at', '-period_date', '-created_at')
-    serializer = PositionSerializer(qs, many=True)
-    return Response({'positions': serializer.data})
+            # For pending positions only, sort ascending (sooner to later)
+            # For other statuses, sort descending (most recent first)
+            if 'pending' in statuses and len(statuses) == 1:
+                # Only pending: sort ascending by opened_at or period_date
+                qs = qs.order_by('opened_at', 'period_date', 'created_at')
+            else:
+                # Mixed or other statuses: sort descending
+                qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+        else:
+            # status_param provided but resulted in empty statuses list
+            # Apply default descending order (consistent with original behavior)
+            qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+    else:
+        # No status filter: default descending order
+        qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+    
+    # Pagination support
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '50')
+    
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 50
+        if limit > 500:  # Max limit to prevent abuse
+            limit = 500
+    except (ValueError, TypeError):
+        page = 1
+        limit = 50
+    
+    total_count = qs.count()
+    offset = (page - 1) * limit
+    paginated_qs = qs[offset:offset + limit]
+    
+    serializer = PositionSerializer(paginated_qs, many=True)
+    return Response({
+        'positions': serializer.data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        }
+    })
 
 
 @api_view(['GET', 'POST'])
@@ -4742,8 +4790,38 @@ def client_transactions(request, client_id):
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     transactions = Transaction.objects.filter(client=client).order_by('-datetime', '-created_at')
-    serializer = TransactionSerializer(transactions, many=True)
-    return Response({'transactions': serializer.data})
+    
+    # Pagination support
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '50')
+    
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 50
+        if limit > 500:  # Max limit to prevent abuse
+            limit = 500
+    except (ValueError, TypeError):
+        page = 1
+        limit = 50
+    
+    total_count = transactions.count()
+    offset = (page - 1) * limit
+    paginated_transactions = transactions[offset:offset + limit]
+    
+    serializer = TransactionSerializer(paginated_transactions, many=True)
+    return Response({
+        'transactions': serializer.data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        }
+    })
 
 @api_view(['POST'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens

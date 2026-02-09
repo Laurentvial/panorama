@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
+import { Checkbox } from './ui/checkbox';
 import { DateInput } from './ui/date-input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User } from 'lucide-react';
@@ -34,8 +35,6 @@ export function AddClient() {
     mobile: '',
     platformAccess: true,
     active: true,
-    template: '',
-    support: '',
     birthDate: '',
     birthPlace: '',
     address: '',
@@ -197,8 +196,6 @@ export function AddClient() {
         formDataToSend.append('mobile', formData.mobile || '');
         formDataToSend.append('platformAccess', formData.platformAccess.toString());
         formDataToSend.append('active', formData.active.toString());
-        formDataToSend.append('template', formData.template || '');
-        formDataToSend.append('support', formData.support || '');
         formDataToSend.append('birthDate', formData.birthDate || '');
         formDataToSend.append('birthPlace', formData.birthPlace || '');
         formDataToSend.append('address', formData.address || '');
@@ -249,8 +246,6 @@ export function AddClient() {
           mobile: formData.mobile || '',
           platformAccess: formData.platformAccess,
           active: formData.active,
-          template: formData.template || '',
-          support: formData.support || '',
           birthDate: formData.birthDate || '',
           birthPlace: formData.birthPlace || '',
           address: formData.address || '',
@@ -644,52 +639,31 @@ export function AddClient() {
             <CardTitle>Connexion et paramètres</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="platformAccess"
-                checked={formData.platformAccess}
-                onChange={(e) => setFormData({ ...formData, platformAccess: e.target.checked })}
-                className="client-checkbox"
-              />
-              <Label htmlFor="platformAccess" className="cursor-pointer">
-                Connexion à la plateforme
-              </Label>
-            </div>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="platformAccess"
+                  checked={formData.platformAccess}
+                  onCheckedChange={(checked) => setFormData({ ...formData, platformAccess: checked === true })}
+                />
+                <Label htmlFor="platformAccess" className="cursor-pointer">
+                  Connexion à la plateforme
+                </Label>
+              </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="active"
-                checked={formData.active}
-                onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                className="client-checkbox"
-              />
-              <Label htmlFor="active" className="cursor-pointer">
-                Actif
-              </Label>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="active"
+                  checked={formData.active}
+                  onCheckedChange={(checked) => setFormData({ ...formData, active: checked === true })}
+                />
+                <Label htmlFor="active" className="cursor-pointer">
+                  Actif
+                </Label>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="template">Template</Label>
-                <Input
-                  id="template"
-                  value={formData.template}
-                  onChange={(e) => setFormData({ ...formData, template: e.target.value })}
-                  placeholder="Template"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="support">Support</Label>
-                <Input
-                  id="support"
-                  value={formData.support}
-                  onChange={(e) => setFormData({ ...formData, support: e.target.value })}
-                  placeholder="Support"
-                />
-              </div>
             </div>
           </CardContent>
         </Card>

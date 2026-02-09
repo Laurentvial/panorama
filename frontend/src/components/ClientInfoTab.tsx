@@ -51,14 +51,6 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
               <p>{client.firstName} {client.lastName}</p>
             </div>
             <div>
-              <Label className="text-slate-600">Template</Label>
-              <p>{client.template || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Support</Label>
-              <p>{client.support || '-'}</p>
-            </div>
-            <div>
               <Label className="text-slate-600">Mot de passe</Label>
               <p className="font-mono text-sm">{client.password || '-'}</p>
             </div>
