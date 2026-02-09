@@ -27,5 +27,23 @@ echo "============================================================"
 echo "Starting gunicorn..."
 echo "============================================================"
 
+# Ensure PORT is set (Railway should set this automatically)
+if [ -z "$PORT" ]; then
+    echo "⚠️  WARNING: PORT environment variable is not set. Using default 8080."
+    export PORT=8080
+fi
+
+echo "Starting gunicorn on port $PORT..."
+
 # Start gunicorn regardless of migration status
-exec gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info --timeout 120
+# Use exec to replace shell process with gunicorn
+exec gunicorn backend.wsgi:application \
+    --bind "0.0.0.0:${PORT}" \
+    --workers 2 \
+    --threads 2 \
+    --timeout 120 \
+    --keep-alive 5 \
+    --access-logfile - \
+    --error-logfile - \
+    --log-level info \
+    --preload

@@ -19,7 +19,9 @@ def cors_test(request):
     })
 
 urlpatterns = [
+    # Health check - support both with and without trailing slash for Railway
     path('health/', health_check, name='health_check'),
+    path('health', health_check, name='health_check_no_slash'),
     path('cors-test/', cors_test, name='cors_test'),
     path('admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='get_token'),
