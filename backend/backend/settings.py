@@ -42,10 +42,16 @@ CSRF_TRUSTED_ORIGINS = [
 # Add Railway domain dynamically
 railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
 if railway_domain:
-    CSRF_TRUSTED_ORIGINS.append(f'https://{railway_domain}')
+    # Ensure the domain has a scheme (http:// or https://)
+    if not railway_domain.startswith(('http://', 'https://')):
+        railway_domain = f'https://{railway_domain}'
+    CSRF_TRUSTED_ORIGINS.append(railway_domain)
 # Also support RAILWAY_STATIC_URL if provided
 railway_static_url = os.getenv('RAILWAY_STATIC_URL')
 if railway_static_url:
+    # Ensure the URL has a scheme (http:// or https://)
+    if not railway_static_url.startswith(('http://', 'https://')):
+        railway_static_url = f'https://{railway_static_url}'
     CSRF_TRUSTED_ORIGINS.append(railway_static_url)
 
 SIMPLE_JWT = {
