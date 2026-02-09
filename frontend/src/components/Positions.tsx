@@ -103,6 +103,22 @@ export function Positions() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = positions.filter((p) => {
+      // During loading, don't filter by status to avoid flicker
+      // The backend already filters by status, so we only need to filter by search
+      if (loading) {
+        if (!q) return true;
+        return (
+          (p.clientName || '').toLowerCase().includes(q) ||
+          (p.productName || '').toLowerCase().includes(q) ||
+          (p.assetName || '').toLowerCase().includes(q) ||
+          (p.clientId || '').toLowerCase().includes(q) ||
+          (p.productId || '').toLowerCase().includes(q) ||
+          (p.assetId || '').toLowerCase().includes(q) ||
+          (p.transactionId || '').toLowerCase().includes(q)
+        );
+      }
+      
+      // When not loading, filter by both status and search
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
@@ -121,7 +137,7 @@ export function Positions() {
       );
     });
     return list;
-  }, [positions, activeTab, search, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [positions, activeTab, search, loading, upcomingStatuses, openStatuses, closedStatuses]);
 
   const counts = useMemo(() => {
     let upcoming = 0;
@@ -138,7 +154,16 @@ export function Positions() {
   async function loadPositions() {
     try {
       setLoading(true);
-      const data = await apiCall('/api/positions/');
+      // Pass status filter to backend for proper sorting
+      let url = '/api/positions/';
+      if (activeTab === 'upcoming') {
+        url += '?status=pending';
+      } else if (activeTab === 'open') {
+        url += '?status=open';
+      } else if (activeTab === 'closed') {
+        url += '?status=done,cancelled';
+      }
+      const data = await apiCall(url);
       setPositions((data as any)?.positions || []);
     } catch (error: any) {
       console.error('Error loading positions:', error);
@@ -152,7 +177,7 @@ export function Positions() {
   useEffect(() => {
     loadPositions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeTab]);
 
   return (
     <div className="space-y-6">

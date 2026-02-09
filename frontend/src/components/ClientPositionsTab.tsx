@@ -197,9 +197,10 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     });
   }, [positions, search, selectedProductId]);
 
-  // Filter paginated positions by product, search AND active tab status, with sorting for upcoming tab
+  // Filter paginated positions by product, search AND active tab status
+  // Backend already handles sorting, so we just filter here
   const filtered = useMemo(() => {
-    let result = filteredPaginatedByProductAndSearch.filter((p) => {
+    return filteredPaginatedByProductAndSearch.filter((p) => {
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
@@ -208,33 +209,6 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       if (activeTab === 'closed' && !isClosed) return false;
       return true;
     });
-    
-    // Sort upcoming positions from sooner to later (ascending by opened_at or period_date)
-    if (activeTab === 'upcoming') {
-      result = [...result].sort((a, b) => {
-        // Use opened_at if available, otherwise period_date, otherwise created_at
-        const getDate = (p: ClientPositionRow): number => {
-          if (p.opened_at) {
-            const d = new Date(p.opened_at).getTime();
-            if (!Number.isNaN(d)) return d;
-          }
-          if (p.period_date) {
-            const d = new Date(p.period_date).getTime();
-            if (!Number.isNaN(d)) return d;
-          }
-          // Fallback to a very far future date if no date available
-          return Infinity;
-        };
-        
-        const dateA = getDate(a);
-        const dateB = getDate(b);
-        
-        // Sort ascending (sooner first)
-        return dateA - dateB;
-      });
-    }
-    
-    return result;
   }, [filteredPaginatedByProductAndSearch, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
 
   // Counts should reflect filtered positions (by product and search, but not by active tab)

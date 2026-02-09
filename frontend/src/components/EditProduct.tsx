@@ -231,7 +231,16 @@ export function EditProduct() {
         noProfitability: product.noProfitability,
         isVariableProfitability: product.isVariableProfitability,
         variableProfitability: product.variableProfitability,
-        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
+        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => {
+          const trimmed = p.trim();
+          // Normalize legacy values (masculine -> feminine)
+          const legacyMapping: Record<string, string> = {
+            'Trimestriel': 'Trimestrielle',
+            'Semestriel': 'Semestrielle',
+            'Annuel': 'Annuelle',
+          };
+          return legacyMapping[trimmed] || trimmed;
+        }).filter(p => p) : [],
       });
       const processedInterestPeriod = product.interestPeriod ? String(product.interestPeriod).trim() : '';
       console.log('Processed values:', {
@@ -286,7 +295,16 @@ export function EditProduct() {
         profitabilityMin: profitabilityValue !== '' ? profitabilityValue : '',
         profitabilityMax: variableProfitabilityValue !== '' ? variableProfitabilityValue : '',
         profitabilityPeriod: product.profitabilityPeriod || '',
-        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p) : [],
+        interestPeriod: product.interestPeriod ? String(product.interestPeriod).split(',').map(p => {
+          const trimmed = p.trim();
+          // Normalize legacy values (masculine -> feminine)
+          const legacyMapping: Record<string, string> = {
+            'Trimestriel': 'Trimestrielle',
+            'Semestriel': 'Semestrielle',
+            'Annuel': 'Annuelle',
+          };
+          return legacyMapping[trimmed] || trimmed;
+        }).filter(p => p) : [],
         capitalisationFonds: (() => {
           const v = (product as any).capitalisationFonds ?? (product as any).capitalisation_fonds;
           if (typeof v === 'boolean') return v;
@@ -1200,6 +1218,8 @@ export function EditProduct() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Aucune période</SelectItem>
+                        <SelectItem value="Quotidien">Quotidien</SelectItem>
+                        <SelectItem value="Hebdomadaire">Hebdomadaire</SelectItem>
                         <SelectItem value="Mensuel">Mensuel</SelectItem>
                         <SelectItem value="Trimestrielle">Trimestrielle</SelectItem>
                         <SelectItem value="Semestrielle">Semestrielle</SelectItem>
@@ -1230,7 +1250,7 @@ export function EditProduct() {
                         <SelectValue placeholder="Sélectionner une période" />
                       </SelectTrigger>
                       <SelectContent>
-                        {['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat']
+                        {['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat']
                           .filter(option => {
                             const currentArray = Array.isArray(formData.interestPeriod) 
                               ? formData.interestPeriod 

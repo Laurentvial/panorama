@@ -4267,7 +4267,22 @@ def positions_list(request):
         statuses = [s.strip() for s in str(status_param).split(',') if s.strip()]
         if statuses:
             qs = qs.filter(status__in=statuses)
-    qs = qs.order_by('-period_date', '-created_at')
+            # For pending positions only, sort ascending (sooner to later)
+            # For other statuses, sort descending (most recent first)
+            if 'pending' in statuses and len(statuses) == 1:
+                # Only pending: sort ascending by opened_at or period_date (sooner first)
+                qs = qs.order_by('opened_at', 'period_date', 'created_at')
+            else:
+                # Mixed or other statuses: sort descending
+                qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+        else:
+            # status_param provided but resulted in empty statuses list
+            # Apply default descending order
+            qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+    else:
+        # No status filter: default descending order
+        qs = qs.order_by('-opened_at', '-period_date', '-created_at')
+    
     serializer = PositionSerializer(qs, many=True)
     return Response({'positions': serializer.data})
 
@@ -4322,14 +4337,14 @@ def client_positions(request, client_id):
             # For pending positions only, sort ascending (sooner to later)
             # For other statuses, sort descending (most recent first)
             if 'pending' in statuses and len(statuses) == 1:
-                # Only pending: sort ascending by opened_at or period_date
+                # Only pending: sort ascending by opened_at or period_date (sooner first)
                 qs = qs.order_by('opened_at', 'period_date', 'created_at')
             else:
                 # Mixed or other statuses: sort descending
                 qs = qs.order_by('-opened_at', '-period_date', '-created_at')
         else:
             # status_param provided but resulted in empty statuses list
-            # Apply default descending order (consistent with original behavior)
+            # Apply default descending order
             qs = qs.order_by('-opened_at', '-period_date', '-created_at')
     else:
         # No status filter: default descending order
@@ -6707,6 +6722,14 @@ def product_create(request):
     # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
     subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
     
+    # Handle default field - support both string and boolean
+    default_value_raw = request.data.get('default', False)
+    default_value_final = (
+        (str(default_value_raw).strip().lower() in ['oui', 'true', '1', 'yes'])
+        if isinstance(default_value_raw, str)
+        else bool(default_value_raw)
+    )
+    
     product = Product.objects.create(
         id=product_id,
         name=request.data.get('name', ''),
@@ -6736,11 +6759,7 @@ def product_create(request):
         availability_end=availability_end,
         link_to_assets=request.data.get('linkToAssets', 'Non'),
         # Handle default field - support both string and boolean
-        default=(
-            (str(request.data.get('default', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
-            if isinstance(request.data.get('default', False), str)
-            else bool(request.data.get('default', False))
-        ),
+        default=default_value_final,
         # Handle available_funds field - support both string and boolean
         available_funds=(
             (str(request.data.get('availableFunds', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
@@ -6934,6 +6953,26 @@ def product_create(request):
             print(f"Error uploading image: {error_msg}")
             print(traceback.format_exc())
             return Response({'error': f'Error uploading image: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # If product is marked as default, add it to all existing clients
+    if product.default:
+        from django.db import IntegrityError
+        all_clients = Client.objects.all()
+        for client in all_clients:
+            # Check if client already has this product (safety check)
+            if not ClientProduct.objects.filter(client=client, product=product).exists():
+                client_product_id = uuid.uuid4().hex[:12]
+                while ClientProduct.objects.filter(id=client_product_id).exists():
+                    client_product_id = uuid.uuid4().hex[:12]
+                try:
+                    ClientProduct.objects.create(
+                        id=client_product_id,
+                        client=client,
+                        product=product
+                    )
+                except IntegrityError:
+                    # Another request created this relationship concurrently, skip it
+                    pass
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -7543,6 +7582,9 @@ def product_update(request, product_id):
     
     product = get_object_or_404(Product, id=product_id)
     
+    # Store original default value to detect changes
+    original_default_value = product.default
+    
     if 'name' in request.data:
         product.name = request.data['name']
     if 'reference' in request.data:
@@ -7884,6 +7926,56 @@ def product_update(request, product_id):
     # Refresh from database to get auto-updated fields (like updated_at timestamp)
     # and ensure we have the latest state including any database-level defaults or triggers
     product.refresh_from_db()
+    
+    # Handle default field changes: add/remove product from all clients accordingly
+    # Check if default field was updated in this request
+    default_was_updated = 'default' in request.data
+    if default_was_updated:
+        from django.db import IntegrityError
+        
+        # If product changed from default=True to default=False, remove from all clients
+        if original_default_value and not product.default:
+            # Remove ClientProducts for this product from all clients
+            ClientProduct.objects.filter(product=product).delete()
+        
+        # If product is now default=True, ensure it's added to all existing clients
+        elif product.default:
+            all_clients = Client.objects.all()
+            for client in all_clients:
+                # Check if client already has this product (safety check)
+                if not ClientProduct.objects.filter(client=client, product=product).exists():
+                    client_product_id = uuid.uuid4().hex[:12]
+                    while ClientProduct.objects.filter(id=client_product_id).exists():
+                        client_product_id = uuid.uuid4().hex[:12]
+                    try:
+                        ClientProduct.objects.create(
+                            id=client_product_id,
+                            client=client,
+                            product=product
+                        )
+                    except IntegrityError:
+                        # Another request created this relationship concurrently, skip it
+                        pass
+    elif product.default:
+        # If default field wasn't updated but product is still default=True,
+        # ensure it's added to all existing clients (for new clients or if it was missed before)
+        from django.db import IntegrityError
+        all_clients = Client.objects.all()
+        for client in all_clients:
+            # Check if client already has this product (safety check)
+            if not ClientProduct.objects.filter(client=client, product=product).exists():
+                client_product_id = uuid.uuid4().hex[:12]
+                while ClientProduct.objects.filter(id=client_product_id).exists():
+                    client_product_id = uuid.uuid4().hex[:12]
+                try:
+                    ClientProduct.objects.create(
+                        id=client_product_id,
+                        client=client,
+                        product=product
+                    )
+                except IntegrityError:
+                    # Another request created this relationship concurrently, skip it
+                    pass
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data)

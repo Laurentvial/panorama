@@ -367,9 +367,20 @@ export function ProductDetail() {
     return isNaN(parsed) ? 0 : parsed;
   };
 
+  // Normalize interest period values for backward compatibility (masculine -> feminine)
+  const normalizeInterestPeriod = (value: string): string => {
+    const legacyMapping: Record<string, string> = {
+      'Trimestriel': 'Trimestrielle',
+      'Semestriel': 'Semestrielle',
+      'Annuel': 'Annuelle',
+    };
+    return legacyMapping[value] || value;
+  };
+
   // Get available interest period options from product
   const getInterestPeriodOptions = (product: any): string[] => {
-    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'];
+    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat', 'Capitalisation des fonds'];
+    const legacyOptions = ['Trimestriel', 'Semestriel', 'Annuel']; // Legacy masculine forms
     
     if (!product || !product.interestPeriod) {
       return allOptions;
@@ -378,10 +389,11 @@ export function ProductDetail() {
     // Parse comma-separated values
     const productValues = String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p);
     
-    // Filter to only include valid options
-    const validOptions = productValues.filter(v => allOptions.includes(v));
+    // Normalize legacy values and filter to only include valid options
+    const normalizedValues = productValues.map(v => normalizeInterestPeriod(v));
+    const validOptions = normalizedValues.filter(v => allOptions.includes(v));
     
-    // If product has specific values, return only those options
+    // If product has specific values, return only those options (normalized)
     if (validOptions.length > 0) {
       return validOptions;
     }
@@ -612,10 +624,20 @@ export function ProductDetail() {
       
       // Initialize interestPeriod from product if available
       if (product.interestPeriod) {
+        const normalizeInterestPeriod = (value: string): string => {
+          const legacyMapping: Record<string, string> = {
+            'Trimestriel': 'Trimestrielle',
+            'Semestriel': 'Semestrielle',
+            'Annuel': 'Annuelle',
+          };
+          return legacyMapping[value] || value;
+        };
+        
         const productValues = String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p);
-        const allOptions = ['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel', 'Fin de contrat', 'Capitalisation des fonds'];
-        const validOptions = productValues.filter(v => allOptions.includes(v));
-        // If only one option available, pre-select it
+        const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat', 'Capitalisation des fonds'];
+        const normalizedValues = productValues.map(v => normalizeInterestPeriod(v));
+        const validOptions = normalizedValues.filter(v => allOptions.includes(v));
+        // If only one option available, pre-select it (normalized)
         if (validOptions.length === 1) {
           setSubscriptionData(prev => ({ ...prev, interestPeriod: validOptions[0] }));
         }

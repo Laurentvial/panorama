@@ -245,17 +245,22 @@ export function PlatformDiscover() {
 
   // Map product to product type category (for internal products)
   const getProductType = (product: any): string => {
-    const type = (product.type || product.subcategory || '').toLowerCase();
+    // Normalize to handle accents: convert to lowercase and remove accents for comparison
+    const normalize = (str: string) => str.toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''); // Remove diacritics
+    
+    const type = normalize(product.type || product.subcategory || '');
+    const subcategory = product.subcategory ? normalize(product.subcategory) : '';
     
     // Smart Portfolio
     if (type.includes('smart portfolio') || type.includes('smartportfolio')) {
       return 'smart_portfolio';
     }
     
-    // Épargne (savings)
+    // Épargne (savings) - normalized comparison handles all variants: "Épargne", "Épargne Salariale", "épargne", etc.
     if (type.includes('epargne') || type.includes('savings') || type.includes('livret') ||
-        product.subcategory?.toLowerCase().includes('epargne') || 
-        product.subcategory?.toLowerCase().includes('livret')) {
+        subcategory.includes('epargne') || subcategory.includes('livret')) {
       return 'epargne';
     }
     
