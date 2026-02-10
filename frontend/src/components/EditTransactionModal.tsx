@@ -4,7 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
@@ -248,6 +248,27 @@ export function EditTransactionModal({
     setPendingStatusUpdate(null);
   };
 
+  const handleDelete = async () => {
+    if (!transaction) return;
+    
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette transaction ? Cette action est irréversible.')) {
+      return;
+    }
+
+    try {
+      await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/delete/`, {
+        method: 'DELETE'
+      });
+      
+      toast.success('Transaction supprimée avec succès');
+      handleClose();
+      onSuccess();
+    } catch (error: any) {
+      console.error('Error deleting transaction:', error);
+      toast.error(error.message || 'Erreur lors de la suppression de la transaction');
+    }
+  };
+
   if (!isOpen || !transaction) return null;
 
   return (
@@ -324,6 +345,17 @@ export function EditTransactionModal({
               </Select>
             </div>
             <div className="modal-form-actions">
+              {transaction.status !== 'termine' && (
+                <Button 
+                  type="button" 
+                  variant="destructive" 
+                  onClick={handleDelete}
+                  style={{ marginRight: 'auto' }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Supprimer
+                </Button>
+              )}
               <Button type="button" variant="outline" onClick={handleClose}>
                 Annuler
               </Button>

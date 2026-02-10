@@ -104,12 +104,12 @@ urlpatterns = [
     path('clients/<str:client_id>/positions/', api_views.client_positions, name='client-positions'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
-    path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-positions/', api_views.transaction_generate_positions, name='transaction-generate-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/save-positions/', api_views.transaction_save_positions, name='transaction-save-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/logs/', api_views.transaction_logs, name='transaction-logs'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
     # Product Categories endpoints
     path('categories/', api_views.category_list, name='category-list'),
     path('categories/create/', api_views.category_create, name='category-create'),
