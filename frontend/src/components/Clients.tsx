@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
 import LoadingIndicator from './LoadingIndicator';
+import { toast } from 'sonner';
 import '../styles/Clients.css';
 import '../styles/PageHeader.css';
 
@@ -216,8 +217,26 @@ export function Clients({ onSelectClient }: ClientsProps) {
   }
 
   function handlePlatformAccess(clientId: string) {
-    // TODO: Implémenter la fonctionnalité de connexion à la plateforme
-    console.log('Connexion plateforme pour client:', clientId);
+    const client = clients.find(c => c.id === clientId);
+    
+    if (!client) {
+      toast.error('Client introuvable');
+      return;
+    }
+    
+    if (!client.platform_access) {
+      toast.error('Accès à la plateforme désactivé pour ce client');
+      return;
+    }
+    
+    if (!client.active) {
+      toast.error('Compte client désactivé');
+      return;
+    }
+
+    // Open in a new tab with a per-tab (sessionStorage) client session,
+    // so the admin panel stays connected in the current tab.
+    window.open(`/platform/impersonate/${clientId}`, '_blank', 'noopener,noreferrer');
   }
 
   async function handleDeleteClient(clientId: string) {

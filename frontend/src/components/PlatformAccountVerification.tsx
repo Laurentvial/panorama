@@ -979,7 +979,7 @@ export function PlatformAccountVerification() {
 
       await refreshUser();
 
-      setStep(6); // Compliance step
+      setSubStep(4); // Go to compliance substep within step 2
 
     } catch (error: any) {
 
@@ -2463,7 +2463,7 @@ export function PlatformAccountVerification() {
 
             </form>
 
-          ) : step === 7 ? (
+          ) : step === 2 && subStep === 5 ? (
 
             <form onSubmit={handleFundsSourcesSubmit}>
 

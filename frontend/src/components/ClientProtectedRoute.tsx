@@ -22,18 +22,26 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
         const isSessionClient =
             Boolean(sessionToken) && (sessionUserType === 'client' || sessionToken!.startsWith('client_'));
 
+        console.log('ClientProtectedRoute: Checking authentication', {
+            sessionToken: sessionToken ? `${sessionToken.substring(0, 10)}...` : null,
+            sessionUserType,
+            isSessionClient
+        });
+
         const storage: Storage = isSessionClient ? sessionStorage : localStorage;
 
         const token = isSessionClient ? sessionToken : localStorage.getItem(CLIENT_ACCESS_TOKEN);
         const userType = isSessionClient ? sessionUserType : (token ? 'client' : null);
         
         if (!token) {
+            console.log('ClientProtectedRoute: No token found, redirecting to login');
             setIsAuthenticated(false);
             return;
         }
 
         // Check if it's a client token
         if (userType === 'client' || token.startsWith('client_')) {
+            console.log('ClientProtectedRoute: Client token detected, verifying...');
             // Verify client token is valid by checking if client data exists
             const clientData = storage.getItem('clientData');
             if (clientData) {
@@ -41,16 +49,24 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                     const client = JSON.parse(clientData);
                     // Check if client has platform access and is active
                     if (client.platform_access && client.active) {
+                        console.log('ClientProtectedRoute: Client data found in storage, authenticated');
                         setIsAuthenticated(true);
                         return;
+                    } else {
+                        console.log('ClientProtectedRoute: Client data found but access denied', {
+                            platform_access: client.platform_access,
+                            active: client.active
+                        });
                     }
                 } catch (e) {
+                    console.error('ClientProtectedRoute: Invalid client data format', e);
                     // Invalid client data
                 }
             }
             
             // Try to fetch client data from API
             try {
+                console.log('ClientProtectedRoute: Fetching client data from API...');
                 // @ts-ignore - Vite environment variables
                 const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
                 const response = await fetch(`${apiUrl}/api/client/current/?token=${token}`, {
@@ -59,13 +75,17 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                     },
                 });
                 
+                console.log('ClientProtectedRoute: API response status', response.status);
+                
                 if (response.ok) {
                     const data = await response.json();
                     if (data.client && data.client.platform_access && data.client.active) {
                         storage.setItem('clientData', JSON.stringify(data.client));
+                        console.log('ClientProtectedRoute: API authentication successful');
                         setIsAuthenticated(true);
                         return;
                     } else {
+                        console.log('ClientProtectedRoute: Client disabled or no platform access');
                         // Client is disabled or doesn't have platform access - clear session
                         storage.removeItem(ACCESS_TOKEN);
                         storage.removeItem(CLIENT_ACCESS_TOKEN);
@@ -74,8 +94,10 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                         setIsAuthenticated(false);
                         return;
                     }
-                } else if (response.status === 403) {
-                    // Client is disabled or access denied - clear session
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('ClientProtectedRoute: API error', response.status, errorData);
+                    // Any error response (401, 403, 404, 500, etc.) - clear session
                     storage.removeItem(ACCESS_TOKEN);
                     storage.removeItem(CLIENT_ACCESS_TOKEN);
                     storage.removeItem('userType');
@@ -84,10 +106,18 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                     return;
                 }
             } catch (error) {
-                console.error('Client authentication error:', error);
+                console.error('ClientProtectedRoute: Network error', error);
+                // Network error or other exception - clear session
+                storage.removeItem(ACCESS_TOKEN);
+                storage.removeItem(CLIENT_ACCESS_TOKEN);
+                storage.removeItem('userType');
+                storage.removeItem('clientData');
+                setIsAuthenticated(false);
+                return;
             }
         }
         
+        console.log('ClientProtectedRoute: Not a client token or authentication failed');
         setIsAuthenticated(false);
     }
     

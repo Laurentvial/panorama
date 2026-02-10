@@ -41,14 +41,21 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
         const token = localStorage.getItem(ACCESS_TOKEN);
         const userType = localStorage.getItem('userType');
         
+        console.log('ProtectedRoute: Checking admin authentication', {
+            hasToken: !!token,
+            userType,
+            tokenPrefix: token ? token.substring(0, 20) : null
+        });
+        
         if (!token) {
+            console.log('ProtectedRoute: No admin token found');
             setIsAuthenticated(false);
             return;
         }
 
         // Check if it's a client trying to access admin routes
         if (userType === 'client' || token.startsWith('client_')) {
-            console.log('Blocked: Client token detected in admin route');
+            console.log('ProtectedRoute: Blocked - Client token detected in admin route');
             setIsAuthenticated(false);
             return;
         }
@@ -60,15 +67,15 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
             const currentTime = Date.now() / 1000;
 
             if (tokenExpiry && tokenExpiry < currentTime) {
-                console.log('Token expired, attempting refresh');
+                console.log('ProtectedRoute: Token expired, attempting refresh');
                 await refreshToken();
             } else {
-                console.log('Token valid, authenticated');
+                console.log('ProtectedRoute: Token valid, authenticated');
                 setIsAuthenticated(true);
             }
         } catch (error) {
             // Invalid JWT token (might be client token or malformed)
-            console.error('JWT decode error:', error);
+            console.error('ProtectedRoute: JWT decode error', error);
             setIsAuthenticated(false);
         }
     }
