@@ -1078,6 +1078,16 @@ export function PlatformAccountVerification() {
 
 
 
+  // Fonction pour déterminer si une profession nécessite un employeur
+  const requiresEmployer = (profession: string): boolean => {
+    // Retourner false si la profession est vide ou non sélectionnée
+    if (!profession || profession.trim() === '') {
+      return false;
+    }
+    const professionsWithoutEmployer = ['Retraité(e)', 'Étudiant(e)', 'Sans emploi'];
+    return !professionsWithoutEmployer.includes(profession);
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent) => {
 
     e.preventDefault();
@@ -1090,7 +1100,7 @@ export function PlatformAccountVerification() {
 
     }
 
-    if (!employerName.trim()) {
+    if (requiresEmployer(primaryProfession) && !employerName.trim()) {
 
       toast.error('Veuillez renseigner le nom de votre employeur.');
 
@@ -1118,7 +1128,7 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ primaryProfession, employerName: employerName.trim(), annualNetIncome, totalLiquidities });
+      await patchClientIdentity({ primaryProfession, employerName: requiresEmployer(primaryProfession) ? employerName.trim() : '', annualNetIncome, totalLiquidities });
 
       await refreshUser();
 
@@ -1745,6 +1755,42 @@ export function PlatformAccountVerification() {
 
                         'Services de bourse et de change',
 
+                        'Médecine/Santé',
+
+                        'Enseignement/Éducation',
+
+                        'Juridique/Droit',
+
+                        'Commerce/Vente',
+
+                        'Ressources humaines',
+
+                        'Marketing/Communication',
+
+                        'Finance/Banque',
+
+                        'Assurance',
+
+                        'Immobilier',
+
+                        'Transport/Logistique',
+
+                        'Hôtellerie/Restauration',
+
+                        'Tourisme',
+
+                        'Médias/Journalisme',
+
+                        'Fonction publique',
+
+                        'Sécurité',
+
+                        'Retraité(e)',
+
+                        'Étudiant(e)',
+
+                        'Sans emploi',
+
                         'Autre',
 
                       ].map((p) => (
@@ -1761,25 +1807,27 @@ export function PlatformAccountVerification() {
 
 
 
-                <div className="space-y-2" style={{ marginTop: 14 }}>
+                {requiresEmployer(primaryProfession) && (
+                  <div className="space-y-2" style={{ marginTop: 14 }}>
 
-                  <Label htmlFor="employerName">Nom de votre employeur ?</Label>
+                    <Label htmlFor="employerName">Nom de votre employeur ?</Label>
 
-                  <Input
+                    <Input
 
-                    id="employerName"
+                      id="employerName"
 
-                    value={employerName}
+                      value={employerName}
 
-                    onChange={(e) => setEmployerName(e.target.value)}
+                      onChange={(e) => setEmployerName(e.target.value)}
 
-                    placeholder="Ex: Société ABC"
+                      placeholder="Ex: Société ABC"
 
-                    required
+                      required
 
-                  />
+                    />
 
-                </div>
+                  </div>
+                )}
 
               </div>
 
@@ -2003,7 +2051,7 @@ export function PlatformAccountVerification() {
 
                   type="submit"
 
-                  disabled={submitting || !primaryProfession || !employerName.trim() || !annualNetIncome || !totalLiquidities}
+                  disabled={submitting || !primaryProfession || (requiresEmployer(primaryProfession) && !employerName.trim()) || !annualNetIncome || !totalLiquidities}
 
                   variant="platform"
 
@@ -2130,10 +2178,6 @@ export function PlatformAccountVerification() {
               {/* Objective */}
 
               <div>
-
-                <div className="platform-page-title" style={{ marginTop: 6, fontSize: 'clamp(18px, 2vw, 22px)' }}>
-                  Quel de ces énoncés décrit le mieux votre principal objectif de trading avec nous ?
-                </div>
 
                 <div style={{ marginTop: 6 }}>
 

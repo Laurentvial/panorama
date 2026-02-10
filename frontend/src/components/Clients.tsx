@@ -14,6 +14,7 @@ import {
 import { apiCall } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
+import { useUser } from '../contexts/UserContext';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/Clients.css';
 import '../styles/PageHeader.css';
@@ -25,6 +26,7 @@ interface ClientsProps {
 export function Clients({ onSelectClient }: ClientsProps) {
   const navigate = useNavigate();
   const { users, loading: usersLoading, error: usersError } = useUsers();
+  const { currentUser } = useUser();
   const [clients, setClients] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +37,8 @@ export function Clients({ onSelectClient }: ClientsProps) {
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [bulkTeamId, setBulkTeamId] = useState('');
   const [bulkManagerId, setBulkManagerId] = useState('');
+  
+  const isGestionnaire = currentUser?.role === 'gestionnaire';
 
   useEffect(() => {
     if (usersError) {
@@ -326,34 +330,36 @@ export function Clients({ onSelectClient }: ClientsProps) {
                   </Select>
                 </div>
 
-                <div className="clients-bulk-action-select">
-                  <Label className="sr-only">Attribuer un gestionnaire</Label>
-                  <Select value={bulkManagerId} onValueChange={handleBulkAssignManager}>
-                    <SelectTrigger className="w-[200px]">
-                      <UserCheck className="w-4 h-4 mr-2" />
-                      <SelectValue placeholder="Attribuer un gestionnaire" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Aucun gestionnaire</SelectItem>
-                      {usersLoading ? (
-                        <SelectItem value="loading" disabled>Chargement...</SelectItem>
-                      ) : usersError ? (
-                        <SelectItem value="error" disabled>Erreur de chargement</SelectItem>
-                      ) : users.length === 0 ? (
-                        <SelectItem value="empty" disabled>Aucun utilisateur disponible</SelectItem>
-                      ) : (
-                        users.map((user) => {
-                          const displayName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || user.email || `Utilisateur ${user.id}`;
-                          return (
-                            <SelectItem key={user.id} value={user.id}>
-                              {displayName}
-                            </SelectItem>
-                          );
-                        })
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {!isGestionnaire && (
+                  <div className="clients-bulk-action-select">
+                    <Label className="sr-only">Attribuer un gestionnaire</Label>
+                    <Select value={bulkManagerId} onValueChange={handleBulkAssignManager}>
+                      <SelectTrigger className="w-[200px]">
+                        <UserCheck className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="Attribuer un gestionnaire" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Aucun gestionnaire</SelectItem>
+                        {usersLoading ? (
+                          <SelectItem value="loading" disabled>Chargement...</SelectItem>
+                        ) : usersError ? (
+                          <SelectItem value="error" disabled>Erreur de chargement</SelectItem>
+                        ) : users.length === 0 ? (
+                          <SelectItem value="empty" disabled>Aucun utilisateur disponible</SelectItem>
+                        ) : (
+                          users.map((user) => {
+                            const displayName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || user.email || `Utilisateur ${user.id}`;
+                            return (
+                              <SelectItem key={user.id} value={user.id}>
+                                {displayName}
+                              </SelectItem>
+                            );
+                          })
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <Button variant="outline" size="sm" onClick={handleBulkToggleActive}>
                   Activer/Désactiver
@@ -405,7 +411,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                     <th>Téléphone</th>
                     <th>E-Mail</th>
                     <th>Créé le</th>
-                    <th>Gestionnaire</th>
+                    {!isGestionnaire && <th>Gestionnaire</th>}
                     <th>Source</th>
                     <th>Capital</th>
                     <th>Statut</th>
@@ -447,7 +453,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                           : '-'
                         }
                       </td>
-                      <td>{client.managerName || client.manager || '-'}</td>
+                      {!isGestionnaire && <td>{client.managerName || client.manager || '-'}</td>}
                       <td>{client.source || '-'}</td>
                       <td>
                         {client.capital 
