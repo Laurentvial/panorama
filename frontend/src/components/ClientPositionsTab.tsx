@@ -15,12 +15,17 @@ type ClientPositionRow = {
   productName: string;
   assetId?: string | null;
   assetName?: string | null;
+  assetCurrency?: string | null;
   transactionId?: string | null;
   opened_at?: string | null;
   closed_at?: string | null;
   period_date?: string | null;
   invested_amount: number | string;
+  invested_amount_asset_currency?: number | string | null;
   profit_loss?: number | string | null;
+  fx_rate_eur_to_asset?: number | string | null;
+  entry_price?: number | string | null;
+  quantity?: number | string | null;
   status: string;
 };
 
@@ -28,6 +33,14 @@ const formatCurrency = (value: any) => {
   const n = typeof value === 'string' ? parseFloat(value) : Number(value);
   if (!Number.isFinite(n)) return '-';
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+};
+
+const formatMoney = (value: any, currency: string | undefined, opts?: Intl.NumberFormatOptions) => {
+  const n = typeof value === 'string' ? parseFloat(value) : Number(value);
+  if (!Number.isFinite(n)) return '-';
+  const cur = String(currency || '').trim().toUpperCase();
+  if (!cur || cur === 'EUR') return formatCurrency(n);
+  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 8, ...opts })} ${cur}`;
 };
 
 const formatDateTime = (iso: string) => {
@@ -71,6 +84,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   const [search, setSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [products, setProducts] = useState<any[]>([]);
+  const [assets, setAssets] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
@@ -157,6 +171,18 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       }
     };
     loadProducts();
+  }, []);
+
+  useEffect(() => {
+    const loadAssets = async () => {
+      try {
+        const assetsData = await apiCall('/api/assets/').catch(() => ({ assets: [] }));
+        setAssets(assetsData.assets || assetsData || []);
+      } catch (error) {
+        console.error('Error loading assets:', error);
+      }
+    };
+    loadAssets();
   }, []);
 
   // Filter by product and search (without status filter) - use allPositions for counts
@@ -292,7 +318,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assets={assets} />
                 )}
               </TabsContent>
               <TabsContent value="open" className="mt-4">
@@ -303,7 +329,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assets={assets} />
                 )}
               </TabsContent>
               <TabsContent value="closed" className="mt-4">
@@ -314,7 +340,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assets={assets} />
                 )}
               </TabsContent>
             </Tabs>
@@ -420,7 +446,15 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   );
 }
 
-function PositionsTable({ rows }: { rows: ClientPositionRow[] }) {
+function PositionsTable({ rows, assets }: { rows: ClientPositionRow[]; assets: any[] }) {
+  // Créer un Map pour accéder rapidement aux assets par ID
+  const assetsById = new Map<string, any>();
+  assets.forEach((asset) => {
+    if (asset?.id) {
+      assetsById.set(String(asset.id), asset);
+    }
+  });
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -429,8 +463,8 @@ function PositionsTable({ rows }: { rows: ClientPositionRow[] }) {
             <th className="text-left py-2 px-3">Date et heure</th>
             <th className="text-left py-2 px-3">Produit</th>
             <th className="text-left py-2 px-3">Asset</th>
-            <th className="text-left py-2 px-3">Montant</th>
-            <th className="text-left py-2 px-3">P&amp;L</th>
+            <th className="text-right py-2 px-3">Montant</th>
+            <th className="text-right py-2 px-3">P&amp;L</th>
             <th className="text-left py-2 px-3">Statut</th>
             <th className="text-left py-2 px-3">Transaction</th>
           </tr>
@@ -439,15 +473,87 @@ function PositionsTable({ rows }: { rows: ClientPositionRow[] }) {
           {rows.map((p) => {
             const pnlNum =
               p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
-            const pnlColor = pnlNum == null ? 'text-slate-700' : pnlNum >= 0 ? 'text-green-600' : 'text-red-600';
+            const assetCurrency = (p.assetCurrency || 'EUR').trim().toUpperCase();
+            const fxRateNum = p.fx_rate_eur_to_asset == null ? null : typeof p.fx_rate_eur_to_asset === 'string' ? parseFloat(p.fx_rate_eur_to_asset) : Number(p.fx_rate_eur_to_asset);
+            const fxRate = fxRateNum != null && Number.isFinite(fxRateNum) && fxRateNum > 0 ? fxRateNum : null;
+            
+            // Calculer le P&L en devise de l'actif et en EUR
+            let pnlAsset: number | null = null;
+            let pnlEur: number | null = pnlNum;
+            
+            if (pnlNum != null && Number.isFinite(pnlNum)) {
+              // Si la devise n'est pas EUR et qu'on a un taux de change, profit_loss est probablement en devise de l'actif
+              if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                pnlAsset = pnlNum; // P&L en devise de l'actif
+                pnlEur = pnlNum / fxRate; // Convertir en EUR
+              } else {
+                pnlEur = pnlNum; // Déjà en EUR
+                pnlAsset = null;
+              }
+            } else if (p.status === 'open' && p.assetId) {
+              // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
+              const asset = assetsById.get(String(p.assetId));
+              const entryPriceNum = p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+              const qtyNum = p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+              const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+              const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : null;
+              
+              if (asset && entryPrice != null && qty != null) {
+                const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+                const currentPriceNum =
+                  currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+                const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+                
+                if (currentPrice != null && entryPrice > 0) {
+                  // Calculer le P&L en devise de l'actif
+                  const marketValue = qty * currentPrice;
+                  const costBasis = qty * entryPrice;
+                  pnlAsset = marketValue - costBasis;
+                  
+                  // Convertir en EUR si nécessaire
+                  if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                    pnlEur = pnlAsset / fxRate;
+                  } else {
+                    pnlEur = pnlAsset;
+                    pnlAsset = null; // Pas besoin d'afficher deux fois si c'est déjà en EUR
+                  }
+                }
+              }
+            }
+            
+            // Labels pour l'affichage
+            let pnlLabelMain: string;
+            let pnlLabelSub: string | null = null;
+            let finalPnlColor: string;
+            
+            if (assetCurrency !== 'EUR' && pnlAsset != null && Number.isFinite(pnlAsset)) {
+              // Position non-EUR : devise de l'actif en principal
+              pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
+              // EUR en secondaire (estimation)
+              pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) && fxRate != null && fxRate > 0
+                ? `≈ ${formatCurrency(pnlEur)}`
+                : null;
+              // Couleur basée sur le P&L en devise de l'actif
+              finalPnlColor = pnlAsset >= 0 ? 'text-green-600' : 'text-red-600';
+            } else {
+              // Position EUR : EUR uniquement
+              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) 
+                ? formatCurrency(pnlEur)
+                : '-';
+              finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? 'text-green-600' : 'text-red-600') : 'text-slate-700';
+            }
+            
             return (
               <tr key={p.id} className="border-b border-slate-100">
                 <td className="py-2 px-3">{formatPositionRange(p)}</td>
                 <td className="py-2 px-3">{p.productName || p.productId}</td>
                 <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
-                <td className="py-2 px-3">{formatCurrency(p.invested_amount)}</td>
-                <td className={`py-2 px-3 font-medium ${pnlColor}`}>
-                  {p.profit_loss == null ? '-' : formatCurrency(p.profit_loss)}
+                <td className="py-2 px-3 text-right">{formatCurrency(p.invested_amount)}</td>
+                <td className={`py-2 px-3 text-right font-medium ${finalPnlColor}`}>
+                  <div>{pnlLabelMain}</div>
+                  {pnlLabelSub && (
+                    <div className="text-xs text-slate-500 mt-0.5">{pnlLabelSub}</div>
+                  )}
                 </td>
                 <td className="py-2 px-3">
                   {p.status === 'pending'

@@ -28,6 +28,9 @@ export function PlatformPortfolio() {
       // Exclure les positions pending
       if (p?.status === 'pending') return false;
       
+      // Inclure les positions fermées (done) et annulées (cancelled)
+      if (p?.status === 'done' || p?.status === 'cancelled') return true;
+      
       // Exclure les positions ouvertes sans prix d'achat (générations automatiques)
       if (p?.status === 'open') {
         const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
@@ -94,13 +97,35 @@ export function PlatformPortfolio() {
   const loadPortfolioData = async () => {
     try {
       setLoading(true);
-      const [positionsResponse, transactionsResponse, clientAssetsResponse, clientProductsResponse] = await Promise.all([
-        apiCall(`/api/clients/${currentUser.id}/positions/`),
+      
+      // Load all positions by paginating through all pages
+      // This ensures we get all open and closed positions, not just the first 50
+      const allPositionsList: any[] = [];
+      let page = 1;
+      const limit = 500; // Backend max limit
+      let hasMore = true;
+
+      while (hasMore) {
+        const positionsResponse = await apiCall(`/api/clients/${currentUser.id}/positions/?page=${page}&limit=${limit}`);
+        const positions = (positionsResponse as any)?.positions || [];
+        allPositionsList.push(...positions);
+        
+        const pagination = (positionsResponse as any).pagination;
+        if (pagination && page >= pagination.total_pages) {
+          hasMore = false;
+        } else if (positions.length < limit) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
+      
+      const [transactionsResponse, clientAssetsResponse, clientProductsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
         apiCall(`/api/clients/${currentUser.id}/assets/`).catch(() => ({ assets: [] })),
         apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
       ]);
-      setPositions((positionsResponse as any)?.positions || []);
+      setPositions(allPositionsList);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
         (a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
       );
@@ -653,8 +678,11 @@ export function PlatformPortfolio() {
       ).trim();
       const productReferenceFromProduct = String(product?.reference || '').trim();
       
-      // Calculate invested value and P&L from positions (open and done, excluding pending)
-      let totalInvested = 0;
+      // Use netInvested from transactions (calculated correctly in investedProducts)
+      // This is the net amount invested in the product (deposits - withdrawals)
+      const investedEur = p.netInvested > 0 ? p.netInvested : null;
+      
+      // Calculate P&L from positions (open and done, excluding pending)
       let totalPnl = 0;
       
       for (const pos of positions || []) {
@@ -664,12 +692,6 @@ export function PlatformPortfolio() {
         // Check if this position belongs to this product
         const posProductId = pos?.productId || pos?.product_id || null;
         if (!posProductId || String(posProductId) !== String(p.productId)) continue;
-        
-        // Sum invested amount
-        const investedNum = typeof pos.invested_amount === 'string' ? parseFloat(pos.invested_amount) : Number(pos.invested_amount);
-        if (Number.isFinite(investedNum) && investedNum > 0) {
-          totalInvested += investedNum;
-        }
         
         // Sum P&L
         const pnlNum = pos.profit_loss == null ? null : typeof pos.profit_loss === 'string' ? parseFloat(pos.profit_loss) : Number(pos.profit_loss);
@@ -694,7 +716,6 @@ export function PlatformPortfolio() {
         }
       }
       
-      const investedEur = totalInvested > 0 ? totalInvested : null;
       const pnl = totalPnl !== 0 ? totalPnl : null;
       const pnlPct = investedEur != null && investedEur > 0 && pnl != null ? (pnl / investedEur) * 100 : null;
       
