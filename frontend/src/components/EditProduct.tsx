@@ -237,14 +237,14 @@ export function EditProduct() {
           <div>
             <Label htmlFor="categoryId">Catégorie</Label>
             <Select
-              value={formData.categoryId}
-              onValueChange={(value) => setFormData({ ...formData, categoryId: value })}
+              value={formData.categoryId || 'none'}
+              onValueChange={(value) => setFormData({ ...formData, categoryId: value === 'none' ? '' : value })}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Sélectionner une catégorie" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Aucune catégorie</SelectItem>
+                <SelectItem value="none">Aucune catégorie</SelectItem>
                 {categories.map((cat: any) => (
                   <SelectItem key={cat.id} value={cat.id}>
                     {cat.title}
