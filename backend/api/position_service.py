@@ -385,14 +385,75 @@ def _choose_total_trades_with_min_per_day(
     duration_months: int,
     trading_days_count: int,
     max_per_day: int = 3,
+    override_trades_per_month_min: int | None = None,
+    override_trades_per_month_max: int | None = None,
+    rng: random.Random | None = None,
 ) -> int:
     """
     Choose a total number of trades across the duration.
     - No guarantee of 1 trade per day (allows days with 0 trades)
     - At most max_per_day per day
+    
+    Args:
+        override_trades_per_month_min: Optional override for minimum trades per month
+        override_trades_per_month_max: Optional override for maximum trades per month
+        rng: Random number generator for deterministic selection (required if override is provided)
     """
     if trading_days_count <= 0:
         return 0
+    
+    # Calculate maximum theoretical trades per month based on trading days
+    # Approximate: trading_days_count / duration_months gives average days per month
+    # Max trades per month = (days_per_month) * max_per_day
+    # Use ceiling to be conservative (round up)
+    if duration_months > 0:
+        avg_days_per_month = trading_days_count / duration_months
+        max_theoretical_per_month = int((avg_days_per_month * max_per_day) + 0.5)  # Round to nearest
+    else:
+        avg_days_per_month = 0.0  # Initialize to avoid NameError in error message
+        max_theoretical_per_month = 0
+    
+    # Use override if provided
+    if override_trades_per_month_min is not None and override_trades_per_month_max is not None:
+        # Validate override range
+        if override_trades_per_month_min < 0 or override_trades_per_month_max < override_trades_per_month_min:
+            # Invalid override, fall back to default behavior
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Invalid override range: min={override_trades_per_month_min}, max={override_trades_per_month_max}. "
+                f"Falling back to default calculation."
+            )
+            # Explicitly continue to default behavior below (no return here)
+        elif override_trades_per_month_min > max_theoretical_per_month:
+            # Even minimum exceeds theoretical maximum - raise error
+            # Build error message safely (handle case where duration_months <= 0)
+            if duration_months > 0:
+                error_msg = (
+                    f"La fourchette demandée ({override_trades_per_month_min}-{override_trades_per_month_max} positions/mois) "
+                    f"est trop élevée. Le maximum théorique pour cette durée est d'environ {max_theoretical_per_month} positions/mois "
+                    f"(environ {avg_days_per_month:.1f} jours de bourse/mois × {max_per_day} max/jour)."
+                )
+            else:
+                error_msg = (
+                    f"La fourchette demandée ({override_trades_per_month_min}-{override_trades_per_month_max} positions/mois) "
+                    f"est trop élevée. La durée de l'investissement est invalide (durée <= 0 mois)."
+                )
+            raise ValueError(error_msg)
+        else:
+            # Valid override: pick a deterministic value in the range
+            if rng is None:
+                # Fallback to default RNG if not provided
+                rng = random.Random()
+            trades_per_month = rng.randint(override_trades_per_month_min, override_trades_per_month_max)
+            desired_total = trades_per_month * duration_months
+            # Still apply caps
+            total = min(desired_total, trading_days_count * max_per_day)
+            total = min(total, 5000)
+            return total
+    
+    # Default behavior: use heuristic based on amount
+    # (This is also reached when override is invalid or not provided)
     base = _choose_trade_count_for_duration(total_amount, duration_months)
     # Don't force minimum of trading_days_count - allows fewer trades than days
     total = base
@@ -757,12 +818,38 @@ def _create_trade_positions_compounding(
     max_per_day = 3
     rng = random.Random(str(txn.id))
 
-    desired_total = _choose_total_trades_with_min_per_day(
-        total_amount=invested_total,
-        duration_months=ctx.duration_months,
-        trading_days_count=len(trading_days),
-        max_per_day=max_per_day,
-    )
+    # Extract override from subscription_details if present
+    override_min = None
+    override_max = None
+    subscription_details = getattr(txn, 'subscription_details', None) or {}
+    if isinstance(subscription_details, dict):
+        override_min_raw = subscription_details.get('positionsPerMonthMin')
+        override_max_raw = subscription_details.get('positionsPerMonthMax')
+        if override_min_raw is not None:
+            try:
+                override_min = int(override_min_raw)
+            except (ValueError, TypeError):
+                pass
+        if override_max_raw is not None:
+            try:
+                override_max = int(override_max_raw)
+            except (ValueError, TypeError):
+                pass
+
+    try:
+        desired_total = _choose_total_trades_with_min_per_day(
+            total_amount=invested_total,
+            duration_months=ctx.duration_months,
+            trading_days_count=len(trading_days),
+            max_per_day=max_per_day,
+            override_trades_per_month_min=override_min,
+            override_trades_per_month_max=override_max,
+            rng=rng,
+        )
+    except ValueError as e:
+        # Re-raise as ValueError so it can be caught by the API endpoint
+        raise ValueError(str(e))
+    
     day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
 
     # CRITICAL: Always use txn.id directly to ensure correct transaction linkage
@@ -1179,12 +1266,38 @@ def generate_positions_with_rates(
     max_per_day = 3
     rng = random.Random(str(txn.id))
 
-    desired_total = _choose_total_trades_with_min_per_day(
-        total_amount=invested_total,
-        duration_months=ctx.duration_months,
-        trading_days_count=len(trading_days),
-        max_per_day=max_per_day,
-    )
+    # Extract override from subscription_details if present
+    override_min = None
+    override_max = None
+    subscription_details = getattr(txn, 'subscription_details', None) or {}
+    if isinstance(subscription_details, dict):
+        override_min_raw = subscription_details.get('positionsPerMonthMin')
+        override_max_raw = subscription_details.get('positionsPerMonthMax')
+        if override_min_raw is not None:
+            try:
+                override_min = int(override_min_raw)
+            except (ValueError, TypeError):
+                pass
+        if override_max_raw is not None:
+            try:
+                override_max = int(override_max_raw)
+            except (ValueError, TypeError):
+                pass
+
+    try:
+        desired_total = _choose_total_trades_with_min_per_day(
+            total_amount=invested_total,
+            duration_months=ctx.duration_months,
+            trading_days_count=len(trading_days),
+            max_per_day=max_per_day,
+            override_trades_per_month_min=override_min,
+            override_trades_per_month_max=override_max,
+            rng=rng,
+        )
+    except ValueError as e:
+        # Re-raise as ValueError so it can be caught by the API endpoint
+        raise ValueError(str(e))
+    
     day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
 
     existing_count_before = Position.objects.filter(transaction_id=ctx.transaction_id).count() if save_to_db else 0

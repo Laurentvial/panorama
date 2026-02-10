@@ -6133,6 +6133,54 @@ def transaction_generate_positions(request, client_id, transaction_id):
     if not isinstance(avoid_losses, bool):
         avoid_losses = str(avoid_losses).lower() in ('true', '1', 'yes', 'on')
     
+    # Parse positions per month override (optional)
+    positions_per_month_min = request.data.get('positions_per_month_min')
+    positions_per_month_max = request.data.get('positions_per_month_max')
+    
+    # Update transaction subscription_details with override if provided
+    # This allows the override to be used during position generation
+    # IMPORTANT: Both min and max must be provided together, or neither
+    if positions_per_month_min is not None or positions_per_month_max is not None:
+        # Validate that both are provided together
+        if positions_per_month_min is None:
+            return Response({
+                'error': 'positions_per_month_min est requis lorsque positions_per_month_max est fourni'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if positions_per_month_max is None:
+            return Response({
+                'error': 'positions_per_month_max est requis lorsque positions_per_month_min est fourni'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        subscription_details = transaction.subscription_details or {}
+        if not isinstance(subscription_details, dict):
+            subscription_details = {}
+        
+        # Both are provided, parse them
+        try:
+            min_val = int(positions_per_month_min)
+        except (ValueError, TypeError):
+            return Response({'error': 'positions_per_month_min doit être un nombre entier'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            max_val = int(positions_per_month_max)
+        except (ValueError, TypeError):
+            return Response({'error': 'positions_per_month_max doit être un nombre entier'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate range
+        if min_val < 0 or max_val < min_val:
+            return Response({
+                'error': f'Fourchette invalide: min ({min_val}) doit être >= 0 et <= max ({max_val})'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Store both values
+        subscription_details['positionsPerMonthMin'] = min_val
+        subscription_details['positionsPerMonthMax'] = max_val
+        
+        # Temporarily update transaction subscription_details for this generation
+        # We don't save it to DB, just use it for this generation
+        transaction.subscription_details = subscription_details
+    
     try:
         # For withdrawals, create a temporary transaction pointing to source product
         txn_to_use = transaction
@@ -6154,6 +6202,15 @@ def transaction_generate_positions(request, client_id, transaction_id):
             
             # Create a temporary transaction object for position generation
             # This simulates an investment transaction on the source product
+            # Use updated subscription_details if override was provided
+            temp_subscription_details = transaction.subscription_details or {}
+            if isinstance(temp_subscription_details, dict) and (positions_per_month_min is not None or positions_per_month_max is not None):
+                temp_subscription_details = temp_subscription_details.copy()
+                if positions_per_month_min is not None:
+                    temp_subscription_details['positionsPerMonthMin'] = int(positions_per_month_min)
+                if positions_per_month_max is not None:
+                    temp_subscription_details['positionsPerMonthMax'] = int(positions_per_month_max)
+            
             txn_to_use = Transaction(
                 id=transaction.id,
                 client_id=transaction.client_id,
@@ -6165,17 +6222,24 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 transfer_to=product.id,  # Point to source product
                 transfer_from='balance',  # This helps identify it as a temp transaction for withdrawal
                 product=product,
-                subscription_details=transaction.subscription_details or {}
+                subscription_details=temp_subscription_details
             )
             # Mark this as a withdrawal temp transaction so build_investment_context can handle it correctly
             txn_to_use._is_withdrawal_temp = True
         
-        positions = generate_positions_with_rates(
-            txn_to_use, 
-            custom_rates=custom_rates, 
-            save_to_db=False,
-            avoid_losses=avoid_losses
-        )
+        try:
+            positions = generate_positions_with_rates(
+                txn_to_use, 
+                custom_rates=custom_rates, 
+                save_to_db=False,
+                avoid_losses=avoid_losses
+            )
+        except ValueError as e:
+            # Catch validation errors from position generation (e.g., range too high)
+            return Response({
+                'error': str(e),
+                'error_type': 'positions_range_too_high'
+            }, status=status.HTTP_400_BAD_REQUEST)
         # Convert Position objects to dicts if needed
         positions_data = []
         for p in positions:

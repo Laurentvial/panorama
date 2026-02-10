@@ -66,6 +66,9 @@ export function PositionGenerationModal({
   const [avoidLosses, setAvoidLosses] = useState<boolean>(false);
   const [positionsSaved, setPositionsSaved] = useState<boolean>(false);
   const [readyToConfirm, setReadyToConfirm] = useState<boolean>(false);
+  const [positionsPerMonthMin, setPositionsPerMonthMin] = useState<string>('');
+  const [positionsPerMonthMax, setPositionsPerMonthMax] = useState<string>('');
+  const [positionsRangeError, setPositionsRangeError] = useState<string | null>(null);
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
     deleted_by_transaction: Record<string, number>;
@@ -96,6 +99,9 @@ export function PositionGenerationModal({
       setPositionsSaved(false);
       setReadyToConfirm(false);
       setDeletedPositions(null);
+      setPositionsPerMonthMin('');
+      setPositionsPerMonthMax('');
+      setPositionsRangeError(null);
       
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
@@ -224,14 +230,50 @@ export function PositionGenerationModal({
       console.log('Sending rates to backend:', ratesToUse); // Debug log
       console.log('Edited rates state:', editedRates); // Debug log
       
+      // Prepare request body with optional positions per month override
+      const requestBody: any = {
+        rates: ratesToUse,
+        avoid_losses: avoidLosses
+      };
+      
+      // Add positions per month override if provided
+      if (positionsPerMonthMin.trim() !== '' || positionsPerMonthMax.trim() !== '') {
+        const minVal = positionsPerMonthMin.trim() !== '' ? parseInt(positionsPerMonthMin.trim(), 10) : null;
+        const maxVal = positionsPerMonthMax.trim() !== '' ? parseInt(positionsPerMonthMax.trim(), 10) : null;
+        
+        if (minVal !== null && (isNaN(minVal) || minVal < 0)) {
+          setPositionsRangeError('Le minimum doit être un nombre entier >= 0');
+          setStep('review-rates');
+          return;
+        }
+        
+        if (maxVal !== null && (isNaN(maxVal) || maxVal < 0)) {
+          setPositionsRangeError('Le maximum doit être un nombre entier >= 0');
+          setStep('review-rates');
+          return;
+        }
+        
+        if (minVal !== null && maxVal !== null && minVal > maxVal) {
+          setPositionsRangeError('Le minimum doit être <= au maximum');
+          setStep('review-rates');
+          return;
+        }
+        
+        if (minVal !== null) {
+          requestBody.positions_per_month_min = minVal;
+        }
+        if (maxVal !== null) {
+          requestBody.positions_per_month_max = maxVal;
+        }
+      }
+      
+      setPositionsRangeError(null);
+      
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-positions/`,
         {
           method: 'POST',
-          body: JSON.stringify({ 
-            rates: ratesToUse,
-            avoid_losses: avoidLosses
-          })
+          body: JSON.stringify(requestBody)
         }
       );
       
@@ -250,8 +292,17 @@ export function PositionGenerationModal({
       setStep('review-positions');
     } catch (err: any) {
       console.error('Error generating positions:', err);
-      setError(err?.message || 'Erreur lors de la génération des positions');
-      toast.error('Erreur lors de la génération des positions');
+      
+      // Check if it's a positions range error
+      if (err?.error_type === 'positions_range_too_high' || err?.message?.includes('fourchette') || err?.message?.includes('positions/mois')) {
+        setPositionsRangeError(err?.message || 'La fourchette demandée est trop élevée pour cette durée');
+        setError(null); // Clear general error to show specific range error
+      } else {
+        setError(err?.message || 'Erreur lors de la génération des positions');
+        setPositionsRangeError(null);
+      }
+      
+      toast.error(err?.message || 'Erreur lors de la génération des positions');
       setStep('review-rates');
     }
   };
@@ -579,6 +630,74 @@ export function PositionGenerationModal({
                     </label>
                     <p style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', marginLeft: '24px' }}>
                       Si activé, toutes les positions générées seront gagnantes ou neutres (aucune perte)
+                    </p>
+                  </div>
+
+                  <div style={{ marginBottom: '20px', padding: '16px', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '6px' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#0c4a6e' }}>
+                      Fourchette de positions par mois (optionnel)
+                    </h3>
+                    <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
+                      Par défaut, le nombre de positions est calculé automatiquement selon le montant investi. 
+                      Vous pouvez spécifier une fourchette pour contrôler la densité des positions.
+                    </p>
+                    
+                    {positionsRangeError && (
+                      <div style={{ 
+                        padding: '10px', 
+                        backgroundColor: '#fee2e2', 
+                        color: '#991b1b', 
+                        borderRadius: '4px', 
+                        marginBottom: '12px',
+                        fontSize: '13px'
+                      }}>
+                        {positionsRangeError}
+                      </div>
+                    )}
+                    
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1', minWidth: '150px' }}>
+                        <Label htmlFor="positions-per-month-min" style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500' }}>
+                          Minimum (positions/mois)
+                        </Label>
+                        <Input
+                          id="positions-per-month-min"
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={positionsPerMonthMin}
+                          onChange={(e) => {
+                            setPositionsPerMonthMin(e.target.value);
+                            setPositionsRangeError(null);
+                          }}
+                          placeholder="Ex: 5"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      
+                      <div style={{ flex: '1', minWidth: '150px' }}>
+                        <Label htmlFor="positions-per-month-max" style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500' }}>
+                          Maximum (positions/mois)
+                        </Label>
+                        <Input
+                          id="positions-per-month-max"
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={positionsPerMonthMax}
+                          onChange={(e) => {
+                            setPositionsPerMonthMax(e.target.value);
+                            setPositionsRangeError(null);
+                          }}
+                          placeholder="Ex: 20"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <p style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
+                      Note: Le système limite à 3 positions maximum par jour de bourse. 
+                      Si votre fourchette est trop élevée, elle sera automatiquement ajustée ou une erreur sera affichée.
                     </p>
                   </div>
                 </>
