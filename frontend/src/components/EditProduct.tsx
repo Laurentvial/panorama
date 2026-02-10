@@ -45,7 +45,7 @@ export function EditProduct() {
     reference: '',
     type: '',
     categoryId: '',
-    subcategory: '',
+    subcategory: [] as string[],
     status: 'Brouillon',
     profitability: '',
     duration: '',
@@ -76,11 +76,16 @@ export function EditProduct() {
     loadCategories();
     if (id) {
       loadProduct(id);
+    } else {
+      // If no ID is provided, redirect to products list
+      setLoadingProduct(false);
+      toast.error('ID de produit manquant');
+      navigate('/admin/produits-investissements');
     }
   }, [id]);
 
   useEffect(() => {
-    if (!formData.linkToAssets || formData.linkToAssets === 'Non') {
+    if (!formData.linkToAssets) {
       // Reset allocations when disabled
       setAssetAllocations([]);
     }
@@ -262,13 +267,21 @@ export function EditProduct() {
       // For existing products created before type field was added, type might be empty
       // We'll use subcategory as a fallback for initial display, but save type separately
       const productTypeFromDB = (product.type || '').trim();
-      const productSubcategory = (product.subcategory || '').trim();
+      const productSubcategory = product.subcategory;
+      // Convert subcategory to array if it's a string (backward compatibility)
+      let subcategoryArray: string[] = [];
+      if (Array.isArray(productSubcategory)) {
+        subcategoryArray = productSubcategory;
+      } else if (typeof productSubcategory === 'string' && productSubcategory.trim()) {
+        subcategoryArray = [productSubcategory.trim()];
+      }
       // For display: if type is empty but subcategory exists, use subcategory as fallback
-      const displayType = productTypeFromDB || productSubcategory || '';
+      const displayType = productTypeFromDB || (subcategoryArray.length > 0 ? subcategoryArray[0] : '');
       
       console.log('=== PRODUCT TYPE DEBUG ===');
       console.log('Product type field:', product.type);
       console.log('Product subcategory field:', product.subcategory);
+      console.log('Subcategory array:', subcategoryArray);
       console.log('Type from DB:', productTypeFromDB);
       console.log('Display type (with fallback):', displayType);
       
@@ -279,7 +292,7 @@ export function EditProduct() {
         // The fallback will be used only for display in the Select component
         type: productTypeFromDB, // Use type from serializer or fall back to subcategory
         categoryId: product.categoryId || '',
-        subcategory: product.subcategory || '',
+        subcategory: subcategoryArray,
         status: product.status || 'Brouillon',
         profitability: profitabilityValue,
         duration: product.duration || '',
@@ -468,7 +481,9 @@ export function EditProduct() {
         reference: isValidValue(formData.reference) ? formData.reference : '',
         type: isValidValue(formData.type) ? formData.type : '',
         categoryId: isValidValue(formData.categoryId) ? formData.categoryId : '',
-        subcategory: isValidValue(formData.subcategory) ? formData.subcategory : '',
+        subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
+          ? formData.subcategory.filter(s => isValidValue(s)) 
+          : [],
         description: isValidValue(formData.description) ? formData.description : '',
         // Gestion de la rentabilité
         noProfitability: formData.noProfitability,
@@ -591,7 +606,7 @@ export function EditProduct() {
           return;
         }
       }
-      if (!formData.interestPeriod || formData.interestPeriod.length === 0) {
+      if (!Array.isArray(formData.interestPeriod) || formData.interestPeriod.length === 0) {
         toast.error('Au moins une période d\'intérêt disponible est requise');
         setLoading(false);
         return;
@@ -624,8 +639,12 @@ export function EditProduct() {
         // Always send type, even if empty
         formDataToSend.append('type', formData.type || '');
         if (formData.categoryId) formDataToSend.append('categoryId', formData.categoryId);
-        // Always send subcategory, even if empty
-        formDataToSend.append('subcategory', formData.subcategory || '');
+        // Send subcategory as JSON array if multiple, otherwise as string
+        if (Array.isArray(formData.subcategory) && formData.subcategory.length > 0) {
+          formDataToSend.append('subcategory', JSON.stringify(formData.subcategory));
+        } else {
+          formDataToSend.append('subcategory', '');
+        }
         formDataToSend.append('status', formData.status);
         // Price field removed - no longer used in Product model
         // Toujours envoyer profitability si une valeur existe, même si noProfitability est 'Oui'
@@ -707,7 +726,9 @@ export function EditProduct() {
           type: typeToSend,
           // Price field removed - using minEntryValue instead
           categoryId: formData.categoryId || undefined,
-          subcategory: formData.subcategory || '',
+          subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
+            ? formData.subcategory 
+            : '',
           status: formData.status,
           description: formData.description || undefined,
           cgv: formData.cgv || undefined,
@@ -717,7 +738,7 @@ export function EditProduct() {
           isVariableProfitability: formData.isVariableProfitability || 'Non',
           variableProfitability: variableProfitabilityValue || undefined,
           profitabilityPeriod: formData.profitabilityPeriod || undefined,
-          interestPeriod: formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
+          interestPeriod: Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
           capitalisationFonds: !!formData.capitalisationFonds,
           duration: formData.duration || undefined,
           // Gestion du produit
@@ -848,7 +869,7 @@ export function EditProduct() {
               <div className="space-y-2">
                 <Label htmlFor="product-type">Type de produit *</Label>
                 <Select 
-                  value={formData.type || (formData.subcategory || 'none')} 
+                  value={formData.type || (Array.isArray(formData.subcategory) && formData.subcategory.length > 0 ? formData.subcategory[0] : 'none')} 
                   onValueChange={(value) => {
                     const newType = value === 'none' ? '' : value;
                     console.log('Type changed from', formData.type, 'to', newType);
@@ -879,6 +900,9 @@ export function EditProduct() {
                     {/* Comptes */}
                     <SelectItem value="Compte titres">Compte titres</SelectItem>
                     
+                    {/* Produits de placement */}
+                    <SelectItem value="ETF">ETF</SelectItem>
+                    
                     {/* Portefeuilles intelligents */}
                     <SelectItem value="Smart Portfolio">Smart Portfolio</SelectItem>
                     
@@ -894,7 +918,7 @@ export function EditProduct() {
                   value={formData.categoryId || 'none'} 
                   onValueChange={(value) => {
                     const newCategoryId = value === 'none' ? '' : value;
-                    setFormData({ ...formData, categoryId: newCategoryId, subcategory: '' });
+                    setFormData({ ...formData, categoryId: newCategoryId, subcategory: [] });
                   }}
                 >
                   <SelectTrigger id="product-category">
@@ -912,27 +936,55 @@ export function EditProduct() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="product-subcategory">Sous-catégorie (optionnel)</Label>
-                <Select 
-                  value={formData.subcategory || 'none'} 
-                  onValueChange={(value) => setFormData({ ...formData, subcategory: value === 'none' ? '' : value })}
-                  disabled={!formData.categoryId}
-                >
-                  <SelectTrigger id="product-subcategory">
-                    <SelectValue placeholder={formData.categoryId ? "Sélectionner une sous-catégorie" : "Sélectionnez d'abord une catégorie"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Aucune sous-catégorie</SelectItem>
-                    {getSubcategoriesForCategory(formData.categoryId).map((subcategory, index) => (
+            <div className="space-y-2">
+              <Label htmlFor="product-subcategory">Sous-catégories (optionnel)</Label>
+              <Select 
+                value=""
+                onValueChange={(value) => {
+                  if (value && !formData.subcategory.includes(value)) {
+                    setFormData({ ...formData, subcategory: [...formData.subcategory, value] });
+                  }
+                }}
+                disabled={!formData.categoryId}
+              >
+                <SelectTrigger id="product-subcategory">
+                  <SelectValue placeholder={formData.categoryId ? "Sélectionner une sous-catégorie" : "Sélectionnez d'abord une catégorie"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {getSubcategoriesForCategory(formData.categoryId)
+                    .filter(subcategory => !formData.subcategory.includes(subcategory))
+                    .map((subcategory, index) => (
                       <SelectItem key={index} value={subcategory}>
                         {subcategory}
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                </SelectContent>
+              </Select>
+              
+              {formData.subcategory.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {formData.subcategory.map((subcategory, index) => (
+                    <div
+                      key={index}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-md text-sm border border-slate-200"
+                    >
+                      <span>{subcategory}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({ 
+                            ...formData, 
+                            subcategory: formData.subcategory.filter(s => s !== subcategory) 
+                          });
+                        }}
+                        className="ml-1 hover:text-red-600 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1368,7 +1420,7 @@ export function EditProduct() {
                 <Checkbox
                   id="product-link-to-assets"
                   checked={formData.linkToAssets}
-                  onCheckedChange={(checked) => setFormData({ ...formData, linkToAssets: checked as boolean })}
+                  onCheckedChange={(checked) => setFormData({ ...formData, linkToAssets: checked === true })}
                 />
                 <Label htmlFor="product-link-to-assets" className="text-base font-semibold cursor-pointer">
                   Lier le produit à des actifs

@@ -299,9 +299,26 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     }
 
     // For endpoints that allow public access, try without token if refresh fails
+    // Only specific GET list endpoints are public - creation/update endpoints require authentication
     const isPublicEndpoint = endpoint.includes('/api/news/') || 
                              endpoint.includes('/api/settings/') ||
                              endpoint.includes('/api/assets/') ||
+                             // Only GET /api/categories/ is public (list), exclude create/update/delete endpoints
+                             ((endpoint === '/api/categories/' || endpoint === '/api/categories') && 
+                              !endpoint.includes('/create') && 
+                              !endpoint.includes('/update') && 
+                              !endpoint.includes('/delete') &&
+                              !endpoint.match(/\/categories\/[a-zA-Z0-9]+\//)) || // Exclude /categories/{id}/* routes
+                             // Only GET /api/products/ is public (list), exclude all modification endpoints
+                             ((endpoint === '/api/products/' || endpoint === '/api/products') && 
+                              !endpoint.includes('/create') && 
+                              !endpoint.includes('/update') && 
+                              !endpoint.includes('/generate') &&
+                              !endpoint.includes('/delete') &&
+                              !endpoint.includes('/toggle-active') &&
+                              !endpoint.includes('/duplicate') &&
+                              !endpoint.includes('/contract-pdf') &&
+                              !endpoint.match(/\/products\/[a-zA-Z0-9]+\//)) || // Exclude /products/{id}/* routes
                              (endpoint.includes('/api/clients/') && endpoint.includes('/assets/'));
     
     const newToken = await refreshAccessToken();

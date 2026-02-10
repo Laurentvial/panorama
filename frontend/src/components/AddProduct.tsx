@@ -41,7 +41,7 @@ export function AddProduct() {
     reference: '',
     type: '',
     categoryId: '',
-    subcategory: '',
+    subcategory: [] as string[],
     status: 'Brouillon',
     profitability: '',
     duration: '',
@@ -264,7 +264,9 @@ export function AddProduct() {
         reference: isValidValue(formData.reference) ? formData.reference : '',
         type: isValidValue(formData.type) ? formData.type : '',
         categoryId: isValidValue(formData.categoryId) ? formData.categoryId : '',
-        subcategory: isValidValue(formData.subcategory) ? formData.subcategory : '',
+        subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
+          ? formData.subcategory.filter(s => isValidValue(s)) 
+          : [],
         description: isValidValue(formData.description) ? formData.description : '',
         // Gestion de la rentabilité
         noProfitability: formData.noProfitability,
@@ -380,7 +382,7 @@ export function AddProduct() {
           return;
         }
       }
-      if (!formData.interestPeriod) {
+      if (!Array.isArray(formData.interestPeriod) || formData.interestPeriod.length === 0) {
         toast.error('La période d\'intérêt disponible est requise');
         setLoading(false);
         return;
@@ -412,7 +414,11 @@ export function AddProduct() {
         formDataToSend.append('reference', formData.reference);
         if (formData.type) formDataToSend.append('type', formData.type);
         if (formData.categoryId) formDataToSend.append('categoryId', formData.categoryId);
-        if (formData.subcategory || formData.type) formDataToSend.append('subcategory', formData.subcategory || formData.type || '');
+        if (Array.isArray(formData.subcategory) && formData.subcategory.length > 0) {
+          formDataToSend.append('subcategory', JSON.stringify(formData.subcategory));
+        } else if (formData.type) {
+          formDataToSend.append('subcategory', formData.type);
+        }
         formDataToSend.append('status', formData.status);
         // Price = minEntryValue if maxEntryValue is empty, otherwise use minEntryValue as base
         // Price is no longer used - removed from model
@@ -463,8 +469,10 @@ export function AddProduct() {
             profitability: profitabilityValue,
             duration: !formData.noProfitability ? formData.duration : undefined,
             categoryId: formData.categoryId || undefined,
-            // Use type as subcategory if subcategory is not provided (for Smart Portfolio and other types)
-            subcategory: formData.subcategory || formData.type || undefined,
+            // Use subcategory array or type as fallback (for Smart Portfolio and other types)
+            subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
+              ? formData.subcategory 
+              : formData.type || undefined,
             status: formData.status,
             cgv: formData.cgv || undefined,
             // active field removed - using status instead
@@ -473,7 +481,6 @@ export function AddProduct() {
             profitabilityPeriod: !formData.noProfitability ? formData.profitabilityPeriod || undefined : undefined,
             interestPeriod: !formData.noProfitability ? (formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined) : undefined,
             capitalisationFonds: !formData.noProfitability ? !!formData.capitalisationFonds : undefined,
-            valeurCumuleeInterets: formData.valeurCumuleeInterets ? parseFloat(formData.valeurCumuleeInterets) : undefined,
             availabilityStart: formData.availabilityStart || undefined,
             availabilityEnd: formData.availabilityEnd || undefined,
             linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
@@ -594,6 +601,9 @@ export function AddProduct() {
                     {/* Comptes */}
                     <SelectItem value="Compte titres">Compte titres</SelectItem>
                     
+                    {/* Produits de placement */}
+                    <SelectItem value="ETF">ETF</SelectItem>
+                    
                     {/* Portefeuilles intelligents */}
                     <SelectItem value="Smart Portfolio">Smart Portfolio</SelectItem>
                     
@@ -609,7 +619,7 @@ export function AddProduct() {
                   value={formData.categoryId || 'none'} 
                   onValueChange={(value) => {
                     const newCategoryId = value === 'none' ? '' : value;
-                    setFormData({ ...formData, categoryId: newCategoryId, subcategory: '' });
+                    setFormData({ ...formData, categoryId: newCategoryId, subcategory: [] });
                   }}
                 >
                   <SelectTrigger id="product-category">
@@ -627,27 +637,55 @@ export function AddProduct() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="product-subcategory">Sous-catégorie (optionnel)</Label>
-                <Select 
-                  value={formData.subcategory || 'none'} 
-                  onValueChange={(value) => setFormData({ ...formData, subcategory: value === 'none' ? '' : value })}
-                  disabled={!formData.categoryId}
-                >
-                  <SelectTrigger id="product-subcategory">
-                    <SelectValue placeholder={formData.categoryId ? "Sélectionner une sous-catégorie" : "Sélectionnez d'abord une catégorie"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Aucune sous-catégorie</SelectItem>
-                    {getSubcategoriesForCategory(formData.categoryId).map((subcategory, index) => (
+            <div className="space-y-2">
+              <Label htmlFor="product-subcategory">Sous-catégories (optionnel)</Label>
+              <Select 
+                value=""
+                onValueChange={(value) => {
+                  if (value && !formData.subcategory.includes(value)) {
+                    setFormData({ ...formData, subcategory: [...formData.subcategory, value] });
+                  }
+                }}
+                disabled={!formData.categoryId}
+              >
+                <SelectTrigger id="product-subcategory">
+                  <SelectValue placeholder={formData.categoryId ? "Sélectionner une sous-catégorie" : "Sélectionnez d'abord une catégorie"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {getSubcategoriesForCategory(formData.categoryId)
+                    .filter(subcategory => !formData.subcategory.includes(subcategory))
+                    .map((subcategory, index) => (
                       <SelectItem key={index} value={subcategory}>
                         {subcategory}
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                </SelectContent>
+              </Select>
+              
+              {formData.subcategory.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {formData.subcategory.map((subcategory, index) => (
+                    <div
+                      key={index}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-md text-sm border border-slate-200"
+                    >
+                      <span>{subcategory}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({ 
+                            ...formData, 
+                            subcategory: formData.subcategory.filter(s => s !== subcategory) 
+                          });
+                        }}
+                        className="ml-1 hover:text-red-600 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -987,7 +1025,7 @@ export function AddProduct() {
                 <Checkbox
                   id="product-link-to-assets"
                   checked={formData.linkToAssets}
-                  onCheckedChange={(checked) => setFormData({ ...formData, linkToAssets: checked as boolean })}
+                  onCheckedChange={(checked) => setFormData({ ...formData, linkToAssets: checked === true })}
                 />
                 <Label htmlFor="product-link-to-assets" className="text-base font-semibold cursor-pointer">
                   Lier le produit à des actifs
