@@ -1704,7 +1704,14 @@ def update_own_profile(request):
             if status_value in ['online', 'away', 'offline']:
                 user_details.status = status_value
         if 'availabilitySchedule' in request.data:
-            user_details.availability_schedule = request.data['availabilitySchedule'] or {}
+            schedule = request.data['availabilitySchedule']
+            # Parse JSON string if it's a string (when sent via FormData)
+            if isinstance(schedule, str):
+                try:
+                    schedule = json.loads(schedule) if schedule else {}
+                except (json.JSONDecodeError, TypeError):
+                    schedule = {}
+            user_details.availability_schedule = schedule or {}
         
         # Update profile photo if provided
         if 'profilePhoto' in request.FILES:
@@ -8502,6 +8509,8 @@ def app_settings(request):
                     'email': getattr(settings_obj, 'email', ''),
                     'logo': None,
                     'logo_url': None,
+                    'favicon': None,
+                    'favicon_url': None,
                     'login_background_image': None,
                     'login_background_image_url': None,
                     'primary_color': settings_obj.primary_color or '#030213',
@@ -8516,11 +8525,21 @@ def app_settings(request):
             # Handle FormData for file uploads
             data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
             
+            # Track which file fields were uploaded so we can include them in update_fields
+            uploaded_file_fields = []
+            
             # Handle logo removal
             if data.get('remove_logo') == 'true':
                 if settings_obj.logo:
                     settings_obj.logo.delete(save=False)
                 settings_obj.logo = None
+                settings_obj.save()
+
+            # Handle favicon removal
+            if data.get('remove_favicon') == 'true':
+                if settings_obj.favicon:
+                    settings_obj.favicon.delete(save=False)
+                settings_obj.favicon = None
                 settings_obj.save()
 
             # Handle login background removal
@@ -8540,11 +8559,8 @@ def app_settings(request):
                     # Create filename: logo{ext}
                     custom_filename = f'logo{ext}'
                     
-                    print(f"Uploading logo: {original_filename} as {custom_filename}")
-                    
                     # Delete old logo if it exists
                     if settings_obj.logo:
-                        print(f"Deleting old logo: {settings_obj.logo.name}")
                         settings_obj.logo.delete(save=False)
                     
                     # Save with custom filename - load into memory first to avoid temp-file issues on Windows/Python 3.14
@@ -8554,6 +8570,7 @@ def app_settings(request):
                     except Exception:
                         pass
                     settings_obj.logo.save(custom_filename, ContentFile(logo_file.read()), save=True)
+                    uploaded_file_fields.append('logo')
                     
                     # Verify the logo was saved and uploaded to Cloudinary
                     if not settings_obj.logo:
@@ -8565,16 +8582,58 @@ def app_settings(request):
                         from api.storage import CloudinaryMediaStorage
                         if isinstance(storage, CloudinaryMediaStorage):
                             logo_url = settings_obj.logo.url
-                            if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
-                                print(f"Logo successfully uploaded to Cloudinary: {settings_obj.logo.name}")
-                                print(f"Cloudinary URL: {logo_url[:100]}...")
-                    except Exception as verify_error:
-                        print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                            if not logo_url or not (logo_url.startswith('http://') or logo_url.startswith('https://')):
+                                return Response({'error': 'Logo upload failed - Cloudinary URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    except Exception:
+                        # Cloudinary verification failed, but file was saved - continue
+                        pass
                 except Exception as upload_error:
-                    print(f"Error uploading logo: {str(upload_error)}")
                     import traceback
                     traceback.print_exc()
                     return Response({'error': f'Logo upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Handle favicon file upload
+            if 'favicon' in request.FILES:
+                try:
+                    favicon_file = request.FILES['favicon']
+                    # Get file extension
+                    original_filename = favicon_file.name
+                    _, ext = os.path.splitext(original_filename)
+                    # Create filename: favicon{ext}
+                    custom_filename = f'favicon{ext}'
+                    
+                    # Delete old favicon if it exists
+                    if settings_obj.favicon:
+                        settings_obj.favicon.delete(save=False)
+                    
+                    # Save with custom filename - load into memory first to avoid temp-file issues on Windows/Python 3.14
+                    from django.core.files.base import ContentFile
+                    try:
+                        favicon_file.seek(0)
+                    except Exception:
+                        pass
+                    settings_obj.favicon.save(custom_filename, ContentFile(favicon_file.read()), save=True)
+                    uploaded_file_fields.append('favicon')
+                    
+                    # Verify the favicon was saved and uploaded to Cloudinary
+                    if not settings_obj.favicon:
+                        return Response({'error': 'Favicon upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    
+                    # Verify Cloudinary upload
+                    try:
+                        storage = settings_obj.favicon.storage
+                        from api.storage import CloudinaryMediaStorage
+                        if isinstance(storage, CloudinaryMediaStorage):
+                            favicon_url = settings_obj.favicon.url
+                            if not favicon_url or not (favicon_url.startswith('http://') or favicon_url.startswith('https://')):
+                                return Response({'error': 'Favicon upload failed - Cloudinary URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    except Exception:
+                        # Cloudinary verification failed, but file was saved - continue
+                        pass
+                except Exception as upload_error:
+                    import traceback
+                    traceback.print_exc()
+                    return Response({'error': f'Favicon upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             # Handle login background image upload
             if 'login_background_image' in request.FILES:
@@ -8595,6 +8654,7 @@ def app_settings(request):
                     except Exception:
                         pass
                     settings_obj.login_background_image.save(custom_filename, ContentFile(bg_file.read()), save=True)
+                    uploaded_file_fields.append('login_background_image')
 
                     if not settings_obj.login_background_image:
                         return Response({'error': 'Background upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -8604,23 +8664,45 @@ def app_settings(request):
                     return Response({'error': f'Background upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Update platform info from request data
+            update_fields = []
             if 'platform_name' in data:
                 settings_obj.platform_name = (data.get('platform_name') or 'Panorama').strip()[:80]
+                update_fields.append('platform_name')
             if 'address' in data:
                 settings_obj.address = (data.get('address') or '').strip()[:200]
+                update_fields.append('address')
             if 'website' in data:
                 settings_obj.website = (data.get('website') or '').strip()[:200]
+                update_fields.append('website')
             if 'email' in data:
                 settings_obj.email = (data.get('email') or '').strip()[:100]
+                update_fields.append('email')
             # Update colors from request data
             if 'primary_color' in data:
                 settings_obj.primary_color = data.get('primary_color', '#030213')
+                update_fields.append('primary_color')
             if 'secondary_color' in data:
                 settings_obj.secondary_color = data.get('secondary_color', '')
+                update_fields.append('secondary_color')
             if 'accent_color' in data:
                 settings_obj.accent_color = data.get('accent_color', '')
+                update_fields.append('accent_color')
             
-            settings_obj.save()
+            # Save the model
+            # If file fields were uploaded, save without update_fields to ensure file fields are properly persisted
+            # File fields need special handling and may not work correctly with update_fields
+            if uploaded_file_fields:
+                # File fields were uploaded - save without update_fields to ensure they're persisted
+                settings_obj.save()
+            elif update_fields:
+                # Only text fields were updated - use update_fields for efficiency
+                settings_obj.save(update_fields=update_fields)
+            else:
+                # No fields to update, but save anyway to ensure any previous changes are persisted
+                settings_obj.save()
+            
+            # Refresh from database to ensure all changes (including file uploads) are loaded
+            settings_obj.refresh_from_db()
             
             serializer = AppSettingsSerializer(settings_obj, context={'request': request})
             return Response(serializer.data, status=status.HTTP_200_OK)

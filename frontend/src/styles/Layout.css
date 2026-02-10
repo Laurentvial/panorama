@@ -19,4 +19,6 @@
   width: 100%;
   padding: 30px;
   background-color: transparent;
+  overflow-x: hidden; /* Prevent horizontal overflow at layout level */
+  min-width: 0; /* Allows flex children to shrink below their content size */
 }

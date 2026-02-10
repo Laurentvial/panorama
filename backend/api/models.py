@@ -646,6 +646,7 @@ class AppSettings(models.Model):
     website = models.URLField(max_length=200, default='', blank=True)
     email = models.EmailField(max_length=100, default='', blank=True)
     logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
+    favicon = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     login_background_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
     secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)

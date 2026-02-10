@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RefreshCw } from 'lucide-react';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 
 type PositionRow = {
@@ -91,7 +92,7 @@ const formatPositionDateTime = (p: PositionRow) => {
 };
 
 export function Positions() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
   const [search, setSearch] = useState('');
@@ -211,19 +212,58 @@ export function Positions() {
 
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList>
-              <TabsTrigger value="upcoming">Positions à venir ({counts.upcoming})</TabsTrigger>
-              <TabsTrigger value="open">Positions ouvertes ({counts.open})</TabsTrigger>
-              <TabsTrigger value="closed">Positions fermées ({counts.closed})</TabsTrigger>
+              <TabsTrigger value="upcoming">Positions à venir ({loading ? '...' : counts.upcoming})</TabsTrigger>
+              <TabsTrigger value="open">Positions ouvertes ({loading ? '...' : counts.open})</TabsTrigger>
+              <TabsTrigger value="closed">Positions fermées ({loading ? '...' : counts.closed})</TabsTrigger>
             </TabsList>
 
             <TabsContent value="upcoming" className="mt-4">
-              <PositionsTable rows={filtered} />
+              {loading && positions.length === 0 ? (
+                <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+                  <LoadingIndicator />
+                </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  {loading && positions.length > 0 && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                      <LoadingIndicator />
+                    </div>
+                  )}
+                  <PositionsTable rows={filtered} />
+                </div>
+              )}
             </TabsContent>
             <TabsContent value="open" className="mt-4">
-              <PositionsTable rows={filtered} />
+              {loading && positions.length === 0 ? (
+                <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+                  <LoadingIndicator />
+                </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  {loading && positions.length > 0 && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                      <LoadingIndicator />
+                    </div>
+                  )}
+                  <PositionsTable rows={filtered} />
+                </div>
+              )}
             </TabsContent>
             <TabsContent value="closed" className="mt-4">
-              <PositionsTable rows={filtered} />
+              {loading && positions.length === 0 ? (
+                <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+                  <LoadingIndicator />
+                </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  {loading && positions.length > 0 && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                      <LoadingIndicator />
+                    </div>
+                  )}
+                  <PositionsTable rows={filtered} />
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </CardContent>

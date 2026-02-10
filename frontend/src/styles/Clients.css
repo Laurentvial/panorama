@@ -6,7 +6,7 @@
   gap: 1.5rem;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden; /* Empêche le débordement horizontal du conteneur */
+  min-width: 0; /* Allows flex children to shrink below their content size */
 }
 
 /* Header title/subtitle styles moved to PageHeader.css */
@@ -60,6 +60,7 @@
   -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
   scrollbar-width: thin; /* Firefox */
   scrollbar-color: #cbd5e1 #f1f5f9; /* Firefox */
+  min-width: 0; /* Allows the wrapper to shrink and enable scrolling */
 }
 
 /* Webkit scrollbar styling */

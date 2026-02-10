@@ -19,6 +19,9 @@ export function Customization() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [shouldRemoveLogo, setShouldRemoveLogo] = useState(false);
+  const [faviconFile, setFaviconFile] = useState<File | null>(null);
+  const [faviconPreview, setFaviconPreview] = useState<string | null>(null);
+  const [shouldRemoveFavicon, setShouldRemoveFavicon] = useState(false);
   const [bgFile, setBgFile] = useState<File | null>(null);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
   const [shouldRemoveBg, setShouldRemoveBg] = useState(false);
@@ -41,6 +44,9 @@ export function Customization() {
       });
       if (settings.logo_url) {
         setLogoPreview(settings.logo_url);
+      }
+      if (settings.favicon_url) {
+        setFaviconPreview(settings.favicon_url);
       }
       if (settings.login_background_image_url) {
         setBgPreview(settings.login_background_image_url);
@@ -75,6 +81,46 @@ export function Customization() {
     setLogoFile(null);
     setLogoPreview(null);
     setShouldRemoveLogo(true);
+  };
+
+  const handleFaviconChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      // Check MIME type first, but also check file extension as fallback
+      // Some .ico files may have empty or unrecognized MIME types
+      const fileName = file.name.toLowerCase();
+      const isValidImageType = file.type.startsWith('image/');
+      const isValidExtension = fileName.endsWith('.ico') || 
+                               fileName.endsWith('.png') || 
+                               fileName.endsWith('.svg') || 
+                               fileName.endsWith('.jpg') || 
+                               fileName.endsWith('.jpeg') || 
+                               fileName.endsWith('.gif');
+      
+      if (!isValidImageType && !isValidExtension) {
+        toast.error('Veuillez sélectionner un fichier image (ICO, PNG, SVG, JPG, GIF)');
+        return;
+      }
+      // Validate file size (max 2MB for favicon)
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error('Le favicon ne doit pas dépasser 2MB');
+        return;
+      }
+      setFaviconFile(file);
+      setShouldRemoveFavicon(false); // Reset remove flag when new file is selected
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFaviconPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveFavicon = () => {
+    setFaviconFile(null);
+    setFaviconPreview(null);
+    setShouldRemoveFavicon(true);
   };
 
   const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,6 +164,10 @@ export function Customization() {
         formData.append('logo', logoFile);
       }
 
+      if (faviconFile) {
+        formData.append('favicon', faviconFile);
+      }
+
       if (bgFile) {
         formData.append('login_background_image', bgFile);
       }
@@ -125,6 +175,11 @@ export function Customization() {
       // If logo should be removed, send a flag
       if (shouldRemoveLogo && !logoFile) {
         formData.append('remove_logo', 'true');
+      }
+
+      // If favicon should be removed, send a flag
+      if (shouldRemoveFavicon && !faviconFile) {
+        formData.append('remove_favicon', 'true');
       }
 
       if (shouldRemoveBg && !bgFile) {
@@ -146,6 +201,7 @@ export function Customization() {
 
       toast.success('Paramètres sauvegardés avec succès');
       setShouldRemoveLogo(false);
+      setShouldRemoveFavicon(false);
       setShouldRemoveBg(false);
       await loadSettings(); // Reload settings to get updated logo URL
     } catch (error: any) {
@@ -168,12 +224,19 @@ export function Customization() {
     });
     setLogoFile(null);
     setShouldRemoveLogo(false);
+    setFaviconFile(null);
+    setShouldRemoveFavicon(false);
     setBgFile(null);
     setShouldRemoveBg(false);
     if (settings?.logo_url) {
       setLogoPreview(settings.logo_url);
     } else {
       setLogoPreview(null);
+    }
+    if (settings?.favicon_url) {
+      setFaviconPreview(settings.favicon_url);
+    } else {
+      setFaviconPreview(null);
     }
     if (settings?.login_background_image_url) {
       setBgPreview(settings.login_background_image_url);
@@ -249,55 +312,106 @@ export function Customization() {
       {/* Logo Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Logo de l'application</CardTitle>
+          <CardTitle>Logo et Favicon de l'application</CardTitle>
           <CardDescription>
-            Téléchargez un logo pour personnaliser l'apparence de votre application
+            Téléchargez un logo et un favicon pour personnaliser l'apparence de votre application
           </CardDescription>
         </CardHeader>
         <CardContent className="customization-card-content">
-          <div className="customization-logo-section">
-            {logoPreview && (
-              <div className="customization-logo-preview">
-                <img
-                  src={logoPreview}
-                  alt="Logo preview"
-                  className="customization-logo-image"
-                />
-              </div>
-            )}
+          <div className="customization-logo-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+            {/* Logo */}
+            <div>
+              {logoPreview && (
+                <div className="customization-logo-preview">
+                  <img
+                    src={logoPreview}
+                    alt="Logo preview"
+                    className="customization-logo-image"
+                  />
+                </div>
+              )}
               <div className="customization-logo-controls">
-              <Label htmlFor="logo-upload">Logo</Label>
-              <div className="customization-logo-upload-group">
-                <input
-                  id="logo-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleLogoChange}
-                  className="customization-logo-upload-input"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => document.getElementById('logo-upload')?.click()}
-                >
-                  <HiOutlineUpload className="h-4 w-4 mr-2" />
-                  {logoPreview ? 'Changer le logo' : 'Télécharger un logo'}
-                </Button>
-                {logoPreview && (
+                <Label htmlFor="logo-upload">Logo</Label>
+                <div className="customization-logo-upload-group">
+                  <input
+                    id="logo-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                    className="customization-logo-upload-input"
+                  />
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handleRemoveLogo}
-                    className="customization-delete-button"
+                    onClick={() => document.getElementById('logo-upload')?.click()}
                   >
-                    <HiOutlineTrash className="h-4 w-4 mr-2" />
-                    Supprimer
+                    <HiOutlineUpload className="h-4 w-4 mr-2" />
+                    {logoPreview ? 'Changer le logo' : 'Télécharger un logo'}
                   </Button>
-                )}
+                  {logoPreview && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRemoveLogo}
+                      className="customization-delete-button"
+                    >
+                      <HiOutlineTrash className="h-4 w-4 mr-2" />
+                      Supprimer
+                    </Button>
+                  )}
+                </div>
+                <p className="customization-logo-info">
+                  Formats acceptés: PNG, JPG, SVG (max 5MB)
+                </p>
               </div>
-              <p className="customization-logo-info">
-                Formats acceptés: PNG, JPG, SVG (max 5MB)
-              </p>
+            </div>
+
+            {/* Favicon */}
+            <div>
+              {faviconPreview && (
+                <div className="customization-logo-preview">
+                  <img
+                    src={faviconPreview}
+                    alt="Favicon preview"
+                    className="customization-logo-image"
+                    style={{ width: '64px', height: '64px', objectFit: 'contain' }}
+                  />
+                </div>
+              )}
+              <div className="customization-logo-controls">
+                <Label htmlFor="favicon-upload">Favicon</Label>
+                <div className="customization-logo-upload-group">
+                  <input
+                    id="favicon-upload"
+                    type="file"
+                    accept="image/*,.ico"
+                    onChange={handleFaviconChange}
+                    className="customization-logo-upload-input"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => document.getElementById('favicon-upload')?.click()}
+                  >
+                    <HiOutlineUpload className="h-4 w-4 mr-2" />
+                    {faviconPreview ? 'Changer le favicon' : 'Télécharger un favicon'}
+                  </Button>
+                  {faviconPreview && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRemoveFavicon}
+                      className="customization-delete-button"
+                    >
+                      <HiOutlineTrash className="h-4 w-4 mr-2" />
+                      Supprimer
+                    </Button>
+                  )}
+                </div>
+                <p className="customization-logo-info">
+                  Formats acceptés: ICO, PNG, SVG (max 2MB). Recommandé: 32×32 ou 16×16px
+                </p>
+              </div>
             </div>
           </div>
         </CardContent>

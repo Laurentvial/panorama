@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
@@ -44,6 +44,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const [productsIndexLoading, setProductsIndexLoading] = useState(false);
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
   const [assetsIndexLoading, setAssetsIndexLoading] = useState(false);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(60); // Default header height
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);
@@ -52,6 +54,30 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     mql.addEventListener('change', onChange);
     return () => mql.removeEventListener('change', onChange);
   }, []);
+
+  // Measure header height and update CSS variable
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (headerRef.current) {
+        const height = headerRef.current.getBoundingClientRect().height;
+        setHeaderHeight(height);
+        document.documentElement.style.setProperty('--platform-header-height', `${height}px`);
+        // Also set scroll-padding-top on html to prevent content from being hidden behind sticky header
+        document.documentElement.style.scrollPaddingTop = `calc(var(--client-banner-height, 0px) + ${height}px)`;
+      }
+    };
+
+    // Use requestAnimationFrame to ensure header is rendered before measuring
+    requestAnimationFrame(() => {
+      updateHeaderHeight();
+    });
+    
+    window.addEventListener('resize', updateHeaderHeight);
+    return () => {
+      window.removeEventListener('resize', updateHeaderHeight);
+      document.documentElement.style.scrollPaddingTop = '';
+    };
+  }, [isMobile, showBottomNav]);
 
   useEffect(() => {
     // When bottom navigation is active, keep the side menu folded by default.
@@ -177,20 +203,22 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       <ClientBanner topOffset={0} />
       
       {/* Header */}
-      <header style={{
-        backgroundColor: 'var(--primary)',
-        color: 'var(--accent-foreground)',
-        borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
-        padding: isMobile ? '12px 16px' : '15px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: isMobile ? '12px' : '20px',
-        position: 'sticky',
-        top: 'var(--client-banner-height, 0px)',
-        // Keep header (and close X) above the drawer overlay.
-        zIndex: showBottomNav ? 500 : 100,
-      }}>
+      <header 
+        ref={headerRef}
+        style={{
+          backgroundColor: 'var(--primary)',
+          color: 'var(--accent-foreground)',
+          borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+          padding: isMobile ? '12px 16px' : '15px 20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: isMobile ? '12px' : '20px',
+          position: 'sticky',
+          top: 'var(--client-banner-height, 0px)',
+          // Keep header (and close X) above the drawer overlay.
+          zIndex: showBottomNav ? 500 : 100,
+        }}>
         {/* Mobile Menu Button */}
         {showBottomNav && (
           <Button
@@ -706,12 +734,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Main Content */}
         <main style={{ 
           flex: 1, 
-          paddingTop: isMobile ? '16px' : '30px',
+          paddingTop: `calc((var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px)) / 2 + ${isMobile ? '16px' : '30px'})`,
           paddingRight: isMobile ? '16px' : '30px',
           paddingLeft: isMobile ? '16px' : '30px',
           paddingBottom: showBottomNav ? `${16 + MOBILE_BOTTOM_NAV_HEIGHT}px` : '30px',
           width: isMobile ? '100%' : 'auto',
           minWidth: 0,
+          scrollMarginTop: `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`, // Account for sticky header height
         }}>
           {children}
         </main>

@@ -5,6 +5,8 @@ interface AppSettings {
   id: string;
   logo?: string;
   logo_url?: string;
+  favicon?: string;
+  favicon_url?: string;
   login_background_image?: string;
   login_background_image_url?: string;
   platform_name?: string;
@@ -66,7 +68,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         platform_name: 'Panorama',
         primary_color: '#030213',
         secondary_color: '',
-        accent_color: ''
+        accent_color: '',
+        favicon_url: undefined
       };
       setSettings(defaultSettings);
       applyTheme(defaultSettings);
@@ -82,6 +85,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const platformName = (appSettings.platform_name || '').trim();
     if (platformName) {
       document.title = platformName;
+    }
+    
+    // Apply favicon
+    const faviconUrl = appSettings.favicon_url;
+    // Remove existing favicon links
+    const existingFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+    existingFavicons.forEach(link => link.remove());
+    
+    if (faviconUrl) {
+      // Create new favicon link
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      // Try to detect the file type from the URL
+      const lowerUrl = faviconUrl.toLowerCase();
+      if (lowerUrl.includes('.ico')) {
+        link.type = 'image/x-icon';
+      } else if (lowerUrl.includes('.png')) {
+        link.type = 'image/png';
+      } else if (lowerUrl.includes('.svg')) {
+        link.type = 'image/svg+xml';
+      } else {
+        link.type = 'image/x-icon'; // Default
+      }
+      link.href = faviconUrl;
+      document.head.appendChild(link);
     }
     
     // Apply primary color

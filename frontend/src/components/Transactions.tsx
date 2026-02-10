@@ -22,12 +22,14 @@ import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
 
 export function Transactions() {
   const { currentUser } = useUser();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
@@ -49,6 +51,7 @@ export function Transactions() {
 
   async function loadData() {
     try {
+      setLoading(true);
       const [transactionsData, clientsData, teamsData, assetsData, productsData] = await Promise.all([
         apiCall('/api/transactions/'),
         apiCall('/api/clients/'),
@@ -64,6 +67,8 @@ export function Transactions() {
       setProducts(productsData.products || productsData || []);
     } catch (error) {
       console.error('Error loading transactions:', error);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -321,24 +326,37 @@ export function Transactions() {
       {/* Transactions List */}
       <Card>
         <CardHeader>
-          <CardTitle>Liste des transactions ({filteredTransactions.length} / {transactions.length})</CardTitle>
+          <CardTitle>Liste des transactions ({loading ? '...' : `${filteredTransactions.length} / ${transactions.length}`})</CardTitle>
         </CardHeader>
         <CardContent>
-          <TransactionList
-            transactions={filteredTransactions}
-            assets={assets}
-            products={products}
-            clients={clients}
-            showClientColumn={true}
-            onView={(transaction) => {
-              setSelectedTransaction(transaction);
-              setIsViewTransactionModalOpen(true);
-            }}
-            onEdit={(transaction) => {
-              openEditModal(transaction);
-            }}
-            emptyMessage="Aucune transaction trouvée"
-          />
+          {loading && transactions.length === 0 ? (
+            <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+              <LoadingIndicator />
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              {loading && transactions.length > 0 && (
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                  <LoadingIndicator />
+                </div>
+              )}
+              <TransactionList
+                transactions={filteredTransactions}
+                assets={assets}
+                products={products}
+                clients={clients}
+                showClientColumn={true}
+                onView={(transaction) => {
+                  setSelectedTransaction(transaction);
+                  setIsViewTransactionModalOpen(true);
+                }}
+                onEdit={(transaction) => {
+                  openEditModal(transaction);
+                }}
+                emptyMessage="Aucune transaction trouvée"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 

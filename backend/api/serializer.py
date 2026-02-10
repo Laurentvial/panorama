@@ -1126,6 +1126,7 @@ class ClientProductSerializer(serializers.ModelSerializer):
 
 class AppSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
+    favicon_url = serializers.SerializerMethodField()
     login_background_image_url = serializers.SerializerMethodField()
     
     class Meta:
@@ -1138,9 +1139,11 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             'email',
             # Writable file fields (required for uploads)
             'logo',
+            'favicon',
             'login_background_image',
             # Read-only URL helpers for frontend consumption
             'logo_url',
+            'favicon_url',
             'login_background_image_url',
             'primary_color',
             'secondary_color',
@@ -1167,6 +1170,28 @@ class AppSettingsSerializer(serializers.ModelSerializer):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"Error getting logo URL for app settings: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return None
+        return None
+
+    def get_favicon_url(self, obj):
+        if obj.favicon:
+            try:
+                favicon_url = obj.favicon.url
+                # Cloudinary URLs are public by default, return them directly
+                if favicon_url and (favicon_url.startswith('http://') or favicon_url.startswith('https://')):
+                    return favicon_url
+                # Local path - build absolute URI
+                request = self.context.get('request')
+                if request and favicon_url:
+                    return request.build_absolute_uri(favicon_url)
+                return favicon_url
+            except Exception as e:
+                # Log error but don't fail - return None if URL generation fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting favicon URL for app settings: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
                 return None

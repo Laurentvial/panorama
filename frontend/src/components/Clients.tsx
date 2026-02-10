@@ -14,6 +14,7 @@ import {
 import { apiCall } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/Clients.css';
 import '../styles/PageHeader.css';
 
@@ -26,6 +27,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
   const { users, loading: usersLoading, error: usersError } = useUsers();
   const [clients, setClients] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [itemsPerPage, setItemsPerPage] = useState(25);
@@ -51,6 +53,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
 
   async function loadData() {
     try {
+      setLoading(true);
       const [clientsData, teamsData] = await Promise.all([
         apiCall('/api/clients/'),
         apiCall('/api/teams/')
@@ -60,6 +63,8 @@ export function Clients({ onSelectClient }: ClientsProps) {
       setTeams(teamsData.teams || []);
     } catch (error) {
       console.error('Error loading clients:', error);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -83,7 +88,14 @@ export function Clients({ onSelectClient }: ClientsProps) {
     return matchesSearch && matchesTeam;
   });
 
-  const displayedClients = filteredClients.slice(0, itemsPerPage);
+  // Sort by creation date, latest first
+  const sortedClients = [...filteredClients].sort((a, b) => {
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return dateB - dateA; // Descending order (latest first)
+  });
+
+  const displayedClients = sortedClients.slice(0, itemsPerPage);
 
   // Gestion de la sélection
   function handleSelectClient(clientId: string) {
@@ -360,11 +372,20 @@ export function Clients({ onSelectClient }: ClientsProps) {
       {/* Clients List */}
       <Card>
         <CardHeader>
-          <CardTitle>Liste des clients ({filteredClients.length})</CardTitle>
+          <CardTitle>Liste des clients ({loading ? '...' : filteredClients.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          {filteredClients.length > 0 ? (
+          {loading && clients.length === 0 ? (
+            <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+              <LoadingIndicator />
+            </div>
+          ) : filteredClients.length > 0 ? (
             <div className="clients-table-wrapper">
+              {loading && clients.length > 0 && (
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                  <LoadingIndicator />
+                </div>
+              )}
               <table className="clients-table">
                 <thead>
                   <tr>

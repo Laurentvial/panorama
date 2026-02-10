@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import { Checkbox } from './ui/checkbox';
 import { HiOutlineUser, HiOutlineCamera } from 'react-icons/hi';
 import { toast } from 'sonner';
 import '../styles/PageHeader.css';
@@ -85,6 +86,27 @@ export function MonProfil() {
         },
       },
     }));
+  };
+
+  const handleDayOffToggle = (day: string, isOff: boolean) => {
+    setFormData(prev => {
+      const newSchedule = { ...prev.availabilitySchedule };
+      if (isOff) {
+        // Remove day from schedule when marked as off
+        delete newSchedule[day];
+      } else {
+        // Add day with default times when not off
+        newSchedule[day] = { start: '09:00', end: '18:00' };
+      }
+      return {
+        ...prev,
+        availabilitySchedule: newSchedule,
+      };
+    });
+  };
+
+  const isDayOff = (day: string) => {
+    return !formData.availabilitySchedule[day];
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -300,10 +322,11 @@ export function MonProfil() {
               <div className="space-y-4">
                 <Label>Horaires de disponibilité</Label>
                 <p className="text-sm text-muted-foreground">
-                  Définissez vos heures de disponibilité pour chaque jour de la semaine (format 24h)
+                  Définissez vos heures de disponibilité pour chaque jour de la semaine (format 24h). Cochez les jours où vous ne travaillez pas.
                 </p>
                 <div className="space-y-3">
                   {DAYS.map((day) => {
+                    const dayIsOff = isDayOff(day);
                     const schedule = formData.availabilitySchedule[day] || { start: '09:00', end: '18:00' };
                     const startTime = schedule.start.split(':');
                     const endTime = schedule.end.split(':');
@@ -317,66 +340,84 @@ export function MonProfil() {
                     const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
                     
                     return (
-                      <div key={day} className="grid grid-cols-[150px_1fr_1fr] gap-4 items-center">
-                        <Label className="text-sm font-medium">{DAY_LABELS[day]}</Label>
-                        <div className="flex items-center gap-2">
-                          <Select
-                            value={startHour}
-                            onValueChange={(value) => handleTimeSelectChange(day, 'start', value, startMinute)}
+                      <div key={day} className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            id={`day-off-${day}`}
+                            checked={dayIsOff}
+                            onCheckedChange={(checked) => handleDayOffToggle(day, checked === true)}
+                          />
+                          <Label 
+                            htmlFor={`day-off-${day}`} 
+                            className="text-sm font-medium cursor-pointer flex-1"
                           >
-                            <SelectTrigger className="w-20">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {hours.map((h) => (
-                                <SelectItem key={h} value={h}>{h}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className="text-sm font-medium">:</span>
-                          <Select
-                            value={startMinute}
-                            onValueChange={(value) => handleTimeSelectChange(day, 'start', startHour, value)}
-                          >
-                            <SelectTrigger className="w-20">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {minutes.filter((_, i) => i % 5 === 0).map((m) => (
-                                <SelectItem key={m} value={m}>{m}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            {DAY_LABELS[day]} {dayIsOff && <span className="text-muted-foreground">(Jour de repos)</span>}
+                          </Label>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Select
-                            value={endHour}
-                            onValueChange={(value) => handleTimeSelectChange(day, 'end', value, endMinute)}
-                          >
-                            <SelectTrigger className="w-20">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {hours.map((h) => (
-                                <SelectItem key={h} value={h}>{h}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className="text-sm font-medium">:</span>
-                          <Select
-                            value={endMinute}
-                            onValueChange={(value) => handleTimeSelectChange(day, 'end', endHour, value)}
-                          >
-                            <SelectTrigger className="w-20">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {minutes.filter((_, i) => i % 5 === 0).map((m) => (
-                                <SelectItem key={m} value={m}>{m}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        {!dayIsOff && (
+                          <div className="grid grid-cols-[1fr_1fr] gap-4 items-center ml-7">
+                            <div className="flex items-center gap-2">
+                              <Label className="text-xs text-muted-foreground">De</Label>
+                              <Select
+                                value={startHour}
+                                onValueChange={(value) => handleTimeSelectChange(day, 'start', value, startMinute)}
+                              >
+                                <SelectTrigger className="w-20">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {hours.map((h) => (
+                                    <SelectItem key={h} value={h}>{h}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-sm font-medium">:</span>
+                              <Select
+                                value={startMinute}
+                                onValueChange={(value) => handleTimeSelectChange(day, 'start', startHour, value)}
+                              >
+                                <SelectTrigger className="w-20">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {minutes.filter((_, i) => i % 5 === 0).map((m) => (
+                                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Label className="text-xs text-muted-foreground">À</Label>
+                              <Select
+                                value={endHour}
+                                onValueChange={(value) => handleTimeSelectChange(day, 'end', value, endMinute)}
+                              >
+                                <SelectTrigger className="w-20">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {hours.map((h) => (
+                                    <SelectItem key={h} value={h}>{h}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-sm font-medium">:</span>
+                              <Select
+                                value={endMinute}
+                                onValueChange={(value) => handleTimeSelectChange(day, 'end', endHour, value)}
+                              >
+                                <SelectTrigger className="w-20">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {minutes.filter((_, i) => i % 5 === 0).map((m) => (
+                                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
