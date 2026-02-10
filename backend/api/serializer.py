@@ -434,6 +434,7 @@ class ClientSerializer(serializers.ModelSerializer):
         
         # Fonctionnalités diverses
         ret['tradingEnabled'] = bool(ret.get('trading_enabled', True))
+        ret['bannerMessage'] = ret.get('banner_message', '') or ''
         
         return ret
 

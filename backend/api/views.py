@@ -735,6 +735,9 @@ def client_create(request):
         'preferences': preferences,
         'compliance_family_flags': compliance_family_flags,
         'funds_sources': funds_sources,
+        # Miscellaneous features
+        'trading_enabled': bool(request.data.get('tradingEnabled', True)) if not isinstance(request.data.get('tradingEnabled'), str) else request.data.get('tradingEnabled', 'true').lower() == 'true',
+        'banner_message': request.data.get('bannerMessage', '') or '',
     })
     
     try:
@@ -1163,6 +1166,10 @@ def client_detail(request, client_id):
         if 'tradingEnabled' in request.data:
             v = request.data.get('tradingEnabled')
             client.trading_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+        
+        # Update banner message if provided
+        if 'bannerMessage' in request.data:
+            client.banner_message = request.data.get('bannerMessage', '') or ''
         
         client.save()
         serializer = ClientSerializer(client, context={'request': request})

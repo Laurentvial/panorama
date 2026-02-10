@@ -4,7 +4,8 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet } from 'lucide-react';
+import { Textarea } from './ui/textarea';
+import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet, MessageSquare } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
@@ -50,6 +51,15 @@ export function ClientMiscTab({
       setTradingEnabled(client.tradingEnabled);
     } else {
       setTradingEnabled(true); // Default to true
+    }
+  }, [client]);
+
+  // Initialize banner message from client data
+  useEffect(() => {
+    if (client?.bannerMessage !== undefined) {
+      setBannerMessage(client.bannerMessage || '');
+    } else {
+      setBannerMessage('');
     }
   }, [client]);
 
@@ -102,6 +112,28 @@ export function ClientMiscTab({
       }
     } finally {
       setSavingTradingEnabled(false);
+    }
+  }
+
+  async function handleSaveBannerMessage() {
+    setSavingBannerMessage(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ bannerMessage: bannerMessage }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Message de bannière mis à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving banner message:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour du message de bannière');
+      // Revert to original value on error
+      if (client?.bannerMessage !== undefined) {
+        setBannerMessage(client.bannerMessage || '');
+      }
+    } finally {
+      setSavingBannerMessage(false);
     }
   }
 
@@ -202,6 +234,43 @@ export function ClientMiscTab({
                 size="sm"
               >
                 {savingTradingEnabled ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Banner Message Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" />
+            Message de bannière
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Écrivez un message qui sera affiché comme une bannière en haut de la plateforme du client.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="bannerMessage">Message de bannière</Label>
+              <Textarea
+                id="bannerMessage"
+                value={bannerMessage}
+                onChange={(e) => setBannerMessage(e.target.value)}
+                placeholder="Entrez le message à afficher sur la plateforme du client..."
+                rows={4}
+                className="w-full"
+              />
+            </div>
+            <div className="pt-2">
+              <Button
+                onClick={handleSaveBannerMessage}
+                disabled={savingBannerMessage}
+                size="sm"
+              >
+                {savingBannerMessage ? 'Enregistrement...' : 'Enregistrer'}
               </Button>
             </div>
           </div>

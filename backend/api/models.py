@@ -138,6 +138,7 @@ class Client(models.Model):
     
     # Fonctionnalités diverses
     trading_enabled = models.BooleanField(default=True)  # Activer le trading (afficher le bouton Trader dans les assets)
+    banner_message = models.TextField(default="", blank=True)  # Message de bannière à afficher sur la plateforme client
     
     # Relations
     managed_by = models.CharField(max_length=50, default="", blank=True)  # ID ou username du gestionnaire

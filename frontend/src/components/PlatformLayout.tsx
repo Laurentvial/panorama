@@ -9,6 +9,7 @@ import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, Arrow
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { CookieBanner } from './CookieBanner';
+import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile } from './ui/use-mobile';
 import '../styles/PlatformTypography.css';
@@ -172,6 +173,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         ['--platform-button-bg' as any]: platformButtonBg,
       }}
     >
+      {/* Client Banner */}
+      <ClientBanner topOffset={0} />
+      
       {/* Header */}
       <header style={{
         backgroundColor: 'var(--primary)',
@@ -183,7 +187,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         alignItems: 'center',
         gap: isMobile ? '12px' : '20px',
         position: 'sticky',
-        top: 0,
+        top: 'var(--client-banner-height, 0px)',
         // Keep header (and close X) above the drawer overlay.
         zIndex: showBottomNav ? 500 : 100,
       }}>
