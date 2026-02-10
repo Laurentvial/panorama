@@ -9,8 +9,58 @@ interface ProtectedRouteProps {
     children?: React.ReactNode;
 }
 
+// Cache for authentication results with TTL (5 minutes)
+const AUTH_CACHE_KEY = 'admin_auth_cache';
+const AUTH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+interface AuthCache {
+    isAuthenticated: boolean;
+    timestamp: number;
+    tokenHash: string; // Hash of token to detect token changes
+}
+
+function getTokenHash(token: string | null): string {
+    if (!token) return '';
+    // Simple hash using first and last 10 chars
+    return token.substring(0, 10) + token.substring(token.length - 10);
+}
+
+function getCachedAuth(): AuthCache | null {
+    try {
+        const cached = sessionStorage.getItem(AUTH_CACHE_KEY);
+        if (!cached) return null;
+        
+        const authCache: AuthCache = JSON.parse(cached);
+        const now = Date.now();
+        
+        // Check if cache is still valid
+        if (now - authCache.timestamp < AUTH_CACHE_TTL) {
+            return authCache;
+        }
+        
+        // Cache expired, remove it
+        sessionStorage.removeItem(AUTH_CACHE_KEY);
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setCachedAuth(isAuthenticated: boolean, tokenHash: string) {
+    try {
+        const authCache: AuthCache = {
+            isAuthenticated,
+            timestamp: Date.now(),
+            tokenHash
+        };
+        sessionStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(authCache));
+    } catch (e) {
+        // Ignore storage errors
+    }
+}
+
 function ProtectedRoute({ children }: ProtectedRouteProps) { 
-    const [isAuthenticated, setIsAuthenticated] = useState(null)
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 
     useEffect(() => {
         authenticate().catch(() => setIsAuthenticated(false));
@@ -25,6 +75,8 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
             });
             if (res.access) {   
                 localStorage.setItem(ACCESS_TOKEN, res.access);
+                // Clear cache on token refresh
+                sessionStorage.removeItem(AUTH_CACHE_KEY);
                 setIsAuthenticated(true);
             } else {
                 setIsAuthenticated(false);
@@ -40,6 +92,15 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
     const authenticate = async () => {
         const token = localStorage.getItem(ACCESS_TOKEN);
         const userType = localStorage.getItem('userType');
+        const tokenHash = getTokenHash(token);
+        
+        // Check cache first
+        const cachedAuth = getCachedAuth();
+        if (cachedAuth && cachedAuth.tokenHash === tokenHash) {
+            console.log('ProtectedRoute: Using cached authentication result');
+            setIsAuthenticated(cachedAuth.isAuthenticated);
+            return;
+        }
         
         console.log('ProtectedRoute: Checking admin authentication', {
             hasToken: !!token,
@@ -50,6 +111,7 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
         if (!token) {
             console.log('ProtectedRoute: No admin token found');
             setIsAuthenticated(false);
+            setCachedAuth(false, tokenHash);
             return;
         }
 
@@ -57,6 +119,7 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
         if (userType === 'client' || token.startsWith('client_')) {
             console.log('ProtectedRoute: Blocked - Client token detected in admin route');
             setIsAuthenticated(false);
+            setCachedAuth(false, tokenHash);
             return;
         }
 
@@ -72,11 +135,13 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
             } else {
                 console.log('ProtectedRoute: Token valid, authenticated');
                 setIsAuthenticated(true);
+                setCachedAuth(true, tokenHash);
             }
         } catch (error) {
             // Invalid JWT token (might be client token or malformed)
             console.error('ProtectedRoute: JWT decode error', error);
             setIsAuthenticated(false);
+            setCachedAuth(false, tokenHash);
         }
     }
     

@@ -1,42 +1,51 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
-import Login from './components/LoginPage';
-import AdminLoginPage from './components/AdminLoginPage';
-import Dashboard from './components/Dashboard';
-import NotFound from './components/NotFound';
-import UsersAndTeams from './components/UsersTeams';
-import Clients from './components/Clients';
-import AddClient from './components/AddClient';
-import { ClientDetail } from './components/ClientDetail';
-import { ManageRibs } from './components/ManageRibs';
-import { ManageAssets } from './components/ManageAssets';
-import { ManageUsefulLinks } from './components/ManageUsefulLinks';
-import { ManageNews } from './components/ManageNews';
-import { Transactions } from './components/Transactions';
-import { Messagerie } from './components/Messagerie';
-import { ProduitsInvestissements } from './components/ProduitsInvestissements';
-import { AddProduct } from './components/AddProduct';
-import { EditProduct } from './components/EditProduct';
-import { Positions } from './components/Positions';
-import { PlatformDashboard } from './components/PlatformDashboard';
-import { PlatformPortfolio } from './components/PlatformPortfolio';
-import { PlatformTrading } from './components/PlatformTrading';
-import { PlatformDiscover } from './components/PlatformDiscover';
-import { PlatformAccountVerification } from './components/PlatformAccountVerification';
-import { PlatformLayout } from './components/PlatformLayout';
-import { ProductDetail } from './components/ProductDetail';
-import { MonProfil } from './components/MonProfil';
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
-import { ClientImpersonate } from './components/ClientImpersonate';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
-import { Settings } from './components/Settings';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './utils/constants';
 import './styles/Card.css';
+
+// Lazy load all route components for better performance
+const Login = lazy(() => import('./components/LoginPage'));
+const AdminLoginPage = lazy(() => import('./components/AdminLoginPage'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const NotFound = lazy(() => import('./components/NotFound'));
+const UsersAndTeams = lazy(() => import('./components/UsersTeams'));
+const Clients = lazy(() => import('./components/Clients'));
+const AddClient = lazy(() => import('./components/AddClient'));
+const ClientDetail = lazy(() => import('./components/ClientDetail').then(m => ({ default: m.ClientDetail })));
+const ManageRibs = lazy(() => import('./components/ManageRibs').then(m => ({ default: m.ManageRibs })));
+const ManageAssets = lazy(() => import('./components/ManageAssets').then(m => ({ default: m.ManageAssets })));
+const ManageUsefulLinks = lazy(() => import('./components/ManageUsefulLinks').then(m => ({ default: m.ManageUsefulLinks })));
+const ManageNews = lazy(() => import('./components/ManageNews').then(m => ({ default: m.ManageNews })));
+const Transactions = lazy(() => import('./components/Transactions').then(m => ({ default: m.Transactions })));
+const Messagerie = lazy(() => import('./components/Messagerie').then(m => ({ default: m.Messagerie })));
+const ProduitsInvestissements = lazy(() => import('./components/ProduitsInvestissements').then(m => ({ default: m.ProduitsInvestissements })));
+const AddProduct = lazy(() => import('./components/AddProduct').then(m => ({ default: m.AddProduct })));
+const EditProduct = lazy(() => import('./components/EditProduct').then(m => ({ default: m.EditProduct })));
+const Positions = lazy(() => import('./components/Positions').then(m => ({ default: m.Positions })));
+const PlatformDashboard = lazy(() => import('./components/PlatformDashboard').then(m => ({ default: m.PlatformDashboard })));
+const PlatformPortfolio = lazy(() => import('./components/PlatformPortfolio').then(m => ({ default: m.PlatformPortfolio })));
+const PlatformTrading = lazy(() => import('./components/PlatformTrading').then(m => ({ default: m.PlatformTrading })));
+const PlatformDiscover = lazy(() => import('./components/PlatformDiscover').then(m => ({ default: m.PlatformDiscover })));
+const PlatformAccountVerification = lazy(() => import('./components/PlatformAccountVerification').then(m => ({ default: m.PlatformAccountVerification })));
+const PlatformLayout = lazy(() => import('./components/PlatformLayout').then(m => ({ default: m.PlatformLayout })));
+const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => ({ default: m.ProductDetail })));
+const MonProfil = lazy(() => import('./components/MonProfil').then(m => ({ default: m.MonProfil })));
+const ClientImpersonate = lazy(() => import('./components/ClientImpersonate').then(m => ({ default: m.ClientImpersonate })));
+const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
+
+// Loading fallback component
+const LoadingFallback = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+    <div>Chargement...</div>
+  </div>
+);
 
 function Logout() {
     const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
@@ -94,50 +103,70 @@ function App() {
                     <Toaster />
                 <Routes>
                     {/* Public Routes */}
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/admin/login" element={<AdminLoginPage />} />
+                    <Route path="/login" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <Login />
+                        </Suspense>
+                    } />
+                    <Route path="/admin/login" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <AdminLoginPage />
+                        </Suspense>
+                    } />
                     <Route path="/logout" element={<Logout />} />
                     
                     {/* Admin/CRM Routes - All under /admin */}
                     <Route path="/admin" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Dashboard />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Dashboard />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/dashboard" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Dashboard />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Dashboard />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/users" element={
                         <ProtectedRoute>
                             <Layout>
-                                <UsersAndTeams />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <UsersAndTeams />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/profile" element={
                         <ProtectedRoute>
                             <Layout>
-                                <MonProfil />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <MonProfil />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/clients" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Clients onSelectClient={() => {}} />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Clients onSelectClient={() => {}} />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/clients/add" element={
                         <ProtectedRoute>
                             <Layout>
-                                <AddClient />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <AddClient />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
@@ -151,49 +180,63 @@ function App() {
                     <Route path="/admin/manage/ribs" element={
                         <ProtectedRoute>
                             <Layout>
-                                <ManageRibs />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ManageRibs />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/manage/assets" element={
                         <ProtectedRoute>
                             <Layout>
-                                <ManageAssets />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ManageAssets />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/manage/useful-links" element={
                         <ProtectedRoute>
                             <Layout>
-                                <ManageUsefulLinks />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ManageUsefulLinks />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/manage/news" element={
                         <ProtectedRoute>
                             <Layout>
-                                <ManageNews />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ManageNews />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/transactions" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Transactions />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Transactions />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/messagerie" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Messagerie />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Messagerie />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/positions" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Positions />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Positions />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
@@ -207,21 +250,27 @@ function App() {
                     <Route path="/admin/produits-investissements/add" element={
                         <ProtectedRoute>
                             <Layout>
-                                <AddProduct />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <AddProduct />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements/edit/:id" element={
                         <ProtectedRoute>
                             <Layout>
-                                <EditProduct />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <EditProduct />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
                     <Route path="/admin/settings" element={
                         <ProtectedRoute>
                             <Layout>
-                                <Settings />
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <Settings />
+                                </Suspense>
                             </Layout>
                         </ProtectedRoute>
                     } />
@@ -233,33 +282,47 @@ function App() {
                     {/* Trading Platform Routes - For Clients */}
                     <Route path="/platform/impersonate/:id" element={
                         <ProtectedRoute>
-                            <ClientImpersonate />
+                            <Suspense fallback={<LoadingFallback />}>
+                                <ClientImpersonate />
+                            </Suspense>
                         </ProtectedRoute>
                     } />
                     <Route path="/platform" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <PlatformDashboard />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformDashboard />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/portfolio" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <PlatformPortfolio />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformPortfolio />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/verification" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <PlatformAccountVerification />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformAccountVerification />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
@@ -270,27 +333,39 @@ function App() {
                     <Route path="/platform/funds" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <PlatformTrading />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformTrading />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/discover" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <PlatformDiscover />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformDiscover />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
                     <Route path="/platform/product/:id" element={
                         <ClientProtectedRoute>
                             <PlatformSearchProvider>
-                                <PlatformLayout>
-                                    <ProductDetail />
-                                </PlatformLayout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <ProductDetail />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
                             </PlatformSearchProvider>
                         </ClientProtectedRoute>
                     } />
@@ -312,7 +387,11 @@ function App() {
                     <Route path="/" element={<Navigate to="/login" replace />} />
                     
                     {/* 404 */}
-                    <Route path="*" element={<NotFound />} />
+                    <Route path="*" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <NotFound />
+                        </Suspense>
+                    } />
                 </Routes>
                 </ThemeProvider>
             </UserProvider>

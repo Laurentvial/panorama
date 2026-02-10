@@ -7,6 +7,60 @@ interface ClientProtectedRouteProps {
     children?: React.ReactNode;
 }
 
+// Cache for client authentication results with TTL (5 minutes)
+const CLIENT_AUTH_CACHE_KEY = 'client_auth_cache';
+const CLIENT_AUTH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+interface ClientAuthCache {
+    isAuthenticated: boolean;
+    timestamp: number;
+    tokenHash: string; // Hash of token to detect token changes
+    storageType: 'session' | 'local';
+}
+
+function getTokenHash(token: string | null): string {
+    if (!token) return '';
+    // Simple hash using first and last 10 chars
+    return token.substring(0, 10) + token.substring(token.length - 10);
+}
+
+function getCachedClientAuth(storageType: 'session' | 'local'): ClientAuthCache | null {
+    try {
+        const storage = storageType === 'session' ? sessionStorage : localStorage;
+        const cached = storage.getItem(CLIENT_AUTH_CACHE_KEY);
+        if (!cached) return null;
+        
+        const authCache: ClientAuthCache = JSON.parse(cached);
+        const now = Date.now();
+        
+        // Check if cache is still valid
+        if (now - authCache.timestamp < CLIENT_AUTH_CACHE_TTL) {
+            return authCache;
+        }
+        
+        // Cache expired, remove it
+        storage.removeItem(CLIENT_AUTH_CACHE_KEY);
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setCachedClientAuth(isAuthenticated: boolean, tokenHash: string, storageType: 'session' | 'local') {
+    try {
+        const storage = storageType === 'session' ? sessionStorage : localStorage;
+        const authCache: ClientAuthCache = {
+            isAuthenticated,
+            timestamp: Date.now(),
+            tokenHash,
+            storageType
+        };
+        storage.setItem(CLIENT_AUTH_CACHE_KEY, JSON.stringify(authCache));
+    } catch (e) {
+        // Ignore storage errors
+    }
+}
+
 function ClientProtectedRoute({ children }: ClientProtectedRouteProps) { 
     const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -29,13 +83,24 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
         });
 
         const storage: Storage = isSessionClient ? sessionStorage : localStorage;
+        const storageType: 'session' | 'local' = isSessionClient ? 'session' : 'local';
 
         const token = isSessionClient ? sessionToken : localStorage.getItem(CLIENT_ACCESS_TOKEN);
         const userType = isSessionClient ? sessionUserType : (token ? 'client' : null);
+        const tokenHash = getTokenHash(token);
+        
+        // Check cache first
+        const cachedAuth = getCachedClientAuth(storageType);
+        if (cachedAuth && cachedAuth.tokenHash === tokenHash) {
+            console.log('ClientProtectedRoute: Using cached authentication result');
+            setIsAuthenticated(cachedAuth.isAuthenticated);
+            return;
+        }
         
         if (!token) {
             console.log('ClientProtectedRoute: No token found, redirecting to login');
             setIsAuthenticated(false);
+            setCachedClientAuth(false, tokenHash, storageType);
             return;
         }
 
@@ -51,6 +116,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                     if (client.platform_access && client.active) {
                         console.log('ClientProtectedRoute: Client data found in storage, authenticated');
                         setIsAuthenticated(true);
+                        setCachedClientAuth(true, tokenHash, storageType);
                         return;
                     } else {
                         console.log('ClientProtectedRoute: Client data found but access denied', {
@@ -83,6 +149,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                         storage.setItem('clientData', JSON.stringify(data.client));
                         console.log('ClientProtectedRoute: API authentication successful');
                         setIsAuthenticated(true);
+                        setCachedClientAuth(true, tokenHash, storageType);
                         return;
                     } else {
                         console.log('ClientProtectedRoute: Client disabled or no platform access');
@@ -91,7 +158,9 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                         storage.removeItem(CLIENT_ACCESS_TOKEN);
                         storage.removeItem('userType');
                         storage.removeItem('clientData');
+                        storage.removeItem(CLIENT_AUTH_CACHE_KEY);
                         setIsAuthenticated(false);
+                        setCachedClientAuth(false, tokenHash, storageType);
                         return;
                     }
                 } else {
@@ -102,7 +171,9 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                     storage.removeItem(CLIENT_ACCESS_TOKEN);
                     storage.removeItem('userType');
                     storage.removeItem('clientData');
+                    storage.removeItem(CLIENT_AUTH_CACHE_KEY);
                     setIsAuthenticated(false);
+                    setCachedClientAuth(false, tokenHash, storageType);
                     return;
                 }
             } catch (error) {
@@ -112,13 +183,16 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                 storage.removeItem(CLIENT_ACCESS_TOKEN);
                 storage.removeItem('userType');
                 storage.removeItem('clientData');
+                storage.removeItem(CLIENT_AUTH_CACHE_KEY);
                 setIsAuthenticated(false);
+                setCachedClientAuth(false, tokenHash, storageType);
                 return;
             }
         }
         
         console.log('ClientProtectedRoute: Not a client token or authentication failed');
         setIsAuthenticated(false);
+        setCachedClientAuth(false, tokenHash, storageType);
     }
     
     if (isAuthenticated === null) {

@@ -124,6 +124,81 @@ async function refreshAccessToken(): Promise<string | null> {
 // Flag to prevent multiple redirects
 let isRedirecting = false;
 
+// API Cache system with TTL
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+  ttl: number;
+}
+
+const apiCache = new Map<string, CacheEntry>();
+const DEFAULT_CACHE_TTL = 2 * 60 * 1000; // 2 minutes default
+const MAX_CACHE_SIZE = 100; // Maximum number of cached entries
+
+// Clean up expired cache entries
+function cleanupCache() {
+  const now = Date.now();
+  for (const [key, entry] of apiCache.entries()) {
+    if (now - entry.timestamp > entry.ttl) {
+      apiCache.delete(key);
+    }
+  }
+  
+  // If cache is too large, remove oldest entries
+  if (apiCache.size > MAX_CACHE_SIZE) {
+    const entries = Array.from(apiCache.entries());
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = entries.slice(0, apiCache.size - MAX_CACHE_SIZE);
+    toRemove.forEach(([key]) => apiCache.delete(key));
+  }
+}
+
+// Generate cache key from endpoint and options
+function getCacheKey(endpoint: string, options: RequestInit): string {
+  const method = options.method || 'GET';
+  const body = options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : '';
+  return `${method}:${endpoint}:${body}`;
+}
+
+// Get cached data if available and valid
+function getCachedData(key: string): any | null {
+  cleanupCache();
+  const entry = apiCache.get(key);
+  if (!entry) return null;
+  
+  const now = Date.now();
+  if (now - entry.timestamp > entry.ttl) {
+    apiCache.delete(key);
+    return null;
+  }
+  
+  return entry.data;
+}
+
+// Set cached data
+function setCachedData(key: string, data: any, ttl: number = DEFAULT_CACHE_TTL) {
+  cleanupCache();
+  apiCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    ttl
+  });
+}
+
+// Clear cache for a specific endpoint pattern or all cache
+export function clearApiCache(endpointPattern?: string) {
+  if (!endpointPattern) {
+    apiCache.clear();
+    return;
+  }
+  
+  for (const [key] of apiCache.entries()) {
+    if (key.includes(endpointPattern)) {
+      apiCache.delete(key);
+    }
+  }
+}
+
 // Helper function to retry a request with exponential backoff
 async function retryRequest(
   url: string,
@@ -150,6 +225,19 @@ async function retryRequest(
 
 // Helper function for API calls that returns data directly
 export async function apiCall(endpoint: string, options: RequestInit = {}) {
+  const method = options.method || 'GET';
+  const isGetRequest = method === 'GET';
+  
+  // Check cache for GET requests
+  if (isGetRequest) {
+    const cacheKey = getCacheKey(endpoint, options);
+    const cachedData = getCachedData(cacheKey);
+    if (cachedData !== null) {
+      console.log(`API Cache hit: ${endpoint}`);
+      return cachedData;
+    }
+  }
+  
   const auth = getActiveAuth();
   let token = auth.token;
   const activeUserType = auth.userType;
@@ -338,5 +426,24 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
     return null;
   }
 
-  return JSON.parse(text);
+  const data = JSON.parse(text);
+  
+  // Cache GET requests
+  if (isGetRequest && response.ok) {
+    const cacheKey = getCacheKey(endpoint, options);
+    // Use cache-control header if available, otherwise use default TTL
+    const cacheControl = response.headers.get('cache-control');
+    let ttl = DEFAULT_CACHE_TTL;
+    
+    if (cacheControl) {
+      const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+      if (maxAgeMatch) {
+        ttl = parseInt(maxAgeMatch[1], 10) * 1000; // Convert seconds to milliseconds
+      }
+    }
+    
+    setCachedData(cacheKey, data, ttl);
+  }
+  
+  return data;
 }

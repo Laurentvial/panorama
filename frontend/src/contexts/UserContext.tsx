@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { apiCall } from '../utils/api';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 
@@ -17,11 +17,34 @@ const defaultContextValue: UserContextType = {
 
 const UserContext = createContext<UserContextType>(defaultContextValue);
 
+// Cache for user data with TTL (2 minutes)
+const USER_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+let userCache: { user: any; timestamp: number; tokenHash: string; userType: string } | null = null;
+let isLoadingUser = false;
+
+function getTokenHash(token: string | null): string {
+  if (!token) return '';
+  return token.substring(0, 10) + token.substring(token.length - 10);
+}
+
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const isMountedRef = useRef(true);
 
-  const getCurrentUser = async () => {
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const getCurrentUser = async (forceRefresh: boolean = false) => {
+    // Prevent concurrent requests
+    if (isLoadingUser && !forceRefresh) {
+      return;
+    }
+
+    isLoadingUser = true;
     const path =
       typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
     const isAdminRoute = path.startsWith('/admin');
@@ -55,11 +78,33 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     // Only make API call if we have a token
     if (!token) {
-      setCurrentUser(null);
-      setLoading(false);
+      if (isMountedRef.current) {
+        setCurrentUser(null);
+        setLoading(false);
+      }
+      isLoadingUser = false;
       return;
     }
 
+    const tokenHash = getTokenHash(token);
+    
+    // Check cache first (unless force refresh)
+    if (!forceRefresh && userCache) {
+      const now = Date.now();
+      const cacheAge = now - userCache.timestamp;
+      
+      // Use cache if it's still valid and token hasn't changed
+      if (cacheAge < USER_CACHE_TTL && userCache.tokenHash === tokenHash && userCache.userType === userType) {
+        console.log('UserContext: Using cached user data');
+        if (isMountedRef.current) {
+          setCurrentUser(userCache.user);
+          setLoading(false);
+        }
+        isLoadingUser = false;
+        return;
+      }
+    }
+    
     try {
       // Check if it's a client or admin user
       // If userType is not set or is 'admin', treat as admin (Django JWT)
@@ -77,13 +122,23 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               storage.removeItem(CLIENT_ACCESS_TOKEN);
               storage.removeItem('userType');
             } else {
-              setCurrentUser({
+              const cachedUserData = {
                 ...cachedClient,
                 userType: 'client'
-              });
-              // Show cached data immediately, then refresh from API to keep server-derived
-              // flags (like accountVerified) consistent.
-              setLoading(false);
+              };
+              if (isMountedRef.current) {
+                setCurrentUser(cachedUserData);
+                // Show cached data immediately, then refresh from API to keep server-derived
+                // flags (like accountVerified) consistent.
+                setLoading(false);
+              }
+              // Update cache
+              userCache = {
+                user: cachedUserData,
+                timestamp: Date.now(),
+                tokenHash,
+                userType: 'client'
+              };
             }
           } catch (e) {
             // ignore parse errors; we'll fetch below
@@ -110,32 +165,50 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             storage.removeItem(CLIENT_ACCESS_TOKEN);
             storage.removeItem('userType');
             storage.removeItem('clientData');
-            setCurrentUser(null);
-            setLoading(false);
+            if (isMountedRef.current) {
+              setCurrentUser(null);
+              setLoading(false);
+            }
+            userCache = null;
             // Redirect to login if on platform route
             if (typeof window !== 'undefined' && window.location.pathname.startsWith('/platform')) {
               window.location.href = '/login';
             }
+            isLoadingUser = false;
             return;
           }
           
-          setCurrentUser({
+          const userData = {
             ...client,
             userType: 'client'
-          });
+          };
+          if (isMountedRef.current) {
+            setCurrentUser(userData);
+          }
           storage.setItem('clientData', JSON.stringify(client));
+          // Update cache
+          userCache = {
+            user: userData,
+            timestamp: Date.now(),
+            tokenHash,
+            userType: 'client'
+          };
         } else if (response.status === 403) {
           // Client is disabled or access denied - sign out
           storage.removeItem(ACCESS_TOKEN);
           storage.removeItem(CLIENT_ACCESS_TOKEN);
           storage.removeItem('userType');
           storage.removeItem('clientData');
-          setCurrentUser(null);
-          setLoading(false);
+          if (isMountedRef.current) {
+            setCurrentUser(null);
+            setLoading(false);
+          }
+          userCache = null;
           // Redirect to login if on platform route
           if (typeof window !== 'undefined' && window.location.pathname.startsWith('/platform')) {
             window.location.href = '/login';
           }
+          isLoadingUser = false;
           return;
         } else if (!clientData) {
           // Only fail hard if we had no cached clientData at all
@@ -145,10 +218,20 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Admin user (Django JWT) - userType is 'admin' or not set
         try {
           const response = await apiCall("/api/user/current/");
-          setCurrentUser({
+          const userData = {
             ...response,
             userType: 'admin'
-          });
+          };
+          if (isMountedRef.current) {
+            setCurrentUser(userData);
+          }
+          // Update cache
+          userCache = {
+            user: userData,
+            timestamp: Date.now(),
+            tokenHash,
+            userType: userType || 'admin'
+          };
         } catch (apiError: any) {
           // If API call fails, it might be because token is invalid
           throw apiError;
@@ -181,8 +264,23 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 // Retry the request with new token
                 try {
                   const response = await apiCall("/api/user/current/");
-                  setCurrentUser(response);
-                  setLoading(false);
+                  const userData = {
+                    ...response,
+                    userType: 'admin'
+                  };
+                  if (isMountedRef.current) {
+                    setCurrentUser(userData);
+                    setLoading(false);
+                  }
+                  // Update cache with new token hash
+                  const newTokenHash = getTokenHash(localStorage.getItem(ACCESS_TOKEN));
+                  userCache = {
+                    user: userData,
+                    timestamp: Date.now(),
+                    tokenHash: newTokenHash,
+                    userType: 'admin'
+                  };
+                  isLoadingUser = false;
                   return;
                 } catch (retryError) {
                   console.error("Erreur après refresh du token", retryError);
@@ -200,9 +298,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.removeItem('userType');
       }
       
-      setCurrentUser(null);
+      if (isMountedRef.current) {
+        setCurrentUser(null);
+      }
+      userCache = null;
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+      isLoadingUser = false;
     }
   };
 
@@ -211,7 +315,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const refreshUser = async () => {
-    await getCurrentUser();
+    // Clear cache and force refresh
+    userCache = null;
+    await getCurrentUser(true);
   };
 
   return (

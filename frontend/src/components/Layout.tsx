@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -9,12 +9,12 @@ interface LayoutProps {
   children?: React.ReactNode;
 }
 
-export function Layout({ children }: LayoutProps) {
+const LayoutComponent = ({ children }: LayoutProps) => {
   const { currentUser, loading } = useUser();
   const location = useLocation();
 
-  // Map route paths to sidebar page IDs
-  const getCurrentPage = () => {
+  // Memoize current page calculation
+  const currentPage = useMemo(() => {
     const path = location.pathname;
     if (path === '/admin' || path === '/admin/dashboard') return 'dashboard';
     if (path === '/admin/users') return 'users-teams';
@@ -31,12 +31,16 @@ export function Layout({ children }: LayoutProps) {
     if (path === '/admin/manage/news') return 'manage-news';
     if (path === '/admin/settings') return 'settings';
     return 'dashboard';
-  };
+  }, [location.pathname]);
 
-  const handleNavigate = (page: string) => {
+  // Memoize navigation handler
+  const handleNavigate = useCallback((page: string) => {
     // Sidebar will handle navigation using useNavigate internally
     // This is just a placeholder for the onNavigate prop
-  };
+  }, []);
+
+  // Memoize user role
+  const userRole = useMemo(() => currentUser?.role || 'admin', [currentUser?.role]);
 
   if (loading) {
     return (
@@ -51,9 +55,9 @@ export function Layout({ children }: LayoutProps) {
       <Header user={currentUser} />
       <div style={{ display: 'flex' }}>
         <Sidebar 
-          currentPage={getCurrentPage()} 
+          currentPage={currentPage} 
           onNavigate={handleNavigate} 
-          userRole={currentUser?.role || 'admin'} 
+          userRole={userRole} 
         />
         <div className="layout-content">
           {children}
@@ -61,5 +65,7 @@ export function Layout({ children }: LayoutProps) {
       </div>
     </div>
   );
-}
+};
+
+export const Layout = React.memo(LayoutComponent);
 
