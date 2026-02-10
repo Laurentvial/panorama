@@ -1836,6 +1836,8 @@ def team_detail(request, team_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_list(request):
+    # Return all users regardless of role (admin, teamleader, gestionnaire, etc.)
+    # No filtering by role or active status - show all users
     users = UserDetails.objects.all()
     serializer = UserDetailsSerializer(users, many=True, context={'request': request})
     return Response({'users': serializer.data})
