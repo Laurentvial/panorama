@@ -13,6 +13,7 @@ import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
 import { useIsMobile } from './ui/use-mobile';
+import { logPlatformAction } from '../utils/platformLogger';
 import { StockChart } from './StockChart';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 
@@ -1845,7 +1846,10 @@ export function ProductDetail() {
                     </div>
                     
                     <Button 
-                      onClick={handleSubscribe}
+                      onClick={() => {
+                        logPlatformAction('click', { element: 'invest_button', productId: id });
+                        handleSubscribe();
+                      }}
                       disabled={isSubscribing}
                       style={{
                         width: '100%',
@@ -2243,6 +2247,7 @@ export function ProductDetail() {
                 width: isMobile ? '100%' : 'auto',
               }}
             onClick={() => {
+              logPlatformAction('click', { element: 'trading_modal_open', assetId: id });
               setTradeAmountEur('');
               setFxError(null);
               setTradeOrderSuccess(null);

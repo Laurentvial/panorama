@@ -16,6 +16,8 @@ import { ClientNotesTab } from './ClientNotesTab';
 import { ClientMiscTab } from './ClientMiscTab';
 import { ClientVerificationTab } from './ClientVerificationTab';
 import { ClientDocumentsTab } from './ClientDocumentsTab';
+import { ClientHistoryTab } from './ClientHistoryTab';
+import { ClientPlatformLogsTab } from './ClientPlatformLogsTab';
 import '../styles/Clients.css';
 
 interface ClientDetailProps {
@@ -295,6 +297,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <TabsTrigger value="verification">Vérification</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="misc">Fonctionnalités diverses</TabsTrigger>
+          <TabsTrigger value="history">Historique</TabsTrigger>
+          <TabsTrigger value="platform-logs">Logs plateforme</TabsTrigger>
         </TabsList>
 
         {/* Info Tab */}
@@ -388,6 +392,16 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
               onRefresh={loadClientData}
             />
           )}
+        </TabsContent>
+
+        {/* History Tab */}
+        <TabsContent value="history">
+          <ClientHistoryTab clientId={clientId} />
+        </TabsContent>
+
+        {/* Platform Logs Tab */}
+        <TabsContent value="platform-logs">
+          <ClientPlatformLogsTab clientId={clientId} />
         </TabsContent>
       </Tabs>
 

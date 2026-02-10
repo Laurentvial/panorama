@@ -73,6 +73,17 @@ export function LoginPage() {
       // Client login only
       await clientSignIn(emailValue, passwordValue);
       await refreshUser();
+      
+      // Log successful login (backend already logs it, but we can also log from frontend for redundancy)
+      // Wait a bit to ensure token is available in storage
+      setTimeout(() => {
+        import('../utils/platformLogger').then(({ logPlatformAction }) => {
+          logPlatformAction('login', { source: 'frontend' });
+        }).catch(() => {
+          // Silently ignore if logging fails
+        });
+      }, 100);
+      
       navigate('/platform');
     } catch (err: any) {
       console.error('Login error:', err);

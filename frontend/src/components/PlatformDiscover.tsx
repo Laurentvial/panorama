@@ -9,6 +9,7 @@ import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { MdPadding } from 'react-icons/md';
 import { useIsMobile } from './ui/use-mobile';
+import { logPlatformAction } from '../utils/platformLogger';
 
 // Component for asset logo with fallback
 function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }: any) {
@@ -731,7 +732,10 @@ export function PlatformDiscover() {
                   return (
                     <Card
                       key={portfolio.id}
-                      onClick={() => navigate(`/platform/product/${portfolio.id}`)}
+                      onClick={() => {
+                        logPlatformAction('click', { element: 'product', productId: portfolio.id });
+                        navigate(`/platform/product/${portfolio.id}`);
+                      }}
                       style={{
                         position: 'relative',
                         overflow: 'hidden',
@@ -871,7 +875,10 @@ export function PlatformDiscover() {
                 return (
                   <Card
                     key={asset.id}
-                    onClick={() => navigate(`/platform/product/${asset.id}`)}
+                    onClick={() => {
+                      logPlatformAction('click', { element: 'asset', assetId: asset.id });
+                      navigate(`/platform/product/${asset.id}`);
+                    }}
                     style={{
                       position: 'relative',
                       overflow: 'hidden',
@@ -1078,7 +1085,10 @@ export function PlatformDiscover() {
                 return (
                   <Card
                     key={`product-${product.id}`}
-                    onClick={() => navigate(`/platform/product/${product.id}`)}
+                    onClick={() => {
+                      logPlatformAction('click', { element: 'product', productId: product.id });
+                      navigate(`/platform/product/${product.id}`);
+                    }}
                     style={{
                       position: 'relative',
                       overflow: 'hidden',

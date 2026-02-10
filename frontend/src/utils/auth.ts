@@ -122,6 +122,34 @@ export async function signOut() {
 }
 
 export async function clientSignOut() {
+  // Capture credentials BEFORE clearing session to ensure logout log succeeds
+  let clientId: string | null = null;
+  let token: string | null = null;
+  
+  // Check sessionStorage first (for impersonation)
+  const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+  if (sessionToken && sessionToken.startsWith('client_')) {
+    clientId = sessionToken.replace('client_', '');
+    token = sessionToken;
+  } else {
+    // Check localStorage (for normal client login)
+    const clientToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
+    if (clientToken && clientToken.startsWith('client_')) {
+      clientId = clientToken.replace('client_', '');
+      token = clientToken;
+    }
+  }
+  
+  // Log logout with captured credentials (before clearing session)
+  if (clientId && token) {
+    try {
+      const { logPlatformActionWithCredentials } = await import('./platformLogger');
+      await logPlatformActionWithCredentials(clientId, token, 'logout', {});
+    } catch (error) {
+      // Silently ignore logging errors
+    }
+  }
+  
   // Clear per-tab client impersonation context (if any)
   sessionStorage.removeItem(ACCESS_TOKEN);
   sessionStorage.removeItem('userType');

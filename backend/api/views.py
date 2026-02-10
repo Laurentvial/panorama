@@ -15,7 +15,7 @@ from .models import Note
 from .models import UserDetails
 from .models import Team
 from .models import TeamMember
-from .models import Log
+from .models import Log, ClientPlatformLog
 from .models import Asset
 from .models import ClientAsset
 from .models import RIB
@@ -37,7 +37,8 @@ from .serializer import (
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
-    ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer
+    ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
+    ClientHistoryLogSerializer, ClientPlatformLogSerializer
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
@@ -428,7 +429,7 @@ def get_transaction_data_for_log(transaction):
     return transaction_data
 
 
-def create_log_entry(event_type, user_id, request, old_value=None, new_value=None, transaction_id=None, client_name=None):
+def create_log_entry(event_type, user_id, request, old_value=None, new_value=None, transaction_id=None, client_name=None, client_id=None):
     """Create a log entry for an activity"""
     try:
         # Generate log ID
@@ -455,6 +456,7 @@ def create_log_entry(event_type, user_id, request, old_value=None, new_value=Non
             id=log_id,
             event_type=event_type,
             user_id=user_id if user_id else None,
+            client_id=client_id if client_id else None,
             details=details,
             old_value=old_value if old_value else {},
             new_value=new_value if new_value else {}
@@ -464,6 +466,50 @@ def create_log_entry(event_type, user_id, request, old_value=None, new_value=Non
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to create log entry for event_type={event_type}, transaction_id={transaction_id}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Don't re-raise - allow the main operation to succeed even if logging fails
+
+def create_platform_log(client_id, action_type, action_details, request):
+    """Create a platform log entry for a client action"""
+    try:
+        # Generate log ID
+        log_id = uuid.uuid4().hex[:12]
+        while ClientPlatformLog.objects.filter(id=log_id).exists():
+            log_id = uuid.uuid4().hex[:12]
+        
+        # Get client
+        try:
+            client = Client.objects.get(id=client_id)
+        except Client.DoesNotExist:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create platform log: Client {client_id} does not exist")
+            return
+        
+        # Extract IP and user agent
+        ip_address = get_client_ip(request)
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+        
+        # Create platform log entry
+        platform_log = ClientPlatformLog.objects.create(
+            id=log_id,
+            client=client,
+            action_type=action_type,
+            action_details=action_details if action_details else {},
+            ip_address=ip_address if ip_address != 'Unknown' else None,
+            user_agent=user_agent if user_agent else None
+        )
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Created platform log: {platform_log.id} for client {client_id}, action_type={action_type}")
+    except Exception as e:
+        # Log the error but don't raise it (to prevent breaking the main operation)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create platform log for client_id={client_id}, action_type={action_type}: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         # Don't re-raise - allow the main operation to succeed even if logging fails
@@ -821,6 +867,28 @@ def client_create(request):
                     useful_link=useful_link
                 )
         
+        # Create log entry for client creation
+        try:
+            client_data_for_log = {
+                'id': client.id,
+                'firstName': client.fname,
+                'lastName': client.lname,
+                'email': client.email,
+            }
+            create_log_entry(
+                event_type='createClient',
+                user_id=request.user if request.user.is_authenticated else None,
+                request=request,
+                old_value={},
+                new_value=client_data_for_log,
+                client_id=client
+            )
+        except Exception as log_error:
+            # Log the error but don't fail the client creation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create log entry for client creation {client_id}: {str(log_error)}")
+        
         serializer = ClientSerializer(client, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except Exception as e:
@@ -1171,6 +1239,29 @@ def client_detail(request, client_id):
         if 'bannerMessage' in request.data:
             client.banner_message = request.data.get('bannerMessage', '') or ''
         
+        # Create log entry for client update
+        try:
+            # Get list of changed fields
+            changed_fields = []
+            for field in request.data.keys():
+                if field not in ['removeProfilePhoto']:  # Skip special fields
+                    changed_fields.append(field)
+            
+            if changed_fields:
+                create_log_entry(
+                    event_type='editClient',
+                    user_id=request.user if request.user.is_authenticated else None,
+                    request=request,
+                    old_value={},  # Could capture old values, but complex for now
+                    new_value={'changed_fields': changed_fields},
+                    client_id=client
+                )
+        except Exception as log_error:
+            # Log the error but don't fail the client update
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to create log entry for client update {client_id}: {str(log_error)}")
+        
         client.save()
         serializer = ClientSerializer(client, context={'request': request})
         return Response({'client': serializer.data})
@@ -1273,6 +1364,163 @@ def client_verification_config(request, client_id):
         logger.error(f'Serializer errors for client {client_id}: {serializer.errors}')
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_history(request, client_id):
+    """Get history of actions performed ON the client (admin/gestionnaire actions)"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    # Get logs related to this client
+    logs = Log.objects.filter(client_id=client).order_by('-created_at')
+    
+    # Pagination support
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '50')
+    
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 50
+        if limit > 500:
+            limit = 500
+    except (ValueError, TypeError):
+        page = 1
+        limit = 50
+    
+    total_count = logs.count()
+    offset = (page - 1) * limit
+    paginated_logs = logs[offset:offset + limit]
+    
+    serializer = ClientHistoryLogSerializer(paginated_logs, many=True)
+    return Response({
+        'history': serializer.data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        }
+    })
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def client_platform_logs(request, client_id):
+    """Get or create platform logs for a client (actions performed BY the client)"""
+    client = get_object_or_404(Client, id=client_id)
+    
+    if request.method == 'GET':
+        # GET: Return platform logs (admin/gestionnaire only)
+        # Check authentication manually
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        token = auth_header.replace('Bearer ', '')
+        
+        # Check if it's an admin token (not client token)
+        if token.startswith('client_'):
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Verify admin authentication
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if not user.is_authenticated:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Get platform logs for this client
+        logs = ClientPlatformLog.objects.filter(client=client).order_by('-created_at')
+        
+        # Pagination support
+        page = request.GET.get('page', '1')
+        limit = request.GET.get('limit', '50')
+        
+        try:
+            page = int(page)
+            limit = int(limit)
+            if page < 1:
+                page = 1
+            if limit < 1:
+                limit = 50
+            if limit > 500:
+                limit = 500
+        except (ValueError, TypeError):
+            page = 1
+            limit = 50
+        
+        total_count = logs.count()
+        offset = (page - 1) * limit
+        paginated_logs = logs[offset:offset + limit]
+        
+        serializer = ClientPlatformLogSerializer(paginated_logs, many=True)
+        return Response({
+            'platformLogs': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+            }
+        })
+    
+    elif request.method == 'POST':
+        # POST: Create a platform log (client can create their own logs)
+        # Check authentication manually
+        auth_header = request.headers.get('Authorization', '')
+        token = None
+        
+        if auth_header.startswith('Bearer '):
+            token = auth_header.replace('Bearer ', '').strip()
+        
+        # If no token provided, return 401 Unauthorized (REST API semantics)
+        if not token:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Check if it's a client token accessing their own logs
+        is_client_access = False
+        is_admin_access = False
+        
+        if token.startswith('client_'):
+            token_client_id = token.replace('client_', '')
+            if token_client_id == client_id:
+                is_client_access = True
+                if not client.platform_access or not client.active:
+                    return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Check if it's an admin token
+        if not token.startswith('client_'):
+            from rest_framework_simplejwt.authentication import JWTAuthentication
+            jwt_auth = JWTAuthentication()
+            try:
+                validated_token = jwt_auth.get_validated_token(token)
+                user = jwt_auth.get_user(validated_token)
+                if user.is_authenticated:
+                    is_admin_access = True
+            except Exception:
+                pass
+        
+        if not is_client_access and not is_admin_access:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Get action data from request
+        action_type = request.data.get('actionType', '')
+        action_details = request.data.get('actionDetails', {})
+        
+        if not action_type:
+            return Response({'error': 'actionType est requis'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create platform log
+        create_platform_log(client_id, action_type, action_details, request)
+        
+        return Response({'message': 'Log créé avec succès'}, status=status.HTTP_201_CREATED)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def client_login(request):
@@ -1331,6 +1579,13 @@ def client_login(request):
         return Response({'error': 'Email ou mot de passe incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
     
     logger.info(f"Successful login for client {client.id} ({email})")
+
+    # Create platform log for login
+    try:
+        create_platform_log(client.id, 'login', {}, request)
+    except Exception as log_error:
+        # Log the error but don't fail the login
+        logger.error(f"Failed to create platform log for login {client.id}: {str(log_error)}")
 
     # Ensure account_verified is consistent with required fields
     changed_fields = _recompute_client_account_verified(client)
@@ -5273,7 +5528,8 @@ def client_transaction_create(request, client_id):
             old_value={},
             new_value=transaction_data,
             transaction_id=transaction_id,
-            client_name=client_name_for_log
+            client_name=client_name_for_log,
+            client_id=client
         )
     except Exception as log_error:
         # Log the error but don't fail the transaction creation
@@ -6002,7 +6258,8 @@ def client_transaction_update(request, client_id, transaction_id):
             old_value=old_transaction_data,
             new_value=new_transaction_data,
             transaction_id=transaction_id,
-            client_name=client_name_for_log
+            client_name=client_name_for_log,
+            client_id=client
         )
     
     serializer = TransactionSerializer(transaction)

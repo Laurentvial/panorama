@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -639,6 +639,71 @@ class LogSerializer(serializers.ModelSerializer):
         ret['details'] = instance.details if instance.details else {}
         ret['oldValue'] = instance.old_value if instance.old_value else {}
         ret['newValue'] = instance.new_value if instance.new_value else {}
+        return ret
+
+class ClientHistoryLogSerializer(serializers.ModelSerializer):
+    """Serializer for client history logs (actions performed ON the client)"""
+    userId = serializers.SerializerMethodField()
+    userName = serializers.SerializerMethodField()
+    eventType = serializers.CharField(source='event_type', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    oldValue = serializers.JSONField(source='old_value', read_only=True)
+    newValue = serializers.JSONField(source='new_value', read_only=True)
+    
+    class Meta:
+        model = Log
+        fields = ['id', 'eventType', 'userId', 'userName', 'createdAt', 'details', 'oldValue', 'newValue']
+        read_only_fields = ['id', 'createdAt']
+    
+    def get_userId(self, obj):
+        return obj.user_id.id if obj.user_id else None
+    
+    def get_userName(self, obj):
+        if obj.user_id:
+            return f"{obj.user_id.first_name} {obj.user_id.last_name}".strip() or obj.user_id.username
+        # If no user_id but we have client_name in details (client-created transaction)
+        if obj.details and obj.details.get('client_name'):
+            return obj.details.get('client_name')
+        return None
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['eventType'] = instance.event_type
+        ret['userId'] = instance.user_id.id if instance.user_id else None
+        if instance.user_id:
+            ret['userName'] = f"{instance.user_id.first_name} {instance.user_id.last_name}".strip() or instance.user_id.username
+        elif instance.details and instance.details.get('client_name'):
+            ret['userName'] = instance.details.get('client_name')
+        else:
+            ret['userName'] = None
+        ret['createdAt'] = instance.created_at
+        ret['details'] = instance.details if instance.details else {}
+        ret['oldValue'] = instance.old_value if instance.old_value else {}
+        ret['newValue'] = instance.new_value if instance.new_value else {}
+        return ret
+
+class ClientPlatformLogSerializer(serializers.ModelSerializer):
+    """Serializer for client platform logs (actions performed BY the client)"""
+    actionType = serializers.CharField(source='action_type', read_only=True)
+    actionDetails = serializers.JSONField(source='action_details', read_only=True)
+    ipAddress = serializers.CharField(source='ip_address', read_only=True, allow_null=True)
+    userAgent = serializers.CharField(source='user_agent', read_only=True, allow_null=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    
+    class Meta:
+        model = ClientPlatformLog
+        fields = ['id', 'actionType', 'actionDetails', 'ipAddress', 'userAgent', 'createdAt', 'clientId']
+        read_only_fields = ['id', 'createdAt']
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['actionType'] = instance.action_type
+        ret['actionDetails'] = instance.action_details if instance.action_details else {}
+        ret['ipAddress'] = instance.ip_address
+        ret['userAgent'] = instance.user_agent
+        ret['createdAt'] = instance.created_at
+        ret['clientId'] = instance.client.id
         return ret
 
 class AssetSerializer(serializers.ModelSerializer):

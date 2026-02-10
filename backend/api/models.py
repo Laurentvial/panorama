@@ -257,6 +257,7 @@ class Log(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     event_type = models.CharField(max_length=100, default="")  # createUser, editUser, createClient, etc.
     user_id = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='activity_logs')
+    client_id = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, related_name='history_logs')
     created_at = models.DateTimeField(auto_now_add=True)
     details = models.JSONField(default=dict, blank=True)  # IP, browser info, and other metadata
     old_value = models.JSONField(default=dict, null=True, blank=True)  # Previous state
@@ -264,6 +265,22 @@ class Log(models.Model):
 
     def __str__(self):
         return f"Log {self.id} - {self.event_type} - {self.created_at}"
+
+class ClientPlatformLog(models.Model):
+    """Table for tracking all client actions on the platform"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='platform_logs')
+    action_type = models.CharField(max_length=100, default="")  # login, page_view, click, form_submit, etc.
+    action_details = models.JSONField(default=dict, blank=True)  # Details of the action (page, element clicked, etc.)
+    ip_address = models.CharField(max_length=50, null=True, blank=True)
+    user_agent = models.CharField(max_length=500, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"PlatformLog {self.id} - {self.action_type} - {self.client.fname} {self.client.lname} - {self.created_at}"
 
 class Asset(models.Model):
     """Table des actifs disponibles (bourse, cryptos, etc.)"""

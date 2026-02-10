@@ -12,6 +12,7 @@ import { CookieBanner } from './CookieBanner';
 import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile } from './ui/use-mobile';
+import { logPlatformAction } from '../utils/platformLogger';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformButtons.css';
 import '../styles/PlatformInputs.css';
@@ -85,6 +86,26 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       setSidebarOpen(false);
     }
   }, [showBottomNav]);
+
+  // Log page views
+  useEffect(() => {
+    // Only log if we have a valid client user and pathname
+    if (!location.pathname || !currentUser?.userType || currentUser.userType !== 'client') {
+      return;
+    }
+    
+    // Ensure we have a client ID before logging
+    if (!currentUser?.id) {
+      return;
+    }
+    
+    // Small delay to ensure token is available in storage
+    const timeoutId = setTimeout(() => {
+      logPlatformAction('page_view', { route: location.pathname });
+    }, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [location.pathname, currentUser?.userType, currentUser?.id]);
 
   // Load product index once so the header search can show results.
   useEffect(() => {
