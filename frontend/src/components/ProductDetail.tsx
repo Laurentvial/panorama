@@ -707,55 +707,6 @@ export function ProductDetail() {
       return;
     }
 
-    // Validate available balance before creating transaction
-    const completedTransactions = transactions.filter((t: any) => t.status === 'termine');
-    
-    let calculatedInvestedCapital = 0;
-    let calculatedTradingPortfolio = 0;
-    
-    completedTransactions.forEach((transaction: any) => {
-      const txnAmount = parseFloat(transaction.amount) || 0;
-      
-      if (transaction.type === 'depot') {
-        calculatedInvestedCapital += txnAmount;
-      } else if (transaction.type === 'retrait') {
-        calculatedInvestedCapital -= txnAmount;
-      } else if (transaction.type === 'bonus') {
-        calculatedInvestedCapital += txnAmount;
-      } else if (transaction.type === 'interets') {
-        // Interest transactions credit gains to cash balance
-        calculatedInvestedCapital += txnAmount;
-      } else if (transaction.type === 'achat') {
-        calculatedTradingPortfolio += txnAmount;
-      } else if (transaction.type === 'vente') {
-        calculatedTradingPortfolio -= txnAmount;
-      } else if (transaction.type === 'transfert') {
-        const transferFrom = transaction.from || transaction.from_field || null;
-        const transferTo = transaction.to || transaction.to_field || null;
-        if (transferFrom === 'balance' && transferTo && transferTo !== 'balance') {
-          calculatedTradingPortfolio += txnAmount;
-        } else if (transferFrom && transferFrom !== 'balance' && transferTo === 'balance') {
-          calculatedTradingPortfolio -= txnAmount;
-        }
-      }
-    });
-    
-    // Use calculated values or fallback to client object values
-    const investedCapital = completedTransactions.length > 0 
-      ? calculatedInvestedCapital 
-      : parseFinancialValue(currentUser?.investedCapital || currentUser?.invested_capital || 0);
-    const tradingPortfolio = completedTransactions.length > 0 
-      ? calculatedTradingPortfolio 
-      : parseFinancialValue(currentUser?.tradingPortfolio || currentUser?.trading_portfolio || 0);
-    
-    // Available funds = investedCapital - tradingPortfolio (bonus is included in investedCapital)
-    const availableFunds = investedCapital - tradingPortfolio;
-    
-    if (amount > availableFunds) {
-      setSubscriptionError(`Fonds insuffisants. Solde disponible: ${availableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR, montant demandé: ${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
-      return;
-    }
-
     setIsSubscribing(true);
     try {
       // Calculate gains using the same simulator logic as the product page
