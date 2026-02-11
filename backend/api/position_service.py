@@ -2967,19 +2967,43 @@ def create_interest_transaction_for_period_if_complete(
             transaction_id=txn.id,
             period_index=period_index
         )
-        
-        if not positions_in_period.exists():
-            # No positions for this period yet
-            return None
-        
-        # Check if all positions in this period are 'done'
-        total_positions = positions_in_period.count()
-        done_positions = positions_in_period.filter(status='done').count()
-        
-        if done_positions < total_positions:
-            # Period not yet complete
-            return None
-        
+
+        period_summary: dict | None = None
+        used_positions = positions_in_period.exists()
+        if used_positions:
+            # Check if all positions in this period are 'done'
+            total_positions = positions_in_period.count()
+            done_positions = positions_in_period.filter(status='done').count()
+
+            if done_positions < total_positions:
+                # Period not yet complete
+                return None
+        else:
+            # Fallback path: no positions linked to this validated transfer.
+            # We still create "interets" at period end using generated target profit.
+            generated_periods = generate_rates_for_investment(txn)
+            period_summary = next(
+                (
+                    p for p in generated_periods
+                    if int(p.get("periodIndex", -1)) == int(period_index)
+                ),
+                None,
+            )
+            if not period_summary:
+                return None
+
+            period_end_raw = period_summary.get("endDate")
+            if not period_end_raw:
+                return None
+            try:
+                period_end_date = date.fromisoformat(str(period_end_raw))
+            except Exception:
+                return None
+
+            # Only create interest once the period is fully elapsed.
+            if period_end_date > timezone.localdate():
+                return None
+
         # Check if an interest transaction already exists for this period (idempotent)
         # We identify it by checking for an 'interets' transaction with:
         # - same client
@@ -3003,19 +3027,39 @@ def create_interest_transaction_for_period_if_complete(
             logger.debug(f"Interest transaction already exists for transaction {txn.id}, period {period_index} (transaction {existing_interest.id})")
             return None
         
-        # Calculate total profit_loss for this period
-        total_profit = positions_in_period.aggregate(
-            total=Sum('profit_loss')
-        )['total'] or Decimal('0')
+        # Calculate total profit for this period:
+        # - from realized positions when available
+        # - from generated targetProfit when no positions are linked to this transaction
+        if used_positions:
+            total_profit = positions_in_period.aggregate(
+                total=Sum('profit_loss')
+            )['total'] or Decimal('0')
+        else:
+            try:
+                total_profit = Decimal(str((period_summary or {}).get('targetProfit', '0')))
+            except Exception:
+                total_profit = Decimal('0')
         
         if total_profit <= 0:
             # No profit to create interest transaction for
             return None
         
         # Get period date range for description
-        period_positions = positions_in_period.order_by('period_date')
-        first_date = period_positions.first().period_date if period_positions.exists() else None
-        last_date = period_positions.last().period_date if period_positions.exists() else None
+        if used_positions:
+            period_positions = positions_in_period.order_by('period_date')
+            first_date = period_positions.first().period_date if period_positions.exists() else None
+            last_date = period_positions.last().period_date if period_positions.exists() else None
+        else:
+            first_raw = (period_summary or {}).get("startDate")
+            last_raw = (period_summary or {}).get("endDate")
+            try:
+                first_date = date.fromisoformat(str(first_raw)) if first_raw else None
+            except Exception:
+                first_date = None
+            try:
+                last_date = date.fromisoformat(str(last_raw)) if last_raw else None
+            except Exception:
+                last_date = None
         
         # Create the interest transaction
         transaction_id = uuid.uuid4().hex[:12]

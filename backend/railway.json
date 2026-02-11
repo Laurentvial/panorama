@@ -6,7 +6,8 @@
   },
   "deploy": {
     "startCommand": "python check_startup.py && bash run_with_migrations.sh",
-    "restartPolicyType": "ON_FAILURE",
+    "healthcheckPath": "/health/",
+    "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10
   }
 }
