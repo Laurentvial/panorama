@@ -2420,7 +2420,7 @@ export function ProductDetail() {
                       amount: Number(amountEurNum),
                       description: `Ordre de trading: ${asset?.reference || asset?.name || asset?.id}`,
                       datetime: new Date().toISOString(),
-                      status: 'termine',
+                      status: 'valide',
                       transfer_from: 'balance',
                       transfer_to: 'trading',
                       subscription_details: {

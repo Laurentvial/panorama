@@ -28,46 +28,47 @@ interface ClientTransactionsTabProps {
 const TRANSACTION_TYPES = {
   depot: {
     label: 'Dépôt',
-    statuses: ['en_attente_paiement', 'en_cours', 'termine', 'conteste', 'annule']
+    statuses: ['en_attente_paiement', 'en_cours', 'valide', 'conteste', 'annule']
   },
   retrait: {
     label: 'Retrait',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   bonus: {
     label: 'Bonus',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   achat: {
     label: 'Achat',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   vente: {
     label: 'Vente',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   interets: {
     label: 'Intérêts',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   frais: {
     label: 'Frais',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   transfert: {
     label: 'Transfert',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   perte: {
     label: 'Perte',
-    statuses: ['termine', 'annule']
+    statuses: ['valide', 'annule']
   }
 };
 
 const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
-  termine: 'Terminé',
+  valide: 'Validé',
+  termine: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'
 };
@@ -298,7 +299,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       
       // Check if this is a transfert transaction with status "termine"
       const isTransfert = transactionForm.type === 'transfert';
-      const isTermine = transactionForm.status === 'termine';
+      const isTermine = transactionForm.status === 'valide' || transactionForm.status === 'termine';
       
       // For transfert transactions, determine if this is an investment or withdrawal BEFORE creating
       // This prevents creating transactions with wrong status if they don't qualify for position generation
@@ -401,19 +402,19 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           return;
         } else {
           // Transaction was created with 'en_cours' but doesn't qualify for modal
-          // Update it back to 'termine' to match user's intent
-          console.warn('Transaction created with en_cours status but does not qualify for position generation modal. Updating to termine.');
+          // Update it back to 'valide' to match user's intent
+          console.warn('Transaction created with en_cours status but does not qualify for position generation modal. Updating to valide.');
           try {
             await apiCall(`/api/clients/${clientId}/transactions/${response.id}/`, {
               method: 'PUT',
               body: JSON.stringify({
                 ...response,
-                status: 'termine',
+                status: 'valide',
                 skip_position_generation: false // Allow backend to handle position generation if needed
               })
             });
           } catch (error: any) {
-            console.error('Error updating transaction status back to termine:', error);
+            console.error('Error updating transaction status back to valide:', error);
             toast.error('Erreur lors de la mise à jour du statut de la transaction');
           }
         }
@@ -1094,7 +1095,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         }}
       />
 
-      {/* Position Generation Modal - Shows after creating/editing transaction with status "termine" */}
+      {/* Position Generation Modal - Shows after creating/editing transaction with status "valide" */}
       {transactionForPositionGeneration && (
         <PositionGenerationModal
           isOpen={isPositionGenerationModalOpen}
@@ -1113,7 +1114,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             onRefresh();
           }}
           onSuccess={async () => {
-            // Update transaction status to "termine" after position generation completes
+            // Update transaction status to "valide" after position generation completes
             if (transactionForPositionGeneration) {
               try {
                 const datetimeISO = new Date(transactionForPositionGeneration.datetime || new Date()).toISOString();
@@ -1123,7 +1124,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     type: transactionForPositionGeneration.type,
                     amount: parseFloat(transactionForPositionGeneration.amount),
                     description: transactionForPositionGeneration.description,
-                    status: 'termine', // Update to final status
+                    status: 'valide', // Update to final status
                     datetime: datetimeISO,
                     skip_position_generation: true // Skip since positions already generated
                   })

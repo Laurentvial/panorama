@@ -99,12 +99,12 @@ export function EditTransactionModal({
       return;
     }
     
-    // Check if this is a transfert transaction changing to "termine"
-    // Only show modal if status is changing FROM something else TO "termine"
-    // If status was already "termine", no need to regenerate positions
+    // Check if this is a transfert transaction changing to "valide"
+    // Only show modal if status is changing FROM something else TO "valide"
+    // If status was already "valide", no need to regenerate positions
     const isTransfert = transactionForm.type === 'transfert';
-    const wasAlreadyTermine = transaction.status === 'termine';
-    const isChangingToTermine = transactionForm.status === 'termine' && 
+    const wasAlreadyTermine = transaction.status === 'valide' || transaction.status === 'termine';
+    const isChangingToTermine = transactionForm.status === 'valide' && 
                                  !wasAlreadyTermine;
     
     if (isTransfert && isChangingToTermine) {
@@ -169,17 +169,17 @@ export function EditTransactionModal({
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
       
       // Check if this is a withdrawal (transfert from product to balance)
-      // Only recalculate if status is changing TO "termine" (not if it was already "termine")
+      // Only recalculate if status is changing TO "valide" (not if it was already "valide")
       const transferTo = transaction.transfer_to || 
                          transaction.to_field || 
                          transaction.to || 
                          transaction.transferTo ||
                          null;
       const transferFrom = transaction.transfer_from || transaction.from_field || null;
-      const wasAlreadyTermine = transaction.status === 'termine';
+      const wasAlreadyTermine = transaction.status === 'valide' || transaction.status === 'termine';
       const isWithdrawal = transactionForm.type === 'transfert' && 
-                          transactionForm.status === 'termine' &&
-                          !wasAlreadyTermine && // Only if status is changing TO "termine"
+                          transactionForm.status === 'valide' &&
+                          !wasAlreadyTermine && // Only if status is changing TO "valide"
                           (transferTo === 'balance' || (transferFrom && transferFrom !== 'balance'));
       
       await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
@@ -190,7 +190,7 @@ export function EditTransactionModal({
           description: transactionForm.description,
           status: transactionForm.status,
           datetime: datetimeISO,
-          skip_position_generation: wasAlreadyTermine // Skip if already "termine" (no regeneration needed)
+          skip_position_generation: wasAlreadyTermine // Skip if already "valide" (no regeneration needed)
         })
       });
       
@@ -208,7 +208,7 @@ export function EditTransactionModal({
   }
 
   const handlePositionModalSuccess = async () => {
-    // After positions are generated (or withdrawal confirmed), update transaction status to termine
+    // After positions are generated (or withdrawal confirmed), update transaction status to valide
     if (pendingStatusUpdate) {
       try {
         const datetimeISO = new Date(transactionForm.datetime).toISOString();
@@ -345,7 +345,7 @@ export function EditTransactionModal({
               </Select>
             </div>
             <div className="modal-form-actions">
-              {transaction.status !== 'termine' && (
+              {transaction.status !== 'valide' && transaction.status !== 'termine' && (
                 <Button 
                   type="button" 
                   variant="destructive" 

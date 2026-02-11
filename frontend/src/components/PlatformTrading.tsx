@@ -182,7 +182,7 @@ export function PlatformTrading() {
     let tradingPortfolio = 0;
     let bonus = 0;
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
 
     completedTransactions.forEach((transaction: any) => {
       const amountNum = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
@@ -481,7 +481,7 @@ export function PlatformTrading() {
   }, [transactions]);
 
   const statusLabel = (s: string) =>
-    s === 'termine' ? 'Terminé' : s === 'en_cours' ? 'En cours' : s === 'en_attente_paiement' ? 'En attente' : s || '-';
+    s === 'valide' ? 'Validé' : s === 'en_cours' ? 'En cours' : s === 'en_attente_paiement' ? 'En attente' : s || '-';
 
   return (
     <div>

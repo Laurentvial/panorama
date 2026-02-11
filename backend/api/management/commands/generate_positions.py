@@ -3,6 +3,8 @@ from django.core.management.base import BaseCommand
 from api.models import Transaction
 from api.position_service import create_positions_for_investment
 
+COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
+
 
 class Command(BaseCommand):
     help = "Generate missing monthly positions for investment transactions (transfert to product)."
@@ -11,7 +13,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--status",
             default=None,
-            help="Optionally filter transactions by status (e.g. termine, en_cours).",
+            help="Optionally filter transactions by status (e.g. valide, en_cours).",
         )
         parser.add_argument(
             "--transaction-id",
@@ -39,7 +41,7 @@ class Command(BaseCommand):
         if status_filter:
             qs = qs.filter(status=status_filter)
         else:
-            qs = qs.filter(status="termine")
+            qs = qs.filter(status__in=COMPLETED_TRANSACTION_STATUSES)
 
         total_created = 0
         total_txn = 0

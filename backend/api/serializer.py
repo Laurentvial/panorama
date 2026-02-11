@@ -4,6 +4,8 @@ from .models import Client, ClientConversation, ClientChatMessage, Note, UserDet
 import uuid
 from urllib.parse import urlparse, unquote
 
+COMPLETED_TRANSACTION_STATUSES = ('valide', 'termine')
+
 class UserSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -172,7 +174,7 @@ class ClientSerializer(serializers.ModelSerializer):
             from .models import Transaction
             transactions = Transaction.objects.filter(
                 client=obj,
-                status='termine'
+                status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
         calculated_invested_capital = 0
@@ -216,7 +218,7 @@ class ClientSerializer(serializers.ModelSerializer):
             from .models import Transaction
             transactions = Transaction.objects.filter(
                 client=instance,
-                status='termine'
+                status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
         calculated_invested_capital = 0
@@ -903,9 +905,17 @@ class TransactionSerializer(serializers.ModelSerializer):
             'position_generation_history'
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
+
+    def to_internal_value(self, data):
+        internal_data = dict(data)
+        if internal_data.get('status') == 'termine':
+            internal_data['status'] = 'valide'
+        return super().to_internal_value(internal_data)
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        if ret.get('status') == 'termine':
+            ret['status'] = 'valide'
         ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at

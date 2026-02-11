@@ -227,8 +227,8 @@ export function PlatformPortfolio() {
     if (!status) return '-';
     const statusLower = String(status).toLowerCase();
     switch (statusLower) {
-      case 'termine':
-        return 'Terminé';
+      case 'valide':
+        return 'Validé';
       case 'en_cours':
         return 'En cours';
       case 'en_attente_paiement':
@@ -246,7 +246,7 @@ export function PlatformPortfolio() {
     if (!status) return '#6b7280';
     const statusLower = String(status).toLowerCase();
     switch (statusLower) {
-      case 'termine':
+      case 'valide':
         return '#10b981'; // green
       case 'en_cours':
         return '#3b82f6'; // blue
@@ -431,7 +431,7 @@ export function PlatformPortfolio() {
       return tb > ta ? b : a;
     };
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
     for (const t of completedTransactions) {
       if (!t) continue;
       if (String(t.type || '') !== 'transfert') continue;
@@ -517,7 +517,7 @@ export function PlatformPortfolio() {
       }
     >();
 
-    const completed = (transactions || []).filter((t: any) => String(t?.status || '').toLowerCase() === 'termine');
+    const completed = (transactions || []).filter((t: any) => String(t?.status || '').toLowerCase() === 'valide');
     for (const t of completed) {
       if (!t) continue;
       if (String(t?.type || '') !== 'transfert') continue;
@@ -764,9 +764,9 @@ export function PlatformPortfolio() {
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // achat + transfert (balance -> product) - transfert (product -> balance) when status is 'termine'
+    let calculatedTotalInvesti = 0; // achat + transfert (balance -> product) - transfert (product -> balance) when status is 'valide'
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
 
     completedTransactions.forEach((transaction: any) => {
       const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
@@ -812,7 +812,7 @@ export function PlatformPortfolio() {
             calculatedTradingPortfolio += amt;
           } else if (transferTo === 'balance') {
             // product -> balance
-            // When status is 'termine', subtract from totalInvesti (capital returned from terminated product)
+            // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
             calculatedTotalInvesti -= amt;
             calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
@@ -967,7 +967,7 @@ export function PlatformPortfolio() {
 
   // Calculate gains/losses from interest transactions (these are credited to cash balance)
   const interestGainsInCash = useMemo(() => {
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
     let total = 0;
     completedTransactions.forEach((transaction: any) => {
       if (transaction.type === 'interets') {
@@ -987,7 +987,7 @@ export function PlatformPortfolio() {
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = useMemo(() => {
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
 
     const productTypeById = (productId: any): string | null => {
       if (!productId) return null;
@@ -1129,7 +1129,7 @@ export function PlatformPortfolio() {
                 <div className="text-2xl font-bold">
                   {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance terminé)</p>
+                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)</p>
               </CardContent>
             </Card>
 

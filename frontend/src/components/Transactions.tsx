@@ -244,7 +244,7 @@ export function Transactions() {
                   <SelectItem value="all">Tous les statuts</SelectItem>
                   <SelectItem value="en_attente_paiement">En attente de paiement</SelectItem>
                   <SelectItem value="en_cours">En cours</SelectItem>
-                  <SelectItem value="termine">Terminé</SelectItem>
+                  <SelectItem value="valide">Validé</SelectItem>
                   <SelectItem value="conteste">Contesté</SelectItem>
                 </SelectContent>
               </Select>

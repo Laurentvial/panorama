@@ -323,12 +323,12 @@ export function ViewTransactionModal({
                   <span 
                     className="px-2 py-1 rounded text-xs font-medium inline-block"
                     style={{
-                      backgroundColor: transaction.status === 'termine' ? '#dcfce7' :
+                      backgroundColor: (transaction.status === 'valide' || transaction.status === 'termine') ? '#dcfce7' :
                                       transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#fed7aa' :
                                       transaction.status === 'conteste' ? '#fee2e2' :
                                       transaction.status === 'annule' ? '#e5e7eb' :
                                       '#f1f5f9',
-                      color: transaction.status === 'termine' ? '#15803d' :
+                      color: (transaction.status === 'valide' || transaction.status === 'termine') ? '#15803d' :
                              transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#c2410c' :
                              transaction.status === 'conteste' ? '#991b1b' :
                              transaction.status === 'annule' ? '#6b7280' :

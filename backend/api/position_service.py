@@ -29,6 +29,7 @@ class InvestmentContext:
 
 
 _DURATION_RE = re.compile(r"(\d+)")
+COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
 
 
 def _add_months(d: date, months: int) -> date:
@@ -1892,7 +1893,7 @@ def save_generated_positions(
             client_id=ctx.client_id,
             type='transfert',
             transfer_to=ctx.product_id,
-            status='termine'
+            status__in=COMPLETED_TRANSACTION_STATUSES
         ).exclude(id=txn.id)  # Exclude the current transaction using txn.id directly
         
         logger.info(f"Recalculating positions for {other_investment_transactions.count()} other investment transactions "
@@ -2235,7 +2236,7 @@ def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_d
     qs = Transaction.objects.filter(
         client_id=client_id,
         type='transfert',
-        status='termine'
+        status__in=COMPLETED_TRANSACTION_STATUSES
     )
     
     if up_to_datetime:
@@ -2782,7 +2783,7 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
     
     # Only check status if not forcing recalculation
     # This allows save-positions endpoint to trigger recalculation even for withdrawals with status 'en_cours'
-    if not force_recalculate and withdrawal_txn.status != 'termine':
+    if not force_recalculate and withdrawal_txn.status not in COMPLETED_TRANSACTION_STATUSES:
         return
     
     # Determine the product from which capital is being withdrawn
@@ -2886,7 +2887,7 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
         client_id=withdrawal_txn.client_id,
         type='transfert',
         transfer_to=product.id,
-        status='termine'
+        status__in=COMPLETED_TRANSACTION_STATUSES
     ).exclude(id=withdrawal_txn.id)  # Exclude the withdrawal transaction itself
     
     logger.info(f"Recalculating positions for {investment_transactions.count()} investment transactions "
@@ -3038,7 +3039,7 @@ def create_interest_transaction_for_period_if_complete(
             type='interets',
             amount=total_profit,
             description=description,
-            status='termine',  # Auto-completed since it's automatic
+            status='valide',  # Auto-completed since it's automatic
             datetime=timezone.now(),
             product=product,  # Link to the product for reference
         )

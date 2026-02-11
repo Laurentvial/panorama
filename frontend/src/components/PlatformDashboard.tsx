@@ -158,7 +158,7 @@ export function PlatformDashboard() {
     let calculatedInvestedCapital = 0;
     let calculatedTradingPortfolio = 0;
 
-    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'valide');
 
     for (const transaction of completedTransactions) {
       const amount = parseFinancialValue(transaction?.amount);
@@ -343,7 +343,7 @@ export function PlatformDashboard() {
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = React.useMemo(() => {
-    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'termine');
+    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'valide');
 
     const productTypeById = (productId: any): string | null => {
       if (!productId) return null;

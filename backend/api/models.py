@@ -420,7 +420,8 @@ class Transaction(models.Model):
     STATUS_CHOICES = [
         ('en_attente_paiement', 'En attente de paiement'),
         ('en_cours', 'En cours'),
-        ('termine', 'Terminé'),
+        ('valide', 'Validé'),
+        ('termine', 'Validé'),  # Legacy value kept for backward compatibility
         ('conteste', 'Contesté'),
         ('annule', 'Annulé'),
     ]
@@ -432,7 +433,7 @@ class Transaction(models.Model):
     description = models.TextField(default="", blank=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='en_cours')
     datetime = models.DateTimeField()  # Date et heure de la transaction
-    # Timestamp when the transaction was validated (status became 'termine').
+    # Timestamp when the transaction was validated (status became 'valide').
     # Used to start position generation at validation time instead of creation time.
     validated_at = models.DateTimeField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)

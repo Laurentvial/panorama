@@ -93,11 +93,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // achat + transfert (balance → product) - transfert (product → balance) when status is 'termine'
+    let calculatedTotalInvesti = 0; // achat + transfert (balance → product) - transfert (product → balance) when status is 'valide'
 
-    // Only consider completed transactions (status === 'termine')
+    // Only consider completed transactions (status === 'valide')
     const completedTransactions = transactions.filter((transaction: any) => 
-      transaction.status === 'termine'
+      transaction.status === 'valide'
     );
 
     completedTransactions.forEach((transaction: any) => {
@@ -160,7 +160,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
             // Profit/loss will only change when position values change (future feature)
           } else if (transferTo === 'balance') {
             // Withdrawal: product → balance
-            // When status is 'termine', subtract from totalInvesti (capital returned from terminated product)
+            // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
             calculatedTotalInvesti -= amount;
             calculatedTradingPortfolio -= amount;
             // Note: Withdrawal profit/loss will be calculated based on position values when that feature is implemented
@@ -193,7 +193,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   
   // Check if there are completed transactions
   const hasCompletedTransactions = useMemo(() => 
-    transactions.some((t: any) => t.status === 'termine'),
+    transactions.some((t: any) => t.status === 'valide'),
     [transactions]
   );
   
@@ -384,7 +384,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
             <div className="text-2xl font-bold">
               {formatCurrency(totalInvesti)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance terminé)</p>
+            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)</p>
           </CardContent>
         </Card>
 

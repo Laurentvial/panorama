@@ -65,6 +65,13 @@ from .position_service import (
     recalculate_positions_for_product_withdrawal,
 )
 
+COMPLETED_TRANSACTION_STATUSES = ('valide', 'termine')
+
+
+def _normalize_transaction_status(raw_status):
+    """Map legacy status values to canonical ones."""
+    return 'valide' if raw_status == 'termine' else raw_status
+
 
 def get_client_ip(request):
     """Extract client IP address from request, checking multiple headers"""
@@ -599,7 +606,7 @@ class ClientView(generics.ListAPIView):
     queryset = Client.objects.select_related('team').prefetch_related(
         Prefetch(
             'transactions',
-            queryset=Transaction.objects.filter(status='termine'),
+            queryset=Transaction.objects.filter(status__in=COMPLETED_TRANSACTION_STATUSES),
             to_attr='completed_transactions'
         )
     )
@@ -5290,7 +5297,7 @@ def client_transaction_create(request, client_id):
         # Calculate available balance from completed transactions
         completed_transactions = Transaction.objects.filter(
             client=client,
-            status='termine'
+            status__in=COMPLETED_TRANSACTION_STATUSES
         )
         
         calculated_invested_capital = 0
@@ -5338,7 +5345,7 @@ def client_transaction_create(request, client_id):
     
     # Check if this is an investment transaction that will be created with status 'termine'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
-    transaction_status = request.data.get('status', 'en_cours')
+    transaction_status = _normalize_transaction_status(request.data.get('status', 'en_cours'))
     skip_position_generation = request.data.get('skip_position_generation', False)
     is_investment_transfert = (
         transaction_type == 'transfert' 
@@ -5352,7 +5359,7 @@ def client_transaction_create(request, client_id):
     # Only skip if it's explicitly a withdrawal or non-investment transaction.
     should_generate_positions_before_create = (
         is_investment_transfert 
-        and transaction_status == 'termine'
+        and transaction_status == 'valide'
     )
     
     # Create transaction and generate positions together in an atomic transaction
@@ -6145,7 +6152,7 @@ def client_transaction_update(request, client_id, transaction_id):
     if 'description' in request.data:
         transaction.description = request.data.get('description', '')
     if 'status' in request.data:
-        transaction.status = request.data.get('status')
+        transaction.status = _normalize_transaction_status(request.data.get('status'))
     if 'datetime' in request.data:
         from django.utils.dateparse import parse_datetime
         datetime_str = request.data.get('datetime')
@@ -6248,8 +6255,8 @@ def client_transaction_update(request, client_id, transaction_id):
     # Also backfill if it's already termine but positions are missing (idempotent).
     # Skip automatic generation if skip_position_generation flag is set (for staged modal flow)
     # Note: skip_position_generation flag is already set above before transaction.save()
-    if is_investment and transaction.status == 'termine' and not skip_position_generation:
-        if previous_status != 'termine' or not Position.objects.filter(transaction=transaction).exists():
+    if is_investment and transaction.status in COMPLETED_TRANSACTION_STATUSES and not skip_position_generation:
+        if previous_status not in COMPLETED_TRANSACTION_STATUSES or not Position.objects.filter(transaction=transaction).exists():
             try:
                 create_positions_for_investment(transaction, trigger="api_transaction_update")
             except Exception as pos_err:
@@ -6265,8 +6272,8 @@ def client_transaction_update(request, client_id, transaction_id):
         transaction.type == 'transfert' and
         transaction.transfer_to == 'balance'
     )
-    if is_withdrawal and transaction.status == 'termine' and not skip_position_generation:
-        if previous_status != 'termine':
+    if is_withdrawal and transaction.status in COMPLETED_TRANSACTION_STATUSES and not skip_position_generation:
+        if previous_status not in COMPLETED_TRANSACTION_STATUSES:
             try:
                 recalculate_positions_for_product_withdrawal(transaction)
             except Exception as pos_err:

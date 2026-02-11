@@ -19,7 +19,8 @@ export const getStatusLabel = (status: string): string => {
   const statusMap: { [key: string]: string } = {
     'en_attente_paiement': 'En attente de paiement',
     'en_cours': 'En cours',
-    'termine': 'Terminé',
+    'valide': 'Validé',
+    'termine': 'Validé',
     'conteste': 'Contesté',
     'annule': 'Annulé',
   };
@@ -80,46 +81,47 @@ export const extractAssetInfo = (description: string): { name: string; reference
 export const TRANSACTION_TYPES = {
   depot: {
     label: 'Dépôt',
-    statuses: ['en_attente_paiement', 'en_cours', 'termine', 'conteste', 'annule']
+    statuses: ['en_attente_paiement', 'en_cours', 'valide', 'conteste', 'annule']
   },
   retrait: {
     label: 'Retrait',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   bonus: {
     label: 'Bonus',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   achat: {
     label: 'Achat',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   vente: {
     label: 'Vente',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   interets: {
     label: 'Intérêts',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   frais: {
     label: 'Frais',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   transfert: {
     label: 'Transfert',
-    statuses: ['en_cours', 'termine', 'annule']
+    statuses: ['en_cours', 'valide', 'annule']
   },
   perte: {
     label: 'Perte',
-    statuses: ['termine', 'annule']
+    statuses: ['valide', 'annule']
   }
 };
 
 export const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
-  termine: 'Terminé',
+  valide: 'Validé',
+  termine: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'
 };

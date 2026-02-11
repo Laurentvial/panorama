@@ -17,6 +17,7 @@ from .position_service import (
 )
 
 logger = logging.getLogger(__name__)
+COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
 
 
 @receiver(pre_save, sender=Transaction)
@@ -52,7 +53,7 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
     # even if the transaction is created days earlier.
     try:
         previous_status = getattr(instance, "_previous_status", None)
-        if previous_status != "termine" and instance.status == "termine" and not getattr(instance, "validated_at", None):
+        if previous_status not in COMPLETED_TRANSACTION_STATUSES and instance.status in COMPLETED_TRANSACTION_STATUSES and not getattr(instance, "validated_at", None):
             instance.validated_at = timezone.now()
     except Exception:
         # Best-effort; validation timestamp isn't critical enough to crash saves.
@@ -75,7 +76,7 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         if not is_investment:
             return
 
-        if instance.status != "termine":
+        if instance.status not in COMPLETED_TRANSACTION_STATUSES:
             return
 
         # Skip if flag is set (set by API when using staged generation flow)
@@ -90,7 +91,7 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         # 2. Status is "termine" but no positions exist (recovery from accidental deletion)
         # Note: create_positions_for_investment is idempotent and will only create missing positions
         existing_positions_count = Position.objects.filter(transaction=instance).count()
-        status_changed_to_termine = previous_status != "termine"
+        status_changed_to_termine = previous_status not in COMPLETED_TRANSACTION_STATUSES
         no_positions_exist = existing_positions_count == 0
         
         # If status didn't change AND positions already exist, skip (already fully generated)
@@ -132,7 +133,7 @@ def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transacti
         if not is_withdrawal:
             return
         
-        if instance.status != "termine":
+        if instance.status not in COMPLETED_TRANSACTION_STATUSES:
             return
         
         # Skip if flag is set
@@ -141,7 +142,7 @@ def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transacti
             return
         
         previous_status = getattr(instance, "_previous_status", None)
-        status_changed_to_termine = previous_status != "termine"
+        status_changed_to_termine = previous_status not in COMPLETED_TRANSACTION_STATUSES
         
         # Only recalculate if status just changed to "termine"
         # (to avoid recalculating multiple times if transaction is saved multiple times)
