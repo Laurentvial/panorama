@@ -103,7 +103,7 @@ export function EditTransactionModal({
     // Only show modal if status is changing FROM something else TO "valide"
     // If status was already "valide", no need to regenerate positions
     const isTransfert = transactionForm.type === 'transfert';
-    const wasAlreadyTermine = transaction.status === 'valide' || transaction.status === 'termine';
+    const wasAlreadyTermine = transaction.status === 'valide';
     const isChangingToTermine = transactionForm.status === 'valide' && 
                                  !wasAlreadyTermine;
     
@@ -176,7 +176,7 @@ export function EditTransactionModal({
                          transaction.transferTo ||
                          null;
       const transferFrom = transaction.transfer_from || transaction.from_field || null;
-      const wasAlreadyTermine = transaction.status === 'valide' || transaction.status === 'termine';
+      const wasAlreadyTermine = transaction.status === 'valide';
       const isWithdrawal = transactionForm.type === 'transfert' && 
                           transactionForm.status === 'valide' &&
                           !wasAlreadyTermine && // Only if status is changing TO "valide"
@@ -345,7 +345,7 @@ export function EditTransactionModal({
               </Select>
             </div>
             <div className="modal-form-actions">
-              {transaction.status !== 'valide' && transaction.status !== 'termine' && (
+              {transaction.status !== 'valide' && (
                 <Button 
                   type="button" 
                   variant="destructive" 

@@ -421,7 +421,6 @@ class Transaction(models.Model):
         ('en_attente_paiement', 'En attente de paiement'),
         ('en_cours', 'En cours'),
         ('valide', 'Validé'),
-        ('termine', 'Validé'),  # Legacy value kept for backward compatibility
         ('conteste', 'Contesté'),
         ('annule', 'Annulé'),
     ]

@@ -28,7 +28,7 @@ interface ClientTransactionsTabProps {
 const TRANSACTION_TYPES = {
   depot: {
     label: 'Dépôt',
-    statuses: ['en_attente_paiement', 'en_cours', 'valide', 'conteste', 'annule']
+    statuses: ['en_attente_paiement', 'valide', 'conteste', 'annule']
   },
   retrait: {
     label: 'Retrait',
@@ -68,7 +68,6 @@ const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
   valide: 'Validé',
-  termine: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'
 };
@@ -297,9 +296,9 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       // Convert datetime-local format to ISO string
       const datetimeISO = new Date(transactionForm.datetime).toISOString();
       
-      // Check if this is a transfert transaction with status "termine"
+      // Check if this is a transfert transaction with status "valide"
       const isTransfert = transactionForm.type === 'transfert';
-      const isTermine = transactionForm.status === 'valide' || transactionForm.status === 'termine';
+      const isTermine = transactionForm.status === 'valide';
       
       // For transfert transactions, determine if this is an investment or withdrawal BEFORE creating
       // This prevents creating transactions with wrong status if they don't qualify for position generation

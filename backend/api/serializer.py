@@ -4,7 +4,7 @@ from .models import Client, ClientConversation, ClientChatMessage, Note, UserDet
 import uuid
 from urllib.parse import urlparse, unquote
 
-COMPLETED_TRANSACTION_STATUSES = ('valide', 'termine')
+COMPLETED_TRANSACTION_STATUSES = ('valide',)
 
 class UserSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -906,16 +906,8 @@ class TransactionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt']
 
-    def to_internal_value(self, data):
-        internal_data = dict(data)
-        if internal_data.get('status') == 'termine':
-            internal_data['status'] = 'valide'
-        return super().to_internal_value(internal_data)
-    
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        if ret.get('status') == 'termine':
-            ret['status'] = 'valide'
         ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at

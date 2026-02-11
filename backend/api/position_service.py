@@ -29,7 +29,7 @@ class InvestmentContext:
 
 
 _DURATION_RE = re.compile(r"(\d+)")
-COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
+COMPLETED_TRANSACTION_STATUSES = ("valide",)
 
 
 def _add_months(d: date, months: int) -> date:
@@ -1886,7 +1886,7 @@ def save_generated_positions(
         logger = logging.getLogger(__name__)
         
         # Find all other investment transactions (transfer_to = product_id) for the same client and product
-        # that are 'termine' and have positions
+        # that are 'valide' and have positions
         # CRITICAL: Use txn.id directly to exclude the current transaction, not ctx.transaction_id
         # This ensures we don't accidentally include the current transaction in the recalculation
         other_investment_transactions = Transaction.objects.filter(
@@ -2215,7 +2215,7 @@ def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_d
     Calculate the real invested capital in a product for a client.
     
     This sums all completed transfers TO the product and subtracts all completed transfers FROM the product.
-    Only considers transactions with status='termine' (completed).
+    Only considers transactions with status='valide' (completed).
     Transactions with status='en_cours' are NOT included here - they should be added manually
     if they are the current transaction being processed.
     
@@ -2242,7 +2242,7 @@ def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_d
     if up_to_datetime:
         qs = qs.filter(datetime__lte=up_to_datetime)
     
-    # Exclude specific transaction if provided (e.g., current transaction if not yet 'termine')
+    # Exclude specific transaction if provided (e.g., current transaction if not yet 'valide')
     if exclude_transaction_id:
         qs = qs.exclude(id=exclude_transaction_id)
     
@@ -2496,7 +2496,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
 
     # Calculate real invested capital: sum of all completed transfers to/from this product
     # This takes into account all previous transactions (deposits and withdrawals)
-    # Only counts transactions with status='termine' (completed)
+    # Only counts transactions with status='valide' (completed)
     
     # Exclude current transaction from calculation (we'll add it manually below)
     real_invested_capital = _calculate_real_invested_capital(
@@ -2514,7 +2514,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     
     # IMPORTANT: Always include the current transaction in the capital calculation
     # This ensures that when generating positions for a transaction, its amount is included
-    # in the capital base, even if it's not yet saved with status 'termine' in the database
+    # in the capital base, even if it's not yet saved with status 'valide' in the database
     current_txn_amount = _to_decimal(txn.amount) or Decimal('0')
     
     # Check if this is a withdrawal by looking at the original transaction
@@ -2775,7 +2775,7 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
     
     Args:
         withdrawal_txn: Transaction with type='transfert', transfer_to='balance' or transfer_from=product_id
-        force_recalculate: If True, recalculate even if transaction status is not 'termine'.
+        force_recalculate: If True, recalculate even if transaction status is not 'valide'.
                           Used when save-positions is called for withdrawals that may still have status 'en_cours'.
     """
     if withdrawal_txn.type != 'transfert':
@@ -2882,7 +2882,7 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
         logger.info(f"No pending positions to delete for product {product.id} and client {withdrawal_txn.client_id}")
     
     # Find all investment transactions (transfer_to = product_id) for the same client and product
-    # that are 'termine' and have positions
+    # that are 'valide' and have positions
     investment_transactions = Transaction.objects.filter(
         client_id=withdrawal_txn.client_id,
         type='transfert',

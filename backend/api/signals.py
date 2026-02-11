@@ -17,7 +17,7 @@ from .position_service import (
 )
 
 logger = logging.getLogger(__name__)
-COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
+COMPLETED_TRANSACTION_STATUSES = ("valide",)
 
 
 @receiver(pre_save, sender=Transaction)
@@ -26,7 +26,7 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
     Capture previous values so post_save can detect state transitions.
 
     This is needed because admin/ORM updates bypass the API endpoint logic that
-    normally generates monthly positions when an investment becomes 'termine'.
+    normally generates monthly positions when an investment becomes 'valide'.
     """
     try:
         if not instance.pk:
@@ -48,7 +48,7 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
         instance._previous_transfer_to = None
         instance._previous_validated_at = None
 
-    # If we are transitioning to 'termine', capture a stable validated_at timestamp.
+    # If we are transitioning to 'valide', capture a stable validated_at timestamp.
     # This ensures position generation starts at validation time (not creation time),
     # even if the transaction is created days earlier.
     try:
@@ -61,9 +61,9 @@ def _transaction_capture_previous_state(sender, instance: Transaction, **kwargs)
 
 
 @receiver(post_save, sender=Transaction)
-def _transaction_generate_positions_on_termine(sender, instance: Transaction, created: bool, **kwargs):
+def _transaction_generate_positions_on_valide(sender, instance: Transaction, created: bool, **kwargs):
     """
-    Idempotently generate positions for investment transactions when they reach 'termine'.
+    Idempotently generate positions for investment transactions when they reach 'valide'.
     
     Skip generation if skip_auto_position_generation flag is set (for staged modal flow).
     """
@@ -87,23 +87,23 @@ def _transaction_generate_positions_on_termine(sender, instance: Transaction, cr
         previous_status = getattr(instance, "_previous_status", None)
         
         # Idempotent logic: generate positions if:
-        # 1. Status just changed to "termine" (previous_status != "termine"), OR
-        # 2. Status is "termine" but no positions exist (recovery from accidental deletion)
+        # 1. Status just changed to "valide", OR
+        # 2. Status is "valide" but no positions exist (recovery from accidental deletion)
         # Note: create_positions_for_investment is idempotent and will only create missing positions
         existing_positions_count = Position.objects.filter(transaction=instance).count()
-        status_changed_to_termine = previous_status not in COMPLETED_TRANSACTION_STATUSES
+        status_changed_to_valide = previous_status not in COMPLETED_TRANSACTION_STATUSES
         no_positions_exist = existing_positions_count == 0
         
         # If status didn't change AND positions already exist, skip (already fully generated)
-        if not status_changed_to_termine and existing_positions_count > 0:
+        if not status_changed_to_valide and existing_positions_count > 0:
             logger.debug("Skipping auto-position generation for transaction %s (%d positions already exist, status unchanged)", getattr(instance, "id", None), existing_positions_count)
             return
         
-        # Generate if status changed to "termine" OR if no positions exist (recovery case)
-        if status_changed_to_termine:
-            logger.info("Auto-generating positions for transaction %s (status changed to termine)", getattr(instance, "id", None))
+        # Generate if status changed to "valide" OR if no positions exist (recovery case)
+        if status_changed_to_valide:
+            logger.info("Auto-generating positions for transaction %s (status changed to valide)", getattr(instance, "id", None))
         elif no_positions_exist:
-            logger.info("Auto-generating positions for transaction %s (recovery: status is termine but no positions exist)", getattr(instance, "id", None))
+            logger.info("Auto-generating positions for transaction %s (recovery: status is valide but no positions exist)", getattr(instance, "id", None))
         else:
             # This shouldn't happen, but log it
             logger.warning("Unexpected state in position generation signal for transaction %s", getattr(instance, "id", None))
@@ -142,14 +142,14 @@ def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transacti
             return
         
         previous_status = getattr(instance, "_previous_status", None)
-        status_changed_to_termine = previous_status not in COMPLETED_TRANSACTION_STATUSES
+        status_changed_to_valide = previous_status not in COMPLETED_TRANSACTION_STATUSES
         
-        # Only recalculate if status just changed to "termine"
+        # Only recalculate if status just changed to "valide"
         # (to avoid recalculating multiple times if transaction is saved multiple times)
-        if not status_changed_to_termine:
+        if not status_changed_to_valide:
             return
         
-        logger.info("Recalculating positions after withdrawal transaction %s (status changed to termine)", getattr(instance, "id", None))
+        logger.info("Recalculating positions after withdrawal transaction %s (status changed to valide)", getattr(instance, "id", None))
         recalculate_positions_for_product_withdrawal(instance)
     except Exception as e:
         logger.error("Failed to recalculate positions after withdrawal transaction %s: %s", getattr(instance, "id", None), e, exc_info=True)

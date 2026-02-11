@@ -20,7 +20,6 @@ export const getStatusLabel = (status: string): string => {
     'en_attente_paiement': 'En attente de paiement',
     'en_cours': 'En cours',
     'valide': 'Validé',
-    'termine': 'Validé',
     'conteste': 'Contesté',
     'annule': 'Annulé',
   };
@@ -81,7 +80,7 @@ export const extractAssetInfo = (description: string): { name: string; reference
 export const TRANSACTION_TYPES = {
   depot: {
     label: 'Dépôt',
-    statuses: ['en_attente_paiement', 'en_cours', 'valide', 'conteste', 'annule']
+    statuses: ['en_attente_paiement', 'valide', 'conteste', 'annule']
   },
   retrait: {
     label: 'Retrait',
@@ -121,7 +120,6 @@ export const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
   valide: 'Validé',
-  termine: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'
 };

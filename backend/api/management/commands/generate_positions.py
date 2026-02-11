@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from api.models import Transaction
 from api.position_service import create_positions_for_investment
 
-COMPLETED_TRANSACTION_STATUSES = ("valide", "termine")
+COMPLETED_TRANSACTION_STATUSES = ("valide",)
 
 
 class Command(BaseCommand):

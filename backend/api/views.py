@@ -65,12 +65,7 @@ from .position_service import (
     recalculate_positions_for_product_withdrawal,
 )
 
-COMPLETED_TRANSACTION_STATUSES = ('valide', 'termine')
-
-
-def _normalize_transaction_status(raw_status):
-    """Map legacy status values to canonical ones."""
-    return 'valide' if raw_status == 'termine' else raw_status
+COMPLETED_TRANSACTION_STATUSES = ('valide',)
 
 
 def get_client_ip(request):
@@ -5343,16 +5338,16 @@ def client_transaction_create(request, client_id):
                 'error': f'Fonds insuffisants. Solde disponible: {available_funds:.2f} EUR, montant demandé: {transaction_amount:.2f} EUR'
             }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Check if this is an investment transaction that will be created with status 'termine'
+    # Check if this is an investment transaction that will be created with status 'valide'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
-    transaction_status = _normalize_transaction_status(request.data.get('status', 'en_cours'))
+    transaction_status = request.data.get('status', 'en_cours')
     skip_position_generation = request.data.get('skip_position_generation', False)
     is_investment_transfert = (
         transaction_type == 'transfert' 
         and transfer_to 
         and transfer_to != 'balance'
     )
-    # IMPORTANT: For investment transactions with status 'termine', we MUST generate positions
+    # IMPORTANT: For investment transactions with status 'valide', we MUST generate positions
     # even if skip_position_generation is True (which is set by frontend to show modal).
     # The frontend will handle showing the modal, but if the user closes it without completing,
     # the transaction should still have positions generated automatically.
@@ -5407,14 +5402,14 @@ def client_transaction_create(request, client_id):
             # If skip_position_generation is True but it's not an investment, still skip signal
             transaction._skip_auto_position_generation = True
         
-        # If this is an investment transaction with status 'termine', set validated_at
+        # If this is an investment transaction with status 'valide', set validated_at
         if should_generate_positions_before_create:
             transaction.validated_at = transaction_datetime
         
         # Now save the transaction (signal will see the skip flag)
         transaction.save()
         
-        # If this is an investment transaction with status 'termine', generate positions NOW
+        # If this is an investment transaction with status 'valide', generate positions NOW
         # This happens BEFORE the transaction is committed, ensuring positions are ready
         # when the transaction becomes visible in the database
         if should_generate_positions_before_create:
@@ -5433,7 +5428,7 @@ def client_transaction_create(request, client_id):
                     'error': f'Erreur lors de la génération des positions: {str(pos_err)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # IMPORTANT: For investment transactions created with status 'termine',
+    # IMPORTANT: For investment transactions created with status 'valide',
     # positions are now generated BEFORE the transaction is committed (but after it's created in the atomic block).
     # This ensures positions are ready when the transaction becomes visible in the database.
     # The signal will be skipped because _skip_auto_position_generation is set.
@@ -6152,7 +6147,7 @@ def client_transaction_update(request, client_id, transaction_id):
     if 'description' in request.data:
         transaction.description = request.data.get('description', '')
     if 'status' in request.data:
-        transaction.status = _normalize_transaction_status(request.data.get('status'))
+        transaction.status = request.data.get('status')
     if 'datetime' in request.data:
         from django.utils.dateparse import parse_datetime
         datetime_str = request.data.get('datetime')
@@ -6251,8 +6246,8 @@ def client_transaction_update(request, client_id, transaction_id):
             if not transaction.subscription_contract_end:
                 transaction.subscription_contract_end = merged.get('contractEnd', '') or ''
             transaction.save()
-    # If an investment becomes "termine", this is the moment it starts: create monthly positions.
-    # Also backfill if it's already termine but positions are missing (idempotent).
+    # If an investment becomes "valide", this is the moment it starts: create monthly positions.
+    # Also backfill if it's already valide but positions are missing (idempotent).
     # Skip automatic generation if skip_position_generation flag is set (for staged modal flow)
     # Note: skip_position_generation flag is already set above before transaction.save()
     if is_investment and transaction.status in COMPLETED_TRANSACTION_STATUSES and not skip_position_generation:
@@ -6262,11 +6257,11 @@ def client_transaction_update(request, client_id, transaction_id):
             except Exception as pos_err:
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.error(f"Failed to create positions for transaction {transaction.id} on status termine: {str(pos_err)}")
+                logger.error(f"Failed to create positions for transaction {transaction.id} on status valide: {str(pos_err)}")
                 import traceback
                 logger.error(traceback.format_exc())
     
-    # If a withdrawal becomes "termine", recalculate positions for all investment transactions on the same product
+    # If a withdrawal becomes "valide", recalculate positions for all investment transactions on the same product
     # A withdrawal is specifically when transfer_to == 'balance'
     is_withdrawal = (
         transaction.type == 'transfert' and
@@ -6783,7 +6778,7 @@ def transaction_save_positions(request, client_id, transaction_id):
             # Collect information about positions that will be deleted before recalculation
             # IMPORTANT: Always recalculate positions for withdrawals when save-positions is called,
             # regardless of transaction status. This ensures positions are recalculated even if
-            # the frontend creates withdrawals with status 'en_cours' and fails to update to 'termine'.
+            # the frontend creates withdrawals with status 'en_cours' and fails to update to 'valide'.
             # The save-positions call indicates the user is finalizing the withdrawal.
             deleted_positions_info = None
             try:
