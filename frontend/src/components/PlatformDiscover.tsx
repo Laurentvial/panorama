@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -46,6 +46,22 @@ export function PlatformDiscover() {
   const [loading, setLoading] = useState(true);
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const featuredSliderRef = useRef<HTMLDivElement | null>(null);
+
+  const parseFeatured = (value: any): boolean => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return value.trim().toLowerCase() === 'true' || value.trim() === '1';
+    if (typeof value === 'number') return value === 1;
+    return false;
+  };
+
+  const scrollFeaturedSlider = (direction: 'left' | 'right') => {
+    const slider = featuredSliderRef.current;
+    if (!slider) return;
+    const step = isMobile ? 280 : 360;
+    const delta = direction === 'left' ? -step : step;
+    slider.scrollBy({ left: delta, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     if (currentUser && currentUser.id) {
@@ -101,7 +117,10 @@ export function PlatformDiscover() {
           return null;
         }
         console.log('Extracted asset:', asset.id, asset.name);
-        return asset;
+        return {
+          ...asset,
+          isFeatured: parseFeatured(ca.featured),
+        };
       }).filter(Boolean);
       
       console.log('Extracted assets:', assetsList);
@@ -112,7 +131,13 @@ export function PlatformDiscover() {
       
       // Extract products from ClientProduct objects - only show products the client has access to
       const clientProducts = (clientProductsResponse as any)?.products || [];
-      const productsList = clientProducts.map((cp: any) => cp.product).filter(Boolean);
+      const productsList = clientProducts.map((cp: any) => {
+        if (!cp?.product) return null;
+        return {
+          ...cp.product,
+          isFeatured: parseFeatured(cp.featured),
+        };
+      }).filter(Boolean);
       // Filter active products only
       const activeProducts = productsList.filter((p: any) => p.status === 'Actif');
       
@@ -238,6 +263,16 @@ export function PlatformDiscover() {
     
     return matchesCategory && matchesType;
   });
+
+  const sortedFilteredAssets = useMemo(() => {
+    const featuredFirst = [...filteredAssets].sort((a: any, b: any) => {
+      const aFeatured = parseFeatured(a?.isFeatured);
+      const bFeatured = parseFeatured(b?.isFeatured);
+      if (aFeatured !== bFeatured) return aFeatured ? -1 : 1;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' });
+    });
+    return featuredFirst;
+  }, [filteredAssets]);
   
   console.log('Total assets:', assets.length);
   console.log('Filtered assets:', filteredAssets.length);
@@ -304,6 +339,15 @@ export function PlatformDiscover() {
     return false;
   });
 
+  const sortedSmartPortfolios = useMemo(() => {
+    return [...smartPortfolios].sort((a: any, b: any) => {
+      const aFeatured = parseFeatured(a?.isFeatured);
+      const bFeatured = parseFeatured(b?.isFeatured);
+      if (aFeatured !== bFeatured) return aFeatured ? -1 : 1;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' });
+    });
+  }, [smartPortfolios]);
+
   // Filter other internal products (non-Smart Portfolio products)
   const allOtherInternalProducts = products.filter((product: any) => {
     // Check if it's NOT a Smart Portfolio
@@ -329,6 +373,15 @@ export function PlatformDiscover() {
     const productTypeCategory = getProductType(product);
     return productTypeCategory === selectedTypeFilter;
   });
+
+  const sortedOtherInternalProducts = useMemo(() => {
+    return [...otherInternalProducts].sort((a: any, b: any) => {
+      const aFeatured = parseFeatured(a?.isFeatured);
+      const bFeatured = parseFeatured(b?.isFeatured);
+      if (aFeatured !== bFeatured) return aFeatured ? -1 : 1;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'fr', { sensitivity: 'base' });
+    });
+  }, [otherInternalProducts]);
 
   // Check if asset is actually in client's portfolio (has open positions)
   const isAssetInPortfolio = (assetId: string) => {
@@ -574,6 +627,30 @@ export function PlatformDiscover() {
     return { text: `${min.toFixed(2)}%${period}`, isPositive };
   };
 
+  const visibleAssets = sortedFilteredAssets.filter((asset: any) => !parseFeatured(asset?.isFeatured));
+  const visibleSmartPortfolios = sortedSmartPortfolios.filter((product: any) => !parseFeatured(product?.isFeatured));
+  const visibleOtherInternalProducts = sortedOtherInternalProducts.filter((product: any) => !parseFeatured(product?.isFeatured));
+
+  const featuredAssets = (assets || [])
+    .filter((asset: any) => parseFeatured(asset?.isFeatured))
+    .map((asset: any) => ({
+      key: `asset-${asset.id}`,
+      kind: 'asset' as const,
+      data: asset,
+    }));
+
+  const featuredProducts = (products || [])
+    .filter((product: any) => parseFeatured(product?.isFeatured))
+    .map((product: any) => ({
+      key: `product-${product.id}`,
+      kind: 'product' as const,
+      data: product,
+    }));
+
+  const featuredSliderItems = [...featuredAssets, ...featuredProducts].sort((a, b) =>
+    String(a?.data?.name || '').localeCompare(String(b?.data?.name || ''), 'fr', { sensitivity: 'base' })
+  );
+
   return (
     <div style={{ padding: '0' }}>
       {/* Navigation Tabs */}
@@ -630,83 +707,422 @@ export function PlatformDiscover() {
       ) : (
         <>
 
-          {/* Section Header */}
-          <div style={{ marginBottom: isMobile ? '20px' : '30px' }}>
-            <h2 style={{ 
-              fontSize: isMobile ? '12px' : '14px', 
-              fontWeight: '600', 
-              color: '#6b7280', 
-              marginBottom: '8px', 
-              textTransform: 'uppercase', 
-              letterSpacing: '0.5px' 
-            }}>
-              Opportunités d'investissement
-            </h2>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: isMobile ? 'flex-start' : 'center',
-              flexWrap: isMobile ? 'wrap' : 'nowrap',
-              gap: isMobile ? '12px' : '0',
-            }}>
-              <h1 className="platform-page-title" style={{ flex: 1, minWidth: 0 }}>
-                Explorer les marchés mondiaux
-              </h1>
-              <div style={{ 
-                display: 'flex', 
-                gap: '8px',
-                flexShrink: 0,
-              }}>
-                <button
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    border: '1px solid #e5e7eb',
-                    backgroundColor: 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#f3f4f6';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <button
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    border: '1px solid #e5e7eb',
-                    backgroundColor: 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = '#f3f4f6';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
+          {/* Featured Top Slider */}
+          {featuredSliderItems.length > 0 && (
+            <div style={{ marginBottom: '36px' }}>
+              <div style={{ marginBottom: '14px' }}>
+                <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Tendance du moment
+                </h2>
+                <h3 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: '700', margin: 0 }}>
+                  Produits et actifs du moment
+                </h3>
+              </div>
+
+              <div
+                ref={featuredSliderRef}
+                style={{
+                  display: 'flex',
+                  gap: '14px',
+                  overflowX: 'auto',
+                  scrollBehavior: 'smooth',
+                  WebkitOverflowScrolling: 'touch',
+                  paddingBottom: '6px',
+                }}
+              >
+                {featuredSliderItems.map((item) => {
+                  if (item.kind === 'asset') {
+                    const asset = item.data;
+                    const isInPortfolio = isAssetInPortfolio(asset.id);
+                    const productType = getAssetProductType(asset);
+
+                    return (
+                      <Card
+                        key={item.key}
+                        onClick={() => {
+                          logPlatformAction('click', { element: 'asset', assetId: asset.id, source: 'featured_slider' });
+                          navigate(`/platform/product/${asset.id}`);
+                        }}
+                        style={{
+                          minWidth: isMobile ? '260px' : '300px',
+                          maxWidth: isMobile ? '260px' : '300px',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          border: 'none',
+                          borderRadius: '16px',
+                          cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s',
+                          minHeight: '200px',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: '16px',
+                            right: '16px',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: '#065f46',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            zIndex: 2,
+                          }}>
+                            Tendance du moment
+                          </div>
+                          {isInPortfolio && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '44px',
+                              right: '16px',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                              color: '#065f46',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              zIndex: 2,
+                            }}>
+                              Dans le portefeuille
+                            </div>
+                          )}
+
+                          <div style={{
+                            marginBottom: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '64px',
+                            height: '64px',
+                            borderRadius: '16px',
+                            backgroundColor: asset.logoUrl ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
+                            overflow: 'hidden',
+                          }}>
+                            {asset.logoUrl && (
+                              <AssetLogo
+                                logoUrl={asset.logoUrl}
+                                name={asset.name}
+                                productType={productType}
+                                typeColor={{ text: '#111827' }}
+                                getProductTypeIcon={getProductTypeIcon}
+                              />
+                            )}
+                          </div>
+
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                              {asset.name || 'N/A'}
+                            </div>
+                            {asset.reference && (
+                              <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                                {asset.reference}
+                              </div>
+                            )}
+                          </div>
+                          {(asset.category || asset.subcategory) && (
+                            <div style={{
+                              marginBottom: '12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}>
+                              {asset.category && (
+                                <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>
+                                  {asset.category}
+                                </div>
+                              )}
+                              {asset.subcategory && (
+                                <>
+                                  {asset.category && (
+                                    <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
+                                  )}
+                                  <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
+                                    {asset.subcategory}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {(asset.lastPrice !== undefined && asset.lastPrice !== null) || (asset.price !== undefined) ? (
+                            <div style={{ marginBottom: '16px' }}>
+                              <div style={{
+                                fontSize: '24px',
+                                fontWeight: '700',
+                                color: '#111827',
+                                marginBottom: '8px',
+                              }}>
+                                {(asset.lastPrice !== undefined && asset.lastPrice !== null)
+                                  ? typeof asset.lastPrice === 'number'
+                                    ? asset.lastPrice.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                    : asset.lastPrice
+                                  : typeof asset.price === 'number'
+                                    ? asset.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                    : asset.price}
+                                {asset.currency && ` ${asset.currency}`}
+                              </div>
+
+                              {(asset.priceChangePercent !== undefined && asset.priceChangePercent !== null) ||
+                               (asset.priceChange !== undefined && asset.priceChange !== null) ||
+                               (asset.changePercent !== undefined) ? (
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  flexWrap: 'wrap',
+                                }}>
+                                  {(asset.priceChange !== undefined && asset.priceChange !== null) && (
+                                    <div style={{
+                                      fontSize: '14px',
+                                      fontWeight: '600',
+                                      color: (asset.priceChange || 0) >= 0 ? '#10b981' : '#ef4444',
+                                    }}>
+                                      {(asset.priceChange || 0) >= 0 ? '+' : ''}
+                                      {typeof asset.priceChange === 'number'
+                                        ? asset.priceChange.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : asset.priceChange}
+                                    </div>
+                                  )}
+
+                                  {(asset.priceChangePercent !== undefined && asset.priceChangePercent !== null) ? (
+                                    <div style={{
+                                      fontSize: '14px',
+                                      fontWeight: '600',
+                                      color: (asset.priceChangePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                    }}>
+                                      ({(asset.priceChangePercent || 0) >= 0 ? '+' : ''}
+                                      {typeof asset.priceChangePercent === 'number'
+                                        ? asset.priceChangePercent.toFixed(2)
+                                        : asset.priceChangePercent}%)
+                                    </div>
+                                  ) : asset.changePercent !== undefined && (
+                                    <div style={{
+                                      fontSize: '14px',
+                                      fontWeight: '600',
+                                      color: (asset.changePercent || 0) >= 0 ? '#10b981' : '#ef4444',
+                                    }}>
+                                      ({(asset.changePercent || 0) >= 0 ? '+' : ''}
+                                      {typeof asset.changePercent === 'number'
+                                        ? asset.changePercent.toFixed(2)
+                                        : asset.changePercent}%)
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  const product = item.data;
+                  const productType = getProductType(product);
+                  const isSmartPortfolio = productType === 'smart_portfolio';
+
+                  if (isSmartPortfolio) {
+                    const profitabilityInfo = getProfitabilityDisplay(product);
+                    const isPositive = profitabilityInfo.isPositive;
+
+                    return (
+                      <Card
+                        key={item.key}
+                        onClick={() => {
+                          logPlatformAction('click', { element: 'product', productId: product.id, source: 'featured_slider' });
+                          navigate(`/platform/product/${product.id}`);
+                        }}
+                        style={{
+                          minWidth: isMobile ? '260px' : '320px',
+                          maxWidth: isMobile ? '260px' : '320px',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s',
+                          backgroundColor: 'white',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <div style={{
+                          position: 'relative',
+                          height: '180px',
+                          backgroundColor: '#f3f4f6',
+                          backgroundImage: product.imageUrl ? `url(${product.imageUrl})` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'flex-end',
+                          padding: '12px',
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: '12px',
+                            right: '12px',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: '#065f46',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            zIndex: 2,
+                          }}>
+                            Tendance du moment
+                          </div>
+                        </div>
+                        <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
+                          <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', color: '#030213', marginBottom: '8px', marginTop: 0 }}>
+                            {product.name}
+                          </h4>
+                          {(product.categoryName || product.subcategory) && (
+                            <div style={{
+                              marginBottom: '12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}>
+                              {product.categoryName && (
+                                <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>
+                                  {product.categoryName}
+                                </div>
+                              )}
+                              {product.subcategory && (
+                                <>
+                                  {product.categoryName && (
+                                    <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
+                                  )}
+                                  <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
+                                    {product.subcategory}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280', marginBottom: '16px', lineHeight: '1.5', minHeight: '40px' }}>
+                            {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
+                          </p>
+                          <div style={{ marginBottom: '16px' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '700', color: isPositive ? '#10b981' : '#ef4444' }}>
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  return (
+                    <Card
+                      key={item.key}
+                      onClick={() => {
+                        logPlatformAction('click', { element: 'product', productId: product.id, source: 'featured_slider' });
+                        navigate(`/platform/product/${product.id}`);
+                      }}
+                      style={{
+                        minWidth: isMobile ? '260px' : '300px',
+                        maxWidth: isMobile ? '260px' : '300px',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        background: product.imageUrl
+                          ? `linear-gradient(135deg, rgba(243, 244, 246, 0.95) 0%, rgba(229, 231, 235, 0.95) 100%), url(${product.imageUrl})`
+                          : 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                        backgroundSize: product.imageUrl ? 'cover' : 'auto',
+                        backgroundPosition: product.imageUrl ? 'center' : 'auto',
+                        backgroundRepeat: 'no-repeat',
+                        border: 'none',
+                        borderRadius: '16px',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s, box-shadow 0.2s',
+                        minHeight: '200px',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                        <div style={{
+                          position: 'absolute',
+                          top: '16px',
+                          right: '16px',
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          color: '#065f46',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          zIndex: 2,
+                        }}>
+                          Tendance du moment
+                        </div>
+                        <div style={{ marginBottom: '20px', width: '64px', height: '64px' }}></div>
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                            {product.name || 'N/A'}
+                          </div>
+                          {product.reference && (
+                            <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                              {product.reference}
+                            </div>
+                          )}
+                        </div>
+                        {(product.categoryName || product.subcategory) && (
+                          <div style={{
+                            marginBottom: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            flexWrap: 'wrap',
+                          }}>
+                            {product.categoryName && (
+                              <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>
+                                {product.categoryName}
+                              </div>
+                            )}
+                            {product.subcategory && (
+                              <>
+                                {product.categoryName && (
+                                  <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
+                                )}
+                                <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
+                                  {product.subcategory}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Smart Portfolios Section - Only visible when 'all' or 'smart_portfolio' tab is selected */}
-          {smartPortfolios.length > 0 && (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') && (
+          {visibleSmartPortfolios.length > 0 && (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') && (
             <div style={{ marginBottom: '50px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -725,7 +1141,7 @@ export function PlatformDiscover() {
                 gap: isMobile ? '16px' : '20px',
                 marginBottom: isMobile ? '20px' : '30px'
               }}>
-                {smartPortfolios.map((portfolio: any) => {
+                {visibleSmartPortfolios.map((portfolio: any) => {
                   const profitabilityInfo = getProfitabilityDisplay(portfolio);
                   const isPositive = profitabilityInfo.isPositive;
                   
@@ -767,6 +1183,22 @@ export function PlatformDiscover() {
                         justifyContent: 'flex-end',
                         padding: '12px',
                       }}>
+                        {parseFeatured(portfolio?.isFeatured) && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '12px',
+                            right: '12px',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: '#065f46',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            zIndex: 2,
+                          }}>
+                            Tendance du moment
+                          </div>
+                        )}
                         {/* Trending Label or Menu Button */}
                         {(() => {
                           const desc = truncateDescription(portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150);
@@ -843,7 +1275,7 @@ export function PlatformDiscover() {
                           <div style={{
                             fontSize: '20px',
                             fontWeight: '700',
-                            color: isPositive ? 'var(--platform-button-bg)' : '#ef4444',
+                            color: isPositive ? '#10b981' : '#ef4444',
                           }}>
                             {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                           </div>
@@ -856,9 +1288,94 @@ export function PlatformDiscover() {
             </div>
           )}
 
+          {/* Section Header */}
+          <div style={{ marginBottom: isMobile ? '20px' : '30px' }}>
+            <h2 style={{ 
+              fontSize: isMobile ? '12px' : '14px', 
+              fontWeight: '600', 
+              color: '#6b7280', 
+              marginBottom: '8px', 
+              textTransform: 'uppercase', 
+              letterSpacing: '0.5px' 
+            }}>
+              Opportunités d'investissement
+            </h2>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: isMobile ? 'flex-start' : 'center',
+              flexWrap: isMobile ? 'wrap' : 'nowrap',
+              gap: isMobile ? '12px' : '0',
+            }}>
+              <h1 className="platform-page-title" style={{ flex: 1, minWidth: 0 }}>
+                Explorer les marchés mondiaux
+              </h1>
+              <div style={{ 
+                display: 'flex', 
+                gap: '8px',
+                flexShrink: 0,
+              }}>
+                <button
+                  type="button"
+                  onClick={() => scrollFeaturedSlider('left')}
+                  disabled={featuredSliderItems.length === 0}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: '1px solid #e5e7eb',
+                    backgroundColor: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (featuredSliderItems.length === 0) return;
+                    e.currentTarget.style.backgroundColor = '#f3f4f6';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'white';
+                  }}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollFeaturedSlider('right')}
+                  disabled={featuredSliderItems.length === 0}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: '1px solid #e5e7eb',
+                    backgroundColor: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (featuredSliderItems.length === 0) return;
+                    e.currentTarget.style.backgroundColor = '#f3f4f6';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'white';
+                  }}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Assets Grid (External Assets + Other Internal Products) */}
           {/* Filtered by selected tab */}
-          {(filteredAssets.length > 0 || otherInternalProducts.length > 0) && (
+          {(visibleAssets.length > 0 || visibleOtherInternalProducts.length > 0) && (
             <div style={{ 
               display: 'grid', 
               gridTemplateColumns: isMobile 
@@ -867,7 +1384,7 @@ export function PlatformDiscover() {
               gap: isMobile ? '16px' : '20px' 
             }}>
               {/* External Assets */}
-              {filteredAssets.map((asset: any) => {
+              {visibleAssets.map((asset: any) => {
                 const isInPortfolio = isAssetInPortfolio(asset.id);
                 const productType = getAssetProductType(asset);
                 const typeColor = getProductTypeColor(productType);
@@ -900,10 +1417,26 @@ export function PlatformDiscover() {
                   >
                     <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
                       {/* Featured Badge */}
-                      {isInPortfolio && (
+                      {parseFeatured(asset?.isFeatured) && (
                         <div style={{
                           position: 'absolute',
                           top: '16px',
+                          right: '16px',
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          color: '#065f46',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          zIndex: 2,
+                        }}>
+                          Tendance du moment
+                        </div>
+                      )}
+                      {isInPortfolio && (
+                        <div style={{
+                          position: 'absolute',
+                          top: parseFeatured(asset?.isFeatured) ? '44px' : '16px',
                           right: '16px',
                           padding: '4px 10px',
                           borderRadius: '12px',
@@ -1035,7 +1568,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.priceChange || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
+                                  color: (asset.priceChange || 0) >= 0 ? '#10b981' : '#ef4444',
                                 }}>
                                   {(asset.priceChange || 0) >= 0 ? '+' : ''}
                                   {typeof asset.priceChange === 'number' 
@@ -1049,7 +1582,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.priceChangePercent || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
+                                  color: (asset.priceChangePercent || 0) >= 0 ? '#10b981' : '#ef4444',
                                 }}>
                                   ({(asset.priceChangePercent || 0) >= 0 ? '+' : ''}
                                   {typeof asset.priceChangePercent === 'number' 
@@ -1060,7 +1593,7 @@ export function PlatformDiscover() {
                                 <div style={{
                                   fontSize: '14px',
                                   fontWeight: '600',
-                                  color: (asset.changePercent || 0) >= 0 ? 'var(--platform-button-bg)' : '#ef4444',
+                                  color: (asset.changePercent || 0) >= 0 ? '#10b981' : '#ef4444',
                                 }}>
                                   ({(asset.changePercent || 0) >= 0 ? '+' : ''}
                                   {typeof asset.changePercent === 'number' 
@@ -1078,7 +1611,7 @@ export function PlatformDiscover() {
               })}
               
               {/* Internal Products (non-Smart Portfolio) */}
-              {otherInternalProducts.map((product: any) => {
+              {visibleOtherInternalProducts.map((product: any) => {
                 const productType = getProductType(product);
                 const typeColor = getProductTypeColor(productType);
                 
@@ -1114,6 +1647,22 @@ export function PlatformDiscover() {
                     }}
                   >
                     <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                      {parseFeatured(product?.isFeatured) && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '16px',
+                          right: '16px',
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          color: '#065f46',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          zIndex: 2,
+                        }}>
+                          Tendance du moment
+                        </div>
+                      )}
                       {/* Logo placeholder - empty space */}
                       <div style={{
                         marginBottom: '20px',
@@ -1201,7 +1750,7 @@ export function PlatformDiscover() {
                               <div style={{
                                 fontSize: '14px',
                                 fontWeight: '600',
-                                color: profitabilityInfo.isPositive ? 'var(--platform-button-bg)' : '#ef4444',
+                                color: profitabilityInfo.isPositive ? '#10b981' : '#ef4444',
                               }}>
                                 {profitabilityInfo.isPositive ? '+' : ''}
                                 {profitabilityInfo.text}

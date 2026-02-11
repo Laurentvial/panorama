@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
@@ -24,6 +24,16 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [filterType, setFilterType] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterSubcategory, setFilterSubcategory] = useState<string>('all');
+  const [localClientAssets, setLocalClientAssets] = useState<any[]>(clientAssets || []);
+  const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
+
+  useEffect(() => {
+    setLocalClientAssets(clientAssets || []);
+  }, [clientAssets]);
+
+  useEffect(() => {
+    setLocalClientProducts(clientProducts || []);
+  }, [clientProducts]);
 
   async function handleAddAsset(assetId: string) {
     try {
@@ -84,28 +94,60 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   }
 
   async function handleToggleFeaturedAsset(clientAssetId: string, assetId: string, currentFeatured: boolean) {
+    const nextFeatured = !currentFeatured;
+    setLocalClientAssets((prev) =>
+      prev.map((ca: any) =>
+        String(ca?.id) === String(clientAssetId)
+          ? { ...ca, featured: nextFeatured }
+          : ca
+      )
+    );
+
     try {
       await apiCall(`/api/clients/${clientId}/assets/${assetId}/toggle-featured/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success(currentFeatured ? 'Actif ne sera plus mis en avant' : 'Actif mis en avant');
-      onRefresh();
     } catch (error: any) {
+      // Rollback optimistic update on error
+      setLocalClientAssets((prev) =>
+        prev.map((ca: any) =>
+          String(ca?.id) === String(clientAssetId)
+            ? { ...ca, featured: currentFeatured }
+            : ca
+        )
+      );
       console.error('Error toggling featured:', error);
       toast.error(error.message || 'Erreur lors de la modification');
     }
   }
 
   async function handleToggleFeaturedProduct(clientProductId: string, productId: string, currentFeatured: boolean) {
+    const nextFeatured = !currentFeatured;
+    setLocalClientProducts((prev) =>
+      prev.map((cp: any) =>
+        String(cp?.id) === String(clientProductId)
+          ? { ...cp, featured: nextFeatured }
+          : cp
+      )
+    );
+
     try {
       await apiCall(`/api/clients/${clientId}/products/${productId}/toggle-featured/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success(currentFeatured ? 'Produit ne sera plus mis en avant' : 'Produit mis en avant');
-      onRefresh();
     } catch (error: any) {
+      // Rollback optimistic update on error
+      setLocalClientProducts((prev) =>
+        prev.map((cp: any) =>
+          String(cp?.id) === String(clientProductId)
+            ? { ...cp, featured: currentFeatured }
+            : cp
+        )
+      );
       console.error('Error toggling featured:', error);
       toast.error(error.message || 'Erreur lors de la modification');
     }
@@ -131,7 +173,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Tous les types</SelectItem>
-                    {Array.from(new Set(clientAssets.map((ca: any) => ca.asset?.type).filter(Boolean) as string[])).map((type) => (
+                    {Array.from(new Set(localClientAssets.map((ca: any) => ca.asset?.type).filter(Boolean) as string[])).map((type) => (
                       <SelectItem key={type} value={type}>{type}</SelectItem>
                     ))}
                   </SelectContent>
@@ -143,7 +185,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Toutes les catégories</SelectItem>
-                    {Array.from(new Set(clientAssets.map((ca: any) => ca.asset?.category).filter(Boolean) as string[])).map((category) => (
+                    {Array.from(new Set(localClientAssets.map((ca: any) => ca.asset?.category).filter(Boolean) as string[])).map((category) => (
                       <SelectItem key={category} value={category}>{category}</SelectItem>
                     ))}
                   </SelectContent>
@@ -155,7 +197,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Toutes les sous-catégories</SelectItem>
-                    {Array.from(new Set(clientAssets.map((ca: any) => ca.asset?.subcategory).filter(Boolean) as string[])).map((subcategory) => (
+                    {Array.from(new Set(localClientAssets.map((ca: any) => ca.asset?.subcategory).filter(Boolean) as string[])).map((subcategory) => (
                       <SelectItem key={subcategory} value={subcategory}>{subcategory}</SelectItem>
                     ))}
                   </SelectContent>
@@ -242,7 +284,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
               <CardContent>
                 {(() => {
                   // Filter assets based on selected filters
-                  const filteredAssets = clientAssets.filter((clientAsset: any) => {
+                  const filteredAssets = localClientAssets.filter((clientAsset: any) => {
                     const asset = clientAsset.asset;
                     if (!asset) return false; // Skip if asset was deleted
                     const typeMatch = filterType === 'all' || asset.type === filterType;
@@ -315,7 +357,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         </tbody>
                       </table>
                     </div>
-                  ) : clientAssets.length > 0 ? (
+                  ) : localClientAssets.length > 0 ? (
                     <p className="text-sm text-slate-500">Aucun actif ne correspond aux filtres sélectionnés</p>
                   ) : (
                     <p className="text-sm text-slate-500">Aucun actif assigné</p>
@@ -384,7 +426,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         </SelectTrigger>
                         <SelectContent>
                           {availableProducts
-                            .filter((product: any) => !clientProducts.some((cp: any) => cp.product?.id === product.id))
+                            .filter((product: any) => !localClientProducts.some((cp: any) => cp.product?.id === product.id))
                             .map((product: any) => (
                               <SelectItem key={product.id} value={product.id}>
                                 {product.name} ({product.type || 'N/A'}) - {product.reference || 'N/A'}
@@ -408,7 +450,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                 <CardTitle>Produits visibles par le client</CardTitle>
               </CardHeader>
               <CardContent>
-                {clientProducts.length > 0 ? (
+                {localClientProducts.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -422,7 +464,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         </tr>
                       </thead>
                       <tbody>
-                        {clientProducts.map((clientProduct: any) => {
+                        {localClientProducts.map((clientProduct: any) => {
                           const product = clientProduct.product;
                           if (!product) return null; // Skip if product was deleted
                           const isFeatured = clientProduct.featured || false;
