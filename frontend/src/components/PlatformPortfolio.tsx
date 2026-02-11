@@ -1571,14 +1571,16 @@ export function PlatformPortfolio() {
                         const hasAsset = Boolean(p.assetName || p.assetReference || p.assetId || p.asset_id || p.asset?.id);
                         const assetId = p.assetId || p.asset_id || p.asset?.id || null;
                         const asset = assetId ? assetsById.get(String(assetId)) : null;
+                        const positionAssetType = p.assetType || p.asset_type || p.asset?.type || '';
                         
                         // Pour la colonne "Produit" : afficher le type
                         // Si asset : utiliser le type de l'actif (action, etf, etc.)
                         // Si produit interne : utiliser le type du produit (livret, etc.)
                         let productTypeLabel = '';
-                        if (hasAsset && asset) {
-                          // Asset : utiliser le type de l'actif
-                          productTypeLabel = asset?.type || asset?.category || asset?.subcategory || p.assetType || p.asset_type || 'Trading';
+                        if (hasAsset) {
+                          // Ordre actif : prioriser le type embarque dans la position (source API),
+                          // puis fallback vers l'index d'actifs.
+                          productTypeLabel = positionAssetType || asset?.type || asset?.category || asset?.subcategory || 'Trading';
                         } else if (p.productId) {
                           // Produit interne : utiliser le type du produit
                           const product = productsById.get(String(p.productId));
