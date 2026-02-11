@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from './ui/button';
-import { ArrowLeftRight, Eye, Edit } from 'lucide-react';
+import { ArrowLeftRight, Eye, Edit, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 // Helper functions for French labels
@@ -90,6 +90,8 @@ interface TransactionListProps {
   assets?: any[];
   products?: any[];
   clients?: any[];
+  transactionDocuments?: Record<string, any[]>;
+  showContractColumn?: boolean;
   showClientColumn?: boolean;
   showIcons?: boolean;
   onView?: (transaction: any) => void;
@@ -102,6 +104,8 @@ export function TransactionList({
   assets = [],
   products = [],
   clients = [],
+  transactionDocuments = {},
+  showContractColumn = false,
   showClientColumn = false,
   showIcons = true,
   onView,
@@ -144,6 +148,7 @@ export function TransactionList({
             <th className="text-left py-3 px-4">Description</th>
             <th className="text-left py-3 px-4">Montant</th>
             <th className="text-left py-3 px-4">Statut</th>
+            {showContractColumn && <th className="text-left py-3 px-4">Contrat</th>}
             <th className="text-right py-3 px-4">Actions</th>
           </tr>
         </thead>
@@ -151,6 +156,8 @@ export function TransactionList({
           {transactions.map((transaction) => {
             const client = clients.find(c => c.id === transaction.clientId);
             const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
+            const contractDocs = transactionDocuments[String(transaction.id)] || [];
+            const hasContract = contractDocs.length > 0;
             
             // Get product/asset info - prioritize productId from transaction
             let productName = '-';
@@ -275,6 +282,24 @@ export function TransactionList({
                     {getStatusLabel(transaction.status)}
                   </span>
                 </td>
+                {showContractColumn && (
+                  <td className="py-3 px-4">
+                    {hasContract && contractDocs[0]?.fileUrl ? (
+                      <a
+                        href={contractDocs[0].fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Voir le contrat
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">-</span>
+                    )}
+                  </td>
+                )}
                 <td className="py-3 px-4 text-right">
                   <div className="flex gap-2 justify-end relative" style={{ zIndex: 10 }}>
                     {onView ? (

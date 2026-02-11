@@ -5594,9 +5594,16 @@ def client_transaction_create(request, client_id):
         import traceback
         logger.error(traceback.format_exc())
     
-    # Auto-create contract document for transfert transactions with products (subscriptions)
+    # Auto-create contract document for product subscriptions.
+    # A client subscription may occasionally arrive without explicit transfer_to
+    # but still include a valid product in subscription_details.
+    is_subscription_transfert = (
+        transaction_type == 'transfert'
+        and product is not None
+        and transfer_to != 'balance'
+    )
     # Use the same detailed contract generation logic as product_contract_pdf
-    if transaction_type == 'transfert' and product and transfer_to and transfer_to != 'balance':
+    if is_subscription_transfert:
         import logging
         logger = logging.getLogger(__name__)
         try:
@@ -6100,6 +6107,87 @@ def client_transaction_create(request, client_id):
             contract_logger = logging.getLogger(__name__)
             contract_logger.error(f"Failed to auto-create contract document for transaction {transaction_id}: {str(contract_err)}")
             contract_logger.error(traceback.format_exc())
+            # Fallback: create a minimal contract file so subscription always has a linked contract document.
+            try:
+                if not ClientDocument.objects.filter(transaction=transaction, document_type='contract').exists():
+                    from io import BytesIO
+                    from django.core.files.base import ContentFile
+                    fallback_doc_id = uuid.uuid4().hex[:12]
+                    while ClientDocument.objects.filter(id=fallback_doc_id).exists():
+                        fallback_doc_id = uuid.uuid4().hex[:12]
+
+                    safe_product_name = (getattr(product, 'name', None) or 'Produit')
+                    safe_client_name = f"{client.fname or ''} {client.lname or ''}".strip() or (client.email or 'Client')
+                    dt_display = (
+                        transaction.datetime.strftime('%d/%m/%Y %H:%M')
+                        if getattr(transaction, 'datetime', None)
+                        else datetime.now().strftime('%d/%m/%Y %H:%M')
+                    )
+                    amount_display = f"{float(transaction.amount):,.2f} EUR".replace(',', ' ')
+
+                    fallback_content = None
+                    fallback_filename = f"contrat_{re.sub(r'[^a-zA-Z0-9_-]', '_', safe_product_name)[:50]}_{transaction_id}.pdf"
+
+                    try:
+                        from reportlab.lib.pagesizes import A4
+                        from reportlab.pdfgen import canvas
+
+                        pdf_buffer = BytesIO()
+                        pdf = canvas.Canvas(pdf_buffer, pagesize=A4)
+                        y = 800
+                        pdf.setFont('Helvetica-Bold', 14)
+                        pdf.drawString(50, y, "Contrat de souscription (version de secours)")
+                        y -= 36
+                        pdf.setFont('Helvetica', 11)
+                        for line in [
+                            f"Transaction: {transaction_id}",
+                            f"Client: {safe_client_name}",
+                            f"Produit: {safe_product_name}",
+                            f"Montant: {amount_display}",
+                            f"Date: {dt_display}",
+                            "",
+                            "Ce document est genere automatiquement en mode secours.",
+                            "Le contrat detaille peut etre regenere depuis l'administration si necessaire.",
+                        ]:
+                            pdf.drawString(50, y, line)
+                            y -= 20
+                        pdf.showPage()
+                        pdf.save()
+                        fallback_content = pdf_buffer.getvalue()
+                        pdf_buffer.close()
+                    except Exception:
+                        # Last-resort fallback if PDF rendering is unavailable.
+                        fallback_filename = f"contrat_{re.sub(r'[^a-zA-Z0-9_-]', '_', safe_product_name)[:50]}_{transaction_id}.txt"
+                        fallback_text = (
+                            "Contrat de souscription (fallback)\n"
+                            f"Transaction: {transaction_id}\n"
+                            f"Client: {safe_client_name}\n"
+                            f"Produit: {safe_product_name}\n"
+                            f"Montant: {amount_display}\n"
+                            f"Date: {dt_display}\n"
+                        )
+                        fallback_content = fallback_text.encode('utf-8')
+
+                    fallback_document = ClientDocument.objects.create(
+                        id=fallback_doc_id,
+                        client=client,
+                        transaction=transaction,
+                        name=f"Contrat - {safe_product_name}",
+                        document_type='contract',
+                        description=(
+                            f"Contrat de souscription (fallback) pour la transaction {transaction_id}. "
+                            "Le PDF detaille n'a pas pu etre genere automatiquement."
+                        ),
+                        uploaded_by=None
+                    )
+                    fallback_document.file.save(fallback_filename, ContentFile(fallback_content), save=True)
+                    contract_logger.warning(
+                        f"Fallback contract created for transaction {transaction_id} (document {fallback_doc_id})."
+                    )
+            except Exception as fallback_err:
+                contract_logger.error(
+                    f"Fallback contract creation also failed for transaction {transaction_id}: {str(fallback_err)}"
+                )
     
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data, status=status.HTTP_201_CREATED)

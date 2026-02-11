@@ -926,13 +926,11 @@ export function PlatformDiscover() {
                   }
 
                   const product = item.data;
-                  const productType = getProductType(product);
-                  const isSmartPortfolio = productType === 'smart_portfolio';
+                  const profitabilityInfo = getProfitabilityDisplay(product);
+                  const isPositive = profitabilityInfo.isPositive;
+                  const hasImage = Boolean(product.imageUrl);
 
-                  if (isSmartPortfolio) {
-                    const profitabilityInfo = getProfitabilityDisplay(product);
-                    const isPositive = profitabilityInfo.isPositive;
-
+                  if (!hasImage) {
                     return (
                       <Card
                         key={item.key}
@@ -941,15 +939,16 @@ export function PlatformDiscover() {
                           navigate(`/platform/product/${product.id}`);
                         }}
                         style={{
-                          minWidth: isMobile ? '260px' : '320px',
-                          maxWidth: isMobile ? '260px' : '320px',
+                          minWidth: isMobile ? '260px' : '300px',
+                          maxWidth: isMobile ? '260px' : '300px',
                           position: 'relative',
                           overflow: 'hidden',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '12px',
+                          background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          border: 'none',
+                          borderRadius: '16px',
                           cursor: 'pointer',
                           transition: 'transform 0.2s, box-shadow 0.2s',
-                          backgroundColor: 'white',
+                          minHeight: '200px',
                         }}
                         onMouseEnter={(e) => {
                           e.currentTarget.style.transform = 'translateY(-4px)';
@@ -960,22 +959,11 @@ export function PlatformDiscover() {
                           e.currentTarget.style.boxShadow = 'none';
                         }}
                       >
-                        <div style={{
-                          position: 'relative',
-                          height: '180px',
-                          backgroundColor: '#f3f4f6',
-                          backgroundImage: product.imageUrl ? `url(${product.imageUrl})` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center',
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'flex-end',
-                          padding: '12px',
-                        }}>
+                        <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
                           <div style={{
                             position: 'absolute',
-                            top: '12px',
-                            right: '12px',
+                            top: '16px',
+                            right: '16px',
                             padding: '4px 10px',
                             borderRadius: '12px',
                             backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -986,11 +974,17 @@ export function PlatformDiscover() {
                           }}>
                             Tendance du moment
                           </div>
-                        </div>
-                        <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
-                          <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', color: '#030213', marginBottom: '8px', marginTop: 0 }}>
-                            {product.name}
-                          </h4>
+                          <div style={{ marginBottom: '20px', width: '64px', height: '64px' }}></div>
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                              {product.name || 'N/A'}
+                            </div>
+                            {product.reference && (
+                              <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                                {product.reference}
+                              </div>
+                            )}
+                          </div>
                           {(product.categoryName || product.subcategory) && (
                             <div style={{
                               marginBottom: '12px',
@@ -1016,11 +1010,17 @@ export function PlatformDiscover() {
                               )}
                             </div>
                           )}
-                          <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280', marginBottom: '16px', lineHeight: '1.5', minHeight: '40px' }}>
+                          <p style={{
+                            fontSize: isMobile ? '13px' : '14px',
+                            color: '#6b7280',
+                            marginBottom: '16px',
+                            lineHeight: '1.5',
+                            minHeight: '40px',
+                          }}>
                             {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                           </p>
                           <div style={{ marginBottom: '16px' }}>
-                            <div style={{ fontSize: '20px', fontWeight: '700', color: isPositive ? '#10b981' : '#ef4444' }}>
+                            <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
                               {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                             </div>
                           </div>
@@ -1037,21 +1037,15 @@ export function PlatformDiscover() {
                         navigate(`/platform/product/${product.id}`);
                       }}
                       style={{
-                        minWidth: isMobile ? '260px' : '300px',
-                        maxWidth: isMobile ? '260px' : '300px',
+                        minWidth: isMobile ? '260px' : '320px',
+                        maxWidth: isMobile ? '260px' : '320px',
                         position: 'relative',
                         overflow: 'hidden',
-                        background: product.imageUrl
-                          ? `linear-gradient(135deg, rgba(243, 244, 246, 0.95) 0%, rgba(229, 231, 235, 0.95) 100%), url(${product.imageUrl})`
-                          : 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
-                        backgroundSize: product.imageUrl ? 'cover' : 'auto',
-                        backgroundPosition: product.imageUrl ? 'center' : 'auto',
-                        backgroundRepeat: 'no-repeat',
-                        border: 'none',
-                        borderRadius: '16px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '12px',
                         cursor: 'pointer',
                         transition: 'transform 0.2s, box-shadow 0.2s',
-                        minHeight: '200px',
+                        backgroundColor: 'white',
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-4px)';
@@ -1062,11 +1056,37 @@ export function PlatformDiscover() {
                         e.currentTarget.style.boxShadow = 'none';
                       }}
                     >
-                      <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                      <div style={{
+                        position: 'relative',
+                        height: '180px',
+                        backgroundColor: '#ffffff',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'flex-end',
+                        padding: '12px',
+                      }}>
+                        {product.imageUrl && (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.name || 'Product image'}
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              objectPosition: 'center',
+                              transform: 'scale(1.22)',
+                              transformOrigin: 'center',
+                              zIndex: 0,
+                            }}
+                          />
+                        )}
                         <div style={{
                           position: 'absolute',
-                          top: '16px',
-                          right: '16px',
+                          top: '12px',
+                          right: '12px',
                           padding: '4px 10px',
                           borderRadius: '12px',
                           backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -1077,17 +1097,11 @@ export function PlatformDiscover() {
                         }}>
                           Tendance du moment
                         </div>
-                        <div style={{ marginBottom: '20px', width: '64px', height: '64px' }}></div>
-                        <div style={{ marginBottom: '12px' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
-                            {product.name || 'N/A'}
-                          </div>
-                          {product.reference && (
-                            <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                              {product.reference}
-                            </div>
-                          )}
-                        </div>
+                      </div>
+                      <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
+                        <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', color: '#030213', marginBottom: '8px', marginTop: 0 }}>
+                          {product.name || 'N/A'}
+                        </h4>
                         {(product.categoryName || product.subcategory) && (
                           <div style={{
                             marginBottom: '12px',
@@ -1113,6 +1127,14 @@ export function PlatformDiscover() {
                             )}
                           </div>
                         )}
+                        <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280', marginBottom: '16px', lineHeight: '1.5', minHeight: '40px' }}>
+                          {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
+                        </p>
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   );
@@ -1144,6 +1166,133 @@ export function PlatformDiscover() {
                 {visibleSmartPortfolios.map((portfolio: any) => {
                   const profitabilityInfo = getProfitabilityDisplay(portfolio);
                   const isPositive = profitabilityInfo.isPositive;
+                  const hasImage = Boolean(portfolio.imageUrl);
+
+                  if (!hasImage) {
+                    return (
+                      <Card
+                        key={portfolio.id}
+                        onClick={() => {
+                          logPlatformAction('click', { element: 'product', productId: portfolio.id });
+                          navigate(`/platform/product/${portfolio.id}`);
+                        }}
+                        style={{
+                          position: 'relative',
+                          overflow: 'hidden',
+                          background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          border: 'none',
+                          borderRadius: '16px',
+                          cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s',
+                          minHeight: '200px',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                          {parseFeatured(portfolio?.isFeatured) && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '16px',
+                              right: '16px',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                              color: '#065f46',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              zIndex: 2,
+                            }}>
+                              Tendance du moment
+                            </div>
+                          )}
+                          <div style={{
+                            marginBottom: '20px',
+                            width: '64px',
+                            height: '64px',
+                          }}></div>
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{
+                              fontSize: '20px',
+                              fontWeight: '600',
+                              color: '#111827',
+                              marginBottom: '8px',
+                            }}>
+                              {portfolio.name || 'N/A'}
+                            </div>
+                            {portfolio.reference && (
+                              <div style={{
+                                fontSize: '14px',
+                                color: '#6b7280',
+                              }}>
+                                {portfolio.reference}
+                              </div>
+                            )}
+                          </div>
+                          {(portfolio.categoryName || portfolio.subcategory) && (
+                            <div style={{
+                              marginBottom: '16px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                            }}>
+                              {portfolio.categoryName && (
+                                <div style={{
+                                  fontSize: '16px',
+                                  fontWeight: '600',
+                                  color: '#374151',
+                                }}>
+                                  {portfolio.categoryName}
+                                </div>
+                              )}
+                              {portfolio.subcategory && (
+                                <>
+                                  {portfolio.categoryName && (
+                                    <span style={{
+                                      fontSize: '14px',
+                                      color: '#9ca3af',
+                                    }}>•</span>
+                                  )}
+                                  <div style={{
+                                    fontSize: '14px',
+                                    fontWeight: '500',
+                                    color: '#6b7280',
+                                  }}>
+                                    {portfolio.subcategory}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <p style={{
+                            fontSize: isMobile ? '13px' : '14px',
+                            color: '#6b7280',
+                            marginBottom: '16px',
+                            lineHeight: '1.5',
+                            minHeight: '40px',
+                          }}>
+                            {truncateDescription(portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
+                          </p>
+                          <div style={{ marginBottom: '16px'}}>
+                          <div style={{
+                            fontSize: '16px',
+                            fontWeight: '700',
+                            color: 'var(--secondary)',
+                          }}>
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
                   
                   return (
                     <Card
@@ -1174,15 +1323,30 @@ export function PlatformDiscover() {
                       <div style={{
                         position: 'relative',
                         height: '180px',
-                        backgroundColor: '#f3f4f6',
-                        backgroundImage: portfolio.imageUrl ? `url(${portfolio.imageUrl})` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
+                        backgroundColor: '#ffffff',
+                        overflow: 'hidden',
                         display: 'flex',
                         alignItems: 'flex-start',
                         justifyContent: 'flex-end',
                         padding: '12px',
                       }}>
+                        {portfolio.imageUrl && (
+                          <img
+                            src={portfolio.imageUrl}
+                            alt={portfolio.name || 'Product image'}
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              objectPosition: 'center',
+                              transform: 'scale(1.22)',
+                              transformOrigin: 'center',
+                              zIndex: 0,
+                            }}
+                          />
+                        )}
                         {parseFeatured(portfolio?.isFeatured) && (
                           <div style={{
                             position: 'absolute',
@@ -1253,7 +1417,7 @@ export function PlatformDiscover() {
                           marginBottom: '8px',
                           marginTop: 0,
                         }}>
-                          {portfolio.name}
+                          {portfolio.name || 'N/A'}
                         </h4>
                         
                         {/* Description */}
@@ -1273,9 +1437,9 @@ export function PlatformDiscover() {
                         {/* Return */}
                         <div style={{ marginBottom: '16px'}}>
                           <div style={{
-                            fontSize: '20px',
+                            fontSize: '16px',
                             fontWeight: '700',
-                            color: isPositive ? '#10b981' : '#ef4444',
+                            color: 'var(--secondary)',
                           }}>
                             {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                           </div>
@@ -1612,8 +1776,135 @@ export function PlatformDiscover() {
               
               {/* Internal Products (non-Smart Portfolio) */}
               {visibleOtherInternalProducts.map((product: any) => {
-                const productType = getProductType(product);
-                const typeColor = getProductTypeColor(productType);
+                const profitabilityInfo = getProfitabilityDisplay(product);
+                const isPositive = profitabilityInfo.isPositive;
+                const hasImage = Boolean(product.imageUrl);
+
+                if (!hasImage) {
+                  return (
+                    <Card
+                      key={`product-${product.id}`}
+                      onClick={() => {
+                        logPlatformAction('click', { element: 'product', productId: product.id });
+                        navigate(`/platform/product/${product.id}`);
+                      }}
+                      style={{
+                        position: 'relative',
+                        overflow: 'hidden',
+                        background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                        border: 'none',
+                        borderRadius: '16px',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s, box-shadow 0.2s',
+                        minHeight: '200px',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                        {parseFeatured(product?.isFeatured) && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '16px',
+                            right: '16px',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: '#065f46',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            zIndex: 2,
+                          }}>
+                            Tendance du moment
+                          </div>
+                        )}
+                        <div style={{
+                          marginBottom: '20px',
+                          width: '64px',
+                          height: '64px',
+                        }}></div>
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{
+                            fontSize: '20px',
+                            fontWeight: '600',
+                            color: '#111827',
+                            marginBottom: '8px',
+                          }}>
+                            {product.name || 'N/A'}
+                          </div>
+                          {product.reference && (
+                            <div style={{
+                              fontSize: '14px',
+                              color: '#6b7280',
+                            }}>
+                              {product.reference}
+                            </div>
+                          )}
+                        </div>
+                        {(product.categoryName || product.subcategory) && (
+                          <div style={{
+                            marginBottom: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            flexWrap: 'wrap',
+                          }}>
+                            {product.categoryName && (
+                              <div style={{
+                                fontSize: '16px',
+                                fontWeight: '600',
+                                color: '#374151',
+                              }}>
+                                {product.categoryName}
+                              </div>
+                            )}
+                            {product.subcategory && (
+                              <>
+                                {product.categoryName && (
+                                  <span style={{
+                                    fontSize: '14px',
+                                    color: '#9ca3af',
+                                  }}>•</span>
+                                )}
+                                <div style={{
+                                  fontSize: '14px',
+                                  fontWeight: '500',
+                                  color: '#6b7280',
+                                }}>
+                                  {product.subcategory}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        <p style={{
+                          fontSize: isMobile ? '13px' : '14px',
+                          color: '#6b7280',
+                          marginBottom: '16px',
+                          lineHeight: '1.5',
+                          minHeight: '40px',
+                        }}>
+                          {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
+                        </p>
+                        <div style={{ marginBottom: '16px'}}>
+                          <div style={{
+                            fontSize: '16px',
+                            fontWeight: '700',
+                            color: 'var(--secondary)',
+                          }}>
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                }
                 
                 return (
                   <Card
@@ -1625,17 +1916,11 @@ export function PlatformDiscover() {
                     style={{
                       position: 'relative',
                       overflow: 'hidden',
-                      background: product.imageUrl 
-                        ? `linear-gradient(135deg, rgba(243, 244, 246, 0.95) 0%, rgba(229, 231, 235, 0.95) 100%), url(${product.imageUrl})`
-                        : 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
-                      backgroundSize: product.imageUrl ? 'cover' : 'auto',
-                      backgroundPosition: product.imageUrl ? 'center' : 'auto',
-                      backgroundRepeat: 'no-repeat',
-                      border: 'none',
-                      borderRadius: '16px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '12px',
                       cursor: 'pointer',
                       transition: 'transform 0.2s, box-shadow 0.2s',
-                      minHeight: '200px',
+                      backgroundColor: 'white',
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.transform = 'translateY(-4px)';
@@ -1646,12 +1931,38 @@ export function PlatformDiscover() {
                       e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                    <div style={{
+                      position: 'relative',
+                      height: '180px',
+                      backgroundColor: '#ffffff',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'flex-end',
+                      padding: '12px',
+                    }}>
+                      {product.imageUrl && (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name || 'Product image'}
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            objectPosition: 'center',
+                            transform: 'scale(1.22)',
+                            transformOrigin: 'center',
+                            zIndex: 0,
+                          }}
+                        />
+                      )}
                       {parseFeatured(product?.isFeatured) && (
                         <div style={{
                           position: 'absolute',
-                          top: '16px',
-                          right: '16px',
+                          top: '12px',
+                          right: '12px',
                           padding: '4px 10px',
                           borderRadius: '12px',
                           backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -1663,102 +1974,60 @@ export function PlatformDiscover() {
                           Tendance du moment
                         </div>
                       )}
-                      {/* Logo placeholder - empty space */}
-                      <div style={{
-                        marginBottom: '20px',
-                        width: '64px',
-                        height: '64px',
-                      }}></div>
-                      
-                      {/* Name */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{
-                          fontSize: '20px',
-                          fontWeight: '600',
-                          color: '#111827',
-                          marginBottom: '8px',
-                        }}>
-                          {product.name || 'N/A'}
-                        </div>
-                        {/* Reference */}
-                        {product.reference && (
-                          <div style={{
-                            fontSize: '14px',
-                            color: '#6b7280',
-                          }}>
-                            {product.reference}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Category and Subcategory */}
+                    </div>
+                    <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
+                      <h4 style={{
+                        fontSize: isMobile ? '18px' : '22px',
+                        fontWeight: '700',
+                        color: '#030213',
+                        marginBottom: '8px',
+                        marginTop: 0,
+                      }}>
+                        {product.name || 'N/A'}
+                      </h4>
                       {(product.categoryName || product.subcategory) && (
-                        <div style={{ 
-                          marginBottom: '16px',
+                        <div style={{
+                          marginBottom: '12px',
                           display: 'flex',
                           alignItems: 'center',
                           gap: '8px',
                           flexWrap: 'wrap',
                         }}>
                           {product.categoryName && (
-                            <div style={{
-                              fontSize: '16px',
-                              fontWeight: '600',
-                              color: '#374151',
-                            }}>
+                            <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>
                               {product.categoryName}
                             </div>
                           )}
                           {product.subcategory && (
                             <>
                               {product.categoryName && (
-                                <span style={{
-                                  fontSize: '14px',
-                                  color: '#9ca3af',
-                                }}>•</span>
+                                <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
                               )}
-                              <div style={{
-                                fontSize: '14px',
-                                fontWeight: '500',
-                                color: '#6b7280',
-                              }}>
+                              <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
                                 {product.subcategory}
                               </div>
                             </>
                           )}
                         </div>
                       )}
-                      
-                      {/* Price and Profitability */}
-                      {product.price !== undefined && (
-                        <div style={{ marginBottom: '16px' }}>
-                          {/* Current Price */}
-                          <div style={{
-                            fontSize: '24px',
-                            fontWeight: '700',
-                            color: '#111827',
-                            marginBottom: '8px',
-                          }}>
-                            {typeof product.price === 'number' ? product.price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : product.price} {product.currency || 'EUR'}
-                          </div>
-                          
-                          {/* Profitability/Change */}
-                          {(() => {
-                            const profitabilityInfo = getProfitabilityDisplay(product);
-                            if (!profitabilityInfo.text) return null;
-                            return (
-                              <div style={{
-                                fontSize: '14px',
-                                fontWeight: '600',
-                                color: profitabilityInfo.isPositive ? '#10b981' : '#ef4444',
-                              }}>
-                                {profitabilityInfo.isPositive ? '+' : ''}
-                                {profitabilityInfo.text}
-                              </div>
-                            );
-                          })()}
+                      <p style={{
+                        fontSize: isMobile ? '13px' : '14px',
+                        color: '#6b7280',
+                        marginBottom: '16px',
+                        lineHeight: '1.5',
+                        minHeight: '40px',
+                      }}>
+                        {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
+                      </p>
+                      <div style={{ marginBottom: '16px'}}>
+                        <div style={{
+                          fontSize: '16px',
+                          fontWeight: '700',
+                          color: 'var(--secondary)',
+                        }}>
+                          {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
                         </div>
-                      )}
+                      </div>
                     </CardContent>
                   </Card>
                 );

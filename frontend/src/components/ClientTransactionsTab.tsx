@@ -75,6 +75,7 @@ const STATUS_LABELS: { [key: string]: string } = {
 export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransactionsTabProps) {
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [contractDocumentsByTransaction, setContractDocumentsByTransaction] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
@@ -105,9 +106,34 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     }
   };
 
+  const loadContractDocuments = async () => {
+    try {
+      const data = await apiCall(`/api/clients/${clientId}/documents/`);
+      const documents = (data as any).documents || [];
+      const contracts = documents.filter(
+        (doc: any) => doc?.documentType === 'contract' && doc?.transactionId
+      );
+
+      const groupedByTransaction = contracts.reduce((acc: Record<string, any[]>, doc: any) => {
+        const txId = String(doc.transactionId);
+        if (!acc[txId]) {
+          acc[txId] = [];
+        }
+        acc[txId].push(doc);
+        return acc;
+      }, {});
+
+      setContractDocumentsByTransaction(groupedByTransaction);
+    } catch (error) {
+      console.error('Error loading contract documents:', error);
+      setContractDocumentsByTransaction({});
+    }
+  };
+
   // Load transactions on mount and when clientId changes
   useEffect(() => {
     loadTransactions(1, 50);
+    loadContractDocuments();
   }, [clientId]);
 
   // Load assets and products to find IDs
@@ -434,6 +460,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       });
       // Reload transactions to show the new one
       loadTransactions(pagination.page, pagination.limit);
+      loadContractDocuments();
       onRefresh();
     } catch (error: any) {
       console.error('Error creating transaction:', error);
@@ -973,6 +1000,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 transactions={filteredTransactions}
                 assets={assets}
                 products={products}
+                transactionDocuments={contractDocumentsByTransaction}
+                showContractColumn={true}
                 showClientColumn={false}
                 showIcons={false}
                 onView={(transaction) => {
@@ -1109,6 +1138,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         onSuccess={(updatedTransaction) => {
           applyTransactionUpdate(updatedTransaction);
           loadTransactions(pagination.page, pagination.limit);
+          loadContractDocuments();
           onRefresh();
         }}
       />
@@ -1129,6 +1159,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             setIsTransactionDialogOpen(false);
             toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
             loadTransactions(pagination.page, pagination.limit);
+            loadContractDocuments();
             onRefresh();
           }}
           onSuccess={async () => {
@@ -1158,6 +1189,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             setIsTransactionDialogOpen(false);
             toast.success('Transaction créée avec succès');
             loadTransactions(pagination.page, pagination.limit);
+            loadContractDocuments();
             onRefresh();
           }}
           isWithdrawal={isWithdrawalForPositionGeneration}
