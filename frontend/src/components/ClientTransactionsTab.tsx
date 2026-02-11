@@ -446,6 +446,24 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     setIsEditTransactionModalOpen(true);
   };
 
+  const applyTransactionUpdate = (updatedTransaction?: any) => {
+    if (!updatedTransaction?.id) return;
+
+    setTransactions(prevTransactions =>
+      prevTransactions.map(transaction =>
+        transaction.id === updatedTransaction.id
+          ? { ...transaction, ...updatedTransaction }
+          : transaction
+      )
+    );
+
+    setSelectedTransaction(prevSelected =>
+      prevSelected?.id === updatedTransaction.id
+        ? { ...prevSelected, ...updatedTransaction }
+        : prevSelected
+    );
+  };
+
   const getAvailableStatuses = () => {
     const typeConfig = TRANSACTION_TYPES[transactionForm.type as keyof typeof TRANSACTION_TYPES];
     return typeConfig ? typeConfig.statuses : [];
@@ -1088,7 +1106,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           setIsEditTransactionModalOpen(false);
           setSelectedTransaction(null);
         }}
-        onSuccess={() => {
+        onSuccess={(updatedTransaction) => {
+          applyTransactionUpdate(updatedTransaction);
           loadTransactions(pagination.page, pagination.limit);
           onRefresh();
         }}

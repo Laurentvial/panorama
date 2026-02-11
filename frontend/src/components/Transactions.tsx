@@ -165,6 +165,24 @@ export function Transactions() {
     setIsEditTransactionModalOpen(true);
   };
 
+  const applyTransactionUpdate = (updatedTransaction?: any) => {
+    if (!updatedTransaction?.id) return;
+
+    setTransactions(prevTransactions =>
+      prevTransactions.map(transaction =>
+        transaction.id === updatedTransaction.id
+          ? { ...transaction, ...updatedTransaction }
+          : transaction
+      )
+    );
+
+    setSelectedTransaction(prevSelected =>
+      prevSelected?.id === updatedTransaction.id
+        ? { ...prevSelected, ...updatedTransaction }
+        : prevSelected
+    );
+  };
+
   const selectedTypeCount = filters.types.length;
   const typeFilterLabel =
     selectedTypeCount === 0
@@ -427,7 +445,8 @@ export function Transactions() {
           setIsEditTransactionModalOpen(false);
           setSelectedTransaction(null);
         }}
-        onSuccess={() => {
+        onSuccess={(updatedTransaction) => {
+          applyTransactionUpdate(updatedTransaction);
           loadData();
         }}
       />

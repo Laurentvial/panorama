@@ -16,14 +16,16 @@ export const getTypeLabel = (type: string): string => {
 };
 
 export const getStatusLabel = (status: string): string => {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
   const statusMap: { [key: string]: string } = {
     'en_attente_paiement': 'En attente de paiement',
     'en_cours': 'En cours',
     'valide': 'Validé',
+    'validé': 'Validé',
     'conteste': 'Contesté',
     'annule': 'Annulé',
   };
-  return statusMap[status] || status;
+  return statusMap[normalizedStatus] || status;
 };
 
 export const getTypeColors = (type: string): { bg: string; text: string } => {

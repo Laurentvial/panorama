@@ -20,14 +20,16 @@ const getTypeLabel = (type: string): string => {
 };
 
 const getStatusLabel = (status: string): string => {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
   const statusMap: { [key: string]: string } = {
     'en_attente_paiement': 'En attente de paiement',
     'en_cours': 'En cours',
     'valide': 'Validé',
+    'validé': 'Validé',
     'conteste': 'Contesté',
     'annule': 'Annulé',
   };
-  return statusMap[status] || status;
+  return statusMap[normalizedStatus] || status;
 };
 
 // Get type colors
@@ -148,6 +150,7 @@ export function TransactionList({
         <tbody>
           {transactions.map((transaction) => {
             const client = clients.find(c => c.id === transaction.clientId);
+            const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
             
             // Get product/asset info - prioritize productId from transaction
             let productName = '-';
@@ -255,15 +258,15 @@ export function TransactionList({
                   <span 
                     className="px-2 py-1 rounded text-xs font-medium inline-block"
                     style={{
-                      backgroundColor: transaction.status === 'valide' ? '#dcfce7' :
-                                      transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#fed7aa' :
-                                      transaction.status === 'conteste' ? '#fee2e2' :
-                                      transaction.status === 'annule' ? '#e5e7eb' :
+                      backgroundColor: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#dcfce7' :
+                                      normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#fed7aa' :
+                                      normalizedStatus === 'conteste' ? '#fee2e2' :
+                                      normalizedStatus === 'annule' ? '#e5e7eb' :
                                       '#f1f5f9',
-                      color: transaction.status === 'valide' ? '#15803d' :
-                             transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#c2410c' :
-                             transaction.status === 'conteste' ? '#991b1b' :
-                             transaction.status === 'annule' ? '#6b7280' :
+                      color: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#15803d' :
+                             normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#c2410c' :
+                             normalizedStatus === 'conteste' ? '#991b1b' :
+                             normalizedStatus === 'annule' ? '#6b7280' :
                              '#475569',
                       zIndex: 1,
                       position: 'relative'

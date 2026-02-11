@@ -16,7 +16,7 @@ interface EditTransactionModalProps {
   transaction: any;
   clientId: string;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedTransaction?: any) => void;
 }
 
 export function EditTransactionModal({
@@ -182,7 +182,7 @@ export function EditTransactionModal({
                           !wasAlreadyTermine && // Only if status is changing TO "valide"
                           (transferTo === 'balance' || (transferFrom && transferFrom !== 'balance'));
       
-      await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+      const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
         method: 'PUT',
         body: JSON.stringify({
           type: transactionForm.type,
@@ -200,7 +200,7 @@ export function EditTransactionModal({
         toast.success('Transaction modifiée avec succès');
       }
       handleClose();
-      onSuccess();
+      onSuccess(updatedTransaction);
     } catch (error: any) {
       console.error('Error updating transaction:', error);
       toast.error(error.message || 'Erreur lors de la modification de la transaction');
@@ -213,7 +213,7 @@ export function EditTransactionModal({
       try {
         const datetimeISO = new Date(transactionForm.datetime).toISOString();
         
-        await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+        const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
           method: 'PUT',
           body: JSON.stringify({
             type: transactionForm.type,
@@ -235,7 +235,7 @@ export function EditTransactionModal({
         setPendingStatusUpdate(null);
         setIsWithdrawalTransaction(false);
         handleClose();
-        onSuccess();
+        onSuccess(updatedTransaction);
       } catch (error: any) {
         console.error('Error updating transaction after position generation:', error);
         toast.error(error.message || 'Erreur lors de la mise à jour de la transaction');

@@ -193,6 +193,7 @@ export function ViewTransactionModal({
   const subscriptionDetails = parseSubscriptionDetails(transaction);
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
+  const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
   
   // Check if this is an investment transfert (transfer_to is a product ID, not 'balance')
   const isInvestmentTransfer = transaction.type === 'transfert' && 
@@ -323,15 +324,15 @@ export function ViewTransactionModal({
                   <span 
                     className="px-2 py-1 rounded text-xs font-medium inline-block"
                     style={{
-                      backgroundColor: transaction.status === 'valide' ? '#dcfce7' :
-                                      transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#fed7aa' :
-                                      transaction.status === 'conteste' ? '#fee2e2' :
-                                      transaction.status === 'annule' ? '#e5e7eb' :
+                      backgroundColor: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#dcfce7' :
+                                      normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#fed7aa' :
+                                      normalizedStatus === 'conteste' ? '#fee2e2' :
+                                      normalizedStatus === 'annule' ? '#e5e7eb' :
                                       '#f1f5f9',
-                      color: transaction.status === 'valide' ? '#15803d' :
-                             transaction.status === 'en_attente_paiement' || transaction.status === 'en_cours' ? '#c2410c' :
-                             transaction.status === 'conteste' ? '#991b1b' :
-                             transaction.status === 'annule' ? '#6b7280' :
+                      color: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#15803d' :
+                             normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#c2410c' :
+                             normalizedStatus === 'conteste' ? '#991b1b' :
+                             normalizedStatus === 'annule' ? '#6b7280' :
                              '#475569',
                       zIndex: 1,
                       position: 'relative'
@@ -543,7 +544,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Statut</Label>
                       <p className="text-slate-900 mt-1">
-                        {transaction.status === 'en_cours' ? 'En vérification' : getStatusLabel(transaction.status)}
+                        {normalizedStatus === 'en_cours' ? 'En vérification' : getStatusLabel(transaction.status)}
                       </p>
                     </div>
                   </div>
