@@ -47,6 +47,7 @@ export function ProductDetail() {
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const isDrawingRef = useRef(false);
+  const hasDrawnStrokeRef = useRef(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [subscriptionSuccess, setSubscriptionSuccess] = useState<string | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
@@ -93,6 +94,16 @@ export function ProductDetail() {
   const [clientIP, setClientIP] = useState('');
   const isMobile = useIsMobile();
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+
+  const updateSignatureFromCanvas = (canvas: HTMLCanvasElement | null) => {
+    if (!canvas) return;
+    // Do not lock the field with an empty/blank signature.
+    if (!hasDrawnStrokeRef.current) {
+      setSignature(null);
+      return;
+    }
+    setSignature(canvas.toDataURL());
+  };
 
   const getTruncatedText = (text: string, limit: number) => {
     const normalized = (text || '').toString();
@@ -556,6 +567,7 @@ export function ProductDetail() {
       const handleTouchStart = (e: TouchEvent) => {
         e.preventDefault();
         isDrawingRef.current = true;
+        hasDrawnStrokeRef.current = false;
         setIsDrawing(true);
         if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
@@ -572,6 +584,7 @@ export function ProductDetail() {
       const handleTouchMove = (e: TouchEvent) => {
         e.preventDefault();
         if (!isDrawingRef.current) return;
+        hasDrawnStrokeRef.current = true;
         if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
         const ctx = canvas.getContext('2d');
@@ -592,9 +605,7 @@ export function ProductDetail() {
         e.preventDefault();
         isDrawingRef.current = false;
         setIsDrawing(false);
-        if (canvas) {
-          setSignature(canvas.toDataURL());
-        }
+        updateSignatureFromCanvas(canvas);
       };
 
       canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -1718,6 +1729,7 @@ export function ProductDetail() {
                               variant="outline"
                               onClick={() => {
                                 setSignature(null);
+                                hasDrawnStrokeRef.current = false;
                                 const canvas = signatureCanvasRef.current;
                                 if (canvas) {
                                   const ctx = canvas.getContext('2d');
@@ -1754,6 +1766,7 @@ export function ProductDetail() {
                               }}
                               onMouseDown={(e) => {
                                 isDrawingRef.current = true;
+                                hasDrawnStrokeRef.current = false;
                                 setIsDrawing(true);
                                 const canvas = signatureCanvasRef.current;
                                 if (!canvas) return;
@@ -1768,6 +1781,7 @@ export function ProductDetail() {
                               }}
                               onMouseMove={(e) => {
                                 if (!isDrawingRef.current) return;
+                                hasDrawnStrokeRef.current = true;
                                 const canvas = signatureCanvasRef.current;
                                 if (!canvas) return;
                                 const rect = canvas.getBoundingClientRect();
@@ -1787,17 +1801,13 @@ export function ProductDetail() {
                                 isDrawingRef.current = false;
                                 setIsDrawing(false);
                                 const canvas = signatureCanvasRef.current;
-                                if (canvas) {
-                                  setSignature(canvas.toDataURL());
-                                }
+                                updateSignatureFromCanvas(canvas);
                               }}
                               onMouseLeave={() => {
                                 isDrawingRef.current = false;
                                 setIsDrawing(false);
                                 const canvas = signatureCanvasRef.current;
-                                if (canvas) {
-                                  setSignature(canvas.toDataURL());
-                                }
+                                updateSignatureFromCanvas(canvas);
                               }}
                             />
                             <div style={{ 
