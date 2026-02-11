@@ -13,6 +13,7 @@ import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { useIsMobile } from './ui/use-mobile';
+import { logPlatformAction } from '../utils/platformLogger';
 
 export function PlatformTrading() {
   const { currentUser } = useUser();
@@ -56,6 +57,11 @@ export function PlatformTrading() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    logPlatformAction('page_view', { route: '/platform/funds', page: 'funds' });
+  }, [currentUser?.id]);
 
   // Créer automatiquement le dépôt si aucun RIB n'est disponible quand le dialog s'ouvre
   useEffect(() => {

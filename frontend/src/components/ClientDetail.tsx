@@ -25,9 +25,27 @@ interface ClientDetailProps {
   onBack: () => void;
 }
 
+const CLIENT_DETAIL_TAB_STORAGE_PREFIX = 'client_detail_active_tab_';
+const CLIENT_DETAIL_TABS = [
+  'info',
+  'assets',
+  'portfolio',
+  'transactions',
+  'positions',
+  'notes',
+  'verification',
+  'documents',
+  'misc',
+  'history',
+  'platform-logs',
+] as const;
+
+type ClientDetailTab = typeof CLIENT_DETAIL_TABS[number];
+
 export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [client, setClient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ClientDetailTab>('info');
   
   // Track which tabs have been loaded
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['info']));
@@ -50,7 +68,21 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   
   // Load only essential client data on mount
   useEffect(() => {
+    const storageKey = `${CLIENT_DETAIL_TAB_STORAGE_PREFIX}${clientId}`;
+    const storedTab = sessionStorage.getItem(storageKey);
+    const initialTab = CLIENT_DETAIL_TABS.includes(storedTab as ClientDetailTab)
+      ? (storedTab as ClientDetailTab)
+      : 'info';
+
+    setActiveTab(initialTab);
+    setLoadedTabs(new Set(['info']));
+    setLoadingTab(null);
+
     loadEssentialClientData();
+
+    if (initialTab !== 'info') {
+      loadTabData(initialTab, true);
+    }
   }, [clientId]);
 
   async function loadEssentialClientData() {
@@ -126,6 +158,13 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
   // Handle tab change to load data lazily
   function handleTabChange(value: string) {
+    if (!CLIENT_DETAIL_TABS.includes(value as ClientDetailTab)) {
+      return;
+    }
+
+    const nextTab = value as ClientDetailTab;
+    setActiveTab(nextTab);
+    sessionStorage.setItem(`${CLIENT_DETAIL_TAB_STORAGE_PREFIX}${clientId}`, nextTab);
     loadTabData(value);
   }
 
@@ -286,7 +325,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
 
       {/* Client Details Tabs */}
-      <Tabs defaultValue="info" className="space-y-6" onValueChange={handleTabChange}>
+      <Tabs value={activeTab} className="space-y-6" onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="info">Informations</TabsTrigger>
           <TabsTrigger value="assets">Actifs visibles</TabsTrigger>

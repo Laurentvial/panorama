@@ -4,6 +4,7 @@ import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 
 interface ClientPlatformLogsTabProps {
   clientId: string;
@@ -31,9 +32,11 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
+  const [clientDisplayName, setClientDisplayName] = useState<string>('');
 
   useEffect(() => {
     loadPlatformLogs();
+    loadClientDisplayName();
   }, [clientId]);
 
   async function loadPlatformLogs(page: number = 1) {
@@ -60,6 +63,19 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     }
   }
 
+  async function loadClientDisplayName() {
+    try {
+      const data: any = await apiCall(`/api/clients/${clientId}/`);
+      const client = data?.client || data || {};
+      const firstName = (client.fname || client.firstName || '').toString().trim();
+      const lastName = (client.lname || client.lastName || '').toString().trim();
+      const fullName = `${firstName} ${lastName}`.trim();
+      setClientDisplayName(fullName || client.email || clientId);
+    } catch {
+      setClientDisplayName(clientId);
+    }
+  }
+
   function formatActionType(actionType: string): string {
     return ACTION_TYPE_LABELS[actionType] || actionType;
   }
@@ -76,9 +92,48 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     });
   }
 
-  function renderActionDetails(log: PlatformLog) {
+  function formatDateParts(dateString: string): { date: string; time: string } {
+    const date = new Date(dateString);
+    return {
+      date: date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }),
+      time: date.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }),
+    };
+  }
+
+  function getActionLabel(log: PlatformLog): string {
+    if (log.actionType === 'login') {
+      const { date, time } = formatDateParts(log.createdAt);
+      if (log.actionDetails?.source === 'crm_impersonation') {
+        const actorName =
+          log.actionDetails?.client_name ||
+          log.actionDetails?.clientName ||
+          clientDisplayName ||
+          "l'utilisateur";
+        return `Connexion de ${actorName} le ${date} a ${time}`;
+      }
+      return `Connexion du client le ${date} a ${time}`;
+    }
+
+    return formatActionType(log.actionType);
+  }
+
+  function getActionDetailsSummary(log: PlatformLog): string {
     if (!log.actionDetails || Object.keys(log.actionDetails).length === 0) {
-      return null;
+      return '-';
+    }
+
+    const isCrmImpersonationLogin =
+      log.actionType === 'login' && log.actionDetails?.source === 'crm_impersonation';
+    if (isCrmImpersonationLogin) {
+      return '-';
     }
 
     const details: string[] = [];
@@ -115,23 +170,11 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
 
     // Login details are not displayed (method info removed)
 
-    if (details.length === 0) {
-      return (
-        <div className="text-sm text-slate-600 mt-2">
-          <pre className="whitespace-pre-wrap text-xs bg-slate-50 p-2 rounded">
-            {JSON.stringify(log.actionDetails, null, 2)}
-          </pre>
-        </div>
-      );
+    if (details.length > 0) {
+      return details.join(' | ');
     }
 
-    return (
-      <div className="text-sm text-slate-600 mt-2 space-y-1">
-        {details.map((detail, index) => (
-          <div key={index}>{detail}</div>
-        ))}
-      </div>
-    );
+    return JSON.stringify(log.actionDetails);
   }
 
   return (
@@ -147,27 +190,40 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
           </div>
         ) : platformLogs.length > 0 ? (
           <>
-            <div className="space-y-3">
-              {platformLogs.map((log) => (
-                <div key={log.id} className="p-4 border border-slate-200 rounded-lg">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="font-medium text-slate-900">
-                        {formatActionType(log.actionType)}
-                      </div>
-                      <div className="text-sm text-slate-500 mt-1">
-                        {formatDate(log.createdAt)}
-                      </div>
-                      {log.ipAddress && (
-                        <div className="text-xs text-slate-400 mt-1">
-                          IP: {log.ipAddress}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {renderActionDetails(log)}
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[190px]">Date</TableHead>
+                    <TableHead className="w-[340px]">Action</TableHead>
+                    <TableHead>Détails</TableHead>
+                    <TableHead className="w-[170px]">IP</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {platformLogs.map((log) => {
+                    const detailsSummary = getActionDetailsSummary(log);
+                    return (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-xs text-slate-600 whitespace-nowrap">
+                          {formatDate(log.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-medium text-slate-900 text-sm">
+                          {getActionLabel(log)}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600">
+                          <span className="block max-w-[520px] truncate" title={detailsSummary}>
+                            {detailsSummary}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                          {log.ipAddress || '-'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
             
             {pagination.total_pages > 1 && (

@@ -208,6 +208,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                         <th className="text-left py-3 px-4">Investissement minimum</th>
                         <th className="text-left py-3 px-4">Plafond de souscription</th>
                         <th className="text-left py-3 px-4">Rentabilité</th>
+                        <th className="text-left py-3 px-4">Période de rentabilité</th>
                         <th className="text-left py-3 px-4">Durée</th>
                         <th className="text-left py-3 px-4">Statut</th>
                         <th className="text-right py-3 px-4">Actions</th>
@@ -287,6 +288,9 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                               ) : (
                                 product.profitability ? `${product.profitability}%` : '-'
                               )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {product.profitabilityPeriod || product.profitability_period || '-'}
                             </td>
                             <td className="py-3 px-4">
                               {product.duration ? (

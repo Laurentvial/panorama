@@ -558,7 +558,6 @@ export function PlatformAccountVerification() {
       
       case 3: // Profile
         return !!(currentUser.primaryProfession || currentUser.primary_profession) && 
-               !!(currentUser.employerName || currentUser.employer_name) && 
                currentUser.annualNetIncome && 
                currentUser.totalLiquidities;
       
@@ -1100,14 +1099,6 @@ export function PlatformAccountVerification() {
 
     }
 
-    if (requiresEmployer(primaryProfession) && !employerName.trim()) {
-
-      toast.error('Veuillez renseigner le nom de votre employeur.');
-
-      return;
-
-    }
-
     if (!annualNetIncome) {
 
       toast.error('Veuillez sélectionner votre revenu annuel net.');
@@ -1128,7 +1119,7 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ primaryProfession, employerName: requiresEmployer(primaryProfession) ? employerName.trim() : '', annualNetIncome, totalLiquidities });
+      await patchClientIdentity({ primaryProfession, employerName: employerName.trim(), annualNetIncome, totalLiquidities });
 
       await refreshUser();
 
@@ -1810,7 +1801,7 @@ export function PlatformAccountVerification() {
                 {requiresEmployer(primaryProfession) && (
                   <div className="space-y-2" style={{ marginTop: 14 }}>
 
-                    <Label htmlFor="employerName">Nom de votre employeur ?</Label>
+                    <Label htmlFor="employerName">Nom de votre employeur ? (facultatif)</Label>
 
                     <Input
 
@@ -1821,8 +1812,6 @@ export function PlatformAccountVerification() {
                       onChange={(e) => setEmployerName(e.target.value)}
 
                       placeholder="Ex: Société ABC"
-
-                      required
 
                     />
 
@@ -2051,7 +2040,7 @@ export function PlatformAccountVerification() {
 
                   type="submit"
 
-                  disabled={submitting || !primaryProfession || (requiresEmployer(primaryProfession) && !employerName.trim()) || !annualNetIncome || !totalLiquidities}
+                  disabled={submitting || !primaryProfession || !annualNetIncome || !totalLiquidities}
 
                   variant="platform"
 

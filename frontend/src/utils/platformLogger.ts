@@ -153,6 +153,7 @@ function sendLogRequest(
 ): Promise<void> {
   return fetch(`${apiUrl}/api/clients/${clientId}/platform-logs/`, {
     method: 'POST',
+    keepalive: true,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
@@ -161,8 +162,10 @@ function sendLogRequest(
       actionType,
       actionDetails,
     }),
-  }).then(() => {
-    // Request completed successfully
+  }).then((response) => {
+    if (!response.ok) {
+      throw new Error(`Failed to log platform action (${response.status})`);
+    }
   }).catch((error) => {
     // Silently ignore errors to prevent breaking the UI
     console.debug('Failed to log platform action:', error);

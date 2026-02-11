@@ -6,6 +6,7 @@ import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart, FileText } from
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
+import { logPlatformAction } from '../utils/platformLogger';
 
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
@@ -93,6 +94,11 @@ export function PlatformPortfolio() {
       };
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    logPlatformAction('page_view', { route: '/platform/portfolio', page: 'portfolio' });
+  }, [currentUser?.id]);
 
   const loadPortfolioData = async () => {
     try {

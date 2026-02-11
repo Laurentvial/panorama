@@ -136,7 +136,6 @@ def _recompute_client_account_verified(client: Client) -> list[str]:
         and compliance_complete
         and sources_complete
         and bool((getattr(client, 'primary_profession', '') or '').strip())
-        and bool((getattr(client, 'employer_name', '') or '').strip())
         and bool((getattr(client, 'annual_net_income', '') or '').strip())
         and bool((getattr(client, 'total_liquidities', '') or '').strip())
     )
@@ -1406,6 +1405,7 @@ def client_history(request, client_id):
     })
 
 @api_view(['GET', 'POST'])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
 @permission_classes([AllowAny])
 def client_platform_logs(request, client_id):
     """Get or create platform logs for a client (actions performed BY the client)"""
@@ -1621,6 +1621,24 @@ def get_current_client(request):
         changed_fields = _recompute_client_account_verified(client)
         if changed_fields:
             client.save(update_fields=changed_fields)
+
+        # CRM impersonation path can bypass /api/client/login/.
+        # When explicitly flagged by frontend, create a platform login log here.
+        if request.GET.get('source') == 'crm_impersonation':
+            impersonation_mode = request.GET.get('mode', '')
+            client_display_name = " ".join(
+                [part for part in [client.fname or '', client.lname or ''] if part.strip()]
+            ).strip() or (client.email or client.id)
+            create_platform_log(
+                client.id,
+                'login',
+                {
+                    'source': 'crm_impersonation',
+                    'mode': impersonation_mode,
+                    'client_name': client_display_name,
+                },
+                request
+            )
 
         serializer = ClientSerializer(client, context={'request': request})
         return Response({
@@ -1853,7 +1871,6 @@ def client_update_identity(request):
         and compliance_complete
         and sources_complete
         and bool((client.primary_profession or '').strip())
-        and bool((client.employer_name or '').strip())
         and bool((client.annual_net_income or '').strip())
         and bool((client.total_liquidities or '').strip())
     )

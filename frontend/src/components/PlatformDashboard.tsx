@@ -771,7 +771,7 @@ export function PlatformDashboard() {
                   marginBottom: '12px', 
                   color: '#111827' 
                 }}>
-                  Vous êtes presque prêt à trader
+                  Vous êtes bientôt prêt
                 </h2>
 
                 {/* Description */}

@@ -38,6 +38,13 @@ export function ClientImpersonate() {
         // Already set up, just navigate
         console.log('ClientImpersonate: Already authenticated, navigating directly');
         try {
+          // Trigger backend-marked login log for CRM impersonation in existing session mode.
+          // @ts-ignore - Vite environment variables
+          const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+          await fetch(`${apiUrl}/api/client/current/?token=${sessionToken}&source=crm_impersonation&mode=existing_session`, {
+            headers: { Authorization: `Bearer ${sessionToken}` },
+          }).catch(() => null);
+
           await refreshUser();
           navigate('/platform', { replace: true });
         } catch (e) {
@@ -81,7 +88,7 @@ export function ClientImpersonate() {
         // @ts-ignore - Vite environment variables
         const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
         setMessage('Vérification des accès client...');
-        const res = await fetch(`${apiUrl}/api/client/current/?token=${clientToken}`, {
+        const res = await fetch(`${apiUrl}/api/client/current/?token=${clientToken}&source=crm_impersonation&mode=new_session`, {
           headers: { Authorization: `Bearer ${clientToken}` },
         });
 

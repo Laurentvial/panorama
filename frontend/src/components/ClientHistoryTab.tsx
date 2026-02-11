@@ -4,6 +4,7 @@ import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 
 interface ClientHistoryTabProps {
   clientId: string;
@@ -76,40 +77,44 @@ export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
     });
   }
 
-  function renderDetails(log: HistoryLog) {
+  function getDetailsSummary(log: HistoryLog): string {
     if (log.eventType === 'editClient' && log.newValue?.changed_fields) {
-      return (
-        <div className="text-sm text-slate-600">
-          Champs modifiés: {log.newValue.changed_fields.join(', ')}
-        </div>
-      );
+      return `Champs modifies: ${log.newValue.changed_fields.join(', ')}`;
     }
     
     if (log.eventType === 'createTransaction' || log.eventType === 'editTransaction') {
       const transactionData = log.newValue || log.oldValue;
       if (transactionData) {
-        return (
-          <div className="text-sm text-slate-600">
-            {transactionData.type && <div>Type: {transactionData.type}</div>}
-            {transactionData.amount && <div>Montant: {transactionData.amount} €</div>}
-            {transactionData.status && <div>Statut: {transactionData.status}</div>}
-          </div>
-        );
+        const details: string[] = [];
+        if (transactionData.type) {
+          details.push(`Type: ${transactionData.type}`);
+        }
+        if (transactionData.amount) {
+          details.push(`Montant: ${transactionData.amount} EUR`);
+        }
+        if (transactionData.status) {
+          details.push(`Statut: ${transactionData.status}`);
+        }
+        if (details.length > 0) {
+          return details.join(' | ');
+        }
       }
     }
 
     if (log.eventType === 'createClient' && log.newValue) {
-      return (
-        <div className="text-sm text-slate-600">
-          {log.newValue.firstName && log.newValue.lastName && (
-            <div>Nom: {log.newValue.firstName} {log.newValue.lastName}</div>
-          )}
-          {log.newValue.email && <div>Email: {log.newValue.email}</div>}
-        </div>
-      );
+      const details: string[] = [];
+      if (log.newValue.firstName && log.newValue.lastName) {
+        details.push(`Nom: ${log.newValue.firstName} ${log.newValue.lastName}`);
+      }
+      if (log.newValue.email) {
+        details.push(`Email: ${log.newValue.email}`);
+      }
+      if (details.length > 0) {
+        return details.join(' | ');
+      }
     }
 
-    return null;
+    return '-';
   }
 
   return (
@@ -125,27 +130,40 @@ export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
           </div>
         ) : history.length > 0 ? (
           <>
-            <div className="space-y-3">
-              {history.map((log) => (
-                <div key={log.id} className="p-4 border border-slate-200 rounded-lg">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="font-medium text-slate-900">
-                        {formatEventType(log.eventType)}
-                      </div>
-                      <div className="text-sm text-slate-500 mt-1">
-                        {formatDate(log.createdAt)}
-                      </div>
-                      {log.userName && (
-                        <div className="text-sm text-slate-600 mt-1">
-                          Par: {log.userName}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {renderDetails(log)}
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[170px]">Date</TableHead>
+                    <TableHead className="w-[280px]">Action</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead className="w-[200px]">Par</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.map((log) => {
+                    const detailsSummary = getDetailsSummary(log);
+                    return (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-xs text-slate-600 whitespace-nowrap">
+                          {formatDate(log.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-medium text-slate-900 text-sm">
+                          {formatEventType(log.eventType)}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600">
+                          <span className="block max-w-[520px] truncate" title={detailsSummary}>
+                            {detailsSummary}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600 whitespace-nowrap">
+                          {log.userName || '-'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
             
             {pagination.total_pages > 1 && (
