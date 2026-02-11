@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -44,6 +45,7 @@ type RequestItem = {
 
 export function Messagerie() {
   const { currentUser } = useUser();
+  const [searchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState<string>('');
@@ -70,6 +72,8 @@ export function Messagerie() {
     () => requests.find((r) => r.id === selectedRequestId) || null,
     [requests, selectedRequestId],
   );
+  const requestedClientId = searchParams.get('clientId') || '';
+  const requestedConversationId = searchParams.get('conversationId') || '';
 
   async function loadClients() {
     setLoadingClients(true);
@@ -185,6 +189,19 @@ export function Messagerie() {
     loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingClients, visibleClientIdsKey]);
+
+  useEffect(() => {
+    if (!requests.length) return;
+    if (!requestedClientId || !requestedConversationId) return;
+
+    const targetId = `${requestedClientId}:${requestedConversationId}`;
+    if (!requests.some((r) => r.id === targetId)) return;
+    if (selectedRequestId === targetId) return;
+
+    setSelectedRequestId(targetId);
+    setDraft('');
+    setChatMessages([]);
+  }, [requests, requestedClientId, requestedConversationId, selectedRequestId]);
 
   useEffect(() => {
     if (!selectedRequest) {

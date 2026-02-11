@@ -4472,12 +4472,48 @@ def stats(request):
     # Get recent transactions (last 10)
     recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')[:10]
     transaction_serializer = TransactionSerializer(recent_transactions, many=True)
+
+    # Get recent received messages for admin dashboard:
+    # received by managers means messages sent by clients.
+    recent_messages_qs = (
+        ClientChatMessage.objects
+        .filter(sender='client')
+        .select_related('conversation', 'client', 'manager_user')
+        .order_by('-created_at')[:5]
+    )
+    recent_messages = []
+    for message in recent_messages_qs:
+        client_name = f"{(message.client.fname or '').strip()} {(message.client.lname or '').strip()}".strip()
+        if not client_name:
+            client_name = (message.client.email or '').strip() or (message.client.id or '').strip()
+        manager_name = ''
+        if message.manager_user:
+            manager_name = (message.manager_user.get_full_name() or '').strip() or (message.manager_user.username or '').strip()
+        subject = ''
+        if message.conversation and message.conversation.subject:
+            subject = message.conversation.subject
+        if not subject:
+            subject = f"Message de {client_name}" if client_name else "Nouveau message"
+
+        recent_messages.append({
+            'id': message.id,
+            'subject': subject,
+            'message': message.message,
+            'createdAt': message.created_at,
+            'clientId': message.client_id,
+            'clientName': client_name,
+            'managerName': manager_name,
+            'conversationId': message.conversation_id or 'legacy',
+            'read': bool(message.read_by_manager),
+            'read_by_manager': bool(message.read_by_manager),
+        })
     
     return Response({
         'totalRevenue': float(total_revenue),
         'pendingRevenue': float(pending_revenue),
         'totalClients': total_clients,
-        'recentTransactions': transaction_serializer.data
+        'recentTransactions': transaction_serializer.data,
+        'recentMessages': recent_messages,
     })
 
 # Transaction endpoints

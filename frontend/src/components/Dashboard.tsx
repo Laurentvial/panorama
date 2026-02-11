@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -26,6 +26,7 @@ interface DashboardProps {
 
 export function Dashboard({ user: userProp }: DashboardProps) {
   const { currentUser } = useUser();
+  const navigate = useNavigate();
   const user = userProp || currentUser;
   const [stats, setStats] = useState<any>(null);
   const [teams, setTeams] = useState<any[]>([]);
@@ -106,6 +107,18 @@ export function Dashboard({ user: userProp }: DashboardProps) {
       iconWrapperClass: 'dashboard-stat-icon-wrapper-pink'
     },
   ];
+
+  const openMessage = (message: any) => {
+    const clientId = message.clientId;
+    const conversationId = message.conversationId;
+    if (clientId && conversationId) {
+      navigate(
+        `/admin/messagerie?clientId=${encodeURIComponent(clientId)}&conversationId=${encodeURIComponent(conversationId)}`
+      );
+      return;
+    }
+    navigate('/admin/messagerie');
+  };
 
   return (
     <div className="dashboard-container">
@@ -189,22 +202,64 @@ export function Dashboard({ user: userProp }: DashboardProps) {
         </CardHeader>
         <CardContent>
           {stats?.recentMessages && stats.recentMessages.length > 0 ? (
-            <div className="dashboard-messages-list">
-              {stats.recentMessages.slice(0, 5).map((message: any) => (
-                <div key={message.id} className="dashboard-message-item">
-                  <div className="dashboard-message-content">
-                    <p className="dashboard-message-subject">{message.subject}</p>
-                    <p className="dashboard-message-date">
-                      {new Date(message.createdAt).toLocaleDateString('fr-FR')}
-                    </p>
-                  </div>
-                  {!message.read && (
-                    <span className="dashboard-message-badge">
-                      Non lu
-                    </span>
-                  )}
-                </div>
-              ))}
+            <div className="dashboard-table-container">
+              <table className="dashboard-table">
+                <thead>
+                  <tr>
+                    <th>Sujet</th>
+                    <th>Aperçu</th>
+                    <th>Client</th>
+                    <th>Pour</th>
+                    <th>Date</th>
+                    <th>Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.recentMessages.slice(0, 5).map((message: any) => (
+                    <tr key={message.id}>
+                      <td className="dashboard-table-type">
+                        <button
+                          type="button"
+                          onClick={() => openMessage(message)}
+                          style={{ color: '#2563eb', textDecoration: 'underline', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                        >
+                          {message.subject || 'Message'}
+                        </button>
+                      </td>
+                      <td
+                        title={(message.message || '').toString()}
+                        style={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => openMessage(message)}
+                          style={{ color: '#2563eb', textDecoration: 'underline', background: 'none', border: 'none', padding: 0, cursor: 'pointer', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        >
+                          {(message.message || '—').toString()}
+                        </button>
+                      </td>
+                      <td>{message.clientName || message.clientId || 'Utilisateur inconnu'}</td>
+                      <td>{message.managerName || 'Gestionnaire'}</td>
+                      <td>
+                        {new Date(message.createdAt).toLocaleDateString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td>
+                        {!(message.read_by_manager ?? message.read) ? (
+                          <span className="dashboard-message-badge">Non lu</span>
+                        ) : (
+                          <span className="dashboard-table-badge">Lu</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
             <p className="dashboard-empty-message">Aucun message récent</p>
