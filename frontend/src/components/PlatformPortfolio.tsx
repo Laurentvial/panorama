@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart, FileText } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
@@ -145,34 +145,22 @@ export function PlatformPortfolio() {
       });
       setTransactions(filteredTransactions);
       
-      // Load documents for transfert transactions with products (subscriptions)
+      // Load and index contract documents by transaction ID
       const documentsMap: Record<string, any[]> = {};
-      const transfertTransactions = filteredTransactions.filter((t: any) => 
-        t.type === 'transfert' && 
-        t.transfer_to && 
-        t.transfer_to !== 'balance' && 
-        t.transfer_to !== 'trading'
-      );
-      
-      if (transfertTransactions.length > 0) {
-        try {
-          const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
-          const allDocuments = (documentsResponse as any)?.documents || [];
-          
-          // Group documents by transaction ID
-          transfertTransactions.forEach((t: any) => {
-            const contractDocs = allDocuments.filter((doc: any) => 
-              doc.transactionId === t.id && doc.documentType === 'contract'
-            );
-            if (contractDocs.length > 0) {
-              documentsMap[t.id] = contractDocs;
-            }
-          });
-        } catch (error) {
-          console.error('Error loading documents:', error);
-        }
+      try {
+        const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
+        const allDocuments = (documentsResponse as any)?.documents || [];
+        allDocuments.forEach((doc: any) => {
+          if (doc?.documentType !== 'contract' || !doc?.transactionId) return;
+          const txId = String(doc.transactionId);
+          if (!documentsMap[txId]) {
+            documentsMap[txId] = [];
+          }
+          documentsMap[txId].push(doc);
+        });
+      } catch (error) {
+        console.error('Error loading documents:', error);
       }
-      
       setTransactionDocuments(documentsMap);
       
       // Extract assets from ClientAsset objects
@@ -1451,12 +1439,8 @@ export function PlatformPortfolio() {
                         const statusLabel = formatTransactionStatus(t.status);
                         const statusColor = getStatusColor(t.status);
                         
-                        // Check if this transaction has a contract document
-                        const isInvestmentTransfer = t.type === 'transfert' && 
-                          t.transfer_to && 
-                          t.transfer_to !== 'balance' && 
-                          t.transfer_to !== 'trading';
-                        const contractDocs = isInvestmentTransfer ? (transactionDocuments[t.id] || []) : [];
+                        // Show contract action whenever a contract document exists for this transaction
+                        const contractDocs = transactionDocuments[String(t.id)] || [];
                         const hasContract = contractDocs.length > 0;
                         
                         return (
@@ -1478,21 +1462,30 @@ export function PlatformPortfolio() {
                             </td>
                             <td style={{ padding: '10px 8px', textAlign: 'right' }}>
                               {hasContract ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    const contractDoc = contractDocs[0];
-                                    if (contractDoc?.fileUrl) {
-                                      window.open(contractDoc.fileUrl, '_blank', 'noopener,noreferrer');
+                                <a
+                                  href={contractDocs[0]?.fileUrl || '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    if (!contractDocs[0]?.fileUrl) {
+                                      e.preventDefault();
                                     }
                                   }}
-                                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                                  style={{
+                                    color: '#2563eb',
+                                    textDecoration: 'none',
+                                    fontSize: '12px',
+                                    fontWeight: 500,
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.textDecoration = 'underline';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.textDecoration = 'none';
+                                  }}
                                 >
-                                  <FileText style={{ width: 14, height: 14, marginRight: 4 }} />
                                   Voir le contrat
-                                </Button>
+                                </a>
                               ) : (
                                 <span style={{ color: '#9ca3af', fontSize: '12px' }}>—</span>
                               )}

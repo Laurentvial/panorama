@@ -211,6 +211,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     return matches.slice(0, 8);
   }, [productsIndex, normalizedSearch]);
 
+  const stickyTopOffset = `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`;
+  const sidebarHeight = `calc(100vh - (var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px)))`;
+
   return (
     <div
       className="platform-root"
@@ -455,7 +458,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
             style={{
               position: 'fixed',
               // Don't cover the header; it contains the close (X) button.
-              top: '60px',
+              top: stickyTopOffset,
               left: 0,
               right: 0,
               bottom: 0,
@@ -470,7 +473,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         <aside style={{
           // Narrower to avoid horizontal overflow on some screens.
           width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '360px',
-          height: 'calc(100vh - 60px)',
+          height: sidebarHeight,
           padding: 0,
           // Keep drawer behavior on mobile bottom nav.
           // On desktop we keep a spacer in flow and render the actual sidebar as fixed,
@@ -478,7 +481,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           position: showBottomNav ? 'fixed' : 'relative',
           left: showBottomNav ? (sidebarOpen ? '0' : '-280px') : '0',
           // Keep the sidebar under the (sticky) header while scrolling.
-          top: showBottomNav ? '60px' : '60px',
+          top: stickyTopOffset,
           zIndex: showBottomNav ? 400 : 10,
           transition: 'left 0.3s ease, width 0.3s ease',
           overflow: 'hidden',
@@ -502,10 +505,10 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       }
                     : {
                         position: 'fixed',
-                        top: 60,
+                        top: stickyTopOffset,
                         left: 0,
                         width: 360,
-                        height: 'calc(100vh - 60px)',
+                        height: sidebarHeight,
                         backgroundColor: 'var(--primary)',
                         color: 'var(--accent-foreground)',
                         borderRight: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
@@ -521,12 +524,12 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   flex: 1,
                   overflowY: 'auto',
                   overflowX: 'hidden',
-                  padding: showBottomNav ? (sidebarOpen ? '20px 0' : '0') : '20px 0',
+                  padding: showBottomNav ? (sidebarOpen ? '0px 0' : '0') : '0px 0',
                 }}
               >
               <div style={{ 
-                padding: isMobile ? '16px 20px' : '00px 30px', 
-                marginBottom: '20px', 
+                padding: isMobile ? '0 20px' : '0 30px', 
+                marginBottom: 0, 
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'flex-start' 
@@ -537,13 +540,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     alt="Logo" 
                     style={location.pathname.startsWith('/platform/product/') 
                       ? { 
-                          width: isMobile ? '80px' : '200px', 
-                          height: isMobile ? '80px' : '100px', 
+                          width: isMobile ? '64px' : '160px', 
+                          height: isMobile ? '64px' : '80px', 
                           objectFit: 'contain' 
                         }
                       : { 
-                          maxHeight: isMobile ? '40px' : '60px', 
-                          maxWidth: isMobile ? '150px' : '200px', 
+                          maxHeight: isMobile ? '32px' : '48px', 
+                          maxWidth: isMobile ? '120px' : '160px', 
                           objectFit: 'contain' 
                         }
                     } 
@@ -555,13 +558,19 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               
               {/* User Profile */}
               <div style={{ 
-                padding: isMobile ? '12px 20px' : '15px 30px', 
+                padding: isMobile ? '10px 14px' : '12px 16px', 
                 marginBottom: '20px', 
+                marginLeft: isMobile ? '12px' : '20px',
+                marginRight: isMobile ? '12px' : '20px',
                 display: 'flex', 
                 alignItems: 'center', 
                 gap: '12px',
-                borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
-                borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+                borderRadius: '16px',
+                border: '1px solid color-mix(in srgb, var(--accent-foreground) 16%, transparent)',
+                backgroundColor: 'color-mix(in srgb, var(--accent-foreground) 10%, transparent)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
               }}>
                 {currentUser?.profilePhoto ? (
                   <img 
@@ -755,7 +764,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Main Content */}
         <main style={{ 
           flex: 1, 
-          paddingTop: `calc((var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px)) / 2 + ${isMobile ? '16px' : '30px'})`,
+          paddingTop: stickyTopOffset,
           paddingRight: isMobile ? '16px' : '30px',
           paddingLeft: isMobile ? '16px' : '30px',
           paddingBottom: showBottomNav ? `${16 + MOBILE_BOTTOM_NAV_HEIGHT}px` : '30px',

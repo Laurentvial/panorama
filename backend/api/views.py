@@ -4117,11 +4117,38 @@ def client_rib_remove(request, client_id, rib_id):
 
 # Client Documents endpoints
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])  # Manual auth to support both JWT and client_ tokens
+@permission_classes([AllowAny])
 def client_documents(request, client_id):
     """Liste tous les documents d'un client"""
     client = get_object_or_404(Client, id=client_id)
     transaction_id = request.GET.get('transactionId', None)
+
+    # Authorization: allow client token for own data OR authenticated admin user
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+
+    if token and token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.platform_access or not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif token:
+        # Validate JWT manually for admin/staff sessions
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Filter documents
     documents = ClientDocument.objects.filter(client=client)

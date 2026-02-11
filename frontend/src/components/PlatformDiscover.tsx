@@ -655,7 +655,7 @@ export function PlatformDiscover() {
     <div style={{ padding: '0' }}>
       {/* Navigation Tabs */}
       <div style={{ 
-        marginBottom: isMobile ? '24px' : '40px', 
+        marginBottom: 0, 
         borderBottom: '1px solid #e5e7eb' 
       }}>
         <div style={{

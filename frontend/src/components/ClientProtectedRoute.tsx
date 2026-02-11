@@ -18,6 +18,16 @@ interface ClientAuthCache {
     storageType: 'session' | 'local';
 }
 
+function isNetworkLikeError(error: any): boolean {
+    return (
+        error instanceof TypeError ||
+        error?.name === 'NetworkError' ||
+        String(error?.message || '').includes('Failed to fetch') ||
+        String(error?.message || '').includes('NetworkError') ||
+        String(error?.message || '').includes('Network request failed')
+    );
+}
+
 function getTokenHash(token: string | null): string {
     if (!token) return '';
     // Simple hash using first and last 10 chars
@@ -166,26 +176,35 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                 } else {
                     const errorData = await response.json().catch(() => ({}));
                     console.error('ClientProtectedRoute: API error', response.status, errorData);
-                    // Any error response (401, 403, 404, 500, etc.) - clear session
-                    storage.removeItem(ACCESS_TOKEN);
-                    storage.removeItem(CLIENT_ACCESS_TOKEN);
-                    storage.removeItem('userType');
-                    storage.removeItem('clientData');
-                    storage.removeItem(CLIENT_AUTH_CACHE_KEY);
-                    setIsAuthenticated(false);
-                    setCachedClientAuth(false, tokenHash, storageType);
+                    // Only clear session on explicit auth failures.
+                    if (response.status === 401 || response.status === 403) {
+                        storage.removeItem(ACCESS_TOKEN);
+                        storage.removeItem(CLIENT_ACCESS_TOKEN);
+                        storage.removeItem('userType');
+                        storage.removeItem('clientData');
+                        storage.removeItem(CLIENT_AUTH_CACHE_KEY);
+                        setIsAuthenticated(false);
+                        setCachedClientAuth(false, tokenHash, storageType);
+                        return;
+                    }
+
+                    // For transient/backend errors (5xx, etc.), keep existing session.
+                    console.warn('ClientProtectedRoute: transient API error, keeping client session');
+                    setIsAuthenticated(true);
+                    setCachedClientAuth(true, tokenHash, storageType);
                     return;
                 }
             } catch (error) {
                 console.error('ClientProtectedRoute: Network error', error);
-                // Network error or other exception - clear session
-                storage.removeItem(ACCESS_TOKEN);
-                storage.removeItem(CLIENT_ACCESS_TOKEN);
-                storage.removeItem('userType');
-                storage.removeItem('clientData');
-                storage.removeItem(CLIENT_AUTH_CACHE_KEY);
-                setIsAuthenticated(false);
-                setCachedClientAuth(false, tokenHash, storageType);
+                // Keep client session on transient network issues during navigation.
+                if (isNetworkLikeError(error)) {
+                    setIsAuthenticated(true);
+                    setCachedClientAuth(true, tokenHash, storageType);
+                    return;
+                }
+                // Unknown non-network exception: don't force logout either.
+                setIsAuthenticated(true);
+                setCachedClientAuth(true, tokenHash, storageType);
                 return;
             }
         }
