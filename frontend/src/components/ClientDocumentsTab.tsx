@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Trash2, X, FileText, Download, Image as ImageIcon } from 'lucide-react';
+import { Plus, Trash2, X, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
@@ -209,6 +209,63 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
     return lowerUrl.includes('.pdf') || lowerUrl.endsWith('/pdf');
   }
 
+  function renderDocumentFileLink(document: Document) {
+    if (!document.fileUrl) {
+      return <span className="text-slate-400">-</span>;
+    }
+
+    if (isImageFile(document.fileUrl)) {
+      return (
+        <a
+          href={document.fileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:text-blue-800 hover:underline"
+        >
+          Voir l'image
+        </a>
+      );
+    }
+
+    if (isPdfFile(document.fileUrl)) {
+      return (
+        <a
+          href={document.fileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:text-blue-800 hover:underline"
+          onClick={async (e) => {
+            e.preventDefault();
+            if (document.fileUrl) {
+              try {
+                const newWindow = window.open(document.fileUrl, '_blank', 'noopener,noreferrer');
+                if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                  toast.error('Impossible d\'ouvrir le PDF. Veuillez vérifier les paramètres de votre navigateur.');
+                }
+              } catch (error) {
+                console.error('Error opening PDF:', error);
+                toast.error('Erreur lors de l\'ouverture du PDF');
+              }
+            }
+          }}
+        >
+          Voir le contrat
+        </a>
+      );
+    }
+
+    return (
+      <a
+        href={document.fileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:text-blue-800 hover:underline"
+      >
+        Télécharger
+      </a>
+    );
+  }
+
   function formatTransactionLabel(transaction: any): string {
     if (!transaction) return '';
     const typeLabels: Record<string, string> = {
@@ -257,99 +314,57 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
           {documents.length === 0 ? (
             <p className="text-slate-500 text-center py-8">Aucun document</p>
           ) : (
-            <div className="space-y-4">
-              {documents.map((document) => (
-                <div
-                  key={document.id}
-                  className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <FileText className="w-4 h-4 text-slate-500" />
-                        <h3 className="font-semibold text-slate-900">{document.name}</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="text-left py-3 px-3">Nom</th>
+                    <th className="text-left py-3 px-3">Type</th>
+                    <th className="text-left py-3 px-3">Description</th>
+                    <th className="text-left py-3 px-3">Transaction</th>
+                    <th className="text-left py-3 px-3">Fichier</th>
+                    <th className="text-left py-3 px-3">Ajouté le</th>
+                    <th className="text-right py-3 px-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documents.map((document) => (
+                    <tr key={document.id} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="py-3 px-3 font-medium text-slate-900">
+                        {document.name}
+                      </td>
+                      <td className="py-3 px-3">
                         <span className="px-2 py-1 text-xs bg-slate-100 text-slate-600 rounded">
                           {getDocumentTypeLabel(document.documentType)}
                         </span>
-                      </div>
-                      
-                      {document.description && (
-                        <p className="text-sm text-slate-600 mb-2">{document.description}</p>
-                      )}
-                      
-                      <div className="flex items-center gap-4 text-xs text-slate-500">
-                        <span>Ajouté le {formatDate(document.createdAt)}</span>
-                        {document.uploadedByName && (
-                          <span>par {document.uploadedByName}</span>
-                        )}
-                      </div>
-                      
-                      {document.fileUrl && (
-                        <div className="mt-3 flex items-center gap-2">
-                          {isImageFile(document.fileUrl) ? (
-                            <a
-                              href={document.fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                            >
-                              <ImageIcon className="w-4 h-4" />
-                              <span>Voir l'image</span>
-                            </a>
-                          ) : isPdfFile(document.fileUrl) ? (
-                            <a
-                              href={document.fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                              onClick={async (e) => {
-                                e.preventDefault();
-                                if (document.fileUrl) {
-                                  try {
-                                    // For PDFs, always use the media proxy URL which ensures proper headers
-                                    // The serializer should already return media proxy URL for PDFs
-                                    // Open in new tab - the media proxy will serve with Content-Disposition: inline
-                                    const newWindow = window.open(document.fileUrl, '_blank', 'noopener,noreferrer');
-                                    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-                                      // Popup blocked or failed, try alternative method
-                                      toast.error('Impossible d\'ouvrir le PDF. Veuillez vérifier les paramètres de votre navigateur.');
-                                    }
-                                  } catch (error) {
-                                    console.error('Error opening PDF:', error);
-                                    toast.error('Erreur lors de l\'ouverture du PDF');
-                                  }
-                                }
-                              }}
-                            >
-                              <FileText className="w-4 h-4" />
-                              <span>Voir le contrat</span>
-                            </a>
-                          ) : (
-                            <a
-                              href={document.fileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                            >
-                              <Download className="w-4 h-4" />
-                              <span>Télécharger</span>
-                            </a>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(document.id)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                      </td>
+                      <td className="py-3 px-3 text-slate-600 max-w-md truncate" title={document.description || ''}>
+                        {document.description || '-'}
+                      </td>
+                      <td className="py-3 px-3 text-slate-600">
+                        {document.transactionId || '-'}
+                      </td>
+                      <td className="py-3 px-3">
+                        {renderDocumentFileLink(document)}
+                      </td>
+                      <td className="py-3 px-3 text-slate-500">
+                        {formatDate(document.createdAt)}
+                        {document.uploadedByName ? ` par ${document.uploadedByName}` : ''}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(document.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>

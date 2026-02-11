@@ -97,6 +97,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
       }
+      // Keep contract links in sync when transactions are refreshed
+      loadContractDocuments();
     } catch (error) {
       console.error('Error loading transactions:', error);
       toast.error('Erreur lors du chargement des transactions');

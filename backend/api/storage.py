@@ -52,22 +52,24 @@ class CloudinaryMediaStorage(MediaCloudinaryStorage):
             # This ensures signed upload with API credentials (no unsigned parameter needed)
             upload_result = cloudinary.uploader.upload(content, **options)
             
-            # Django's FileField expects _upload to return a string (public_id), not a dict
-            # Extract the public_id from the Cloudinary upload response
-            if isinstance(upload_result, dict) and 'public_id' in upload_result:
-                return upload_result['public_id']
-            elif isinstance(upload_result, str):
-                # If it's already a string (shouldn't happen, but handle it)
-                return upload_result
-            else:
-                # Fallback: try to get public_id or use name as fallback
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Unexpected upload result type: {type(upload_result)}, value: {upload_result}")
-                # Try to extract public_id or use the original name
-                if isinstance(upload_result, dict):
-                    return upload_result.get('public_id', name)
-                return name
+            # MediaCloudinaryStorage._save expects _upload to return a dict-like response
+            # containing a `public_id` key. Returning a bare string causes:
+            # TypeError: string indices must be integers, not 'str'
+            if isinstance(upload_result, dict):
+                if 'public_id' in upload_result:
+                    return upload_result
+                # Keep behavior resilient if Cloudinary response shape changes.
+                return {**upload_result, 'public_id': upload_result.get('public_id') or name}
+
+            if isinstance(upload_result, str):
+                # Normalize string response to dict contract expected by cloudinary_storage.
+                return {'public_id': upload_result}
+
+            # Fallback for unexpected response types.
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Unexpected upload result type: {type(upload_result)}, value: {upload_result}")
+            return {'public_id': name}
         else:
             # For images, use the parent method (MediaCloudinaryStorage)
             return super()._upload(name, content)

@@ -6024,9 +6024,11 @@ def client_transaction_create(request, client_id):
                     sig_img.save(signature_io_final, format='PNG')
                     signature_io_final.seek(0)
                     
-                    # Create ImageReader and add to PDF
-                    sig_img_reader = ImageReader(signature_io_final)
-                    story.append(Image(sig_img_reader, width=sig_width_mm*mm, height=sig_height_mm*mm))
+                    # platypus.Image expects a filename/path or a file-like object.
+                    # Passing ImageReader here raises:
+                    # "expected str, bytes or os.PathLike object, not ImageReader"
+                    signature_io_final.seek(0)
+                    story.append(Image(signature_io_final, width=sig_width_mm*mm, height=sig_height_mm*mm))
                     story.append(Spacer(1, 3*mm))
                 except Exception as e:
                     # If signature processing fails, continue without it
