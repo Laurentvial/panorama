@@ -5,20 +5,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
-import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
+import '../styles/PlatformPortfolio.css';
 
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
   const [productsIndex, setProductsIndex] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transactionDocuments, setTransactionDocuments] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
-  const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
   const ORDERS_PAGE_SIZE = 10;
   const TRANSACTIONS_PAGE_SIZE = 10;
   const [ordersPage, setOrdersPage] = useState(1);
@@ -1083,20 +1081,20 @@ export function PlatformPortfolio() {
   }, [transactions, productsIndex, assetsIndex, availableFunds]);
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
+    <div className="platform-portfolioPage">
       {loading ? (
         <div>Chargement...</div>
       ) : (
         <>
           {/* Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-            <Card style={roundedCardStyle}>
+          <div className="platform-portfolioSummaryGrid">
+            <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Liquidités Disponibles</CardTitle>
+                <CardTitle className="platform-portfolioStatTitle">Liquidités Disponibles</CardTitle>
                 <Wallet className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="platform-portfolioStatValue">
                   {Math.max(0, availableFunds).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
                 {interestGainsInCash !== 0 && (
@@ -1104,26 +1102,28 @@ export function PlatformPortfolio() {
                     dont {interestGainsInCash.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € de {interestGainsInCash >= 0 ? 'gains' : 'pertes'}
                   </p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Fonds disponibles pour investir</p>
+                <p className="platform-portfolioStatSub">Fonds disponibles pour investir</p>
               </CardContent>
             </Card>
 
-            <Card style={roundedCardStyle}>
+            <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Investi</CardTitle>
+                <CardTitle className="platform-portfolioStatTitle">Total Investi</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="platform-portfolioStatValue">
                   {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)</p>
+                <p className="platform-portfolioStatSub">
+                  Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)
+                </p>
               </CardContent>
             </Card>
 
-            <Card style={roundedCardStyle}>
+            <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Bénéfices / Perte</CardTitle>
+                <CardTitle className="platform-portfolioStatTitle">Bénéfices / Perte</CardTitle>
                 {isProfit ? (
                   <TrendingUp className="h-4 w-4 text-green-600" />
                 ) : (
@@ -1132,24 +1132,26 @@ export function PlatformPortfolio() {
               </CardHeader>
               <CardContent>
                 <div 
-                  className="text-2xl font-bold"
+                  className="platform-portfolioStatValue"
                   style={{ color: isProfit ? '#10b981' : '#ef4444' }}
                 >
                   {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="platform-portfolioStatSub">
                   {isProfit ? 'Gain réalisé' : 'Perte réalisée'}
                 </p>
               </CardContent>
             </Card>
 
-            <Card style={roundedCardStyle}>
+            <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Valeur du Portefeuille</CardTitle>
+                <CardTitle className="platform-portfolioStatTitle">Valeur du Portefeuille</CardTitle>
                 <PieChart className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div className="platform-portfolioStatValue">
+                  {portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                </div>
                 <div style={{ marginTop: 6, fontSize: 13, color: isProfit ? '#10b981' : '#ef4444' }}>
                   {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
@@ -1199,13 +1201,13 @@ export function PlatformPortfolio() {
                     </div>
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Valeur totale actuelle</p>
+                <p className="platform-portfolioStatSub">Valeur totale actuelle</p>
               </CardContent>
             </Card>
           </div>
 
           {/* Actifs détenus */}
-          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
+          <Card className="platform-portfolioSectionCard">
             <CardHeader>
               <CardTitle>Actifs détenus</CardTitle>
               <CardDescription>Vos actifs (ordres ouverts) et vos produits en cours d’investissement</CardDescription>
@@ -1214,21 +1216,34 @@ export function PlatformPortfolio() {
               <div style={{ display: 'grid', gap: 18 }}>
                 <div>
                   {mergedHoldingsTableRows.length === 0 ? (
-                    <p>Aucun actif détenu</p>
+                    <div className="platform-portfolioEmpty">
+                      <div className="platform-portfolioEmptyIcon" aria-hidden="true">
+                        <Wallet size={18} />
+                      </div>
+                      <div className="platform-portfolioEmptyTitle">Aucun actif détenu</div>
+                      <div className="platform-portfolioEmptyText">
+                        Commencez à investir pour voir vos actifs (ordres ouverts) et vos produits en cours d'investissement ici.
+                      </div>
+                      <div className="platform-portfolioEmptyCta">
+                        <Button type="button" variant="outline" onClick={() => navigate('/platform/discover')}>
+                          Découvrir les opportunités
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                    <div className="platform-portfolioTableWrap">
+                      <table className="platform-portfolioTable">
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px', whiteSpace: 'nowrap' }}>Dernière ouverture</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Quantité</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix moyen d&apos;achat</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Valeur investie</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Prix</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
+                          <tr className="platform-portfolioTheadRow">
+                            <th className="platform-portfolioTh">Actif</th>
+                            <th className="platform-portfolioTh">Type</th>
+                            <th className="platform-portfolioTh">Réf</th>
+                            <th className="platform-portfolioTh platform-portfolioNowrap">Dernière ouverture</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Quantité</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Prix moyen d'achat</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Valeur investie</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Prix</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1301,8 +1316,8 @@ export function PlatformPortfolio() {
                             }
 
                             return (
-                              <tr key={r.key} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                <td style={{ padding: '10px 8px' }}>
+                              <tr key={r.key} className="platform-portfolioTbodyRow">
+                                <td className="platform-portfolioTd">
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
                                     {r.logoUrl ? (
                                       <img
@@ -1329,19 +1344,14 @@ export function PlatformPortfolio() {
                                           const id = r.key.split('-').slice(1).join('-');
                                           navigate(`/platform/product/${id}`);
                                         }}
-                                        style={{ 
-                                          fontWeight: 700, 
-                                          whiteSpace: 'nowrap', 
-                                          overflow: 'hidden', 
+                                        className="platform-portfolioLink"
+                                        style={{
+                                          display: 'inline-block',
+                                          maxWidth: '100%',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
                                           textOverflow: 'ellipsis',
                                           cursor: 'pointer',
-                                          color: '#2563eb',
-                                        }}
-                                        onMouseEnter={(e) => {
-                                          e.currentTarget.style.textDecoration = 'underline';
-                                        }}
-                                        onMouseLeave={(e) => {
-                                          e.currentTarget.style.textDecoration = 'none';
                                         }}
                                       >
                                         {r.name}
@@ -1349,24 +1359,28 @@ export function PlatformPortfolio() {
                                     </div>
                                   </div>
                                 </td>
-                                <td style={{ padding: '10px 8px' }}>{r.type || '—'}</td>
-                                <td style={{ padding: '10px 8px' }}>{r.reference || '—'}</td>
-                                <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
+                                <td className="platform-portfolioTd">{r.type || '—'}</td>
+                                <td className="platform-portfolioTd">{r.reference || '—'}</td>
+                                <td className="platform-portfolioTd platform-portfolioNowrap">
                                   {r.lastIso ? formatDateTime(r.lastIso) : '—'}
                                 </td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{qtyLabel}</td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{avgLabel}</td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight">{qtyLabel}</td>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight">{avgLabel}</td>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight">
                                   <div style={{ fontWeight: 800 }}>{investedLabelMain}</div>
                                   {investedLabelSub && (
-                                    <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{investedLabelSub}</div>
+                                    <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                      {investedLabelSub}
+                                    </div>
                                   )}
                                 </td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right' }}>{priceLabel}</td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight">{priceLabel}</td>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: pnlColor }}>
                                   <div>{pnlLabelMain}</div>
                                   {pnlLabelSub && (
-                                    <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{pnlLabelSub}</div>
+                                    <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                      {pnlLabelSub}
+                                    </div>
                                   )}
                                 </td>
                               </tr>
@@ -1382,7 +1396,7 @@ export function PlatformPortfolio() {
           </Card>
 
           {/* Transactions */}
-          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
+          <Card className="platform-portfolioSectionCard">
             <CardHeader>
               <CardTitle>Transactions</CardTitle>
               <CardDescription>Historique des transactions</CardDescription>
@@ -1392,16 +1406,16 @@ export function PlatformPortfolio() {
                 <p>Aucune transaction</p>
               ) : (
                 <>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                  <div className="platform-portfolioTableWrap">
+                    <table className="platform-portfolioTable">
                     <thead>
-                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Produit</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Actions</th>
+                      <tr className="platform-portfolioTheadRow">
+                        <th className="platform-portfolioTh">Date</th>
+                        <th className="platform-portfolioTh">Type</th>
+                        <th className="platform-portfolioTh">Produit</th>
+                        <th className="platform-portfolioTh platform-portfolioAlignRight">Montant</th>
+                        <th className="platform-portfolioTh">Statut</th>
+                        <th className="platform-portfolioTh platform-portfolioAlignRight">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1444,23 +1458,19 @@ export function PlatformPortfolio() {
                         const hasContract = contractDocs.length > 0;
                         
                         return (
-                          <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{formatDateTime(t.datetime)}</td>
-                            <td style={{ padding: '10px 8px' }}>{typeLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{productLabel}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
+                          <tr key={t.id} className="platform-portfolioTbodyRow">
+                            <td className="platform-portfolioTd platform-portfolioNowrap">{formatDateTime(t.datetime)}</td>
+                            <td className="platform-portfolioTd">{typeLabel}</td>
+                            <td className="platform-portfolioTd">{productLabel}</td>
+                            <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: amountColor }}>
                               {formatCurrency(t.amount)}
                             </td>
-                            <td style={{ padding: '10px 8px' }}>
-                              <span style={{ 
-                                color: statusColor, 
-                                fontWeight: 600,
-                                fontSize: '13px'
-                              }}>
+                            <td className="platform-portfolioTd">
+                              <span className="platform-portfolioStatus" style={{ color: statusColor }}>
                                 {statusLabel}
                               </span>
                             </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                            <td className="platform-portfolioTd platform-portfolioAlignRight">
                               {hasContract ? (
                                 <a
                                   href={contractDocs[0]?.fileUrl || '#'}
@@ -1471,23 +1481,13 @@ export function PlatformPortfolio() {
                                       e.preventDefault();
                                     }
                                   }}
-                                  style={{
-                                    color: '#2563eb',
-                                    textDecoration: 'none',
-                                    fontSize: '12px',
-                                    fontWeight: 500,
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.textDecoration = 'underline';
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.textDecoration = 'none';
-                                  }}
+                                  className="platform-portfolioLink"
+                                  style={{ fontSize: 12, fontWeight: 800 }}
                                 >
                                   Voir le contrat
                                 </a>
                               ) : (
-                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>—</span>
+                                <span className="platform-portfolioMuted" style={{ fontSize: 12 }}>—</span>
                               )}
                             </td>
                           </tr>
@@ -1528,7 +1528,7 @@ export function PlatformPortfolio() {
           </Card>
 
           {/* Ordres (positions) */}
-          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
+          <Card className="platform-portfolioSectionCard">
             <CardHeader>
               <CardTitle>Ordres</CardTitle>
               <CardDescription>Vos achats/ventes et mouvements</CardDescription>
@@ -1538,18 +1538,18 @@ export function PlatformPortfolio() {
                 <p>Aucun ordre</p>
               ) : (
                 <>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+                  <div className="platform-portfolioTableWrap">
+                    <table className="platform-portfolioTable">
                     <thead>
-                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Actif</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Réf</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date d'ouverture</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date de fermeture</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>Investi</th>
-                        <th style={{ textAlign: 'right', padding: '10px 8px' }}>P&amp;L</th>
-                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
+                      <tr className="platform-portfolioTheadRow">
+                        <th className="platform-portfolioTh">Actif</th>
+                        <th className="platform-portfolioTh">Type</th>
+                        <th className="platform-portfolioTh">Réf</th>
+                        <th className="platform-portfolioTh">Date d'ouverture</th>
+                        <th className="platform-portfolioTh">Date de fermeture</th>
+                        <th className="platform-portfolioTh platform-portfolioAlignRight">Investi</th>
+                        <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
+                        <th className="platform-portfolioTh">Statut</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1714,25 +1714,29 @@ export function PlatformPortfolio() {
                             : '-';
                         const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
                         return (
-                          <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '10px 8px' }}>{assetLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{productTypeLabel}</td>
-                            <td style={{ padding: '10px 8px' }}>{refLabel}</td>
-                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{openedLabel}</td>
-                            <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>{closedLabel}</td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                          <tr key={p.id} className="platform-portfolioTbodyRow">
+                            <td className="platform-portfolioTd">{assetLabel}</td>
+                            <td className="platform-portfolioTd">{productTypeLabel}</td>
+                            <td className="platform-portfolioTd">{refLabel}</td>
+                            <td className="platform-portfolioTd platform-portfolioNowrap">{openedLabel}</td>
+                            <td className="platform-portfolioTd platform-portfolioNowrap">{closedLabel}</td>
+                            <td className="platform-portfolioTd platform-portfolioAlignRight">
                               <div style={{ fontWeight: 700 }}>{investedLabelMain}</div>
                               {investedLabelSub && (
-                                <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{investedLabelSub}</div>
+                                <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                  {investedLabelSub}
+                                </div>
                               )}
                             </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                            <td className="platform-portfolioTd platform-portfolioAlignRight">
                               <div style={{ fontWeight: 700, color: finalPnlColor }}>{pnlLabelMain}</div>
                               {pnlLabelSub && (
-                                <div style={{ marginTop: 2, fontSize: 12, color: '#6b7280' }}>{pnlLabelSub}</div>
+                                <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                  {pnlLabelSub}
+                                </div>
                               )}
                             </td>
-                            <td style={{ padding: '10px 8px' }}>{statusLabel}</td>
+                            <td className="platform-portfolioTd">{statusLabel}</td>
                           </tr>
                         );
                       })}

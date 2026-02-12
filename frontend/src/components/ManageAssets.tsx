@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } from '../utils/iconMapping';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';
@@ -49,6 +50,7 @@ export function ManageAssets() {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTypeTab, setActiveTypeTab] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
   // Used only for the Alpha Vantage search mode in the create dialog
@@ -81,6 +83,7 @@ export function ManageAssets() {
   const [updatingPrices, setUpdatingPrices] = useState(false);
   const [selectedSearchResult, setSelectedSearchResult] = useState<any>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exchangeAutoSetRef = useRef(false);
 
   useEffect(() => {
     loadAssets();
@@ -100,6 +103,131 @@ export function ManageAssets() {
     };
   }, []);
 
+  const normalizedSymbol = (formData.alphaVantageSymbol || '').trim().toUpperCase();
+  const normalizedType = (formData.type || '').trim().toLowerCase();
+  const isCryptoType = normalizedType.includes('crypto') || normalizedType.includes('cryptomonnaie');
+  const isSpotMetalType = normalizedType === 'or' || normalizedType === 'argent';
+  const isSpotCommodityType = normalizedType === 'pétrole' || normalizedType === 'petrole' || normalizedType === 'gaz';
+  const isSpotMetalSymbol = normalizedSymbol === 'XAU' || normalizedSymbol === 'XAG';
+  const isForexType = normalizedType.includes('devise');
+  const hideExchangeField = isCryptoType || isForexType || isSpotMetalType || isSpotCommodityType || isSpotMetalSymbol;
+
+  const normalizeKey = useCallback((value: any) => {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }, []);
+
+  const canonicalTypeKey = useCallback(
+    (raw: any) => {
+      const k = normalizeKey(raw);
+      // Merge common aliases/plurals to avoid duplicate tabs (e.g. "Crypto" vs "Cryptomonnaie").
+      if (!k) return '';
+      if (k === 'crypto' || k === 'cryptos' || k === 'cryptomonnaies') return normalizeKey('Cryptomonnaie');
+      if (k === 'actions') return normalizeKey('Action');
+      if (k === 'etfs') return normalizeKey('ETF');
+      if (k === 'obligations') return normalizeKey('Obligation');
+      if (k === 'devises') return normalizeKey('Devise');
+      if (k === 'indices') return normalizeKey('Indice');
+      if (k === 'matieres premieres' || k === 'matiere premieres' || k === 'matieres premiere') return normalizeKey('Matière première');
+      return k;
+    },
+    [normalizeKey],
+  );
+
+  const assetTypeTabs = useMemo(() => {
+    // Known CRM types, ordered.
+    const base: Array<{ value: string; label: string; typeKey: string }> = [
+      { value: 'all', label: `Tous`, typeKey: 'all' },
+      { value: 'action', label: `Actions`, typeKey: canonicalTypeKey('Action') },
+      { value: 'etf', label: `ETF`, typeKey: canonicalTypeKey('ETF') },
+      { value: 'cryptomonnaie', label: `Crypto`, typeKey: canonicalTypeKey('Cryptomonnaie') },
+      { value: 'obligation', label: `Obligations`, typeKey: canonicalTypeKey('Obligation') },
+      { value: 'matiere-premiere', label: `Matiere premiere`, typeKey: canonicalTypeKey('Matière première') },
+      { value: 'or', label: `Or`, typeKey: canonicalTypeKey('Or') },
+      { value: 'argent', label: `Argent`, typeKey: canonicalTypeKey('Argent') },
+      { value: 'petrole', label: `Petrole`, typeKey: canonicalTypeKey('Pétrole') },
+      { value: 'gaz', label: `Gaz`, typeKey: canonicalTypeKey('Gaz') },
+      { value: 'devise', label: `Devises`, typeKey: canonicalTypeKey('Devise') },
+      { value: 'indice', label: `Indices`, typeKey: canonicalTypeKey('Indice') },
+      { value: 'autre', label: `Autres`, typeKey: canonicalTypeKey('Autre') },
+    ];
+
+    const presentKeys = new Set(base.map((t) => t.typeKey));
+    const dynamicTypes = new Map<string, { raw: string; count: number }>();
+
+    for (const a of assets || []) {
+      const raw = String(a?.type || '').trim();
+      if (!raw) continue;
+      const key = canonicalTypeKey(raw);
+      const prev = dynamicTypes.get(key);
+      dynamicTypes.set(key, { raw, count: (prev?.count || 0) + 1 });
+    }
+
+    const tabs = base.map((t) => {
+      if (t.value === 'all') return { ...t, count: (assets || []).length };
+      const dyn = dynamicTypes.get(t.typeKey);
+      return { ...t, count: dyn?.count || 0 };
+    });
+
+    // Add any unknown types at the end (rare, but keeps UI future-proof).
+    for (const [key, meta] of dynamicTypes.entries()) {
+      if (presentKeys.has(key)) continue;
+      tabs.push({ value: `type:${key}`, label: meta.raw, typeKey: key, count: meta.count });
+    }
+
+    return tabs;
+  }, [assets, canonicalTypeKey]);
+
+  useEffect(() => {
+    // If current tab disappears (e.g. assets list changed), fall back to "all".
+    if (!assetTypeTabs.some((t) => t.value === activeTypeTab)) {
+      setActiveTypeTab('all');
+    }
+  }, [assetTypeTabs, activeTypeTab]);
+
+  useEffect(() => {
+    if (!isDialogOpen) return;
+
+    // For forex/spot metals, exchange should be forced to FOREX and the input hidden.
+    // This prevents incompatible exchanges (NASDAQ/NYSE/etc.) and avoids HTML "required" blocking.
+    if (hideExchangeField) {
+      const autoExchange = isCryptoType ? 'BINANCE' : 'FOREX';
+      setFormData((prev) => {
+        // Only override when empty or when previously auto-set; keep explicit user/backend value if present.
+        const current = String(prev.exchange || '').trim().toUpperCase();
+        const shouldOverride = !current || current === 'FOREX' || current === 'BINANCE';
+        const next = shouldOverride ? { ...prev, exchange: autoExchange } : prev;
+        return next;
+      });
+      exchangeAutoSetRef.current = true;
+      return;
+    }
+
+    // If we previously auto-set (FOREX/BINANCE) and the user switches to an exchange-based type,
+    // clear it so they must pick a relevant exchange.
+    if (exchangeAutoSetRef.current) {
+      setFormData((prev) => {
+        const ex = String(prev.exchange || '').trim().toUpperCase();
+        if (ex !== 'FOREX' && ex !== 'BINANCE') return prev;
+        return { ...prev, exchange: '' }; // force user input when field becomes visible again
+      });
+      exchangeAutoSetRef.current = false;
+    }
+  }, [hideExchangeField, isDialogOpen]);
+
+  function bustAssetsCache(assetId?: string) {
+    // apiCall caches GET requests for ~2 minutes; bust cache after any mutation
+    // so the table reflects the updated asset immediately.
+    clearApiCache('/api/assets');
+    clearApiCache('/api/assets/');
+    if (assetId) {
+      clearApiCache(`/api/assets/${assetId}/`);
+    }
+  }
+
   async function loadAssets() {
     try {
       setLoading(true);
@@ -115,6 +243,7 @@ export function ManageAssets() {
 
   function handleOpenDialog(asset?: any) {
     if (asset) {
+      exchangeAutoSetRef.current = false;
       setEditingAsset(asset);
       setFormData({
         type: asset.type || '',
@@ -131,6 +260,7 @@ export function ManageAssets() {
       });
       setLogoPreview(asset.logoUrl || null);
     } else {
+      exchangeAutoSetRef.current = false;
       setEditingAsset(null);
       setFormData({
         type: '',
@@ -334,6 +464,7 @@ export function ManageAssets() {
           body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
+        bustAssetsCache(String(editingAsset.id));
         toast.success('Actif modifié avec succès');
       } else {
         // Use the import endpoint so we persist extra company info (description, market cap, etc.)
@@ -358,6 +489,7 @@ export function ManageAssets() {
           body: JSON.stringify(importPayload),
           headers: { 'Content-Type': 'application/json' }
         });
+        bustAssetsCache(createdAsset?.id != null ? String(createdAsset.id) : undefined);
         
         // If a logo file was selected but not uploaded yet, upload it now
         if (logoFile && createdAsset?.id) {
@@ -369,6 +501,7 @@ export function ManageAssets() {
               body: formDataUpload
             });
             if (logoResponse.logo_url) {
+              bustAssetsCache(String(createdAsset.id));
               // Logo uploaded successfully, asset already updated
               // Nettoyer le preview local et le fichier
               setLogoFile(null);
@@ -384,7 +517,7 @@ export function ManageAssets() {
         }
       }
       handleCloseDialog();
-      loadAssets();
+      await loadAssets();
     } catch (error: any) {
       console.error('Error saving asset:', error);
       toast.error(error.message || 'Erreur lors de la sauvegarde');
@@ -398,6 +531,7 @@ export function ManageAssets() {
     
     try {
       await apiCall(`/api/assets/${assetId}/delete/`, { method: 'DELETE' });
+      bustAssetsCache(String(assetId));
       toast.success('Actif supprimé avec succès');
       loadAssets();
     } catch (error) {
@@ -491,6 +625,7 @@ export function ManageAssets() {
 
       if (response.logo_url) {
         setFormData((prevFormData) => ({ ...prevFormData, logoUrl: response.logo_url }));
+        bustAssetsCache(String(editingAsset.id));
         // Utiliser uniquement l'URL du serveur, retirer le preview local
         setLogoPreview(null);
         setLogoFile(null);
@@ -500,6 +635,8 @@ export function ManageAssets() {
           fileInput.value = '';
         }
         toast.success('Logo téléchargé avec succès');
+        // Refresh the list table in the background too
+        loadAssets();
       } else {
         toast.error('Erreur lors du téléchargement du logo');
       }
@@ -630,6 +767,7 @@ export function ManageAssets() {
   async function handleUpdatePrice(assetId: string) {
     try {
       const response = await apiCall(`/api/assets/${assetId}/update-price/`, { method: 'POST' });
+      bustAssetsCache(String(assetId));
       toast.success('Prix mis à jour avec succès');
       loadAssets();
     } catch (error: any) {
@@ -658,6 +796,7 @@ export function ManageAssets() {
         body: JSON.stringify({ assetIds }),
         headers: { 'Content-Type': 'application/json' }
       });
+      bustAssetsCache();
       toast.success(`${assetsWithSymbols.length} prix mis à jour`);
       loadAssets();
     } catch (error: any) {
@@ -670,6 +809,15 @@ export function ManageAssets() {
 
   const filteredAssets = assets.filter(asset => {
     const searchLower = searchTerm.toLowerCase();
+    // Apply type tab filter first (then search).
+    if (activeTypeTab !== 'all') {
+      const tab = assetTypeTabs.find((t) => t.value === activeTypeTab) || null;
+      const assetTypeKey = canonicalTypeKey(asset?.type);
+      if (tab && tab.typeKey !== 'all' && assetTypeKey !== tab.typeKey) {
+        return false;
+      }
+      // If we somehow have a selected tab but can't resolve it, fallback to showing all.
+    }
     return (
       asset.name?.toLowerCase().includes(searchLower) ||
       asset.type?.toLowerCase().includes(searchLower) ||
@@ -711,6 +859,23 @@ export function ManageAssets() {
           </Button>
         </div>
       </div>
+
+      {/* Type Tabs */}
+      <Card>
+        <CardContent className="pt-6">
+          <Tabs value={activeTypeTab} onValueChange={setActiveTypeTab}>
+            <div className="overflow-x-auto">
+              <TabsList className="flex-wrap h-auto">
+                {assetTypeTabs.map((t) => (
+                  <TabsTrigger key={t.value} value={t.value}>
+                    {t.label} ({t.count})
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+          </Tabs>
+        </CardContent>
+      </Card>
 
       {/* Search */}
       <Card>
@@ -975,7 +1140,7 @@ export function ManageAssets() {
                                 <div
                                   key={`${result.symbol || 'sym'}-${result.exchange || 'ex'}-${result.currency || 'ccy'}-${index}`}
                                   onClick={() => handleSelectSearchResult(result)}
-                                  className={`p-3 hover:bg-accent hover:text-primary cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
+                                  className={`p-3 hover:bg-slate-100 cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors ${
                                     selectedSearchResult?.symbol === result.symbol &&
                                     selectedSearchResult?.exchange === result.exchange &&
                                     selectedSearchResult?.currency === result.currency
@@ -1172,19 +1337,21 @@ export function ManageAssets() {
                 />
                 <p className="text-xs text-slate-500 mt-1">Symbole utilisé pour récupérer les prix en temps réel depuis Alpha Vantage (ex: AAPL pour les actions, BTC pour les cryptos)</p>
               </div>
-              <div className="modal-form-field">
-                <Label htmlFor="exchange">Exchange (Bourse) *</Label>
-                <Input
-                  id="exchange"
-                  value={formData.exchange}
-                  onChange={(e) => setFormData({ ...formData, exchange: e.target.value.toUpperCase() })}
-                  placeholder="Ex: NASDAQ, NYSE, BINANCE, EURONEXT..."
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Pour les cryptos, utilisez généralement "BINANCE". Pour les actions US: "NASDAQ" ou "NYSE". Pour l'Europe: "EURONEXT", "LSE", etc.
-                </p>
-              </div>
+              {!hideExchangeField && (
+                <div className="modal-form-field">
+                  <Label htmlFor="exchange">Exchange (Bourse) *</Label>
+                  <Input
+                    id="exchange"
+                    value={formData.exchange}
+                    onChange={(e) => setFormData({ ...formData, exchange: e.target.value.toUpperCase() })}
+                    placeholder="Ex: NASDAQ, NYSE, BINANCE, EURONEXT..."
+                    required
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Pour les cryptos, utilisez généralement "BINANCE". Pour les actions US: "NASDAQ" ou "NYSE". Pour l'Europe: "EURONEXT", "LSE", etc.
+                  </p>
+                </div>
+              )}
               <div className="modal-form-field">
                 <Label htmlFor="category">Catégorie</Label>
                 <Input

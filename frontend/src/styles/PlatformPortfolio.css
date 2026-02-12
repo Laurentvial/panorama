@@ -1,0 +1,166 @@
+.platform-portfolioPage {
+  padding: 16px;
+}
+
+/* Keep the original "mobile" threshold (<= 1000px) from useIsMobile */
+@media (min-width: 1001px) {
+  .platform-portfolioPage {
+    padding: 20px 20px;
+  }
+}
+
+.platform-portfolioSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.platform-portfolioCard {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.platform-portfolioStatTitle {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.platform-portfolioStatValue {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--accent-foreground) 92%, transparent);
+}
+
+.platform-portfolioStatSub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+  line-height: 1.35;
+}
+
+.platform-portfolioSectionCard {
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 30px;
+}
+
+.platform-portfolioTableWrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.platform-portfolioTable {
+  width: 100%;
+  font-size: 14px;
+  border-collapse: collapse;
+}
+
+.platform-portfolioTheadRow {
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-foreground) 14%, transparent);
+  background: color-mix(in srgb, var(--accent-foreground) 3.5%, transparent);
+}
+
+.platform-portfolioTbodyRow {
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-foreground) 7%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .platform-portfolioTbodyRow:hover {
+    background-color: color-mix(in srgb, var(--accent-foreground) 3.5%, transparent);
+  }
+}
+
+.platform-portfolioTh,
+.platform-portfolioTd {
+  padding: 10px 8px;
+  vertical-align: middle;
+  text-align: left;
+}
+
+.platform-portfolioTh {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioTd {
+  color: color-mix(in srgb, var(--accent-foreground) 86%, transparent);
+}
+
+.platform-portfolioAlignRight {
+  text-align: right;
+}
+
+.platform-portfolioNowrap {
+  white-space: nowrap;
+}
+
+.platform-portfolioLink {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.platform-portfolioLink:hover {
+  text-decoration: underline;
+}
+
+.platform-portfolioMuted {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}
+
+.platform-portfolioStatus {
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.platform-portfolioEmpty {
+  border: 1px dashed color-mix(in srgb, var(--accent-foreground) 18%, transparent);
+  border-radius: 16px;
+  padding: 28px 16px;
+  background: color-mix(in srgb, var(--accent-foreground) 2.8%, transparent);
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.platform-portfolioEmptyIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-foreground) 6%, transparent);
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}
+
+.platform-portfolioEmptyTitle {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 900;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+}
+
+.platform-portfolioEmptyText {
+  margin-top: 6px;
+  max-width: 520px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+  line-height: 1.5;
+}
+
+.platform-portfolioEmptyCta {
+  margin-top: 10px;
+}
