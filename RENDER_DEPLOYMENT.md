@@ -2,10 +2,10 @@
 
 This repo includes a Render Blueprint at `render.yaml` that provisions:
 
-- `panorama-db` (Postgres)
-- `panorama-backend` (Django + gunicorn web service)
-- `panorama-frontend` (Vite static site)
-- `panorama-refresh-prices` (cron job, every 10 minutes)
+- `db` (Postgres)
+- `backend` (Django + gunicorn web service)
+- `frontend` (Vite static site)
+- `refresh-prices` (cron job, every 10 minutes)
 
 ## Setup steps
 
@@ -16,7 +16,7 @@ This repo includes a Render Blueprint at `render.yaml` that provisions:
    - `CLOUDINARY_API_KEY`
    - `CLOUDINARY_API_SECRET`
 
-The cron job reuses these values from `panorama-backend`, so you only need to set them once.
+The cron job reuses these values from `backend`, so you only need to set them once.
 
 ## Notes
 
