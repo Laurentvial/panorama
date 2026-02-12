@@ -60,7 +60,7 @@ services:
     runtime: static
     rootDir: frontend
     buildCommand: npm install --legacy-peer-deps && npm run build
-    staticPublishPath: frontend/dist
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
