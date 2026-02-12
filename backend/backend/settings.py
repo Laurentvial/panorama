@@ -54,6 +54,13 @@ if railway_static_url:
         railway_static_url = f'https://{railway_static_url}'
     CSRF_TRUSTED_ORIGINS.append(railway_static_url)
 
+# Add Render domain dynamically (for onrender.com URL)
+render_external_url = os.getenv('RENDER_EXTERNAL_URL')
+if render_external_url:
+    if not render_external_url.startswith(('http://', 'https://')):
+        render_external_url = f'https://{render_external_url}'
+    CSRF_TRUSTED_ORIGINS.append(render_external_url)
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),

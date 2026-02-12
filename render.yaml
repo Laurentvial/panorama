@@ -66,17 +66,19 @@ services:
         source: /*
         destination: /index.html
     envVars:
-      # We reference the backend hostname, and the app normalizes it to https://...
+      # Use the backend's public URL (browser must be able to reach it).
+      # Using `property: host` can yield an internal hostname (e.g. backend-xxxx)
+      # which is not reachable from the user's browser.
       - key: VITE_URL
         fromService:
           type: web
           name: backend
-          property: host
+          envVarKey: RENDER_EXTERNAL_URL
       - key: VITE_API_URL
         fromService:
           type: web
           name: backend
-          property: host
+          envVarKey: RENDER_EXTERNAL_URL
 
   # Scheduled price refresh (short-lived Django management command)
   - type: cron
