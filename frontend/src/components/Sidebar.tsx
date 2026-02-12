@@ -127,6 +127,9 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
                 className="sidebar-button"
                 onClick={() => handleNavigation(item)}
                 onMouseEnter={() => handleMouseEnter(item)}
+                data-active={isActive ? 'true' : 'false'}
+                aria-current={isActive ? 'page' : undefined}
+                type="button"
               >
                 <Icon className="sidebar-icon" />
                 {item.label}

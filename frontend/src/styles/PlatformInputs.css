@@ -28,7 +28,7 @@
   border: 1px solid var(--border) !important;
   border-bottom: 1px solid var(--border) !important;
   background-color: var(--input-background) !important;
-  border-radius: 9999px;
+  border-radius: 14px;
   padding: 0.7rem 0.9rem;
 }
 

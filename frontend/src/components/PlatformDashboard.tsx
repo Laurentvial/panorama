@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { TrendingUp, TrendingDown, Check, PieChart } from 'lucide-react';
+import { TrendingUp, TrendingDown, Check, PieChart, Shield } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
@@ -623,6 +623,15 @@ export function PlatformDashboard() {
                                      (isStepEnabled(2) && !isStep2Completed) || 
                                      (isStepEnabled(3) && !isStep3Completed);
   
+  const verificationStepperSteps = [
+    { id: 1 as const, label: 'Inscription', enabled: isStepEnabled(1), completed: isStep1Completed },
+    { id: 2 as const, label: 'Verification', enabled: isStepEnabled(2), completed: isStep2Completed },
+    { id: 3 as const, label: 'Investir', enabled: isStepEnabled(3), completed: isStep3Completed },
+  ].filter((s) => s.enabled);
+
+  const currentVerificationStepId =
+    verificationStepperSteps.find((s) => !s.completed)?.id ?? null;
+
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   return (
@@ -634,171 +643,182 @@ export function PlatformDashboard() {
         <>
           {/* Account Verification Steps */}
           {hasIncompleteEnabledSteps && (
-            <Card style={{ ...roundedCardStyle, marginBottom: isMobile ? '20px' : '30px', backgroundColor: '#f9fafb' }}>
-              <CardContent style={{ padding: isMobile ? '20px' : '30px' }}>
-                {/* Progress Steps */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'flex-start', 
-                  gap: isMobile ? '6px' : '10px', 
-                  marginBottom: isMobile ? '20px' : '25px',
-                  overflowX: 'auto',
-                }}>
-                  {/* Step 1 */}
-                  {isStepEnabled(1) && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
-                    <div style={{
-                      width: isMobile ? '32px' : '40px',
-                      height: isMobile ? '32px' : '40px',
-                      borderRadius: '50%',
-                      backgroundColor: isStep1Completed ? '#10b981' : '#f3f4f6',
-                      border: isStep1Completed ? 'none' : '2px solid #d1d5db',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: isStep1Completed ? 'white' : '#6b7280',
-                      fontWeight: 'bold',
-                    }}>
-                      {isStep1Completed ? (
-                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
-                      ) : (
-                        <span style={{ fontSize: isMobile ? '14px' : '16px' }}>1</span>
-                      )}
-                    </div>
-                  </div>
-                  )}
-                  
-                  {/* Connector between Step 1 and Step 2 */}
-                  {isStepEnabled(1) && isStepEnabled(2) && (
-                    <div style={{
-                      width: isMobile ? '40px' : '60px',
-                      height: '2px',
-                      backgroundColor: isStep1Completed ? '#10b981' : '#d1d5db',
-                      borderStyle: 'dashed',
-                      flexShrink: 0,
-                    }}></div>
-                  )}
-
-                  {/* Step 2 */}
-                  {isStepEnabled(2) && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '10px', flexShrink: 0 }}>
-                    <div style={{
-                      width: isMobile ? '32px' : '40px',
-                      height: isMobile ? '32px' : '40px',
-                      borderRadius: '50%',
-                      backgroundColor: isStep2Completed ? '#10b981' : (isStep1Completed ? 'white' : '#f3f4f6'),
-                      border: isStep2Completed ? 'none' : (isStep1Completed ? '2px solid #10b981' : '2px solid #d1d5db'),
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: isStep2Completed ? 'white' : (isStep1Completed ? '#111827' : '#6b7280'),
-                      fontWeight: 'bold',
-                      fontSize: isMobile ? '14px' : '16px',
-                    }}>
-                      {isStep2Completed ? (
-                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
-                      ) : (
-                        '2'
-                      )}
-                    </div>
-                  </div>
-                  )}
-                  
-                  {/* Connector between Step 2 and Step 3 (only if step 2 is enabled) */}
-                  {isStepEnabled(2) && isStepEnabled(3) && (
-                    <div style={{
-                      width: isMobile ? '40px' : '60px',
-                      height: '2px',
-                      backgroundColor: isStep2Completed ? '#10b981' : '#d1d5db',
-                      borderStyle: 'dashed',
-                      flexShrink: 0,
-                    }}></div>
-                  )}
-                  
-                  {/* Connector between Step 1 and Step 3 (when step 2 is disabled) */}
-                  {!isStepEnabled(2) && isStepEnabled(1) && isStepEnabled(3) && (
-                    <div style={{
-                      width: isMobile ? '40px' : '60px',
-                      height: '2px',
-                      backgroundColor: isStep1Completed ? '#10b981' : '#d1d5db',
-                      borderStyle: 'dashed',
-                      flexShrink: 0,
-                    }}></div>
-                  )}
-
-                  {/* Step 3 */}
-                  {isStepEnabled(3) && (
-                  <div style={{ flexShrink: 0 }}>
-                    <div style={{
-                      width: isMobile ? '32px' : '40px',
-                      height: isMobile ? '32px' : '40px',
-                      borderRadius: '50%',
-                      // If step 2 is disabled, check step 1 completion; otherwise check step 2
-                      backgroundColor: isStep3Completed ? '#10b981' : (
-                        isStepEnabled(2) 
-                          ? (isStep2Completed ? 'white' : '#f3f4f6')
-                          : (isStep1Completed ? 'white' : '#f3f4f6')
-                      ),
-                      border: isStep3Completed ? 'none' : (
-                        isStepEnabled(2)
-                          ? (isStep2Completed ? '2px solid #10b981' : '2px solid #d1d5db')
-                          : (isStep1Completed ? '2px solid #10b981' : '2px solid #d1d5db')
-                      ),
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: isStep3Completed ? 'white' : (
-                        isStepEnabled(2)
-                          ? (isStep2Completed ? '#111827' : '#6b7280')
-                          : (isStep1Completed ? '#111827' : '#6b7280')
-                      ),
-                      fontWeight: 'bold',
-                      fontSize: isMobile ? '14px' : '16px',
-                    }}>
-                      {isStep3Completed ? (
-                        <Check className={isMobile ? "h-4 w-4" : "h-5 w-5"} />
-                      ) : (
-                        '3'
-                      )}
-                    </div>
-                  </div>
-                  )}
-                </div>
-
-                {/* Heading */}
-                <h2 style={{ 
-                  fontSize: isMobile ? '20px' : '24px', 
-                  fontWeight: 'bold', 
-                  marginBottom: '12px', 
-                  color: '#111827' 
-                }}>
-                  Vous êtes bientôt prêt
-                </h2>
-
-                {/* Description */}
-                <p style={{ 
-                  fontSize: isMobile ? '14px' : '16px', 
-                  color: '#374151', 
-                  marginBottom: isMobile ? '20px' : '25px', 
-                  lineHeight: '1.6' 
-                }}>
-                  La vérification de votre identité nous aide à empêcher quelqu'un d'autre de créer un compte en votre nom.
-                </p>
-
-                {/* Verify Button */}
-                <Button 
-                  onClick={() => {
-                    navigate('/platform/verification');
-                  }}
-                  variant="platform"
+            <Card
+              style={{
+                marginBottom: isMobile ? '20px' : '30px',
+                borderRadius: 16,
+                overflow: 'hidden',
+                border: '1px solid rgba(229, 231, 235, 1)',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 10px 30px rgba(2, 6, 23, 0.06)',
+              }}
+            >
+              <CardContent style={{ padding: isMobile ? '18px' : '24px' }}>
+                <div
                   style={{
-                    width: isMobile ? '100%' : 'auto',
-                    ['--platform-button-bg' as any]: '#10b981',
+                    display: 'flex',
+                    flexDirection: isMobile ? 'column' : 'row',
+                    alignItems: isMobile ? 'stretch' : 'center',
+                    justifyContent: 'space-between',
+                    gap: isMobile ? 16 : 24,
                   }}
                 >
-                  Vérifier votre compte
-                </Button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 12,
+                          background: 'color-mix(in srgb, #10b981 14%, transparent)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: '1px solid color-mix(in srgb, #10b981 22%, transparent)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Shield className="h-4 w-4" style={{ color: '#10b981' }} />
+                      </div>
+                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                        {verificationStepperSteps.filter((s) => s.completed).length}/{verificationStepperSteps.length} étapes complétées
+                      </div>
+                    </div>
+
+                    <h2
+                      style={{
+                        fontSize: isMobile ? '18px' : '20px',
+                        fontWeight: 800,
+                        marginBottom: 8,
+                        color: '#111827',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      Vous êtes bientôt prêt
+                    </h2>
+
+                    <p
+                      style={{
+                        fontSize: 14,
+                        color: '#4b5563',
+                        marginBottom: 14,
+                        lineHeight: '1.55',
+                      }}
+                    >
+                      La vérification de votre identité aide à empêcher quelqu’un d’autre de créer un compte en votre nom.
+                    </p>
+
+                    <Button
+                      onClick={() => {
+                        navigate('/platform/verification');
+                      }}
+                      variant="platform"
+                      style={{
+                        width: isMobile ? '100%' : 'auto',
+                        ['--platform-button-bg' as any]: '#10b981',
+                      }}
+                    >
+                      Vérifier votre compte
+                    </Button>
+                  </div>
+
+                  {/* Stepper (hide when there is only 1 enabled step) */}
+                  {verificationStepperSteps.length > 1 && (
+                    <div
+                      style={{
+                        flexShrink: 0,
+                        minWidth: isMobile ? '100%' : 320,
+                        maxWidth: isMobile ? '100%' : 360,
+                      }}
+                      aria-label="Progression de vérification du compte"
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          overflowX: 'auto',
+                          paddingBottom: 4,
+                        }}
+                      >
+                        {verificationStepperSteps.map((s, idx) => {
+                          const isCurrent = currentVerificationStepId === s.id;
+                          const state: 'complete' | 'current' | 'upcoming' = s.completed
+                            ? 'complete'
+                            : isCurrent
+                              ? 'current'
+                              : 'upcoming';
+
+                          const circleBg = state === 'complete' ? '#10b981' : '#ffffff';
+                          const circleBorder =
+                            state === 'complete'
+                              ? 'none'
+                              : state === 'current'
+                                ? '2px solid #10b981'
+                                : '2px solid #d1d5db';
+                          const circleColor =
+                            state === 'complete'
+                              ? '#ffffff'
+                              : state === 'current'
+                                ? '#10b981'
+                                : '#6b7280';
+
+                          return (
+                            <React.Fragment key={s.id}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                <div
+                                  style={{
+                                    width: 34,
+                                    height: 34,
+                                    borderRadius: 9999,
+                                    backgroundColor: circleBg,
+                                    border: circleBorder,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: circleColor,
+                                    fontWeight: 800,
+                                    boxShadow:
+                                      state === 'current'
+                                        ? '0 8px 18px rgba(16, 185, 129, 0.20)'
+                                        : 'none',
+                                  }}
+                                  aria-label={`${s.label} (${s.completed ? 'complété' : isCurrent ? 'en cours' : 'à faire'})`}
+                                >
+                                  {s.completed ? <Check className="h-4 w-4" /> : <span style={{ fontSize: 14 }}>{s.id}</span>}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: state === 'upcoming' ? '#9ca3af' : '#374151',
+                                    fontWeight: state === 'current' ? 700 : 600,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {s.label}
+                                </div>
+                              </div>
+
+                              {idx < verificationStepperSteps.length - 1 && (
+                                <div
+                                  aria-hidden="true"
+                                  style={{
+                                    height: 2,
+                                    width: 44,
+                                    backgroundColor: s.completed ? '#10b981' : '#d1d5db',
+                                    borderRadius: 9999,
+                                    flexShrink: 0,
+                                  }}
+                                />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}

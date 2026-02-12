@@ -23,7 +23,8 @@ interface PlatformLayoutProps {
 
 export function PlatformLayout({ children }: PlatformLayoutProps) {
   const MOBILE_BOTTOM_NAV_HEIGHT = 72;
-  const BOTTOM_NAV_BREAKPOINT = 1400;
+  // Bottom nav is mobile-only; tablet/desktop keep the sidebar visible.
+  const BOTTOM_NAV_BREAKPOINT = 768;
   const { currentUser } = useUser();
   const { searchTerm, setSearchTerm } = usePlatformSearch();
   const { settings, loading: settingsLoading } = useTheme();
@@ -295,7 +296,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               paddingRight: isMobile ? '12px' : '20px',
               height: isMobile ? '34px' : '40px',
               fontSize: isMobile ? '13px' : '14px',
-              borderRadius: 9999,
+              borderRadius: 14,
               border: '1px solid var(--border)',
               backgroundColor: 'var(--input-background)',
               color: 'var(--accent-foreground)',
@@ -528,7 +529,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 }}
               >
               <div style={{ 
-                padding: isMobile ? '0 20px' : '0 30px', 
+                // Give the logo some vertical breathing room in the sidebar.
+                padding: isMobile ? '12px 20px' : '18px 30px', 
                 marginBottom: 0, 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -623,7 +625,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 </div>
               </div>
               
-              <nav>
+              <nav className="platform-sidebar-nav">
                 {menuItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = location.pathname === item.path;
@@ -633,23 +635,18 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       onClick={() => handleMenuClick(item.path)}
                       className="platform-hoverable platform-sidebar-link"
                       data-active={isActive ? 'true' : 'false'}
+                      aria-current={isActive ? 'page' : undefined}
+                      type="button"
                       style={{
                         width: '100%',
                         padding: isMobile ? '12px 20px' : '16px 30px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: isMobile ? '12px' : '16px',
-                        backgroundColor: isActive
-                          ? 'color-mix(in srgb, var(--accent-foreground) 12%, transparent)'
-                          : 'transparent',
                         border: 'none',
                         cursor: 'pointer',
                         textAlign: 'left',
                         fontSize: isMobile ? '16px' : '18px',
-                        color: isActive
-                          ? 'var(--accent-foreground)'
-                          : 'color-mix(in srgb, var(--accent-foreground) 75%, transparent)',
-                        fontWeight: isActive ? '600' : '400',
                       }}
                     >
                       <Icon size={isMobile ? 20 : 24} />
@@ -674,6 +671,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 <div
                   style={{
                     display: 'flex',
+                    flexDirection: isMobile ? 'column' : 'row',
+                    alignItems: 'stretch',
                     gap: 10,
                     marginLeft: isMobile ? 20 : 20,
                     marginRight: isMobile ? 20 : 20,
@@ -683,7 +682,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     onClick={() => handleFundsAction('depot')}
                     className="platform-hoverable platform-action-btn"
                     style={{
-                      flex: 1,
+                      flex: isMobile ? 'none' : 1,
+                      width: isMobile ? '100%' : undefined,
                       height: 44,
                       padding: '0 14px',
                       display: 'flex',
@@ -708,9 +708,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     onClick={() => handleFundsAction('retrait')}
                     className="platform-hoverable platform-action-icon"
                     style={{
-                      width: 55,
+                      width: isMobile ? '100%' : 55,
                       height: 44,
-                      padding: 0,
+                      padding: isMobile ? '0 14px' : 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -728,6 +728,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     aria-label="Retrait"
                   >
                     <ArrowUp size={isMobile ? 18 : 20} />
+                    {isMobile && <span>Retirer des fonds</span>}
                   </button>
 
                   <button
@@ -737,12 +738,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     }}
                     className="platform-hoverable platform-action-icon platform-action-logout"
                     style={{
-                      width: 55,
+                      width: isMobile ? '100%' : 55,
                       height: 44,
-                      padding: 0,
+                      padding: isMobile ? '0 14px' : 0,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
+                      gap: 10,
                       backgroundColor: '#ef4444',
                       border: '1px solid #ef4444',
                       cursor: 'pointer',
@@ -753,6 +755,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     title="Déconnexion"
                   >
                     <LogOut size={isMobile ? 18 : 20} />
+                    {isMobile && <span>Se deconnecter</span>}
                   </button>
                 </div>
               </div>

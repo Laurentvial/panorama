@@ -9,6 +9,7 @@ import { Badge } from './ui/badge';
 import { Plus, Pencil, Trash2, Folder, X, Copy } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
 
@@ -20,6 +21,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
   const navigate = useNavigate();
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [isEditCategoryDialogOpen, setIsEditCategoryDialogOpen] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -36,6 +38,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
 
   async function loadData() {
     try {
+      setLoading(true);
       const [productsData, categoriesData] = await Promise.all([
         apiCall('/api/products/').catch(() => ({ products: [] })),
         apiCall('/api/categories/').catch(() => ({ categories: [] }))
@@ -48,6 +51,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
       // Set empty arrays on error
       setProducts([]);
       setCategories([]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -196,7 +201,11 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
               <CardTitle>Liste des produits</CardTitle>
             </CardHeader>
             <CardContent>
-              {products.length > 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center py-10">
+                  <LoadingIndicator />
+                </div>
+              ) : products.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -541,7 +550,11 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
               <CardTitle>Liste des catégories</CardTitle>
             </CardHeader>
             <CardContent>
-              {categories.length > 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center py-10">
+                  <LoadingIndicator />
+                </div>
+              ) : categories.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>

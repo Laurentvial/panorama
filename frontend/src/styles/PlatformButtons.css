@@ -3,7 +3,7 @@
 .platform-button-primary {
   width: fit-content !important;
   align-self: flex-start;
-  border-radius: 9999px !important;
+  border-radius: 14px !important;
   padding-left: 1.5rem !important;
   padding-right: 1.5rem !important;
   padding-top: 0.75rem !important;
@@ -28,11 +28,68 @@
 }
 
 /* Sidebar links */
+.platform-root .platform-sidebar-nav {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+@media (min-width: 768px) {
+  .platform-root .platform-sidebar-nav {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+.platform-root .platform-sidebar-link {
+  position: relative;
+  border-radius: 16px;
+  line-height: 1.1;
+  margin: 6px 0;
+}
+
+.platform-root .platform-sidebar-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent, var(--platform-button-bg, #030213)) 38%, transparent);
+  outline-offset: 3px;
+}
+
+.platform-root .platform-sidebar-link[data-active='true'] {
+  background-color: color-mix(in srgb, var(--accent-foreground) 12%, transparent) !important;
+  color: var(--accent-foreground) !important;
+  font-weight: 600;
+}
+
+.platform-root .platform-sidebar-link[data-active='true']::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 9999px;
+  background: var(--platform-button-bg, var(--accent, #030213));
+}
+
+.platform-root .platform-sidebar-link[data-active='false'] {
+  color: color-mix(in srgb, var(--accent-foreground) 78%, transparent) !important;
+  font-weight: 500;
+}
+
 .platform-root .platform-sidebar-link[data-active='false']:hover {
   background-color: color-mix(in srgb, var(--accent-foreground) 12%, transparent) !important;
+  color: var(--accent-foreground) !important;
+}
+
+.platform-root .platform-sidebar-link svg {
+  flex-shrink: 0;
 }
 
 /* Bottom action buttons */
+.platform-root .platform-action-btn,
+.platform-root .platform-action-icon,
+.platform-root .platform-action-logout {
+  border-radius: 14px !important;
+}
+
 .platform-root .platform-action-btn:hover {
   filter: brightness(0.96);
 }

@@ -2,7 +2,7 @@
   width: 18rem; /* w-64 */
   /* Use the app's "couleur principale" */
   background-color: var(--primary, #030213);
-  color: var(--accent-foreground, #030213);
+  color: var(--accent-foreground, #ffffff);
   border-right: 1px solid rgba(0, 0, 0, 0.08); /* Softer border */
   min-height: calc(100vh - 73px);
 }
@@ -20,12 +20,38 @@
   justify-content: flex-start;
   padding-left: 1rem; /* px-6 */
   padding-right: 1rem;
+  position: relative;
+  border-radius: 16px;
 }
 
 .sidebar-icon {
   width: 1.25rem; /* w-5 */
   height: 1.25rem; /* h-5 */
   margin-right: 0.5rem; /* mr-2 */
+}
+
+/* Keyboard accessibility */
+.sidebar .sidebar-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent, #ffffff) 35%, transparent);
+  outline-offset: 3px;
+}
+
+/* Active state: clearer than relying on variant styles */
+.sidebar .sidebar-button[data-active='true'] {
+  background-color: color-mix(in srgb, var(--accent, #ffffff) 22%, transparent) !important;
+  color: var(--accent-foreground, #ffffff) !important;
+  font-weight: 600;
+}
+
+.sidebar .sidebar-button[data-active='true']::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 9999px;
+  background: var(--accent, #ffffff);
 }
 
 /* Ensure sidebar buttons use primary color on hover when background is accent */
