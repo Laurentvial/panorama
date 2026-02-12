@@ -114,7 +114,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="login-page-container" style={containerStyle}>
+    <div className="login-page-container login-page-container--client" style={containerStyle}>
       <header className="login-banner">
         {settingsLoading ? (
           <div className="login-banner-placeholder" aria-hidden="true" />
