@@ -16,6 +16,7 @@ import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import { StockChart } from './StockChart';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -818,7 +819,7 @@ export function ProductDetail() {
     const product = data;
 
     // Get API base URL
-    const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiBaseUrl();
     
     // Get authentication token (same logic as apiCall)
     const path = window.location?.pathname || '';

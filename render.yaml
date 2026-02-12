@@ -1,0 +1,146 @@
+# Render Blueprint for Panorama (frontend + backend + cron + Postgres)
+#
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Notes:
+# - The backend requires Cloudinary credentials at runtime (see env vars below).
+# - The frontend reads the backend URL from Vite env vars at build time.
+
+databases:
+  - name: panorama-db
+    plan: free
+
+services:
+  # Django API
+  - type: web
+    name: panorama-backend
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput
+    startCommand: python check_startup.py && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile - --log-level info --preload
+    healthCheckPath: /health/
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: panorama-db
+          property: connectionString
+      - key: DB_CONN_MAX_AGE
+        value: "0"
+
+      # Required for media storage (backend will fail-fast if missing)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # Optional integrations
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+
+  # Vite static site
+  - type: web
+    name: panorama-frontend
+    runtime: static
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # We reference the backend hostname, and the app normalizes it to https://...
+      - key: VITE_URL
+        fromService:
+          type: web
+          name: panorama-backend
+          property: host
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: panorama-backend
+          property: host
+
+  # Scheduled price refresh (short-lived Django management command)
+  - type: cron
+    name: panorama-refresh-prices
+    runtime: python
+    region: oregon
+    rootDir: backend
+    schedule: "*/10 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: panorama-db
+          property: connectionString
+
+      # Match Django SECRET_KEY used by the web service
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: SECRET_KEY
+
+      # Reuse backend secrets (set them once on panorama-backend)
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: CLOUDINARY_API_SECRET
+
+      # Optional integrations (also reuse backend values if set)
+      - key: GEMINI_API_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: GEMINI_API_KEY
+      - key: ALPHA_VANTAGE_API_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: ALPHA_VANTAGE_API_KEY
+      - key: FINNHUB_API_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: FINNHUB_API_KEY
+      - key: NEWS_API_KEY
+        fromService:
+          type: web
+          name: panorama-backend
+          envVarKey: NEWS_API_KEY
+

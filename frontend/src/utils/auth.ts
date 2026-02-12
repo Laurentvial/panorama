@@ -1,13 +1,8 @@
 import { apiCall } from './api';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './constants';
+import { getApiBaseUrl } from './apiBaseUrl';
 
-// Get API base URL from environment or use default
-const getEnvVar = (key: string): string | undefined => {
-  // @ts-ignore - Vite environment variables
-  return import.meta.env[key];
-};
-
-const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
+const apiUrl = getApiBaseUrl();
 
 export async function signIn(username: string, password: string) {
   try {

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 export function ClientImpersonate() {
   const { id } = useParams<{ id: string }>();
@@ -39,8 +40,7 @@ export function ClientImpersonate() {
         console.log('ClientImpersonate: Already authenticated, navigating directly');
         try {
           // Trigger backend-marked login log for CRM impersonation in existing session mode.
-          // @ts-ignore - Vite environment variables
-          const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+          const apiUrl = getApiBaseUrl();
           await fetch(`${apiUrl}/api/client/current/?token=${sessionToken}&source=crm_impersonation&mode=existing_session`, {
             headers: { Authorization: `Bearer ${sessionToken}` },
           }).catch(() => null);
@@ -85,8 +85,7 @@ export function ClientImpersonate() {
 
       try {
         // Validate + preload clientData so ClientProtectedRoute is instant.
-        // @ts-ignore - Vite environment variables
-        const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+        const apiUrl = getApiBaseUrl();
         setMessage('Vérification des accès client...');
         const res = await fetch(`${apiUrl}/api/client/current/?token=${clientToken}&source=crm_impersonation&mode=new_session`, {
           headers: { Authorization: `Bearer ${clientToken}` },

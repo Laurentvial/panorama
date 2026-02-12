@@ -1,11 +1,7 @@
 import { CLIENT_ACCESS_TOKEN, ACCESS_TOKEN } from './constants';
+import { getApiBaseUrl } from './apiBaseUrl';
 
-const getEnvVar = (key: string): string | undefined => {
-  // @ts-ignore - Vite environment variables
-  return import.meta.env[key];
-};
-
-const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
+const apiUrl = getApiBaseUrl();
 
 /**
  * Get the current client ID from the token

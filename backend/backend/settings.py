@@ -77,6 +77,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware DOIT être le premier
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -192,7 +193,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
@@ -221,7 +222,17 @@ cloudinary.config(
 )
 
 # Use Cloudinary storage for ALL media files - no local storage fallback
-DEFAULT_FILE_STORAGE = 'api.storage.CloudinaryMediaStorage'
+# Django 4.2+ storage config (required for Django 5+).
+# - Media is stored in Cloudinary
+# - Static assets are served by WhiteNoise (admin UI, etc.)
+STORAGES = {
+    'default': {
+        'BACKEND': 'api.storage.CloudinaryMediaStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 # Set MEDIA_URL and MEDIA_ROOT for compatibility (even though Cloudinary handles URLs differently)
 # Cloudinary URLs are generated dynamically, but we need these for urlpatterns
 MEDIA_URL = '/media/'  # Not used by Cloudinary, but needed for compatibility

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { apiCall } from '../utils/api';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 interface UserContextType {
   currentUser: any;
@@ -146,8 +147,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         
         // Fetch client data from API
-        // @ts-ignore - Vite environment variables
-        const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+        const apiUrl = getApiBaseUrl();
         const response = await fetch(`${apiUrl}/api/client/current/?token=${token}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -245,8 +245,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const refreshToken = localStorage.getItem(REFRESH_TOKEN);
         if (refreshToken) {
           try {
-            // @ts-ignore - Vite environment variables
-            const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+            const apiUrl = getApiBaseUrl();
             const refreshResponse = await fetch(`${apiUrl}/api/token/refresh/`, {
               method: 'POST',
               headers: {

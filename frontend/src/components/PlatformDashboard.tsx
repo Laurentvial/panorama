@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { TrendingUp, TrendingDown, Check, PieChart } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 export function PlatformDashboard() {
   const { currentUser } = useUser();
@@ -92,7 +93,8 @@ export function PlatformDashboard() {
       if (error?.status === 401) {
         try {
           // Try fetching news without authentication (public endpoint)
-          const response = await fetch(`${(import.meta as any).env?.VITE_API_URL || 'http://127.0.0.1:8000'}/api/news/`, {
+          const apiUrl = getApiBaseUrl();
+          const response = await fetch(`${apiUrl}/api/news/`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',

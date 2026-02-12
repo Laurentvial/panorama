@@ -17,3 +17,4 @@ cloudinary
 requests
 alpha_vantage
 reportlab
+whitenoise

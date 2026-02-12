@@ -8,6 +8,7 @@ import { useUser } from '../contexts/UserContext';
 
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { apiCall } from '../utils/api';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 import { useIsMobile } from './ui/use-mobile';
 
@@ -236,9 +237,7 @@ export function PlatformAccountVerification() {
 
 
 
-    // @ts-ignore - Vite environment variables
-
-    const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiBaseUrl();
 
     
 

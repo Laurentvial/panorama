@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate } from "react-router-dom";
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from "../utils/constants";
 import { useState, useEffect } from "react";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
 interface ClientProtectedRouteProps {
     children?: React.ReactNode;
@@ -143,8 +144,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
             // Try to fetch client data from API
             try {
                 console.log('ClientProtectedRoute: Fetching client data from API...');
-                // @ts-ignore - Vite environment variables
-                const apiUrl = import.meta.env.VITE_URL || 'http://127.0.0.1:8000';
+                const apiUrl = getApiBaseUrl();
                 const response = await fetch(`${apiUrl}/api/client/current/?token=${token}`, {
                     headers: {
                         'Authorization': `Bearer ${token}`,

@@ -1,14 +1,7 @@
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from "./constants";
+import { getApiBaseUrl } from "./apiBaseUrl";
 
-// Use environment variable if set, otherwise use Choreo proxy path
-// For production on Choreo, this should be the Choreo proxy path
-// For direct backend access, use: https://42b73c45-e46a-4ab7-8e13-f21ad7bee0b9-dev.e1-eu-west-cdp.choreoapis.dev/panorama/backend/v1.0
-const getEnvVar = (key: string): string | undefined => {
-  // @ts-ignore - Vite environment variables
-  return import.meta.env[key];
-};
-
-const apiUrl = getEnvVar('VITE_URL') || 'http://127.0.0.1:8000';
+const apiUrl = getApiBaseUrl();
 
 function isClientAuth(token: string | null, userType: string | null): boolean {
   if (!token) return false;
