@@ -7,6 +7,7 @@ import { TrendingUp, TrendingDown, Check, PieChart, Shield } from 'lucide-react'
 import { apiCall } from '../utils/api';
 import { useIsMobile } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import '../styles/PlatformDashboardMovers.css';
 
 export function PlatformDashboard() {
   const { currentUser } = useUser();
@@ -130,6 +131,27 @@ export function PlatformDashboard() {
 
   const getAssetLogoUrl = (asset: any): string => {
     return (asset?.logoUrl || asset?.logo_url || '').toString();
+  };
+
+  const getAssetSubtitle = (asset: any): string => {
+    // Best-effort: different APIs may expose different fields.
+    return (
+      asset?.subtitle ||
+      asset?.companyName ||
+      asset?.company_name ||
+      asset?.group ||
+      asset?.groupName ||
+      asset?.issuer ||
+      asset?.type ||
+      asset?.symbol ||
+      ''
+    ).toString();
+  };
+
+  const formatAssetCurrency = (currencyRaw: any): string => {
+    const c = (currencyRaw ?? '').toString().trim().toUpperCase();
+    if (!c || c === 'EUR' || c === '€') return '€';
+    return c;
   };
 
   useEffect(() => {
@@ -473,8 +495,9 @@ export function PlatformDashboard() {
       return bChange - aChange;
     });
 
-    const gainers = sorted.filter((asset: any) => parseFinancialValue(asset.priceChangePercent) > 0).slice(0, 5);
-    const losers = sorted.filter((asset: any) => parseFinancialValue(asset.priceChangePercent) < 0).slice(-5).reverse();
+    // Limit to 3 lines per card.
+    const gainers = sorted.filter((asset: any) => parseFinancialValue(asset.priceChangePercent) > 0).slice(0, 3);
+    const losers = sorted.filter((asset: any) => parseFinancialValue(asset.priceChangePercent) < 0).slice(-3).reverse();
 
     return { gainers, losers };
   };
@@ -633,6 +656,50 @@ export function PlatformDashboard() {
     verificationStepperSteps.find((s) => !s.completed)?.id ?? null;
 
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
+
+  const MarketMoverRow = ({ asset, direction }: { asset: any; direction: 'up' | 'down' }) => {
+    const changePercent = parseFinancialValue(asset?.priceChangePercent);
+    const logoUrl = getAssetLogoUrl(asset);
+    const subtitle = getAssetSubtitle(asset);
+    const currencyLabel = formatAssetCurrency(asset?.currency);
+    const price = parseFinancialValue(asset?.lastPrice);
+
+    const pctText = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
+    const priceText = `${price.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyLabel}`;
+    const ariaLabel = `Ouvrir ${String(asset?.name || 'actif')}, ${pctText}`;
+
+    return (
+      <button
+        type="button"
+        className="platform-moversRow"
+        onClick={() => navigate(`/platform/product/${asset.id}`)}
+        aria-label={ariaLabel}
+      >
+        <div className="platform-moversLeft">
+          {logoUrl ? (
+            <img
+              className="platform-moversLogo"
+              src={logoUrl}
+              alt={asset?.name ? `Logo ${asset.name}` : 'Logo'}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          ) : null}
+          <div className="platform-moversText">
+            <div className="platform-moversName">{asset?.name}</div>
+            {subtitle ? <div className="platform-moversSub">{subtitle}</div> : null}
+          </div>
+        </div>
+
+        <div className="platform-moversRight">
+          <div className="platform-moversPrice">{priceText}</div>
+          <div className={`platform-moversPct ${direction === 'up' ? 'platform-moversPct--up' : 'platform-moversPct--down'}`}>
+            {pctText}
+          </div>
+        </div>
+      </button>
+    );
+  };
 
   return (
     <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
@@ -914,10 +981,31 @@ export function PlatformDashboard() {
             {/* News Feed */}
             <Card style={roundedCardStyle}>
               <CardHeader>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Actualités</CardTitle>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <CardTitle
+                      style={{
+                        fontSize: isMobile ? '18px' : '20px',
+                        fontWeight: 800,
+                        color: '#111827',
+                        letterSpacing: '-0.01em',
+                        margin: 0,
+                      }}
+                    >
+                      Actualités
+                    </CardTitle>
+                    <CardDescription style={{ fontSize: isMobile ? '12px' : '13px', marginTop: 2 }}>
+                      Dernières nouvelles et mises à jour du marché
+                    </CardDescription>
+                  </div>
                 </div>
-                <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Dernières nouvelles et mises à jour</CardDescription>
               </CardHeader>
               <CardContent>
                 {newsLoading ? (
@@ -930,91 +1018,173 @@ export function PlatformDashboard() {
                       <div
                         key={post.id}
                         style={{
-                          padding: isMobile ? '16px' : '20px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
+                          padding: isMobile ? '14px' : '16px',
+                          border: '1px solid rgba(229, 231, 235, 1)',
+                          borderRadius: 16,
                           backgroundColor: 'white',
+                          display: 'flex',
+                          flexDirection: isMobile ? 'column' : 'row',
+                          alignItems: 'stretch',
+                          gap: isMobile ? 12 : 16,
+                          boxShadow: '0 10px 26px rgba(2, 6, 23, 0.04)',
+                          transition: 'transform 160ms ease, box-shadow 160ms ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (isMobile) return;
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                          e.currentTarget.style.boxShadow = '0 16px 40px rgba(2, 6, 23, 0.08)';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (isMobile) return;
+                          e.currentTarget.style.transform = 'none';
+                          e.currentTarget.style.boxShadow = '0 10px 26px rgba(2, 6, 23, 0.04)';
                         }}
                       >
-                        {post.imageUrl && (
-                          <img
-                            src={post.imageUrl}
-                            alt={post.title}
+                        {post.imageUrl ? (
+                          <div
                             style={{
-                              width: '100%',
-                              maxHeight: isMobile ? '200px' : '300px',
-                              objectFit: 'cover',
-                              borderRadius: '8px',
-                              marginBottom: isMobile ? '12px' : '15px',
+                              width: isMobile ? '100%' : 140,
+                              height: isMobile ? 160 : 96,
+                              borderRadius: 14,
+                              overflow: 'hidden',
+                              background: 'rgba(2, 6, 23, 0.06)',
+                              flexShrink: 0,
                             }}
-                          />
-                        )}
-                        <h3 style={{ 
-                          fontSize: isMobile ? '18px' : '20px', 
-                          fontWeight: 'bold', 
-                          marginBottom: '10px' 
-                        }}>
-                          {post.title}
-                        </h3>
-                        <div
-                          style={{
-                            fontSize: isMobile ? '13px' : '14px',
-                            color: '#6b7280',
-                            marginBottom: isMobile ? '12px' : '15px',
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: '1.6',
-                          }}
-                        >
-                          {post.content}
-                        </div>
-                        <div style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'flex-start', 
-                          fontSize: isMobile ? '11px' : '12px', 
-                          color: '#9ca3af',
-                          flexWrap: 'wrap',
-                          gap: isMobile ? '8px' : '0',
-                        }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <span>
-                              Par {post.sourceName || getWebsiteNameFromUrl(post.articleUrl) || 'Admin'}
-                            </span>
-                            <span>
-                              {new Date(post.createdAt).toLocaleDateString('fr-FR', {
-                                day: '2-digit',
-                                month: 'long',
-                                year: 'numeric',
-                              })}
-                            </span>
+                          >
+                            <img
+                              src={post.imageUrl}
+                              alt={post.title}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                display: 'block',
+                              }}
+                              loading="lazy"
+                            />
+                          </div>
+                        ) : null}
+
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
+                              {post.category ? (
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: '#111827',
+                                    background: 'rgba(2, 6, 23, 0.06)',
+                                    border: '1px solid rgba(2, 6, 23, 0.10)',
+                                    padding: '4px 8px',
+                                    borderRadius: 9999,
+                                    lineHeight: 1,
+                                  }}
+                                >
+                                  {String(post.category).toUpperCase()}
+                                </span>
+                              ) : null}
+
+                              <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                                {new Date(post.createdAt).toLocaleDateString('fr-FR', {
+                                  day: '2-digit',
+                                  month: 'long',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                            </div>
+
+                            {post.articleUrl ? (
+                              <button
+                                type="button"
+                                className="platform-hoverable"
+                                onClick={() => window.open(post.articleUrl, '_blank', 'noopener,noreferrer')}
+                                style={{
+                                  border: 'none',
+                                  background: 'transparent',
+                                  padding: '6px 8px',
+                                  borderRadius: 12,
+                                  cursor: 'pointer',
+                                  color: '#111827',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Lire
+                              </button>
+                            ) : null}
                           </div>
 
-                          {post.articleUrl ? (
-                            <Button
-                              type="button"
-                              variant="platform"
-                              onClick={() => window.open(post.articleUrl, '_blank', 'noopener,noreferrer')}
-                              style={{ borderRadius: 12 }}
-                            >
-                              Lire plus
-                            </Button>
-                          ) : (
-                            <div />
-                          )}
+                          <h3
+                            style={{
+                              fontSize: isMobile ? '16px' : '18px',
+                              fontWeight: 800,
+                              margin: 0,
+                              color: '#111827',
+                              letterSpacing: '-0.01em',
+                            }}
+                          >
+                            {post.title}
+                          </h3>
+
+                          <div
+                            style={
+                              {
+                                fontSize: 13,
+                                color: '#6b7280',
+                                lineHeight: 1.55,
+                                whiteSpace: 'pre-wrap',
+                                display: '-webkit-box',
+                                WebkitBoxOrient: 'vertical',
+                                WebkitLineClamp: isMobile ? 3 : 2,
+                                overflow: 'hidden',
+                              } as any
+                            }
+                          >
+                            {post.content}
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 10,
+                              marginTop: 'auto',
+                            }}
+                          >
+                            <div style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              Par {post.sourceName || getWebsiteNameFromUrl(post.articleUrl) || 'Admin'}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
 
                     {newsPosts.length > visibleNewsCount && (
                       <div style={{ display: 'flex', justifyContent: 'center' }}>
-                        <Button
+                        <button
                           type="button"
-                          variant="platform"
+                          className="platform-hoverable"
                           onClick={() => setVisibleNewsCount((c) => c + 5)}
-                          style={{ borderRadius: 12 }}
+                          aria-label="Voir plus d'actualités"
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            padding: isMobile ? '8px 10px' : '10px 12px',
+                            borderRadius: 12,
+                            cursor: 'pointer',
+                            // Same style as "Tout voir" (secondary color).
+                            color: 'var(--platform-button-bg, var(--accent, var(--primary, #030213)))',
+                            fontSize: isMobile ? 13 : 14,
+                            fontWeight: 700,
+                            lineHeight: 1,
+                            whiteSpace: 'nowrap',
+                          }}
                         >
-                          Charger plus
-                        </Button>
+                          Voir plus
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1024,221 +1194,39 @@ export function PlatformDashboard() {
 
             {/* Gainers and Losers */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
-              {/* Top Gainers */}
-              <Card style={roundedCardStyle}>
-                <CardHeader>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <TrendingUp className={isMobile ? "h-4 w-4 text-green-600" : "h-5 w-5 text-green-600"} />
-                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Les plus fortes variations haussières</CardTitle>
-                  </div>
-                  <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Actifs en hausse aujourd'hui</CardDescription>
-                </CardHeader>
-                <CardContent>
+              {/* Plus fortes hausses */}
+              <Card className="platform-moversCard">
+                <div className="platform-moversHeader">
+                  <TrendingUp className={`platform-moversIcon platform-moversIcon--up ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
+                  <div className="platform-moversTitle">PLUS FORTES HAUSSES</div>
+                </div>
+                <CardContent className="platform-moversContent">
                   {gainers.length === 0 ? (
-                    <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280' }}>Aucune donnée disponible</p>
+                    <div className="platform-moversEmpty">Aucune donnée disponible</div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '10px' : '12px' }}>
-                      {gainers.map((asset: any) => {
-                        const changePercent = parseFinancialValue(asset.priceChangePercent);
-                        const logoUrl = getAssetLogoUrl(asset);
-                        return (
-                          <div
-                            key={asset.id}
-                            style={{
-                              padding: isMobile ? '10px' : '12px',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: '6px',
-                              backgroundColor: 'white',
-                            }}
-                          >
-                            <div style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center', 
-                              flexWrap: 'wrap',
-                              gap: '8px',
-                            }}>
-                              <div style={{ display: 'flex', gap: logoUrl ? '10px' : '0', alignItems: 'center', minWidth: 0 }}>
-                                {logoUrl ? (
-                                  <img
-                                    src={logoUrl}
-                                    alt={asset.name ? `Logo ${asset.name}` : 'Logo'}
-                                    style={{
-                                      width: isMobile ? '30px' : '34px',
-                                      height: isMobile ? '30px' : '34px',
-                                      borderRadius: '10px',
-                                      objectFit: 'contain',
-                                      display: 'block',
-                                      flexShrink: 0,
-                                      backgroundColor: '#ffffff',
-                                      border: '1px solid #e5e7eb',
-                                    }}
-                                    loading="lazy"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : null}
-                                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                                  <div 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigate(`/platform/product/${asset.id}`);
-                                    }}
-                                    style={{ 
-                                      fontWeight: '600', 
-                                      fontSize: isMobile ? '13px' : '14px',
-                                      wordBreak: 'break-word',
-                                      cursor: 'pointer',
-                                      color: '#2563eb',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.textDecoration = 'underline';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.textDecoration = 'none';
-                                    }}
-                                  >{asset.name}</div>
-                                  <div style={{ 
-                                    fontSize: isMobile ? '11px' : '12px', 
-                                    color: '#6b7280',
-                                    marginTop: 2,
-                                    wordBreak: 'break-word',
-                                  }}>
-                                    {asset.type}
-                                  </div>
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                                <div style={{ 
-                                  fontSize: isMobile ? '13px' : '14px', 
-                                  fontWeight: '600', 
-                                  color: '#10b981',
-                                  lineHeight: 1.1,
-                                }}>
-                                  +{changePercent.toFixed(2)}%
-                                </div>
-                                <div style={{ 
-                                  fontSize: isMobile ? '11px' : '12px', 
-                                  fontWeight: '500', 
-                                  color: '#111827',
-                                  lineHeight: 1.1,
-                                }}>
-                                  {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="platform-moversList">
+                      {gainers.map((asset: any) => (
+                        <MarketMoverRow key={asset.id} asset={asset} direction="up" />
+                      ))}
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Top Losers */}
-              <Card style={roundedCardStyle}>
-                <CardHeader>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <TrendingDown className={isMobile ? "h-4 w-4 text-red-600" : "h-5 w-5 text-red-600"} />
-                    <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Les plus fortes variations baissières</CardTitle>
-                  </div>
-                  <CardDescription style={{ fontSize: isMobile ? '13px' : '14px' }}>Actifs en baisse aujourd'hui</CardDescription>
-                </CardHeader>
-                <CardContent>
+              {/* Plus fortes baisses */}
+              <Card className="platform-moversCard">
+                <div className="platform-moversHeader">
+                  <TrendingDown className={`platform-moversIcon platform-moversIcon--down ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
+                  <div className="platform-moversTitle">PLUS FORTES BAISSES</div>
+                </div>
+                <CardContent className="platform-moversContent">
                   {losers.length === 0 ? (
-                    <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280' }}>Aucune donnée disponible</p>
+                    <div className="platform-moversEmpty">Aucune donnée disponible</div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '10px' : '12px' }}>
-                      {losers.map((asset: any) => {
-                        const changePercent = parseFinancialValue(asset.priceChangePercent);
-                        const logoUrl = getAssetLogoUrl(asset);
-                        return (
-                          <div
-                            key={asset.id}
-                            style={{
-                              padding: isMobile ? '10px' : '12px',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: '6px',
-                              backgroundColor: 'white',
-                            }}
-                          >
-                            <div style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center', 
-                              flexWrap: 'wrap',
-                              gap: '8px',
-                            }}>
-                              <div style={{ display: 'flex', gap: logoUrl ? '10px' : '0', alignItems: 'center', minWidth: 0 }}>
-                                {logoUrl ? (
-                                  <img
-                                    src={logoUrl}
-                                    alt={asset.name ? `Logo ${asset.name}` : 'Logo'}
-                                    style={{
-                                      width: isMobile ? '30px' : '34px',
-                                      height: isMobile ? '30px' : '34px',
-                                      borderRadius: '10px',
-                                      objectFit: 'contain',
-                                      display: 'block',
-                                      flexShrink: 0,
-                                      backgroundColor: '#ffffff',
-                                      border: '1px solid #e5e7eb',
-                                    }}
-                                    loading="lazy"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : null}
-                                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                                  <div 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigate(`/platform/product/${asset.id}`);
-                                    }}
-                                    style={{ 
-                                      fontWeight: '600', 
-                                      fontSize: isMobile ? '13px' : '14px',
-                                      wordBreak: 'break-word',
-                                      cursor: 'pointer',
-                                      color: '#2563eb',
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.textDecoration = 'underline';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.textDecoration = 'none';
-                                    }}
-                                  >{asset.name}</div>
-                                  <div style={{ 
-                                    fontSize: isMobile ? '11px' : '12px', 
-                                    color: '#6b7280',
-                                    marginTop: 2,
-                                    wordBreak: 'break-word',
-                                  }}>
-                                    {asset.type}
-                                  </div>
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                                <div style={{ 
-                                  fontSize: isMobile ? '13px' : '14px', 
-                                  fontWeight: '600', 
-                                  color: '#ef4444',
-                                  lineHeight: 1.1,
-                                }}>
-                                  {changePercent.toFixed(2)}%
-                                </div>
-                                <div style={{ 
-                                  fontSize: isMobile ? '11px' : '12px', 
-                                  fontWeight: '500', 
-                                  color: '#111827',
-                                  lineHeight: 1.1,
-                                }}>
-                                  {parseFinancialValue(asset.lastPrice).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset.currency || '€'}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="platform-moversList">
+                      {losers.map((asset: any) => (
+                        <MarketMoverRow key={asset.id} asset={asset} direction="down" />
+                      ))}
                     </div>
                   )}
                 </CardContent>

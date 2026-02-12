@@ -1,0 +1,11 @@
+.platform-root .cookie-banner-actions [data-slot='button'] {
+  width: auto;
+}
+
+@media (max-width: 767px) {
+  /* On mobile, force full-width even for variant="platform" (which sets width: fit-content !important). */
+  .platform-root .cookie-banner-actions [data-slot='button'] {
+    width: 100% !important;
+  }
+}
+

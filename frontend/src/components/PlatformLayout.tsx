@@ -530,7 +530,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               >
               <div style={{ 
                 // Give the logo some vertical breathing room in the sidebar.
-                padding: isMobile ? '12px 20px' : '18px 30px', 
+                padding: isMobile ? '18px 20px' : '26px 30px', 
                 marginBottom: 0, 
                 display: 'flex', 
                 alignItems: 'center', 

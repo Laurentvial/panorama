@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { useIsMobile } from './ui/use-mobile';
 import { Cookie } from 'lucide-react';
+import '../styles/CookieBanner.css';
 
 interface CookieBannerProps {
   bottomOffset?: number;
@@ -132,6 +133,7 @@ export function CookieBanner({ bottomOffset = 0 }: CookieBannerProps) {
           </div>
 
           <div
+            className="cookie-banner-actions"
             style={{
               display: 'flex',
               flexDirection: isMobile ? 'column' : 'row',
