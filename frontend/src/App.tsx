@@ -12,6 +12,9 @@ import './styles/Card.css';
 
 // Lazy load all route components for better performance
 const Login = lazy(() => import('./components/LoginPage'));
+const ClientForgotPasswordPage = lazy(() => import('./components/ClientForgotPasswordPage'));
+const ClientResetPasswordPage = lazy(() => import('./components/ClientResetPasswordPage'));
+const ClientOtpLoginPage = lazy(() => import('./components/ClientOtpLoginPage'));
 const AdminLoginPage = lazy(() => import('./components/AdminLoginPage'));
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const NotFound = lazy(() => import('./components/NotFound'));
@@ -106,6 +109,21 @@ function App() {
                     <Route path="/login" element={
                         <Suspense fallback={<LoadingFallback />}>
                             <Login />
+                        </Suspense>
+                    } />
+                    <Route path="/forgot-password" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <ClientForgotPasswordPage />
+                        </Suspense>
+                    } />
+                    <Route path="/reset-password" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <ClientResetPasswordPage />
+                        </Suspense>
+                    } />
+                    <Route path="/login/otp" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <ClientOtpLoginPage />
                         </Suspense>
                     } />
                     <Route path="/admin/login" element={

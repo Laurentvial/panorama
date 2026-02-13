@@ -30,6 +30,7 @@ export function LoginPage() {
     '#030213';
   const containerStyle: React.CSSProperties = {
     ['--login-button-bg' as any]: buttonBg,
+    ['--platform-button-bg' as any]: buttonBg,
   };
   if (!settingsLoading && settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
@@ -194,9 +195,43 @@ export function LoginPage() {
                 </div>
               )}
 
-              <Button type="submit" className="login-button" disabled={loading}>
-                {loading ? 'Connexion...' : 'Se connecter'}
-              </Button>
+              <div
+                style={{
+                  marginTop: '-0.35rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Link
+                  to="/forgot-password"
+                  style={{
+                    color: 'rgba(2, 6, 23, 0.95)',
+                    fontSize: '0.95rem',
+                    textDecoration: 'underline',
+                    textUnderlineOffset: '3px',
+                  }}
+                >
+                  Mot de passe oublié ?
+                </Link>
+
+                <Button type="submit" className="login-button" disabled={loading}>
+                  {loading ? 'Connexion...' : 'Se connecter'}
+                </Button>
+              </div>
+
+              <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem', justifyItems: 'center' }}>
+                <div style={{ color: 'rgba(2, 6, 23, 0.55)', fontSize: '0.95rem' }}>ou</div>
+                <Button
+                  type="button"
+                  className="login-button"
+                  onClick={() => navigate('/login/otp')}
+                >
+                  Connexion sans mot de passe
+                </Button>
+              </div>
             </form>
           </CardContent>
         </Card>

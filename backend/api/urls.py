@@ -28,6 +28,12 @@ urlpatterns = [
     path('user/profile/', api_views.update_own_profile, name='update-own-profile'),
     # Client authentication endpoints
     path('client/login/', api_views.client_login, name='client-login'),
+    # Client password reset (client platform only)
+    path('client/password-reset/request/', api_views.client_password_reset_request, name='client-password-reset-request'),
+    path('client/password-reset/confirm/', api_views.client_password_reset_confirm, name='client-password-reset-confirm'),
+    # Client OTP login (email one-time code)
+    path('client/login/otp/request/', api_views.client_login_otp_request, name='client-login-otp-request'),
+    path('client/login/otp/verify/', api_views.client_login_otp_verify, name='client-login-otp-verify'),
     path('client/current/', api_views.get_current_client, name='get-current-client'),
     path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
     # Client chat (client <-> manager)

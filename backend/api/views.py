@@ -47,14 +47,29 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 import uuid
 import json
 import os
+import hmac
 import re
 import calendar
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
 from django.utils import timezone
+from django.core import signing
 from django.db.models import Q
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
+from urllib.parse import quote
+import secrets
+import logging
+
+from .emailing import (
+    send_resend_email,
+    render_email,
+    get_frontend_public_url,
+    get_platform_name,
+    get_platform_logo_url,
+    otp_hmac,
+)
+from .sms import send_infobip_sms, get_infobip_sms_reports
 from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import (
     create_positions_for_investment,
@@ -1601,6 +1616,408 @@ def client_login(request):
         'token': f'client_{client.id}',  # Simple token for now
         'userType': 'client'
     }, status=status.HTTP_200_OK)
+
+
+def _client_can_access_platform(client: Client) -> bool:
+    return bool(client and client.platform_access and client.active)
+
+
+def _get_client_by_email(email: str) -> Client | None:
+    try:
+        return Client.objects.get(email__iexact=(email or "").strip().lower())
+    except Client.DoesNotExist:
+        return None
+    except Client.MultipleObjectsReturned:
+        # Should not happen due to unique constraint, but handle gracefully.
+        return Client.objects.filter(email__iexact=(email or "").strip().lower()).first()
+
+
+def _phone_digits(value: str) -> str:
+    return re.sub(r'\D', '', str(value or ''))
+
+
+def _phones_match(a: str, b: str) -> bool:
+    da = _phone_digits(a)
+    db = _phone_digits(b)
+    if not da or not db:
+        return False
+    # Compare on last 9 digits to tolerate country codes (+33, 0033, etc.)
+    if len(da) >= 9 and len(db) >= 9:
+        return da[-9:] == db[-9:]
+    return da == db
+
+
+def _get_client_by_phone(phone: str) -> Client | None:
+    digits = _phone_digits(phone)
+    if len(digits) < 6:
+        return None
+    # Narrow candidates by last 6 digits (cheap prefilter), then verify.
+    tail = digits[-6:]
+    candidates = Client.objects.filter(
+        Q(mobile__icontains=tail) | Q(phone__icontains=tail)
+    )[:50]
+    for c in candidates:
+        if _phones_match(getattr(c, 'mobile', ''), phone) or _phones_match(getattr(c, 'phone', ''), phone):
+            return c
+    # Fallback: if numbers are stored with spaces/punctuation, icontains prefilter may miss.
+    # Scan a limited subset and compare digits-only values.
+    try:
+        qs = Client.objects.exclude(Q(mobile='') & Q(phone='')).only('id', 'mobile', 'phone', 'email', 'active', 'platform_access')[:5000]
+        for c in qs:
+            if _phones_match(getattr(c, 'mobile', ''), phone) or _phones_match(getattr(c, 'phone', ''), phone):
+                return c
+    except Exception:
+        pass
+    return None
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_password_reset_request(request):
+    """
+    Client platform only: request a password reset email.
+    Returns a generic success response to avoid account enumeration.
+    """
+    email = (request.data.get('email') or '').strip().lower()
+    if not email:
+        return Response({'error': 'Email requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    client = _get_client_by_email(email)
+    if client and _client_can_access_platform(client):
+        expires_seconds = 60 * 60  # 60 minutes
+        expires_minutes = expires_seconds // 60
+        token = signing.dumps(
+            {'purpose': 'client_password_reset', 'client_id': client.id},
+            salt='client-password-reset',
+        )
+        reset_url = f"{get_frontend_public_url()}/reset-password?token={quote(token)}"
+
+        platform_name = get_platform_name()
+        logo_url = get_platform_logo_url()
+        subject = f"{platform_name} - Réinitialisation du mot de passe"
+        html = render_email(
+            'emails/client_password_reset.html',
+            {
+                'platform_name': platform_name,
+                'logo_url': logo_url,
+                'reset_url': reset_url,
+                'expires_minutes': expires_minutes,
+            },
+        )
+        try:
+            send_resend_email(to_email=client.email, subject=subject, html=html)
+        except Exception as e:
+            # In production, keep response generic; in DEBUG return the underlying error.
+            if getattr(settings, 'DEBUG', False):
+                return Response({'error': f'Email send failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Always respond with the same message.
+    return Response(
+        {'message': "Si un compte existe pour cet email, un lien de reinitialisation a ete envoye."},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_password_reset_confirm(request):
+    """Client platform only: confirm password reset using a signed token."""
+    token = (request.data.get('token') or '').strip()
+    new_password = (request.data.get('newPassword') or request.data.get('password') or '').strip()
+    if not token or not new_password:
+        return Response({'error': 'token et newPassword requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(new_password) < 6:
+        return Response({'error': 'Le mot de passe doit contenir au moins 6 caracteres'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        payload = signing.loads(token, salt='client-password-reset', max_age=60 * 60)
+    except Exception:
+        return Response({'error': 'Lien invalide ou expire'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if payload.get('purpose') != 'client_password_reset':
+        return Response({'error': 'Lien invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    client_id = payload.get('client_id')
+    if not client_id:
+        return Response({'error': 'Lien invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    client = get_object_or_404(Client, id=client_id)
+    if not _client_can_access_platform(client):
+        return Response({'error': 'Acces refuse'}, status=status.HTTP_403_FORBIDDEN)
+
+    client.password = new_password
+    client.save(update_fields=['password', 'updated_at'])
+    try:
+        create_platform_log(client.id, 'password_reset', {}, request)
+    except Exception:
+        pass
+
+    return Response({'message': 'Mot de passe mis a jour avec succes'}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_login_otp_request(request):
+    """
+    Client platform only: request a one-time code by email.
+    Response includes a signed challenge token used to verify the OTP.
+    """
+    channel = (request.data.get('channel') or 'email').strip().lower()
+    if channel not in ('email', 'sms'):
+        return Response({'error': 'channel invalide (email|sms)'}, status=status.HTTP_400_BAD_REQUEST)
+
+    email = (request.data.get('email') or '').strip().lower()
+    phone = (request.data.get('phone') or '').strip()
+
+    # Identify client depending on channel.
+    if channel == 'email':
+        if not email:
+            return Response({'error': 'Email requis'}, status=status.HTTP_400_BAD_REQUEST)
+        client = _get_client_by_email(email)
+    else:
+        # SMS: accept a phone number directly (recommended), or fallback to email.
+        if phone:
+            client = _get_client_by_phone(phone)
+        elif email:
+            client = _get_client_by_email(email)
+        else:
+            return Response({'error': 'phone ou email requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    logger = logging.getLogger(__name__)
+    logger.info("OTP request received", extra={"channel": channel, "has_email": bool(email), "has_phone": bool(phone)})
+
+    if not (client and _client_can_access_platform(client)):
+        # Keep response generic (avoid account enumeration).
+        # We also return `sent: false` so the frontend only shows the OTP input when we actually sent one.
+        return Response(
+            {
+                'sent': False,
+                'channel': channel,
+                'message': "Si un compte existe pour ces informations, vous recevrez un code de connexion.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # 6-digit code.
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    otp_id = secrets.token_hex(16)
+    expires_seconds = 10 * 60  # 10 minutes
+    expires_minutes = expires_seconds // 60
+
+    expected_hmac = otp_hmac(otp_id=otp_id, code=otp_code, secret=settings.SECRET_KEY)
+    challenge_token = signing.dumps(
+        {
+            'purpose': 'client_login_otp',
+            'client_id': client.id,
+            'otp_id': otp_id,
+            'code_hmac': expected_hmac,
+        },
+        salt='client-login-otp',
+    )
+
+    try:
+        if channel == 'email':
+            platform_name = get_platform_name()
+            logo_url = get_platform_logo_url()
+            subject = f"{platform_name} - Code de connexion"
+            html = render_email(
+                'emails/client_login_otp.html',
+                {
+                    'platform_name': platform_name,
+                    'logo_url': logo_url,
+                    'otp_code': otp_code,
+                    'expires_minutes': expires_minutes,
+                },
+            )
+            send_resend_email(to_email=client.email, subject=subject, html=html)
+        else:
+            # Prefer mobile over phone for SMS.
+            stored_mobile = (getattr(client, 'mobile', '') or '').strip()
+            stored_phone = (getattr(client, 'phone', '') or '').strip()
+
+            send_to = ""
+            # If the user provided an international number (+.. / 00..), prefer sending to that exact value
+            # (avoids local-format numbers like 06.. or 054.. causing "prefix missing" in Infobip),
+            # but only if it matches the stored phone.
+            phone_input = (phone or '').strip()
+            is_international_input = phone_input.startswith('+') or phone_input.startswith('00')
+            if is_international_input and (_phones_match(stored_mobile, phone_input) or _phones_match(stored_phone, phone_input)):
+                send_to = phone_input
+            elif phone_input and _phones_match(stored_mobile, phone_input):
+                send_to = stored_mobile
+            elif phone_input and _phones_match(stored_phone, phone_input):
+                send_to = stored_phone
+            else:
+                send_to = stored_mobile or stored_phone
+
+            if not send_to:
+                # No SMS possible for this account.
+                return Response(
+                    {'sent': False, 'channel': channel, 'error': 'Aucun numéro de téléphone configuré pour ce compte.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Keep SMS content ASCII-friendly.
+            sms_text = f"Votre code de connexion: {otp_code}. Expire dans {expires_minutes} min."
+            infobip_resp = send_infobip_sms(to_phone=send_to, text=sms_text)
+            infobip_msg = None
+            try:
+                messages = infobip_resp.get('messages') if isinstance(infobip_resp, dict) else None
+                if isinstance(messages, list) and messages:
+                    infobip_msg = messages[0]
+            except Exception:
+                infobip_msg = None
+
+            infobip_message_id = (infobip_msg or {}).get('messageId') if isinstance(infobip_msg, dict) else None
+            infobip_status = (infobip_msg or {}).get('status') if isinstance(infobip_msg, dict) else None
+            # Attach to request for later response/logging.
+            request._infobip_message_id = infobip_message_id
+            request._infobip_status = infobip_status
+
+            # Some accounts/operators accept the API call (200) but reject the network immediately after.
+            # Query delivery reports to detect REJECTED/FAILED and return a clear error to the UI.
+            if infobip_message_id:
+                try:
+                    reports = get_infobip_sms_reports(message_id=str(infobip_message_id))
+                    result0 = None
+                    if isinstance(reports, dict):
+                        results = reports.get('results')
+                        if isinstance(results, list) and results:
+                            result0 = results[0]
+                    if isinstance(result0, dict):
+                        report_status = result0.get('status') or {}
+                        report_error = result0.get('error') or {}
+                        request._infobip_report_status = report_status
+                        request._infobip_report_error = report_error
+
+                        group_name = str(report_status.get('groupName') or '').upper()
+                        name = str(report_status.get('name') or '').upper()
+                        # If Infobip already knows it's rejected, fail fast.
+                        if group_name in ('REJECTED', 'FAILED') or name.startswith('REJECTED'):
+                            desc = str(report_status.get('description') or '').strip()
+                            err_desc = str(report_error.get('description') or '').strip()
+                            reason = err_desc or desc or 'SMS rejeté par le réseau.'
+                            raise RuntimeError(reason)
+                except Exception as report_err:
+                    # Re-raise as send failure so the response is not misleading.
+                    raise RuntimeError(f"SMS non delivrable: {str(report_err)}")
+    except Exception as e:
+        # Log details server-side for troubleshooting.
+        logger.exception("OTP send failed", extra={"channel": channel, "client_id": getattr(client, "id", None)})
+        try:
+            create_platform_log(
+                client.id,
+                'otp_send_failed',
+                {'channel': channel, 'error': str(e)[:300]},
+                request
+            )
+        except Exception:
+            pass
+        extra: dict[str, object] = {}
+        if channel == 'sms':
+            mid = getattr(request, '_infobip_message_id', None)
+            if mid:
+                extra['infobipMessageId'] = mid
+            rep_st = getattr(request, '_infobip_report_status', None)
+            rep_err = getattr(request, '_infobip_report_error', None)
+            if rep_st:
+                extra['infobipReportStatus'] = rep_st
+            if rep_err:
+                extra['infobipReportError'] = rep_err
+
+        if getattr(settings, 'DEBUG', False):
+            return Response({'error': f'OTP send failed: {str(e)}', **extra}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Production: avoid leaking details.
+        return Response({'error': 'Erreur lors de l\'envoi du code', **extra}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        details = {'channel': channel}
+        if channel == 'sms':
+            mid = getattr(request, '_infobip_message_id', None)
+            if mid:
+                details['infobip_message_id'] = mid
+            st = getattr(request, '_infobip_status', None)
+            if st:
+                details['infobip_status'] = st
+        create_platform_log(client.id, 'otp_login_requested', details, request)
+    except Exception:
+        pass
+
+    resp_payload = {
+        'sent': True,
+        'message': 'Code envoye',
+        'challengeToken': challenge_token,
+        'expiresInSeconds': expires_seconds,
+        'channel': channel,
+    }
+    if channel == 'sms':
+        mid = getattr(request, '_infobip_message_id', None)
+        st = getattr(request, '_infobip_status', None)
+        if mid:
+            resp_payload['infobipMessageId'] = mid
+        if st:
+            resp_payload['infobipStatus'] = st
+        rep_st = getattr(request, '_infobip_report_status', None)
+        rep_err = getattr(request, '_infobip_report_error', None)
+        if rep_st:
+            resp_payload['infobipReportStatus'] = rep_st
+        if rep_err:
+            resp_payload['infobipReportError'] = rep_err
+    return Response(resp_payload, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_login_otp_verify(request):
+    """Client platform only: verify OTP and issue a client_ token."""
+    challenge_token = (request.data.get('challengeToken') or '').strip()
+    otp_code = (request.data.get('code') or '').strip()
+    if not challenge_token or not otp_code:
+        return Response({'error': 'challengeToken et code requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        payload = signing.loads(challenge_token, salt='client-login-otp', max_age=10 * 60)
+    except Exception:
+        return Response({'error': 'Code invalide ou expire'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if payload.get('purpose') != 'client_login_otp':
+        return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    client_id = payload.get('client_id')
+    otp_id = payload.get('otp_id')
+    expected_hmac = payload.get('code_hmac')
+    if not client_id or not otp_id or not expected_hmac:
+        return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    actual_hmac = otp_hmac(otp_id=str(otp_id), code=otp_code, secret=settings.SECRET_KEY)
+    if not hmac.compare_digest(str(expected_hmac), str(actual_hmac)):
+        return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    client = get_object_or_404(Client, id=client_id)
+    if not _client_can_access_platform(client):
+        return Response({'error': 'Acces refuse'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        create_platform_log(client.id, 'login', {'method': 'otp'}, request)
+    except Exception:
+        pass
+
+    changed_fields = _recompute_client_account_verified(client)
+    if changed_fields:
+        client.save(update_fields=changed_fields)
+
+    serializer = ClientSerializer(client, context={'request': request})
+    return Response(
+        {
+            'client': serializer.data,
+            'token': f'client_{client.id}',
+            'userType': 'client',
+        },
+        status=status.HTTP_200_OK,
+    )
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

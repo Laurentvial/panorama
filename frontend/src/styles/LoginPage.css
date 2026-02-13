@@ -10,6 +10,42 @@
   align-items: stretch;
 }
 
+.login-page-container--client {
+  /* Slightly larger typography for client login readability */
+  font-size: 1.05rem;
+}
+
+.login-page-container--client [data-slot="card-description"] {
+  font-size: 1.05rem;
+}
+
+.login-page-container--client .login-floating-input {
+  font-size: 1.05rem;
+}
+
+.login-page-container--client .login-floating-label {
+  font-size: 1.05rem;
+}
+
+.login-page-container--client .login-error,
+.login-page-container--client .login-field-error {
+  font-size: 0.95rem;
+}
+
+.login-page-container--client button[data-slot="button"] {
+  /* Keep platform styles but bump text size */
+  font-size: 1.05rem;
+}
+
+.login-page-container--client .login-button {
+  /* Bigger primary actions on client login */
+  height: 3.25rem !important; /* ~52px */
+  padding-top: 0.9rem !important;
+  padding-bottom: 0.9rem !important;
+  padding-left: 1.75rem !important;
+  padding-right: 1.75rem !important;
+}
+
 .login-page-container::before {
   content: '';
   position: absolute;

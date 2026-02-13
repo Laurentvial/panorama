@@ -109,6 +109,68 @@ export async function clientSignIn(email: string, password: string) {
   }
 }
 
+export async function clientRequestPasswordReset(email: string) {
+  const trimmedEmail = email.trim().toLowerCase();
+  const response = await fetch(`${apiUrl}/api/client/password-reset/request/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: trimmedEmail }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Erreur serveur' }));
+    throw new Error(errorData.error || errorData.detail || 'Erreur lors de la demande');
+  }
+  return response.json();
+}
+
+export async function clientConfirmPasswordReset(token: string, newPassword: string) {
+  const response = await fetch(`${apiUrl}/api/client/password-reset/confirm/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Erreur serveur' }));
+    throw new Error(errorData.error || errorData.detail || 'Erreur lors de la reinitialisation');
+  }
+  return response.json();
+}
+
+export async function clientRequestOtp(params: { channel: 'email' | 'sms'; email?: string; phone?: string }) {
+  const channel = params.channel;
+  const trimmedEmail = (params.email || '').trim().toLowerCase();
+  const trimmedPhone = (params.phone || '').trim();
+  const response = await fetch(`${apiUrl}/api/client/login/otp/request/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel, email: trimmedEmail || undefined, phone: trimmedPhone || undefined }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Erreur serveur' }));
+    throw new Error(errorData.error || errorData.detail || 'Erreur lors de l\'envoi du code');
+  }
+  return response.json() as Promise<{ sent?: boolean; challengeToken?: string; expiresInSeconds?: number; message?: string; channel?: string; error?: string }>;
+}
+
+export async function clientVerifyOtp(challengeToken: string, code: string) {
+  const response = await fetch(`${apiUrl}/api/client/login/otp/verify/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeToken, code }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Code invalide' }));
+    throw new Error(errorData.error || errorData.detail || 'Code invalide');
+  }
+  const data = await response.json();
+  if (data.token) {
+    localStorage.setItem(CLIENT_ACCESS_TOKEN, data.token);
+    localStorage.setItem('clientData', JSON.stringify(data.client));
+    localStorage.setItem('userType', 'client');
+  }
+  return data;
+}
+
 export async function signOut() {
   localStorage.removeItem(ACCESS_TOKEN);
   localStorage.removeItem(REFRESH_TOKEN);

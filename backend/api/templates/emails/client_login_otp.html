@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Code de connexion</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f7fb;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+            <tr>
+              <td style="padding:20px 24px;border-bottom:1px solid #e5e7eb;">
+                {% if logo_url %}
+                  <img src="{{ logo_url }}" alt="Logo" style="height:28px;max-width:180px;object-fit:contain;display:block;" />
+                {% else %}
+                  <div style="font-size:16px;font-weight:bold;">{{ platform_name }}</div>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px;">
+                <h1 style="margin:0 0 10px 0;font-size:20px;">Votre code de connexion</h1>
+                <p style="margin:0 0 14px 0;line-height:1.5;">
+                  Utilisez ce code à usage unique pour vous connecter à votre espace client.
+                </p>
+
+                <div style="margin:22px 0 18px 0;">
+                  <div style="display:inline-block;background:#111827;color:#ffffff;padding:14px 18px;border-radius:12px;font-size:24px;letter-spacing:6px;font-weight:bold;">
+                    {{ otp_code }}
+                  </div>
+                </div>
+
+                <p style="margin:0 0 10px 0;line-height:1.5;color:#374151;font-size:13px;">
+                  Ce code expire dans environ {{ expires_minutes }} minutes.
+                </p>
+                <p style="margin:0;line-height:1.5;color:#6b7280;font-size:13px;">
+                  Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:14px 24px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:12px;">
+                Email automatique - ne pas répondre.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+
