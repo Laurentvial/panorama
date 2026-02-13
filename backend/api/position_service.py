@@ -2352,6 +2352,15 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
         .filter(product_id=product.id)
     )
 
+    if not allocations:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Skipping trade generation: Smart Portfolio has no asset allocations "
+            f"(txn_id={txn.id}, product_id={product.id}, trigger={trigger})"
+        )
+        return []
+
     return _create_trade_positions_compounding(
         txn=txn,
         product=product,
@@ -2735,6 +2744,20 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
     if product is not None and _is_smart_portfolio(product):
         return create_trade_positions_for_smart_portfolio_investment(txn, trigger=trigger)
 
+    # If the product is not linked to any external assets, we skip generating trade/positions.
+    # This prevents creating positions with asset_id=None for products like livrets/epargne.
+    if product is not None:
+        allocations_list = list(
+            ProductAssetAllocation.objects.select_related('asset')
+            .filter(product_id=product.id)
+        )
+        if not allocations_list:
+            logger.info(
+                "Skipping position generation: product has no external asset allocations "
+                f"(txn_id={txn.id}, product_id={product.id}, trigger={trigger})"
+            )
+            return []
+
     # Non-smart internal products: trade-like positions without asset linkage, with profitability_period + compounding.
     start_dt = txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
@@ -2745,21 +2768,11 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
     if not trading_days:
         return []
 
-    # Check if product has asset allocations (even if not a Smart Portfolio)
-    allocations = None
-    if product is not None:
-        allocations_list = list(
-            ProductAssetAllocation.objects.select_related('asset')
-            .filter(product_id=product.id)
-        )
-        if allocations_list:
-            allocations = allocations_list
-
     return _create_trade_positions_compounding(
         txn=txn,
         product=product,
         ctx=ctx,
-        allocations=allocations,
+        allocations=allocations_list if product is not None else None,
         trigger=trigger,
     )
 

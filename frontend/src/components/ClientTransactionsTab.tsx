@@ -354,7 +354,22 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                       String(transferFrom).trim() !== '';
         
         // Only show modal for actual investments or withdrawals (not balance-to-balance or balance-to-trading)
-        shouldShowModal = isInvestment || isWithdrawal;
+        const productHasAllocations = (productId: any) => {
+          if (!productId) return false;
+          const p = products.find((x: any) => String(x?.id) === String(productId));
+          const allocations = (p as any)?.assetAllocations || (p as any)?.asset_allocations || [];
+          return Array.isArray(allocations) && allocations.length > 0;
+        };
+
+        // Only show the modal when the product actually has external asset allocations configured.
+        // Otherwise, validating the transfer should not trigger position generation.
+        if (isInvestment) {
+          shouldShowModal = productHasAllocations(transferTo);
+        } else if (isWithdrawal) {
+          shouldShowModal = productHasAllocations(transferFrom);
+        } else {
+          shouldShowModal = false;
+        }
       }
       
       // Use temporary status "en_cours" ONLY if we're actually going to show the modal
@@ -406,7 +421,19 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                                     String(responseTransferFrom) !== 'trading';
         
         // Only show modal if response confirms it's an investment or withdrawal
-        if (responseIsInvestment || responseIsWithdrawal) {
+        // AND the involved product has asset allocations.
+        const productHasAllocations = (productId: any) => {
+          if (!productId) return false;
+          const p = products.find((x: any) => String(x?.id) === String(productId));
+          const allocations = (p as any)?.assetAllocations || (p as any)?.asset_allocations || [];
+          return Array.isArray(allocations) && allocations.length > 0;
+        };
+
+        const responseEligibleForModal =
+          (responseIsInvestment && productHasAllocations(responseTransferTo)) ||
+          (responseIsWithdrawal && productHasAllocations(responseTransferFrom));
+
+        if (responseEligibleForModal) {
           // Set the transaction for position generation
           setTransactionForPositionGeneration(response);
           setIsWithdrawalForPositionGeneration(responseIsWithdrawal);

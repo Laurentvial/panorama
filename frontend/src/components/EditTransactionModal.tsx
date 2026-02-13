@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { X, Trash2 } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
 import { PositionGenerationModal } from './PositionGenerationModal';
@@ -36,6 +36,30 @@ export function EditTransactionModal({
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
   const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
+
+  const bustTransactionsCache = (cid: string) => {
+    // apiCall caches GET requests; after a successful edit we must bust list caches
+    // so the table refresh doesn't overwrite local updates with stale cached rows.
+    if (cid) {
+      clearApiCache(`/api/clients/${cid}/transactions/`);
+      clearApiCache(`/api/clients/${cid}/transactions/?`);
+    }
+    clearApiCache('/api/transactions/');
+    clearApiCache('/api/transactions/?');
+  };
+
+  const productHasAllocations = async (productId: any): Promise<boolean> => {
+    if (!productId) return false;
+    try {
+      const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
+      const p = res?.product || res || null;
+      const allocations = p?.assetAllocations || p?.asset_allocations || [];
+      return Array.isArray(allocations) && allocations.length > 0;
+    } catch {
+      // If we can't fetch the product, default to not showing the generation modal.
+      return false;
+    }
+  };
 
   // Initialize form when transaction changes
   useEffect(() => {
@@ -148,19 +172,27 @@ export function EditTransactionModal({
       });
       
       if (isInvestment) {
-        // Show position generation modal for investments
-        console.log('EditTransactionModal - Showing position generation modal for investment');
-        setIsWithdrawalTransaction(false);
-        setPendingStatusUpdate(transactionForm.status);
-        setShowPositionModal(true);
-        return;
+        // Only show the position generation modal if the destination product actually
+        // has external asset allocations configured.
+        const hasAllocations = await productHasAllocations(finalProductId);
+        if (hasAllocations) {
+          console.log('EditTransactionModal - Showing position generation modal for investment');
+          setIsWithdrawalTransaction(false);
+          setPendingStatusUpdate(transactionForm.status);
+          setShowPositionModal(true);
+          return;
+        }
       } else if (isWithdrawal) {
-        // Show modal for withdrawals too, but with different content
-        console.log('EditTransactionModal - Showing position generation modal for withdrawal');
-        setIsWithdrawalTransaction(true);
-        setPendingStatusUpdate(transactionForm.status);
-        setShowPositionModal(true);
-        return;
+        // Only show the modal for withdrawals when the source product has asset allocations.
+        const relevantProductId = transferFrom && transferFrom !== 'balance' ? transferFrom : null;
+        const hasAllocations = await productHasAllocations(relevantProductId);
+        if (hasAllocations) {
+          console.log('EditTransactionModal - Showing position generation modal for withdrawal');
+          setIsWithdrawalTransaction(true);
+          setPendingStatusUpdate(transactionForm.status);
+          setShowPositionModal(true);
+          return;
+        }
       }
     }
     
@@ -193,6 +225,7 @@ export function EditTransactionModal({
           skip_position_generation: wasAlreadyTermine // Skip if already "valide" (no regeneration needed)
         })
       });
+      bustTransactionsCache(clientId);
       
       if (isWithdrawal) {
         toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
@@ -224,6 +257,7 @@ export function EditTransactionModal({
             skip_position_generation: !isWithdrawalTransaction // For withdrawals, allow signal to recalculate; for investments, skip since modal already generated
           })
         });
+        bustTransactionsCache(clientId);
         
         // Show toast for both investments and withdrawals
         if (isWithdrawalTransaction) {
