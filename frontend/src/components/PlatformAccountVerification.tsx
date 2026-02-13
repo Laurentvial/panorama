@@ -183,7 +183,36 @@ export function PlatformAccountVerification() {
 
   const [selfiePhoto, setSelfiePhoto] = useState<File | null>(null);
   
-  const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
+  const [verificationConfig, setVerificationConfig] = useState<
+    Record<string, { enabled?: boolean; questions?: Record<string, boolean> }>
+  >({});
+  const [verificationConfigLoaded, setVerificationConfigLoaded] = useState(false);
+
+  const kycDocumentsConfig = useMemo(() => {
+    const defaultDocs = {
+      identityDocument: true,
+      identityDocumentVerso: true,
+      proofOfAddress: true,
+      selfiePhoto: true,
+    };
+
+    const step8 = verificationConfig?.step_8;
+    const questions = step8 && typeof step8 === 'object' ? step8.questions : undefined;
+    return {
+      ...defaultDocs,
+      ...(questions && typeof questions === 'object' ? questions : {}),
+    };
+  }, [verificationConfig]);
+
+  const isKycDocumentRequested = (documentKey: keyof typeof kycDocumentsConfig): boolean => {
+    return kycDocumentsConfig[documentKey] !== false;
+  };
+
+  const isMissingRequestedKycDocs =
+    (isKycDocumentRequested('identityDocument') && !identityDocument) ||
+    (isKycDocumentRequested('identityDocumentVerso') && !identityDocumentVerso) ||
+    (isKycDocumentRequested('proofOfAddress') && !proofOfAddress) ||
+    (isKycDocumentRequested('selfiePhoto') && !selfiePhoto);
 
 
 
@@ -465,17 +494,20 @@ export function PlatformAccountVerification() {
   // Load verification config
   useEffect(() => {
     if (!currentUser?.id) return;
+    setVerificationConfigLoaded(false);
     const loadVerificationConfig = async () => {
       try {
         // Add cache-busting timestamp to ensure fresh data
         const config = await apiCall(`/api/clients/${currentUser.id}/verification-config/?_t=${Date.now()}`).catch(() => ({ stepsConfig: {} }));
         const stepsConfig = (config as any)?.stepsConfig || {};
         setVerificationConfig(stepsConfig);
+        setVerificationConfigLoaded(true);
         console.log('Loaded verification config for verification page:', stepsConfig, 'Step 3 enabled?', stepsConfig?.step_3?.enabled !== false);
         console.log('Step 3 config object:', stepsConfig?.step_3);
       } catch (error) {
         console.error('Error loading verification config:', error);
         setVerificationConfig({});
+        setVerificationConfigLoaded(true);
       }
     };
     loadVerificationConfig();
@@ -616,6 +648,60 @@ export function PlatformAccountVerification() {
     if (!isConfigStepEnabled(8)) return false;
     return isConfigStepCompleted(8);
   }, [currentUser, verificationConfig]);
+
+  const getNextIncompleteStep2SubStep = (): number => {
+    // Step 2 substeps map to Config steps 3-7
+    const map: Record<number, number> = { 3: 1, 4: 2, 5: 3, 6: 4, 7: 5 };
+    for (const configStep of [3, 4, 5, 6, 7]) {
+      if (!isConfigStepEnabled(configStep)) continue;
+      if (!isConfigStepCompleted(configStep)) return map[configStep];
+    }
+    // Fallback: first substep (even if already complete)
+    return 1;
+  };
+
+  const getNextIncompleteStep1SubStep = (): number => {
+    // Step 1 UI includes Config steps 1 (identity) and 2 (address, optional)
+    if (!isConfigStepCompleted(1)) return 1;
+    if (isConfigStepEnabled(2) && !isConfigStepCompleted(2)) return 2;
+    return 1;
+  };
+
+  // Auto-open next incomplete enabled step (skip manual selection screen)
+  useEffect(() => {
+    if (step !== null) return;
+    if (!currentUser?.id) return;
+    if (!verificationConfigLoaded) return;
+
+    if (isStepEnabled(1) && !isStep1Completed) {
+      setStep(1);
+      setSubStep(getNextIncompleteStep1SubStep());
+      return;
+    }
+
+    if (isStepEnabled(2) && !isStep2Completed) {
+      setStep(2);
+      setSubStep(getNextIncompleteStep2SubStep());
+      return;
+    }
+
+    if (isStepEnabled(3) && !isStep3Completed) {
+      setStep(3);
+      setSubStep(1);
+      return;
+    }
+
+    // Nothing left to do (or everything disabled) -> return to platform
+    navigate('/platform');
+  }, [
+    step,
+    currentUser?.id,
+    verificationConfigLoaded,
+    verificationConfig,
+    isStep1Completed,
+    isStep2Completed,
+    isStep3Completed,
+  ]);
 
   const progress = useMemo(() => {
     if (!step) return { percent: 0, label: 'Sélection' };
@@ -812,7 +898,7 @@ export function PlatformAccountVerification() {
 
 
 
-    if (!identityDocument) {
+    if (isKycDocumentRequested('identityDocument') && !identityDocument) {
 
       toast.error('Veuillez télécharger votre pièce d\'identité (recto).');
 
@@ -820,7 +906,7 @@ export function PlatformAccountVerification() {
 
     }
 
-    if (!identityDocumentVerso) {
+    if (isKycDocumentRequested('identityDocumentVerso') && !identityDocumentVerso) {
 
       toast.error('Veuillez télécharger votre pièce d\'identité (verso).');
 
@@ -828,7 +914,7 @@ export function PlatformAccountVerification() {
 
     }
 
-    if (!proofOfAddress) {
+    if (isKycDocumentRequested('proofOfAddress') && !proofOfAddress) {
 
       toast.error('Veuillez télécharger votre justificatif de domicile.');
 
@@ -836,7 +922,7 @@ export function PlatformAccountVerification() {
 
     }
 
-    if (!selfiePhoto) {
+    if (isKycDocumentRequested('selfiePhoto') && !selfiePhoto) {
 
       toast.error('Veuillez télécharger votre selfie.');
 
@@ -850,23 +936,14 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity(
+      const files: Record<string, File> = {};
+      if (isKycDocumentRequested('identityDocument') && identityDocument) files.identityDocument = identityDocument;
+      if (isKycDocumentRequested('identityDocumentVerso') && identityDocumentVerso) files.identityDocumentVerso = identityDocumentVerso;
+      if (isKycDocumentRequested('proofOfAddress') && proofOfAddress) files.proofOfAddress = proofOfAddress;
+      if (isKycDocumentRequested('selfiePhoto') && selfiePhoto) files.selfiePhoto = selfiePhoto;
 
-        { kycStatus: 'submitted' },
-
-        {
-
-          identityDocument,
-
-          identityDocumentVerso,
-
-          proofOfAddress,
-
-          selfiePhoto,
-
-        }
-
-      );
+      const hasFiles = Object.keys(files).length > 0;
+      await patchClientIdentity({ kycStatus: 'submitted' }, hasFiles ? files : undefined);
 
 
 
@@ -1145,15 +1222,28 @@ export function PlatformAccountVerification() {
       // From step selection, go back to platform
       navigate('/platform');
     } else if (step === 3) {
-      // From KYC, go back to step selection
-      setStep(null);
+      // From KYC, go back to previous incomplete step (no selection screen)
+      if (isStepEnabled(2) && !isStep2Completed) {
+        setStep(2);
+        setSubStep(getNextIncompleteStep2SubStep());
+      } else if (isStepEnabled(1) && !isStep1Completed) {
+        setStep(1);
+        setSubStep(getNextIncompleteStep1SubStep());
+      } else {
+        navigate('/platform');
+      }
     } else if (step === 2) {
       // Within step 2, navigate through substeps backwards
       if (subStep > 1) {
         setSubStep(subStep - 1);
       } else {
-        // From step 2 substep 1, go to step selection
-        setStep(null);
+        // From step 2 substep 1, go back to step 1 if needed, otherwise platform
+        if (isStepEnabled(1) && !isStep1Completed) {
+          setStep(1);
+          setSubStep(getNextIncompleteStep1SubStep());
+        } else {
+          navigate('/platform');
+        }
       }
     } else if (step === 1) {
       // Within step 1, navigate through substeps backwards
@@ -1165,8 +1255,8 @@ export function PlatformAccountVerification() {
           setSubStep(subStep - 1);
         }
       } else {
-        // From step 1 substep 1, go to step selection
-        setStep(null);
+        // From step 1 substep 1, go back to platform (no selection screen)
+        navigate('/platform');
       }
     } else {
       navigate('/platform');
@@ -1180,6 +1270,30 @@ export function PlatformAccountVerification() {
     setStep(stepNumber);
     setSubStep(1);
   };
+
+  // We auto-route to the next incomplete step in an effect. While `step` is null,
+  // render a lightweight placeholder so the manual selection screen never appears.
+  if (step === null) {
+    return (
+      <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 980, margin: '0 auto' }}>
+        <Card style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#ffffff' }}>
+          <CardHeader style={{ paddingBottom: 8 }}>
+            <div className="platform-page-title">Vérification du compte</div>
+          </CardHeader>
+          <CardContent style={{ paddingTop: 10 }}>
+            <div className="py-10 flex flex-col items-center justify-center text-center">
+              <div className="text-slate-700" style={{ fontWeight: 600, fontSize: 16, marginBottom: 6 }}>
+                Ouverture de votre prochaine étape...
+              </div>
+              <div className="text-slate-500" style={{ fontSize: 13 }}>
+                {verificationConfigLoaded ? 'Redirection en cours' : 'Chargement de la configuration'}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
 
@@ -1490,7 +1604,6 @@ export function PlatformAccountVerification() {
             <form onSubmit={handleIdentitySubmit} className="space-y-6">
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
                 <div className="space-y-2">
 
                   <Label htmlFor="firstName">Prénom</Label>
@@ -2585,7 +2698,9 @@ export function PlatformAccountVerification() {
 
               <div style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
 
-                Veuillez télécharger les documents suivants pour compléter votre vérification KYC.
+                {Object.values(kycDocumentsConfig).some((v) => v !== false)
+                  ? 'Veuillez télécharger les documents suivants pour compléter votre vérification KYC.'
+                  : "Aucun document n'est requis pour le moment. Vous pouvez terminer la vérification KYC."}
 
               </div>
 
@@ -2593,9 +2708,10 @@ export function PlatformAccountVerification() {
 
               <div className="space-y-4">
 
+                {(isKycDocumentRequested('identityDocument') || isKycDocumentRequested('identityDocumentVerso')) && (
                 <div className="space-y-2">
 
-                  <Label>Pièce d'identité *</Label>
+                  <Label>Pièce d'identité</Label>
 
                   <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>
 
@@ -2605,6 +2721,7 @@ export function PlatformAccountVerification() {
 
                   <div className="space-y-3">
 
+                    {isKycDocumentRequested('identityDocument') && (
                     <div>
 
                       <Label htmlFor="identityDocument" style={{ fontSize: 13, marginBottom: 6, display: 'block' }}>Recto *</Label>
@@ -2627,7 +2744,7 @@ export function PlatformAccountVerification() {
 
                           }}
 
-                          required
+                          required={isKycDocumentRequested('identityDocument')}
 
                           style={{
 
@@ -2680,7 +2797,9 @@ export function PlatformAccountVerification() {
                       </div>
 
                     </div>
+                    )}
 
+                    {isKycDocumentRequested('identityDocumentVerso') && (
                     <div>
 
                       <Label htmlFor="identityDocumentVerso" style={{ fontSize: 13, marginBottom: 6, display: 'block' }}>Verso *</Label>
@@ -2703,7 +2822,7 @@ export function PlatformAccountVerification() {
 
                           }}
 
-                          required
+                          required={isKycDocumentRequested('identityDocumentVerso')}
 
                           style={{
 
@@ -2756,13 +2875,16 @@ export function PlatformAccountVerification() {
                       </div>
 
                     </div>
+                    )}
 
                   </div>
 
                 </div>
+                )}
 
 
 
+                {isKycDocumentRequested('proofOfAddress') && (
                 <div className="space-y-2">
 
                   <Label htmlFor="proofOfAddress">Justificatif de domicile *</Label>
@@ -2791,7 +2913,7 @@ export function PlatformAccountVerification() {
 
                       }}
 
-                      required
+                      required={isKycDocumentRequested('proofOfAddress')}
 
                       style={{
 
@@ -2854,9 +2976,11 @@ export function PlatformAccountVerification() {
                   )}
 
                 </div>
+                )}
 
 
 
+                {isKycDocumentRequested('selfiePhoto') && (
                 <div className="space-y-2">
 
                   <Label htmlFor="selfiePhoto">Selfie avec pièce d'identité *</Label>
@@ -2885,7 +3009,7 @@ export function PlatformAccountVerification() {
 
                       }}
 
-                      required
+                      required={isKycDocumentRequested('selfiePhoto')}
 
                       style={{
 
@@ -2938,6 +3062,7 @@ export function PlatformAccountVerification() {
                   </div>
 
                 </div>
+                )}
 
               </div>
 
@@ -2945,7 +3070,7 @@ export function PlatformAccountVerification() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting || !identityDocument || !identityDocumentVerso || !proofOfAddress || !selfiePhoto} variant="platform">
+                <Button type="submit" disabled={submitting || isMissingRequestedKycDocs} variant="platform">
 
                   {submitting ? 'Envoi en cours...' : 'Terminer la vérification'}
 

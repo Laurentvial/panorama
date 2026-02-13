@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
-import { Switch } from './ui/switch';
 import { Button } from './ui/button';
 import { CheckCircle, XCircle, Clock, FileText, Image as ImageIcon, Save, Power, PowerOff } from 'lucide-react';
 import { apiCall } from '../utils/api';
@@ -59,6 +58,20 @@ const KYC_STATUS_LABELS: Record<string, { label: string; icon: React.ReactNode; 
   rejected: { label: 'Rejeté', icon: <XCircle className="w-4 h-4" />, color: 'bg-red-100 text-red-800' },
 };
 
+const DEFAULT_KYC_DOCUMENTS: Record<string, boolean> = {
+  identityDocument: true,
+  identityDocumentVerso: true,
+  proofOfAddress: true,
+  selfiePhoto: true,
+};
+
+const KYC_DOCUMENT_LABELS: Record<string, string> = {
+  identityDocument: "Pièce d'identité (recto)",
+  identityDocumentVerso: "Pièce d'identité (verso)",
+  proofOfAddress: 'Justificatif de domicile',
+  selfiePhoto: "Selfie avec pièce d'identité",
+};
+
 const STEP_LABELS: Record<string, string> = {
   step_1: 'Étape 1 : Identité',
   step_2: 'Étape 2 : Adresse',
@@ -109,6 +122,15 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
           console.log(`Step ${i} (${stepKey}): not found in config, defaulting to enabled: true`);
         }
       }
+      const step8 = steps.step_8 && typeof steps.step_8 === 'object' ? steps.step_8 : { enabled: true };
+      const existingQuestions = step8.questions && typeof step8.questions === 'object' ? step8.questions : {};
+      steps.step_8 = {
+        ...step8,
+        questions: {
+          ...DEFAULT_KYC_DOCUMENTS,
+          ...existingQuestions,
+        },
+      };
       setStepsConfig(steps);
       setOriginalConfig(JSON.stringify(steps)); // Sauvegarder l'état original pour comparer
       setHasUnsavedChanges(false);
@@ -119,6 +141,10 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
       for (let i = 1; i <= 8; i++) {
         steps[`step_${i}`] = { enabled: true };
       }
+      steps.step_8 = {
+        ...steps.step_8,
+        questions: { ...DEFAULT_KYC_DOCUMENTS },
+      };
       setStepsConfig(steps);
       setOriginalConfig(JSON.stringify(steps));
       setHasUnsavedChanges(false);
@@ -221,6 +247,58 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
     return stepsConfig[stepKey]?.enabled !== false; // Par défaut true si non défini
   };
 
+  const isKycDocumentRequested = (documentKey: string): boolean => {
+    const value = stepsConfig.step_8?.questions?.[documentKey];
+    return value !== false;
+  };
+
+  const toggleKycDocument = async (documentKey: string) => {
+    if (!actualClientId) return;
+
+    const previousConfig = { ...stepsConfig };
+    const step8 = stepsConfig.step_8 || { enabled: true };
+    const currentQuestions =
+      step8.questions && typeof step8.questions === 'object'
+        ? { ...DEFAULT_KYC_DOCUMENTS, ...step8.questions }
+        : { ...DEFAULT_KYC_DOCUMENTS };
+    const newValue = !isKycDocumentRequested(documentKey);
+
+    const updatedConfig = {
+      ...stepsConfig,
+      step_8: {
+        ...step8,
+        questions: {
+          ...currentQuestions,
+          [documentKey]: newValue,
+        },
+      },
+    };
+
+    setStepsConfig(updatedConfig);
+
+    try {
+      await apiCall(`/api/clients/${actualClientId}/verification-config/`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          stepsConfig: updatedConfig,
+        }),
+      });
+
+      setOriginalConfig(JSON.stringify(updatedConfig));
+      setHasUnsavedChanges(false);
+      toast.success(
+        newValue
+          ? `${KYC_DOCUMENT_LABELS[documentKey]} demandé`
+          : `${KYC_DOCUMENT_LABELS[documentKey]} non demandé`,
+        { duration: 1500 }
+      );
+    } catch (error: any) {
+      console.error('Error saving KYC documents config:', error);
+      toast.error('Erreur lors de la sauvegarde');
+      setStepsConfig(previousConfig);
+    }
+  };
+
   const renderStepToggleButton = (stepNumber: number) => {
     const stepKey = `step_${stepNumber}`;
     const enabled = isStepEnabled(stepNumber);
@@ -238,6 +316,36 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
         className={!enabled ? "hover:bg-green-700 hover:text-white hover:border-green-700" : ""}
       >
         {enabled ? (
+          <>
+            <PowerOff className="w-4 h-4 mr-2" />
+            Désactiver
+          </>
+        ) : (
+          <>
+            <Power className="w-4 h-4 mr-2" />
+            Activer
+          </>
+        )}
+      </Button>
+    );
+  };
+
+  const renderKycDocumentToggleButton = (documentKey: string) => {
+    const requested = isKycDocumentRequested(documentKey);
+    return (
+      <Button
+        size="sm"
+        variant={requested ? "destructive" : "outline"}
+        onClick={() => toggleKycDocument(documentKey)}
+        style={!requested ? {
+          backgroundColor: '#16a34a',
+          color: '#ffffff',
+          borderColor: '#16a34a',
+          opacity: 1
+        } : {}}
+        className={!requested ? "hover:bg-green-700 hover:text-white hover:border-green-700" : ""}
+      >
+        {requested ? (
           <>
             <PowerOff className="w-4 h-4 mr-2" />
             Désactiver
@@ -576,11 +684,40 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </div>
         </CardHeader>
-        {isStepEnabled(8) && (
-          <CardContent className="space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide border-b pb-2">Documents KYC</h3>
-              <div className="grid grid-cols-2 gap-4">
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide border-b pb-2">Documents demandés</h3>
+            <div className="text-sm text-slate-600">
+              Activez ou désactivez les documents que le client devra fournir pendant la vérification KYC.
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {Object.entries(KYC_DOCUMENT_LABELS).map(([documentKey, documentLabel]) => {
+                const requested = isKycDocumentRequested(documentKey);
+                return (
+                  <div key={documentKey} className="flex items-center justify-between rounded-md border border-slate-200 p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-700">{documentLabel}</span>
+                      <Badge className={requested ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}>
+                        {requested ? 'Demandé' : 'Non demandé'}
+                      </Badge>
+                    </div>
+                    {renderKycDocumentToggleButton(documentKey)}
+                  </div>
+                );
+              })}
+            </div>
+            {!isStepEnabled(8) && (
+              <div className="text-sm text-slate-500">
+                Étape 8 désactivée : ces documents ne seront pas demandés côté client, mais vous pouvez préparer la configuration ici.
+              </div>
+            )}
+          </div>
+
+          {isStepEnabled(8) && (
+            <>
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide border-b pb-2">Documents KYC</h3>
+                <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-slate-600">Pièce d'identité (recto)</Label>
                   {client.identityDocument ? (
@@ -668,8 +805,9 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                 </div>
               </div>
             </div>
-          </CardContent>
-        )}
+            </>
+          )}
+        </CardContent>
       </Card>
     </div>
   );
