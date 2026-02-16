@@ -435,6 +435,7 @@ export function ProductDetail() {
     const sim = simulateProfitability(product, basePrice, {
       rateMode: simulatorRateMode,
       customRatePct: simulatorCustomRate,
+      interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     return sim.totalProfit;
   };
@@ -468,6 +469,11 @@ export function ProductDetail() {
     return Boolean(v);
   };
 
+  const isCompoundingInterestPeriod = (period: any): boolean => {
+    const p = String(period || '').trim().toLowerCase();
+    return p.includes('fin') && (p.includes('contrat') || p.includes('matur'));
+  };
+
   const getRateBoundsPct = (product: any): { min: number; max: number; avg: number } => {
     const min = parseFinancialValue(product?.profitability);
     const maxRaw = parseFinancialValue(product?.variableProfitability);
@@ -480,10 +486,11 @@ export function ProductDetail() {
   const simulateProfitability = (
     product: any,
     principal: number,
-    opts: { rateMode: 'min' | 'avg' | 'max' | 'custom'; customRatePct: string }
+    opts: { rateMode: 'min' | 'avg' | 'max' | 'custom'; customRatePct: string; interestPeriod?: string }
   ): {
     durationMonths: number;
     periodMonths: number;
+    compound: boolean;
     pickedRatePct: number;
     rows: Array<{
       index: number;
@@ -499,6 +506,10 @@ export function ProductDetail() {
   } => {
     const durationMonths = parseDurationMonths(product?.duration);
     const periodMonths = profitabilityPeriodMonths(product?.profitabilityPeriod, durationMonths);
+    const selectedInterestPeriod =
+      String(opts.interestPeriod || '').trim() ||
+      String(product?.interestPeriod || product?.interest_period || '').split(',')[0].trim();
+    const compound = isCompoundingInterestPeriod(selectedInterestPeriod);
 
     const bounds = getRateBoundsPct(product);
     let pickedRatePct = bounds.avg;
@@ -512,7 +523,7 @@ export function ProductDetail() {
     const rows: Array<{ index: number; months: number; base: number; ratePct: number; profit: number; end: number }> = [];
     const safePrincipal = Number.isFinite(principal) ? Math.max(0, principal) : 0;
     if (!product || safePrincipal <= 0 || durationMonths <= 0 || pickedRatePct <= 0) {
-      return { durationMonths, periodMonths, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
+      return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
     }
 
     let remaining = durationMonths;
@@ -524,10 +535,10 @@ export function ProductDetail() {
       const step = Math.min(periodMonths, remaining);
       const proration = periodMonths > 0 ? step / periodMonths : 1;
       const effectiveRatePct = pickedRatePct * proration;
-      const base = safePrincipal;
+      const base = compound ? capital : safePrincipal;
       const profit = base * (effectiveRatePct / 100);
       totalProfit += profit;
-      const end = safePrincipal + totalProfit;
+      const end = compound ? capital + profit : safePrincipal + totalProfit;
       rows.push({
         index: idx,
         months: step,
@@ -541,13 +552,13 @@ export function ProductDetail() {
       idx += 1;
     }
 
-    const endCapital = safePrincipal + totalProfit;
+    const endCapital = capital;
     const annualizedPct =
       durationMonths > 0 && endCapital > 0
         ? (Math.pow(endCapital / safePrincipal, 12 / durationMonths) - 1) * 100
         : null;
 
-    return { durationMonths, periodMonths, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
+    return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
   };
 
   // Initialize signature canvas
@@ -709,7 +720,11 @@ export function ProductDetail() {
     setIsSubscribing(true);
     try {
       // Calculate gains using the same simulator logic as the product page
-      const sim = simulateProfitability(productData, amount, { rateMode: 'avg', customRatePct: '' });
+      const sim = simulateProfitability(productData, amount, {
+        rateMode: 'avg',
+        customRatePct: '',
+        interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || productData.interest_period || '',
+      });
       const gains = sim.totalProfit;
       const total = sim.endCapital;
       
@@ -917,7 +932,11 @@ export function ProductDetail() {
     const contractEndDateStr = formatDateToFrench(contractEndDate.toISOString().split('T')[0]);
 
     // Calculate interest (use the same logic as the profitability simulator)
-    const sim = simulateProfitability(productData, amount, { rateMode: 'avg', customRatePct: '' });
+    const sim = simulateProfitability(productData, amount, {
+      rateMode: 'avg',
+      customRatePct: '',
+      interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || productData.interest_period || '',
+    });
     const profitabilityRate = sim.pickedRatePct;
     const interestAmount = sim.totalProfit;
 
@@ -994,6 +1013,7 @@ export function ProductDetail() {
     const sim = simulateProfitability(product, basePriceNum, {
       rateMode: simulatorRateMode,
       customRatePct: simulatorCustomRate,
+      interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     const calculatedGains = sim.totalProfit;
     const total = sim.endCapital;
@@ -1259,8 +1279,16 @@ export function ProductDetail() {
                         style={{ backgroundColor: simulatorRateMode === 'custom' ? 'white' : '#f9fafb' }}
                       />
                       <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
-                        {product?.profitabilityPeriod ? `par ${product.profitabilityPeriod}` : 'par période'}
-                        {sim.compound ? ' • capitalisation' : ''}
+                        {sim.compound
+                          ? 'par mois + Cumul des intérêts'
+                          : (() => {
+                              const p = String(product?.profitabilityPeriod || '').trim().toLowerCase();
+                              if (p.includes('mens')) return 'par mois';
+                              if (p.includes('trim')) return 'par trimestre';
+                              if (p.includes('sem')) return 'par semestre';
+                              if (p.includes('ann') || p === 'an') return 'par an';
+                              return product?.profitabilityPeriod ? `par ${product.profitabilityPeriod}` : 'par période';
+                            })()}
                       </div>
                     </div>
                   </div>

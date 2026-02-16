@@ -56,6 +56,9 @@ export function EditTransactionModal({
     description: '',
     status: 'en_attente_paiement',
     datetime: '',
+    from_field: 'balance',
+    to_field: 'balance',
+    productId: '',
     interestPeriod: '',
   });
   const [showPositionModal, setShowPositionModal] = useState(false);
@@ -63,6 +66,7 @@ export function EditTransactionModal({
   const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
   const [transferProduct, setTransferProduct] = useState<any>(null);
   const [loadingTransferProduct, setLoadingTransferProduct] = useState(false);
+  const [products, setProducts] = useState<any[]>([]);
 
   const bustTransactionsCache = (cid: string) => {
     // apiCall caches GET requests; after a successful edit we must bust list caches
@@ -105,6 +109,15 @@ export function EditTransactionModal({
         description: transaction.description || '',
         status: transaction.status || 'en_cours',
         datetime: datetimeLocal,
+        from_field: transaction.transfer_from || transaction.from_field || transaction.from || 'balance',
+        to_field: transaction.transfer_to || transaction.to_field || transaction.to || 'balance',
+        productId:
+          transaction.productId ||
+          transaction.product_id ||
+          transaction.product?.id ||
+          transaction.transfer_to ||
+          transaction.transfer_from ||
+          '',
         interestPeriod:
           transaction.subscription_interest_period ||
           transaction.subscription_details?.interestPeriod ||
@@ -113,6 +126,27 @@ export function EditTransactionModal({
       });
     }
   }, [isOpen, transaction]);
+
+  // Load products for transfer selectors (same source as creation flow).
+  useEffect(() => {
+    let cancelled = false;
+    const loadProducts = async () => {
+      if (!isOpen) return;
+      try {
+        const productsData = await apiCall('/api/products/').catch(() => ({ products: [] }));
+        if (!cancelled) {
+          setProducts(productsData.products || productsData || []);
+        }
+      } catch (error) {
+        console.error('Error loading products for edit modal:', error);
+        if (!cancelled) setProducts([]);
+      }
+    };
+    loadProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Load related transfer product to expose interest period choices in edit mode.
   useEffect(() => {
@@ -124,8 +158,8 @@ export function EditTransactionModal({
         return;
       }
 
-      const transferTo = transaction.transfer_to || transaction.to_field || transaction.to || transaction.transferTo || null;
-      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const transferTo = transactionForm.to_field || transaction.transfer_to || transaction.to_field || transaction.to || transaction.transferTo || null;
+      const transferFrom = transactionForm.from_field || transaction.transfer_from || transaction.from_field || null;
       const productIdFromSubscription =
         transaction.subscription_details?.productId ||
         transaction.subscriptionDetails?.productId ||
@@ -133,6 +167,7 @@ export function EditTransactionModal({
         transaction.product?.id ||
         null;
       const productId =
+        (transactionForm.productId ? transactionForm.productId : null) ||
         (transferTo && transferTo !== 'balance' ? transferTo : null) ||
         (transferFrom && transferFrom !== 'balance' ? transferFrom : null) ||
         productIdFromSubscription;
@@ -164,7 +199,7 @@ export function EditTransactionModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, transaction, transactionForm.type]);
+  }, [isOpen, transaction, transactionForm.type, transactionForm.to_field, transactionForm.from_field, transactionForm.productId]);
 
   // Ensure selected interest period remains valid for the selected product.
   useEffect(() => {
@@ -207,6 +242,9 @@ export function EditTransactionModal({
       description: '',
       status: 'en_attente_paiement',
       datetime: '',
+      from_field: 'balance',
+      to_field: 'balance',
+      productId: '',
       interestPeriod: '',
     });
     setTransferProduct(null);
@@ -218,6 +256,9 @@ export function EditTransactionModal({
       ? { ...transaction.subscription_details }
       : {};
     const productId =
+      transactionForm.productId ||
+      (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : undefined) ||
+      (transactionForm.from_field && transactionForm.from_field !== 'balance' ? transactionForm.from_field : undefined) ||
       existing.productId ||
       transaction?.product?.id ||
       transaction?.product_id ||
@@ -243,6 +284,8 @@ export function EditTransactionModal({
       skip_position_generation: skipPositionGeneration,
       ...(transactionForm.type === 'transfert'
         ? {
+            from_field: transactionForm.from_field || 'balance',
+            to_field: transactionForm.to_field || 'balance',
             subscription_details: buildSubscriptionDetailsForUpdate(),
             interestPeriod: transactionForm.interestPeriod || '',
           }
@@ -280,10 +323,7 @@ export function EditTransactionModal({
     
     if (isTransfert && isChangingToTermine) {
       // Check multiple possible field names for transfer_to (as returned by serializer)
-      const transferTo = transaction.transfer_to || 
-                         transaction.to_field || 
-                         transaction.to || 
-                         transaction.transferTo ||
+      const transferTo = transactionForm.to_field ||
                          transaction.productId ||
                          transaction.product_id ||
                          null;
@@ -301,7 +341,7 @@ export function EditTransactionModal({
                            String(finalProductId) !== 'trading';
       
       // Check if this is a withdrawal (transfert from product to balance)
-      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const transferFrom = transactionForm.from_field || null;
       const isWithdrawal = (transferTo === 'balance' || transferFrom !== null) && !isInvestment;
       
       // Debug logging
@@ -356,12 +396,8 @@ export function EditTransactionModal({
     try {
       // Check if this is a withdrawal (transfert from product to balance)
       // Only recalculate if status is changing TO "valide" (not if it was already "valide")
-      const transferTo = transaction.transfer_to || 
-                         transaction.to_field || 
-                         transaction.to || 
-                         transaction.transferTo ||
-                         null;
-      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const transferTo = transactionForm.to_field || null;
+      const transferFrom = transactionForm.from_field || null;
       const wasAlreadyTermine = transaction.status === 'valide';
       const isWithdrawal = transactionForm.type === 'transfert' && 
                           transactionForm.status === 'valide' &&
@@ -393,7 +429,7 @@ export function EditTransactionModal({
       try {
         const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
           method: 'PUT',
-          body: JSON.stringify(buildUpdatePayload(pendingStatusUpdate, !isWithdrawalTransaction))
+          body: JSON.stringify(buildUpdatePayload(pendingStatusUpdate, true))  // Always skip: positions already handled
         });
         bustTransactionsCache(clientId);
         
@@ -475,6 +511,93 @@ export function EditTransactionModal({
                 </SelectContent>
               </Select>
             </div>
+            {transactionForm.type === 'transfert' && (
+              <>
+                <div className="modal-form-field">
+                  <Label>Transfert de</Label>
+                  <Select
+                    value={transactionForm.from_field || 'balance'}
+                    onValueChange={(value) => {
+                      const nextFrom = value || 'balance';
+                      const nextTo = transactionForm.to_field || 'balance';
+                      const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
+
+                      let fromName = 'Balance Cash';
+                      let toName = 'Balance Cash';
+                      if (nextFrom !== 'balance') {
+                        const fromProduct = products.find((p: any) => p.id === nextFrom);
+                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                      }
+                      if (nextTo !== 'balance') {
+                        const toProduct = products.find((p: any) => p.id === nextTo);
+                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                      }
+
+                      setTransactionForm({
+                        ...transactionForm,
+                        from_field: nextFrom,
+                        productId: nextProductId,
+                        description: `Transfert de ${fromName} vers ${toName}.`,
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="balance">Balance Cash</SelectItem>
+                      {products.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}{p.reference ? ` (${p.reference})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="modal-form-field">
+                  <Label>Transfert vers</Label>
+                  <Select
+                    value={transactionForm.to_field || 'balance'}
+                    onValueChange={(value) => {
+                      const nextTo = value || 'balance';
+                      const nextFrom = transactionForm.from_field || 'balance';
+                      const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
+
+                      let fromName = 'Balance Cash';
+                      let toName = 'Balance Cash';
+                      if (nextFrom !== 'balance') {
+                        const fromProduct = products.find((p: any) => p.id === nextFrom);
+                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                      }
+                      if (nextTo !== 'balance') {
+                        const toProduct = products.find((p: any) => p.id === nextTo);
+                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                      }
+
+                      setTransactionForm({
+                        ...transactionForm,
+                        to_field: nextTo,
+                        productId: nextProductId,
+                        description: `Transfert de ${fromName} vers ${toName}.`,
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="balance">Balance Cash</SelectItem>
+                      {products.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}{p.reference ? ` (${p.reference})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
             {transactionForm.type === 'transfert' && transferProduct && (
               <div className="modal-form-field">
                 <Label>Période d&apos;intérêt</Label>

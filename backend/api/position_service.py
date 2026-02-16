@@ -2787,15 +2787,19 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     # This ensures that when capital is added/removed, we use the net invested amount
     invested_amount = real_invested_capital
 
-    # Optional metadata override (withdrawal recalculation path):
-    # use total product value after withdrawal (principal + unpaid gains)
+    # Optional metadata override (withdrawal/addition recalculation path):
+    # use total product value after withdrawal/addition (principal + unpaid gains)
     # then apply a proportional scale to preserve contractual schedule while
-    # reducing all future generated positions consistently.
+    # adjusting all future generated positions consistently.
     withdrawal_recalc_meta = getattr(txn, '_withdrawal_recalc_metadata', None)
     if isinstance(withdrawal_recalc_meta, dict):
         try:
-            total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_withdrawal')) or Decimal('0')
-            if total_after >= 0:
+            # For withdrawals, use total_value_after_withdrawal
+            total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_withdrawal'))
+            if total_after is None:
+                # For additions, use total_value_after_addition
+                total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_addition'))
+            if total_after is not None and total_after >= 0:
                 invested_amount = total_after.quantize(Decimal('0.01'))
         except Exception:
             pass
@@ -2950,174 +2954,744 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
 
 
 @db_transaction.atomic
-def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *, force_recalculate: bool = False) -> None:
+def recalculate_positions_for_product_withdrawal(
+    withdrawal_txn: Transaction,
+    *,
+    force_recalculate: bool = False,
+    strict: bool = False,
+    dry_run: bool = False,
+    positions_per_month_min: int | None = None,
+    positions_per_month_max: int | None = None,
+) -> dict:
     """
-    Recalculate future positions for all investment transactions on the same product
-    when a withdrawal (product -> balance) is validated.
-    
-    This ensures that when capital is withdrawn, all future positions are recalculated
-    with the new (reduced) invested capital.
-    
-    Args:
-        withdrawal_txn: Transaction with type='transfert', transfer_to='balance' or transfer_from=product_id
-        force_recalculate: If True, recalculate even if transaction status is not 'valide'.
-                          Used when save-positions is called for withdrawals that may still have status 'en_cours'.
+    Recalculate pending positions after a withdrawal.
+    Returns a structured execution summary.
+    In strict=True mode, raises on partial/inconsistent execution.
     """
-    if withdrawal_txn.type != 'transfert':
-        return
-    
-    # Only check status if not forcing recalculation
-    # This allows save-positions endpoint to trigger recalculation even for withdrawals with status 'en_cours'
-    if not force_recalculate and withdrawal_txn.status not in COMPLETED_TRANSACTION_STATUSES:
-        return
-    
-    # Determine the product from which capital is being withdrawn
-    # For withdrawals (transfert product -> balance), the product is the source (transfer_from)
-    product: Product | None = None
-    
-    # First, try to get product from transfer_from (most reliable for withdrawals)
-    if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
-        try:
-            product = Product.objects.get(id=withdrawal_txn.transfer_from)
-        except Product.DoesNotExist:
-            pass
-    
-    # If not found, try the product field on the transaction (may be set for withdrawals)
-    if product is None and withdrawal_txn.product:
-        product = withdrawal_txn.product
-    
-    # If still not found and transfer_to == 'balance', try to extract from description
-    if product is None and withdrawal_txn.transfer_to == 'balance':
-        product = _extract_product_from_description(withdrawal_txn.description or '')
-    
-    # If we still don't have a product, we can't proceed
-    if product is None:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Cannot determine product for withdrawal transaction {withdrawal_txn.id}. "
-                      f"transfer_from={withdrawal_txn.transfer_from}, transfer_to={withdrawal_txn.transfer_to}, "
-                      f"product={withdrawal_txn.product}")
-        return
-    
-    # Verify this is indeed a withdrawal
-    is_withdrawal = (
-        withdrawal_txn.transfer_to == 'balance' or
-        withdrawal_txn.transfer_from == product.id
-    )
-    if not is_withdrawal:
-        return
-    
     import logging
     logger = logging.getLogger(__name__)
-    withdrawal_meta = calculate_withdrawal_recalculation_metadata(
-        withdrawal_txn=withdrawal_txn,
-        product=product,
-    )
-    logger.info(
-        "Withdrawal recalculation context "
-        f"(txn_id={withdrawal_txn.id}, product_id={product.id}, "
-        f"total_before={withdrawal_meta.get('total_value_before_withdrawal')}, "
-        f"withdrawal_amount={withdrawal_meta.get('withdrawal_amount')}, "
-        f"total_after={withdrawal_meta.get('total_value_after_withdrawal')}, "
-        f"scale={withdrawal_meta.get('capital_scale_factor')})"
-    )
-    
-    # CRITICAL: Delete ALL pending positions for this product and client BEFORE recalculating
-    # This ensures we delete positions from ALL transactions, not just investment transactions
-    # Similar to what save_generated_positions does
-    from .models import Position
-    from django.db.models import Count
-    
-    all_pending_positions = Position.objects.filter(
-        product_id=product.id,
-        client_id=withdrawal_txn.client_id,
-        status='pending'
-    )
-    
-    total_pending_count = all_pending_positions.count()
-    
-    if total_pending_count > 0:
-        # Get breakdown by transaction before deletion
-        pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
-            count=Count('id')
+
+    execution_summary: dict = {
+        'withdrawal_transaction_id': withdrawal_txn.id,
+        'product_id': None,
+        'strict_mode': bool(strict),
+        'dry_run': bool(dry_run),
+        'positions_per_month_min': positions_per_month_min,
+        'positions_per_month_max': positions_per_month_max,
+        'deleted_total': 0,
+        'deleted_by_transaction': {},
+        'regenerated_total': 0,
+        'final_pending_total': 0,
+        'transaction_count': 0,
+        'per_transaction': [],
+        'generated_positions_preview': [],
+        'generated_positions_preview_note': None,
+        'errors': [],
+        'status': 'skipped',
+    }
+    savepoint_id = db_transaction.savepoint() if dry_run else None
+
+    def _record_failure(message: str, *, exc: Exception | None = None) -> None:
+        execution_summary['errors'].append(message)
+        if strict:
+            if exc is not None:
+                raise RuntimeError(message) from exc
+            raise RuntimeError(message)
+        if exc is not None:
+            logger.error(message, exc_info=True)
+        else:
+            logger.error(message)
+
+    try:
+        if withdrawal_txn.type != 'transfert':
+            execution_summary['status'] = 'skipped_not_transfer'
+            return execution_summary
+        
+        # Only check status if not forcing recalculation
+        # This allows save-positions endpoint to trigger recalculation even for withdrawals with status 'en_cours'
+        if not force_recalculate and withdrawal_txn.status not in COMPLETED_TRANSACTION_STATUSES:
+            execution_summary['status'] = 'skipped_not_completed'
+            return execution_summary
+        
+        # Determine the product from which capital is being withdrawn
+        # For withdrawals (transfert product -> balance), the product is the source (transfer_from)
+        product: Product | None = None
+        
+        # First, try to get product from transfer_from (most reliable for withdrawals)
+        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
+            try:
+                product = Product.objects.get(id=withdrawal_txn.transfer_from)
+            except Product.DoesNotExist:
+                pass
+        
+        # If not found, try the product field on the transaction (may be set for withdrawals)
+        if product is None and withdrawal_txn.product:
+            product = withdrawal_txn.product
+        
+        # If still not found and transfer_to == 'balance', try to extract from description
+        if product is None and withdrawal_txn.transfer_to == 'balance':
+            product = _extract_product_from_description(withdrawal_txn.description or '')
+        
+        # If we still don't have a product, we can't proceed
+        if product is None:
+            msg = (
+                f"Cannot determine product for withdrawal transaction {withdrawal_txn.id}. "
+                f"transfer_from={withdrawal_txn.transfer_from}, transfer_to={withdrawal_txn.transfer_to}, "
+                f"product={withdrawal_txn.product}"
+            )
+            _record_failure(msg)
+            execution_summary['status'] = 'failed'
+            return execution_summary
+        
+        # Verify this is indeed a withdrawal
+        is_withdrawal = (
+            withdrawal_txn.transfer_to == 'balance' or
+            withdrawal_txn.transfer_from == product.id
         )
-        deleted_by_transaction = {item['transaction_id']: item['count'] for item in pending_by_transaction}
+        if not is_withdrawal:
+            execution_summary['status'] = 'skipped_not_withdrawal'
+            return execution_summary
+
+        execution_summary['product_id'] = product.id
+        withdrawal_meta = calculate_withdrawal_recalculation_metadata(
+            withdrawal_txn=withdrawal_txn,
+            product=product,
+        )
+        logger.info(
+            "Withdrawal recalculation context "
+            f"(txn_id={withdrawal_txn.id}, product_id={product.id}, "
+            f"total_before={withdrawal_meta.get('total_value_before_withdrawal')}, "
+            f"withdrawal_amount={withdrawal_meta.get('withdrawal_amount')}, "
+            f"total_after={withdrawal_meta.get('total_value_after_withdrawal')}, "
+            f"scale={withdrawal_meta.get('capital_scale_factor')})"
+        )
         
-        # Get all IDs to delete (for logging)
-        all_pending_ids = list(all_pending_positions.values_list('id', flat=True))
+        # CRITICAL: Delete ALL pending positions for this product and client BEFORE recalculating
+        # This ensures we delete positions from ALL transactions, not just investment transactions
+        # Similar to what save_generated_positions does
+        from .models import Position
+        from django.db.models import Count
         
-        logger.info(f"Deleting {total_pending_count} pending positions (IDs: {all_pending_ids[:10]}{'...' if len(all_pending_ids) > 10 else ''}) "
-                   f"for product {product.id} and client {withdrawal_txn.client_id} before recalculation after withdrawal {withdrawal_txn.id}. "
-                   f"Breakdown by transaction: {deleted_by_transaction}")
-        
-        # CRITICAL: Delete all pending positions directly using a fresh queryset
-        # Recreate the queryset to ensure it's up-to-date and not cached
-        delete_queryset = Position.objects.filter(
+        all_pending_positions = Position.objects.filter(
             product_id=product.id,
             client_id=withdrawal_txn.client_id,
             status='pending'
         )
-        deleted_result = delete_queryset.delete()
-        deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
         
-        logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}) "
-                   f"for product {product.id} and client {withdrawal_txn.client_id} before recalculation")
+        total_pending_count = all_pending_positions.count()
         
-        # Verify deletion
-        remaining_count = Position.objects.filter(
+        deleted_count = 0
+        deleted_by_transaction: dict[str, int] = {}
+
+        if total_pending_count > 0:
+            # Get breakdown by transaction before deletion
+            pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
+                count=Count('id')
+            )
+            deleted_by_transaction = {item['transaction_id']: item['count'] for item in pending_by_transaction}
+            
+            # Get all IDs to delete (for logging)
+            all_pending_ids = list(all_pending_positions.values_list('id', flat=True))
+            
+            logger.info(f"Deleting {total_pending_count} pending positions (IDs: {all_pending_ids[:10]}{'...' if len(all_pending_ids) > 10 else ''}) "
+                    f"for product {product.id} and client {withdrawal_txn.client_id} before recalculation after withdrawal {withdrawal_txn.id}. "
+                    f"Breakdown by transaction: {deleted_by_transaction}")
+            
+            # CRITICAL: Delete all pending positions directly using a fresh queryset
+            # Recreate the queryset to ensure it's up-to-date and not cached
+            delete_queryset = Position.objects.filter(
+                product_id=product.id,
+                client_id=withdrawal_txn.client_id,
+                status='pending'
+            )
+            deleted_result = delete_queryset.delete()
+            deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
+            
+            logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}) "
+                    f"for product {product.id} and client {withdrawal_txn.client_id} before recalculation")
+            
+            # Verify deletion
+            remaining_count = Position.objects.filter(
+                product_id=product.id,
+                client_id=withdrawal_txn.client_id,
+                status='pending'
+            ).count()
+            
+            if remaining_count > 0:
+                _record_failure(
+                    f"Deletion consistency error: {remaining_count} pending positions still exist after deletion "
+                    f"(expected 0). Deleted {deleted_count} / expected {total_pending_count}."
+                )
+            else:
+                logger.info(f"Verification passed! All {deleted_count} pending positions were successfully deleted.")
+        else:
+            logger.info(f"No pending positions to delete for product {product.id} and client {withdrawal_txn.client_id}")
+
+        execution_summary['deleted_total'] = int(deleted_count)
+        execution_summary['deleted_by_transaction'] = deleted_by_transaction
+
+        if total_pending_count > 0 and int(deleted_count) != int(total_pending_count):
+            _record_failure(
+                f"Deleted positions mismatch for product {product.id}: deleted={deleted_count}, expected={total_pending_count}."
+            )
+        
+        # Find all investment transactions (transfer_to = product_id) for the same client and product
+        # that are 'valide' and have positions
+        investment_transactions = Transaction.objects.filter(
+            client_id=withdrawal_txn.client_id,
+            type='transfert',
+            transfer_to=product.id,
+            status__in=COMPLETED_TRANSACTION_STATUSES
+        ).exclude(id=withdrawal_txn.id)  # Exclude the withdrawal transaction itself
+        
+        txn_count = investment_transactions.count()
+        execution_summary['transaction_count'] = int(txn_count)
+        logger.info(f"Recalculating positions for {txn_count} investment transactions "
+                    f"on product {product.id} after withdrawal transaction {withdrawal_txn.id}")
+
+        if total_pending_count > 0 and txn_count == 0:
+            _record_failure(
+                f"Pending positions were deleted ({total_pending_count}) but no investment transactions were eligible for regeneration "
+                f"(product={product.id}, client={withdrawal_txn.client_id})."
+            )
+        
+        # For each investment transaction, recalculate positions
+        # This will use the updated capital (which now excludes the withdrawal)
+        # Note: We already deleted all pending positions above, so delete_pending=False
+        regenerated_total = 0
+        preview_sample_cap = 500
+        preview_sample_count = 0
+        for inv_txn in investment_transactions:
+            before_pending = int(deleted_by_transaction.get(inv_txn.id, 0))
+            try:
+                if positions_per_month_min is not None or positions_per_month_max is not None:
+                    merged_sub = dict(inv_txn.subscription_details or {})
+                    if positions_per_month_min is not None:
+                        merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
+                    if positions_per_month_max is not None:
+                        merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
+                    inv_txn.subscription_details = merged_sub
+
+                # Pass recalculation context to context builder without persisting anything.
+                inv_txn._capital_cutoff_datetime = withdrawal_txn.datetime or timezone.now()
+                inv_txn._withdrawal_recalc_metadata = withdrawal_meta
+
+                # Check all existing positions before recalculation
+                # Note: All pending positions have already been deleted above for the entire product/client
+                all_existing = Position.objects.filter(transaction_id=inv_txn.id)
+                total_before = all_existing.count()
+                pending_before = all_existing.filter(status='pending').count()
+                open_before = all_existing.filter(status='open').count()
+                done_before = all_existing.filter(status='done').count()
+                
+                logger.info(f"Before recalculation for investment transaction {inv_txn.id} after withdrawal {withdrawal_txn.id}: "
+                        f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}")
+                
+                # Regenerate positions for this investment transaction
+                # This will use the updated capital (reduced by the withdrawal)
+                # delete_pending=False because we already deleted ALL pending positions above (for all transactions)
+                created_positions = create_positions_for_investment(inv_txn, trigger="withdrawal_recalculation", delete_pending=False)
+                created_count = len(created_positions or [])
+                regenerated_total += created_count
+                if dry_run and created_positions:
+                    for p in created_positions:
+                        if preview_sample_count >= preview_sample_cap:
+                            break
+                        preview_sample_count += 1
+                        asset_name = ''
+                        asset_reference = ''
+                        asset_type = ''
+                        if getattr(p, 'asset_id', None):
+                            asset_obj = Asset.objects.filter(id=p.asset_id).first()
+                            if asset_obj:
+                                asset_name = asset_obj.name or ''
+                                asset_reference = asset_obj.reference or ''
+                                asset_type = asset_obj.type or ''
+                        execution_summary['generated_positions_preview'].append({
+                            'id': str(getattr(p, 'id', '') or ''),
+                            'client_id': str(getattr(p, 'client_id', '') or ''),
+                            'product_id': str(getattr(p, 'product_id', '') or ''),
+                            'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
+                            'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
+                            'asset_name': asset_name,
+                            'asset_reference': asset_reference,
+                            'asset_type': asset_type,
+                            'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
+                            'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
+                            'invested_amount': str(getattr(p, 'invested_amount', '0')),
+                            'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
+                            'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
+                            'profit_loss': str(getattr(p, 'profit_loss', '0')),
+                            'period_index': int(getattr(p, 'period_index', 0) or 0),
+                            'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
+                            'status': str(getattr(p, 'status', 'pending') or 'pending'),
+                        })
+                after_pending = Position.objects.filter(transaction_id=inv_txn.id, status='pending').count()
+                execution_summary['per_transaction'].append({
+                    'transaction_id': inv_txn.id,
+                    'before_pending': before_pending,
+                    'created': int(created_count),
+                    'after_pending': int(after_pending),
+                    'status': 'ok',
+                })
+
+                if before_pending > 0 and created_count == 0:
+                    _record_failure(
+                        f"Regeneration produced 0 positions for transaction {inv_txn.id} although {before_pending} pending positions were deleted."
+                    )
+                if created_count > 0 and after_pending < created_count:
+                    _record_failure(
+                        f"Post-regeneration mismatch for transaction {inv_txn.id}: created={created_count}, after_pending={after_pending}."
+                    )
+                logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after withdrawal")
+            except Exception as e:
+                execution_summary['per_transaction'].append({
+                    'transaction_id': inv_txn.id,
+                    'before_pending': before_pending,
+                    'created': 0,
+                    'after_pending': 0,
+                    'status': 'failed',
+                    'error': str(e),
+                })
+                _record_failure(
+                    f"Failed to recalculate positions for investment transaction {inv_txn.id} "
+                    f"after withdrawal {withdrawal_txn.id}: {str(e)}",
+                    exc=e
+                )
+
+        execution_summary['regenerated_total'] = int(regenerated_total)
+        final_pending_total = Position.objects.filter(
             product_id=product.id,
             client_id=withdrawal_txn.client_id,
             status='pending'
         ).count()
-        
-        if remaining_count > 0:
-            logger.error(f"ERROR: {remaining_count} pending positions still exist after deletion! "
-                        f"Expected 0. Deleted {deleted_count} positions but {remaining_count} remain.")
-        else:
-            logger.info(f"Verification passed! All {deleted_count} pending positions were successfully deleted.")
-    else:
-        logger.info(f"No pending positions to delete for product {product.id} and client {withdrawal_txn.client_id}")
-    
-    # Find all investment transactions (transfer_to = product_id) for the same client and product
-    # that are 'valide' and have positions
-    investment_transactions = Transaction.objects.filter(
-        client_id=withdrawal_txn.client_id,
-        type='transfert',
-        transfer_to=product.id,
-        status__in=COMPLETED_TRANSACTION_STATUSES
-    ).exclude(id=withdrawal_txn.id)  # Exclude the withdrawal transaction itself
-    
-    logger.info(f"Recalculating positions for {investment_transactions.count()} investment transactions "
-                f"on product {product.id} after withdrawal transaction {withdrawal_txn.id}")
-    
-    # For each investment transaction, recalculate positions
-    # This will use the updated capital (which now excludes the withdrawal)
-    # Note: We already deleted all pending positions above, so delete_pending=False
-    for inv_txn in investment_transactions:
-        try:
-            # Pass recalculation context to context builder without persisting anything.
-            inv_txn._capital_cutoff_datetime = withdrawal_txn.datetime or timezone.now()
-            inv_txn._withdrawal_recalc_metadata = withdrawal_meta
+        execution_summary['final_pending_total'] = int(final_pending_total)
 
-            # Check all existing positions before recalculation
-            # Note: All pending positions have already been deleted above for the entire product/client
-            all_existing = Position.objects.filter(transaction_id=inv_txn.id)
-            total_before = all_existing.count()
-            pending_before = all_existing.filter(status='pending').count()
-            open_before = all_existing.filter(status='open').count()
-            done_before = all_existing.filter(status='done').count()
+        if int(final_pending_total) != int(regenerated_total):
+            _record_failure(
+                f"Final pending total mismatch for product {product.id}: final_pending={final_pending_total}, "
+                f"regenerated_total={regenerated_total}."
+            )
+
+        if dry_run and regenerated_total > preview_sample_cap:
+            execution_summary['generated_positions_preview_note'] = (
+                f"{preview_sample_cap} positions affichées en aperçu (sur {regenerated_total} attendues)."
+            )
+
+        execution_summary['status'] = 'ok' if len(execution_summary['errors']) == 0 else 'failed'
+        if dry_run and execution_summary['status'] == 'ok':
+            execution_summary['status'] = 'preview_ok'
+        return execution_summary
+    finally:
+        if dry_run and savepoint_id is not None:
+            db_transaction.savepoint_rollback(savepoint_id)
+
+
+def calculate_addition_recalculation_metadata(
+    *,
+    addition_txn: Transaction,
+    product: Product | None = None,
+) -> dict:
+    """
+    Compute addition metadata used for proportional recalculation:
+    - principal before addition
+    - accrued gains not yet transferred via 'interets'
+    - total value before / after addition
+    - scale factor (> 1 for additions)
+    """
+    resolved_product = product
+    if resolved_product is None:
+        if addition_txn.transfer_to and addition_txn.transfer_to != 'balance':
+            resolved_product = Product.objects.filter(id=addition_txn.transfer_to).first()
+        if resolved_product is None and addition_txn.product:
+            resolved_product = addition_txn.product
+    if resolved_product is None:
+        return {
+            'product_id': None,
+            'addition_amount': '0.00',
+            'principal_before_addition': '0.00',
+            'accrued_gains_before_addition': '0.00',
+            'paid_interests_before_addition': '0.00',
+            'unpaid_gains_before_addition': '0.00',
+            'total_value_before_addition': '0.00',
+            'total_value_after_addition': '0.00',
+            'capital_scale_factor': '1',
+            'cutoff_datetime': (addition_txn.datetime or timezone.now()).isoformat(),
+        }
+
+    cutoff_dt = addition_txn.datetime or timezone.now()
+    addition_amount = (_to_decimal(addition_txn.amount) or Decimal('0')).quantize(Decimal('0.01'))
+
+    principal_before = _calculate_real_invested_capital(
+        client_id=addition_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+        exclude_transaction_id=addition_txn.id,
+    ).quantize(Decimal('0.01'))
+
+    accrued_before = _sum_accrued_position_gains(
+        client_id=addition_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+    ).quantize(Decimal('0.01'))
+
+    paid_interests_before = _sum_paid_interest_transactions(
+        client_id=addition_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+    ).quantize(Decimal('0.01'))
+
+    unpaid_gains_before = (accrued_before - paid_interests_before).quantize(Decimal('0.01'))
+    total_before = (principal_before + unpaid_gains_before).quantize(Decimal('0.01'))
+    
+    # For additions, total increases
+    principal_after = (principal_before + addition_amount).quantize(Decimal('0.01'))
+    total_after = (total_before + addition_amount).quantize(Decimal('0.01'))
+    
+    if total_before <= 0:
+        # Edge case: if there was no capital before, scale factor is undefined
+        # We'll treat this as a normal investment (no recalculation needed)
+        scale_factor = Decimal('1')
+    else:
+        scale_factor = (total_after / total_before).quantize(Decimal('0.000001'))
+
+    return {
+        'product_id': resolved_product.id,
+        'addition_amount': str(addition_amount),
+        'principal_before_addition': str(principal_before),
+        'principal_after_addition': str(principal_after),
+        'accrued_gains_before_addition': str(accrued_before),
+        'paid_interests_before_addition': str(paid_interests_before),
+        'unpaid_gains_before_addition': str(unpaid_gains_before),
+        'total_value_before_addition': str(total_before),
+        'total_value_after_addition': str(total_after),
+        'capital_scale_factor': str(scale_factor),
+        'cutoff_datetime': cutoff_dt.isoformat(),
+    }
+
+
+def recalculate_positions_for_product_addition(
+    addition_txn: Transaction,
+    *,
+    force_recalculate: bool = False,
+    strict: bool = False,
+    dry_run: bool = False,
+    positions_per_month_min: int | None = None,
+    positions_per_month_max: int | None = None,
+) -> dict:
+    """
+    Recalculate pending positions after a fund addition.
+    Similar to withdrawal recalculation but with capital increase (scale_factor > 1).
+    Returns a structured execution summary.
+    In strict=True mode, raises on partial/inconsistent execution.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    execution_summary: dict = {
+        'addition_transaction_id': addition_txn.id,
+        'product_id': None,
+        'strict_mode': bool(strict),
+        'dry_run': bool(dry_run),
+        'positions_per_month_min': positions_per_month_min,
+        'positions_per_month_max': positions_per_month_max,
+        'deleted_total': 0,
+        'deleted_by_transaction': {},
+        'regenerated_total': 0,
+        'final_pending_total': 0,
+        'transaction_count': 0,
+        'per_transaction': [],
+        'generated_positions_preview': [],
+        'generated_positions_preview_note': None,
+        'errors': [],
+        'status': 'skipped',
+    }
+    savepoint_id = db_transaction.savepoint() if dry_run else None
+
+    def _record_failure(message: str, *, exc: Exception | None = None) -> None:
+        execution_summary['errors'].append(message)
+        if strict:
+            if exc is not None:
+                raise RuntimeError(message) from exc
+            raise RuntimeError(message)
+        if exc is not None:
+            logger.error(message, exc_info=True)
+        else:
+            logger.error(message)
+
+    try:
+        if addition_txn.type != 'transfert':
+            execution_summary['status'] = 'skipped_not_transfer'
+            return execution_summary
+        
+        # Only check status if not forcing recalculation
+        if not force_recalculate and addition_txn.status not in COMPLETED_TRANSACTION_STATUSES:
+            execution_summary['status'] = 'skipped_not_completed'
+            return execution_summary
+        
+        # Determine the product to which capital is being added
+        # For additions (transfert balance -> product), the product is the destination (transfer_to)
+        product: Product | None = None
+        
+        # Try to get product from transfer_to (most reliable for additions)
+        if addition_txn.transfer_to and addition_txn.transfer_to != 'balance':
+            try:
+                product = Product.objects.get(id=addition_txn.transfer_to)
+            except Product.DoesNotExist:
+                pass
+        
+        # If not found, try the product field on the transaction
+        if product is None and addition_txn.product:
+            product = addition_txn.product
+        
+        # If we still don't have a product, we can't proceed
+        if product is None:
+            msg = (
+                f"Cannot determine product for addition transaction {addition_txn.id}. "
+                f"transfer_from={addition_txn.transfer_from}, transfer_to={addition_txn.transfer_to}, "
+                f"product={addition_txn.product}"
+            )
+            _record_failure(msg)
+            execution_summary['status'] = 'failed'
+            return execution_summary
+        
+        # Verify this is indeed an addition (investment)
+        is_addition = (
+            addition_txn.transfer_to == product.id and
+            addition_txn.transfer_from == 'balance'
+        )
+        if not is_addition:
+            execution_summary['status'] = 'skipped_not_addition'
+            return execution_summary
+
+        execution_summary['product_id'] = product.id
+        addition_meta = calculate_addition_recalculation_metadata(
+            addition_txn=addition_txn,
+            product=product,
+        )
+        logger.info(
+            "Addition recalculation context "
+            f"(txn_id={addition_txn.id}, product_id={product.id}, "
+            f"total_before={addition_meta.get('total_value_before_addition')}, "
+            f"addition_amount={addition_meta.get('addition_amount')}, "
+            f"total_after={addition_meta.get('total_value_after_addition')}, "
+            f"scale={addition_meta.get('capital_scale_factor')})"
+        )
+        
+        # Delete ALL pending positions for this product and client BEFORE recalculating
+        from .models import Position
+        from django.db.models import Count
+        
+        all_pending_positions = Position.objects.filter(
+            product_id=product.id,
+            client_id=addition_txn.client_id,
+            status='pending'
+        )
+        
+        total_pending_count = all_pending_positions.count()
+        
+        deleted_count = 0
+        deleted_by_transaction: dict[str, int] = {}
+
+        if total_pending_count > 0:
+            # Get breakdown by transaction before deletion
+            pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
+                count=Count('id')
+            )
+            deleted_by_transaction = {item['transaction_id']: item['count'] for item in pending_by_transaction}
             
-            logger.info(f"Before recalculation for investment transaction {inv_txn.id} after withdrawal {withdrawal_txn.id}: "
-                       f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}")
+            # Get all IDs to delete (for logging)
+            all_pending_ids = list(all_pending_positions.values_list('id', flat=True))
             
-            # Regenerate positions for this investment transaction
-            # This will use the updated capital (reduced by the withdrawal)
-            # delete_pending=False because we already deleted ALL pending positions above (for all transactions)
-            create_positions_for_investment(inv_txn, trigger="withdrawal_recalculation", delete_pending=False)
-            logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after withdrawal")
-        except Exception as e:
-            logger.error(f"Failed to recalculate positions for investment transaction {inv_txn.id} "
-                        f"after withdrawal {withdrawal_txn.id}: {str(e)}", exc_info=True)
+            logger.info(f"Deleting {total_pending_count} pending positions (IDs: {all_pending_ids[:10]}{'...' if len(all_pending_ids) > 10 else ''}) "
+                    f"for product {product.id} and client {addition_txn.client_id} before recalculation after addition {addition_txn.id}. "
+                    f"Breakdown by transaction: {deleted_by_transaction}")
+            
+            # Delete all pending positions directly using a fresh queryset
+            delete_queryset = Position.objects.filter(
+                product_id=product.id,
+                client_id=addition_txn.client_id,
+                status='pending'
+            )
+            deleted_result = delete_queryset.delete()
+            deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
+            
+            logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}) "
+                    f"for product {product.id} and client {addition_txn.client_id} before recalculation")
+            
+            # Verify deletion
+            remaining_count = Position.objects.filter(
+                product_id=product.id,
+                client_id=addition_txn.client_id,
+                status='pending'
+            ).count()
+            
+            if remaining_count > 0:
+                _record_failure(
+                    f"Deletion consistency error: {remaining_count} pending positions still exist after deletion "
+                    f"(expected 0). Deleted {deleted_count} / expected {total_pending_count}."
+                )
+            else:
+                logger.info(f"Verification passed! All {deleted_count} pending positions were successfully deleted.")
+        else:
+            logger.info(f"No pending positions to delete for product {product.id} and client {addition_txn.client_id}")
+
+        execution_summary['deleted_total'] = int(deleted_count)
+        execution_summary['deleted_by_transaction'] = deleted_by_transaction
+
+        if total_pending_count > 0 and int(deleted_count) != int(total_pending_count):
+            _record_failure(
+                f"Deleted positions mismatch for product {product.id}: deleted={deleted_count}, expected={total_pending_count}."
+            )
+        
+        # Find all investment transactions (transfer_to = product_id) for the same client and product
+        # that are 'valide' and have positions (excluding the current addition transaction)
+        investment_transactions = Transaction.objects.filter(
+            client_id=addition_txn.client_id,
+            type='transfert',
+            transfer_to=product.id,
+            status__in=COMPLETED_TRANSACTION_STATUSES
+        ).exclude(id=addition_txn.id)  # Exclude the addition transaction itself
+        
+        txn_count = investment_transactions.count()
+        execution_summary['transaction_count'] = int(txn_count)
+        logger.info(f"Recalculating positions for {txn_count} investment transactions "
+                    f"on product {product.id} after addition transaction {addition_txn.id}")
+
+        if total_pending_count > 0 and txn_count == 0:
+            _record_failure(
+                f"Pending positions were deleted ({total_pending_count}) but no investment transactions were eligible for regeneration "
+                f"(product={product.id}, client={addition_txn.client_id})."
+            )
+        
+        # For each investment transaction, recalculate positions
+        # This will use the updated capital (which now includes the addition)
+        regenerated_total = 0
+        preview_sample_cap = 500
+        preview_sample_count = 0
+        for inv_txn in investment_transactions:
+            before_pending = int(deleted_by_transaction.get(inv_txn.id, 0))
+            try:
+                if positions_per_month_min is not None or positions_per_month_max is not None:
+                    merged_sub = dict(inv_txn.subscription_details or {})
+                    if positions_per_month_min is not None:
+                        merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
+                    if positions_per_month_max is not None:
+                        merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
+                    inv_txn.subscription_details = merged_sub
+
+                # Pass recalculation context to context builder without persisting anything.
+                inv_txn._capital_cutoff_datetime = addition_txn.datetime or timezone.now()
+                inv_txn._withdrawal_recalc_metadata = addition_meta  # Reuse the same attribute name for consistency
+                
+                # Check all existing positions before recalculation
+                all_existing = Position.objects.filter(transaction_id=inv_txn.id)
+                total_before = all_existing.count()
+                pending_before = all_existing.filter(status='pending').count()
+                open_before = all_existing.filter(status='open').count()
+                done_before = all_existing.filter(status='done').count()
+                
+                logger.info(f"Before recalculation for investment transaction {inv_txn.id} after addition {addition_txn.id}: "
+                        f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}")
+                
+                # Regenerate positions for this investment transaction
+                # This will use the updated capital (increased by the addition)
+                # delete_pending=False because we already deleted ALL pending positions above
+                created_positions = create_positions_for_investment(inv_txn, trigger="addition_recalculation", delete_pending=False)
+                created_count = len(created_positions or [])
+                regenerated_total += created_count
+                if dry_run and created_positions:
+                    for p in created_positions:
+                        if preview_sample_count >= preview_sample_cap:
+                            break
+                        preview_sample_count += 1
+                        asset_name = ''
+                        asset_reference = ''
+                        asset_type = ''
+                        if getattr(p, 'asset_id', None):
+                            asset_obj = Asset.objects.filter(id=p.asset_id).first()
+                            if asset_obj:
+                                asset_name = asset_obj.name or ''
+                                asset_reference = asset_obj.reference or ''
+                                asset_type = asset_obj.type or ''
+                        execution_summary['generated_positions_preview'].append({
+                            'id': str(getattr(p, 'id', '') or ''),
+                            'client_id': str(getattr(p, 'client_id', '') or ''),
+                            'product_id': str(getattr(p, 'product_id', '') or ''),
+                            'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
+                            'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
+                            'asset_name': asset_name,
+                            'asset_reference': asset_reference,
+                            'asset_type': asset_type,
+                            'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
+                            'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
+                            'invested_amount': str(getattr(p, 'invested_amount', '0')),
+                            'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
+                            'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
+                            'profit_loss': str(getattr(p, 'profit_loss', '0')),
+                            'period_index': int(getattr(p, 'period_index', 0) or 0),
+                            'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
+                            'status': str(getattr(p, 'status', 'pending') or 'pending'),
+                        })
+                after_pending = Position.objects.filter(transaction_id=inv_txn.id, status='pending').count()
+                execution_summary['per_transaction'].append({
+                    'transaction_id': inv_txn.id,
+                    'before_pending': before_pending,
+                    'created': int(created_count),
+                    'after_pending': int(after_pending),
+                    'status': 'ok',
+                })
+
+                if before_pending > 0 and created_count == 0:
+                    _record_failure(
+                        f"Regeneration produced 0 positions for transaction {inv_txn.id} although {before_pending} pending positions were deleted."
+                    )
+                if created_count > 0 and after_pending < created_count:
+                    _record_failure(
+                        f"Post-regeneration mismatch for transaction {inv_txn.id}: created={created_count}, after_pending={after_pending}."
+                    )
+                logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after addition")
+            except Exception as e:
+                execution_summary['per_transaction'].append({
+                    'transaction_id': inv_txn.id,
+                    'before_pending': before_pending,
+                    'created': 0,
+                    'after_pending': 0,
+                    'status': 'failed',
+                    'error': str(e),
+                })
+                _record_failure(
+                    f"Failed to recalculate positions for investment transaction {inv_txn.id} "
+                    f"after addition {addition_txn.id}: {str(e)}",
+                    exc=e
+                )
+
+        execution_summary['regenerated_total'] = int(regenerated_total)
+        final_pending_total = Position.objects.filter(
+            product_id=product.id,
+            client_id=addition_txn.client_id,
+            status='pending'
+        ).count()
+        execution_summary['final_pending_total'] = int(final_pending_total)
+
+        if int(final_pending_total) != int(regenerated_total):
+            _record_failure(
+                f"Final pending total mismatch for product {product.id}: final_pending={final_pending_total}, "
+                f"regenerated_total={regenerated_total}."
+            )
+
+        if dry_run and regenerated_total > preview_sample_cap:
+            execution_summary['generated_positions_preview_note'] = (
+                f"{preview_sample_cap} positions affichées en aperçu (sur {regenerated_total} attendues)."
+            )
+
+        execution_summary['status'] = 'ok' if len(execution_summary['errors']) == 0 else 'failed'
+        if dry_run and execution_summary['status'] == 'ok':
+            execution_summary['status'] = 'preview_ok'
+        return execution_summary
+    finally:
+        if dry_run and savepoint_id is not None:
+            db_transaction.savepoint_rollback(savepoint_id)
 
 
 @db_transaction.atomic

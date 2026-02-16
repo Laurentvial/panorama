@@ -39,6 +39,44 @@ interface Position {
   status: string;
 }
 
+interface RecalculationExecutionSummary {
+  withdrawal_transaction_id: string;
+  product_id: string | null;
+  strict_mode: boolean;
+  deleted_total: number;
+  deleted_by_transaction: Record<string, number>;
+  regenerated_total: number;
+  final_pending_total: number;
+  transaction_count: number;
+  per_transaction: Array<{
+    transaction_id: string;
+    before_pending: number;
+    created: number;
+    after_pending: number;
+    status: string;
+    error?: string;
+  }>;
+  errors: string[];
+  status: string;
+}
+
+interface RecalculationExecutionPreview {
+  deleted_total_expected: number;
+  regenerated_total_expected: number;
+  per_transaction_expected: Array<{
+    transaction_id: string;
+    before_pending: number;
+    created: number;
+    after_pending: number;
+    status: string;
+    error?: string;
+  }>;
+  status: string;
+  errors: string[];
+  generated_positions_preview_note?: string | null;
+  source: string;
+}
+
 interface WithdrawalRecalculationMetadata {
   product_id: string | null;
   withdrawal_amount: string;
@@ -49,6 +87,20 @@ interface WithdrawalRecalculationMetadata {
   total_value_before_withdrawal: string;
   total_value_after_withdrawal: string;
   withdrawal_ratio: string;
+  capital_scale_factor: string;
+  cutoff_datetime: string;
+}
+
+interface AdditionRecalculationMetadata {
+  product_id: string | null;
+  addition_amount: string;
+  principal_before_addition: string;
+  principal_after_addition: string;
+  accrued_gains_before_addition: string;
+  paid_interests_before_addition: string;
+  unpaid_gains_before_addition: string;
+  total_value_before_addition: string;
+  total_value_after_addition: string;
   capital_scale_factor: string;
   cutoff_datetime: string;
 }
@@ -84,6 +136,10 @@ export function PositionGenerationModal({
   const [positionsPerMonthMax, setPositionsPerMonthMax] = useState<string>('');
   const [positionsRangeError, setPositionsRangeError] = useState<string | null>(null);
   const [withdrawalRecalculation, setWithdrawalRecalculation] = useState<WithdrawalRecalculationMetadata | null>(null);
+  const [additionRecalculation, setAdditionRecalculation] = useState<AdditionRecalculationMetadata | null>(null);
+  const [isRecalculationSaved, setIsRecalculationSaved] = useState<boolean>(false);
+  const [recalculationPreview, setRecalculationPreview] = useState<RecalculationExecutionPreview | null>(null);
+  const [recalculationExecution, setRecalculationExecution] = useState<RecalculationExecutionSummary | null>(null);
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
     deleted_by_transaction: Record<string, number>;
@@ -118,6 +174,10 @@ export function PositionGenerationModal({
       setPositionsPerMonthMax('');
       setPositionsRangeError(null);
       setWithdrawalRecalculation(null);
+      setAdditionRecalculation(null);
+      setIsRecalculationSaved(false);
+      setRecalculationPreview(null);
+      setRecalculationExecution(null);
       
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
@@ -162,6 +222,12 @@ export function PositionGenerationModal({
       const ratesData = (response as any).rates || [];
       if ((response as any).withdrawal_recalculation) {
         setWithdrawalRecalculation((response as any).withdrawal_recalculation);
+      }
+      if ((response as any).addition_recalculation) {
+        setAdditionRecalculation((response as any).addition_recalculation);
+      }
+      if ((response as any).recalculation_execution) {
+        setRecalculationExecution((response as any).recalculation_execution);
       }
       console.log('PositionGenerationModal - Parsed rates data:', ratesData);
       
@@ -298,8 +364,14 @@ export function PositionGenerationModal({
       
       const positionsData = (response as any).positions || [];
       setPositions(positionsData);
+      if ((response as any).recalculation_execution_preview) {
+        setRecalculationPreview((response as any).recalculation_execution_preview);
+      }
       if ((response as any).withdrawal_recalculation) {
         setWithdrawalRecalculation((response as any).withdrawal_recalculation);
+      }
+      if ((response as any).addition_recalculation) {
+        setAdditionRecalculation((response as any).addition_recalculation);
       }
       
       // Store deleted positions info if available (for preview before validation)
@@ -352,7 +424,7 @@ export function PositionGenerationModal({
       // Prepare rates_used and period_summaries for history (for both investments and withdrawals)
       const ratesUsed: Record<string, string> = {};
       Object.entries(editedRates).forEach(([periodIdx, rate]) => {
-        ratesUsed[periodIdx] = rate;
+        ratesUsed[periodIdx] = String(rate ?? '');
       });
       
       // Recalculate period_summaries with edited rates and recalculated target profits
@@ -396,6 +468,12 @@ export function PositionGenerationModal({
       
       // For withdrawals, save only the history (no positions are created for the withdrawal itself)
       // For investments, save positions and history
+      const isAdditionRecalc = !!additionRecalculation;
+      const shouldSendPositionsMonthRange =
+        (isWithdrawal || isAdditionRecalc) &&
+        positionsPerMonthMin.trim() !== '' &&
+        positionsPerMonthMax.trim() !== '';
+
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/save-positions/`,
         {
@@ -403,7 +481,13 @@ export function PositionGenerationModal({
           body: JSON.stringify({ 
             positions,
             rates_used: ratesUsed,
-            period_summaries: recalculatedPeriodSummaries
+            period_summaries: recalculatedPeriodSummaries,
+            ...(shouldSendPositionsMonthRange
+              ? {
+                  positions_per_month_min: parseInt(positionsPerMonthMin.trim(), 10),
+                  positions_per_month_max: parseInt(positionsPerMonthMax.trim(), 10),
+                }
+              : {}),
           })
         }
       );
@@ -418,15 +502,31 @@ export function PositionGenerationModal({
       if ((response as any).withdrawal_recalculation) {
         setWithdrawalRecalculation((response as any).withdrawal_recalculation);
       }
+      if ((response as any).addition_recalculation) {
+        setAdditionRecalculation((response as any).addition_recalculation);
+      }
+      if ((response as any).recalculation_execution) {
+        setRecalculationExecution((response as any).recalculation_execution);
+      }
       
       // Mark positions as saved
       setPositionsSaved(true);
       
-      if (isWithdrawal) {
-        // For withdrawals, close after saving
-        toast.success('Retrait confirmé et positions recalculées avec succès');
-        handleClose();
-        onSuccess();
+      // Detect if this is an addition requiring recalculation
+      const isAdditionRecalcAfterSave = !!additionRecalculation || !!(response as any).addition_recalculation;
+      
+      const isRecalculationAfterSave = isWithdrawal || isAdditionRecalcAfterSave;
+      setIsRecalculationSaved(isRecalculationAfterSave);
+
+      if (isRecalculationAfterSave) {
+        // For recalculations, keep modal open to show real execution summary.
+        toast.success(
+          isWithdrawal
+            ? 'Retrait confirmé et recalcul exécuté avec succès'
+            : 'Ajout confirmé et recalcul exécuté avec succès'
+        );
+        setReadyToConfirm(false);
+        setStep('review-positions');
       } else {
         toast.success('Positions générées avec succès');
         handleClose();
@@ -434,19 +534,35 @@ export function PositionGenerationModal({
       }
     } catch (err: any) {
       console.error('Error saving positions:', err);
-      setError(err?.message || 'Erreur lors de l\'enregistrement des positions');
-      toast.error('Erreur lors de l\'enregistrement des positions');
+      const errorMessage =
+        err?.response?.error ||
+        err?.error ||
+        err?.message ||
+        'Erreur lors de l\'enregistrement des positions';
+      setError(errorMessage);
+      toast.error(errorMessage);
       setStep('review-positions');
     }
   };
 
   const handleClose = () => {
+    // For successful withdrawal/addition execution, closing should finalize via onSuccess flow.
+    // This avoids parent "cancel/keep en_cours" handlers overriding the successful state.
+    const isAdditionRecalc = !!additionRecalculation;
+    if ((isWithdrawal || isAdditionRecalc || isRecalculationSaved) && positionsSaved) {
+      onSuccess();
+      return;
+    }
     setStep('loading-rates');
     setRates([]);
     setEditedRates({});
     setPositions([]);
     setError(null);
     setWithdrawalRecalculation(null);
+    setAdditionRecalculation(null);
+    setIsRecalculationSaved(false);
+    setRecalculationPreview(null);
+    setRecalculationExecution(null);
     onClose();
   };
 
@@ -625,6 +741,50 @@ export function PositionGenerationModal({
               </div>
               <div style={{ color: '#334155' }}>
                 Facteur appliqué à la régénération : <strong>{withdrawalRecalculation.capital_scale_factor}</strong>
+              </div>
+            </div>
+          )}
+
+          {additionRecalculation && (
+            <div
+              style={{
+                padding: '14px',
+                backgroundColor: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                fontSize: '14px',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: '6px', color: '#0f172a' }}>
+                Audit ajout et recalcul
+              </div>
+              <div style={{ color: '#334155' }}>
+                Capital principal avant ajout : <strong>{formatCurrency(additionRecalculation.principal_before_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Montant de l'ajout : <strong>{formatCurrency(additionRecalculation.addition_amount)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Capital principal après ajout : <strong>{formatCurrency(additionRecalculation.principal_after_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Gains cumulés observés : <strong>{formatCurrency(additionRecalculation.accrued_gains_before_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Intérêts déjà versés (transactions intérêts) : <strong>{formatCurrency(additionRecalculation.paid_interests_before_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Gains encore dans le produit : <strong>{formatCurrency(additionRecalculation.unpaid_gains_before_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Valeur avant ajout : <strong>{formatCurrency(additionRecalculation.total_value_before_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Valeur après ajout : <strong>{formatCurrency(additionRecalculation.total_value_after_addition)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Facteur appliqué à la régénération : <strong>{additionRecalculation.capital_scale_factor}</strong>
               </div>
             </div>
           )}
@@ -841,7 +1001,7 @@ export function PositionGenerationModal({
                   marginBottom: '20px'
                 }}>
                   <div style={{ fontSize: '16px', fontWeight: '600', color: '#92400e', marginBottom: '12px' }}>
-                    ⚠️ Positions qui seront supprimées
+                    ⚠️ {isWithdrawal ? 'Prévisualisation (dry-run): positions qui seront supprimées' : 'Positions qui seront supprimées'}
                   </div>
                   <div style={{ fontSize: '14px', color: '#78350f', marginBottom: '12px' }}>
                     <strong>{deletedPositions.total_count}</strong> position(s) en attente seront supprimées avant la génération des nouvelles positions.
@@ -906,11 +1066,116 @@ export function PositionGenerationModal({
                   )}
                 </div>
               )}
+
+              {isWithdrawal && !positionsSaved && recalculationPreview && (
+                <div
+                  style={{
+                    padding: '16px',
+                    backgroundColor: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                  }}
+                >
+                  <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#1e3a8a' }}>
+                    Prévisualisation (dry-run)
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Statut : <strong>{recalculationPreview.status}</strong>
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Suppressions attendues : <strong>{recalculationPreview.deleted_total_expected}</strong>
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Régénérations attendues : <strong>{recalculationPreview.regenerated_total_expected}</strong>
+                  </div>
+                  {recalculationPreview.generated_positions_preview_note && (
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#475569' }}>
+                      {recalculationPreview.generated_positions_preview_note}
+                    </div>
+                  )}
+                  {recalculationPreview.per_transaction_expected?.length > 0 && (
+                    <details style={{ marginTop: '10px' }}>
+                      <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>
+                        Voir le détail par transaction ({recalculationPreview.per_transaction_expected.length})
+                      </summary>
+                      <ul style={{ marginTop: '8px', marginLeft: '18px', fontSize: '13px', color: '#334155' }}>
+                        {recalculationPreview.per_transaction_expected.map((item) => (
+                          <li key={item.transaction_id}>
+                            {item.transaction_id}: supprimées={item.before_pending}, régénérées={item.created}, statut={item.status}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  {recalculationPreview.errors?.length > 0 && (
+                    <div style={{ marginTop: '8px', color: '#b91c1c', fontSize: '13px' }}>
+                      <strong>Erreurs preview :</strong>
+                      <ul style={{ marginTop: '6px', marginLeft: '18px' }}>
+                        {recalculationPreview.errors.map((errMsg, idx) => (
+                          <li key={`${idx}-${errMsg}`}>{errMsg}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isWithdrawal && recalculationExecution && (
+                <div
+                  style={{
+                    padding: '16px',
+                    backgroundColor: recalculationExecution.status === 'ok' ? '#ecfdf5' : '#fef2f2',
+                    border: `1px solid ${recalculationExecution.status === 'ok' ? '#86efac' : '#fecaca'}`,
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                  }}
+                >
+                  <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#0f172a' }}>
+                    Exécution réelle du recalcul
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Statut : <strong>{recalculationExecution.status === 'ok' ? 'Succès' : 'Échec'}</strong>
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Positions supprimées : <strong>{recalculationExecution.deleted_total}</strong>
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Positions régénérées : <strong>{recalculationExecution.regenerated_total}</strong>
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#334155' }}>
+                    Pending final en base : <strong>{recalculationExecution.final_pending_total}</strong>
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#475569' }}>
+                    Note: &quot;Positions régénérées&quot; est le total créé. L&apos;onglet &quot;À venir&quot; peut être plus bas si certaines
+                    positions passent immédiatement en &quot;Ouvertes&quot; ou &quot;Fermées&quot; selon l&apos;heure d&apos;ouverture/fermeture.
+                  </div>
+                  {recalculationExecution.errors?.length > 0 && (
+                    <div style={{ marginTop: '8px', color: '#b91c1c', fontSize: '13px' }}>
+                      <strong>Erreurs :</strong>
+                      <ul style={{ marginTop: '6px', marginLeft: '18px' }}>
+                        {recalculationExecution.errors.map((errMsg, idx) => (
+                          <li key={`${idx}-${errMsg}`}>{errMsg}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
               
               <p style={{ marginBottom: '20px', color: '#64748b' }}>
-                {positions.length} position(s) générée(s). Veuillez vérifier avant de valider :
+                {isWithdrawal
+                  ? `${recalculationPreview?.regenerated_total_expected ?? 0} position(s) attendue(s) après exécution.`
+                  : `${positions.length} position(s) générée(s). Veuillez vérifier avant de valider :`}
               </p>
-              
+
+              {( !isWithdrawal || (isWithdrawal && positions.length > 0) ) && (
+              <>
+              {isWithdrawal && (
+                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
+                  Liste des positions attendues (prévisualisation dry-run)
+                </div>
+              )}
               <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                   <thead>
@@ -954,7 +1219,10 @@ export function PositionGenerationModal({
                   </tbody>
                 </table>
               </div>
+              </>
+              )}
 
+              {!isWithdrawal && (
               <div style={{ 
                 padding: '12px', 
                 backgroundColor: '#f0f9ff', 
@@ -979,9 +1247,12 @@ export function PositionGenerationModal({
                   </span>
                 </div>
               </div>
+              )}
 
               <div className="modal-form-actions">
-                {isWithdrawal && readyToConfirm && !positionsSaved ? (
+                {(() => {
+                  const isAdditionRecalc = !!additionRecalculation || isRecalculationSaved;
+                  return isWithdrawal && readyToConfirm && !positionsSaved ? (
                   // For withdrawals after clicking "Valider", show confirm button to actually save
                   <>
                     <Button type="button" variant="outline" onClick={() => setStep('review-rates')}>
@@ -989,6 +1260,12 @@ export function PositionGenerationModal({
                     </Button>
                     <Button type="button" onClick={handleConfirm}>
                       Confirmer
+                    </Button>
+                  </>
+                ) : (isWithdrawal || isAdditionRecalc) && positionsSaved ? (
+                  <>
+                    <Button type="button" onClick={handleClose}>
+                      Fermer
                     </Button>
                   </>
                 ) : (
@@ -1000,7 +1277,8 @@ export function PositionGenerationModal({
                       Valider
                     </Button>
                   </>
-                )}
+                );
+                })()}
               </div>
             </div>
           )}

@@ -6957,11 +6957,25 @@ def transaction_generate_rates(request, client_id, transaction_id):
         and transaction.transfer_to == 'balance'
     )
     
+    # Check if this investment requires recalculation (existing pending positions on same product)
+    requires_addition_recalculation = False
+    if is_investment:
+        product_id = transaction.transfer_to
+        if product_id and product_id != 'balance':
+            from .models import Position
+            pending_count = Position.objects.filter(
+                product_id=product_id,
+                client_id=transaction.client_id,
+                status='pending'
+            ).count()
+            requires_addition_recalculation = pending_count > 0
+    
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
         withdrawal_metadata = None
+        addition_metadata = None
         # For withdrawals, we need to generate rates for the product source
         # Create a temporary transaction-like object pointing to the source product
         if is_withdrawal:
@@ -7005,11 +7019,36 @@ def transaction_generate_rates(request, client_id, transaction_id):
             temp_transaction._capital_cutoff_datetime = transaction.datetime or timezone.now()
             temp_transaction._withdrawal_recalc_metadata = withdrawal_metadata
             rates = generate_rates_for_investment(temp_transaction)
+        elif requires_addition_recalculation:
+            # For additions with recalculation, get the product and calculate metadata
+            product = None
+            if transaction.transfer_to and transaction.transfer_to != 'balance':
+                try:
+                    from .models import Product
+                    product = Product.objects.get(id=transaction.transfer_to)
+                except Product.DoesNotExist:
+                    pass
+            
+            if product is None and transaction.product:
+                product = transaction.product
+            
+            if product:
+                from .position_service import calculate_addition_recalculation_metadata
+                addition_metadata = calculate_addition_recalculation_metadata(
+                    addition_txn=transaction,
+                    product=product,
+                )
+                # Attach metadata to transaction so build_investment_context can use it
+                transaction._capital_cutoff_datetime = transaction.datetime or timezone.now()
+                transaction._withdrawal_recalc_metadata = addition_metadata  # Reuse same attribute name for consistency
+            rates = generate_rates_for_investment(transaction)
         else:
             rates = generate_rates_for_investment(transaction)
         response_payload = {'rates': rates}
         if withdrawal_metadata:
             response_payload['withdrawal_recalculation'] = withdrawal_metadata
+        if addition_metadata:
+            response_payload['addition_recalculation'] = addition_metadata
         return Response(response_payload)
     except Exception as e:
         import logging
@@ -7049,6 +7088,19 @@ def transaction_generate_positions(request, client_id, transaction_id):
         transaction.type == 'transfert'
         and transaction.transfer_to == 'balance'
     )
+    
+    # Check if this investment requires recalculation (existing pending positions on same product)
+    requires_addition_recalculation = False
+    if is_investment:
+        product_id = transaction.transfer_to
+        if product_id and product_id != 'balance':
+            from .models import Position
+            pending_count = Position.objects.filter(
+                product_id=product_id,
+                client_id=transaction.client_id,
+                status='pending'
+            ).count()
+            requires_addition_recalculation = pending_count > 0
     
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
@@ -7125,6 +7177,123 @@ def transaction_generate_positions(request, client_id, transaction_id):
         transaction.subscription_details = subscription_details
     
     try:
+        if requires_addition_recalculation:
+            # Use the same recalculation engine for additions, in dry-run mode.
+            from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
+            recalculation_preview = recalculate_positions_for_product_addition(
+                transaction,
+                force_recalculate=True,
+                strict=False,
+                dry_run=True,
+                positions_per_month_min=min_val if positions_per_month_min is not None else None,
+                positions_per_month_max=max_val if positions_per_month_max is not None else None,
+            )
+
+            deleted_total_expected = int(recalculation_preview.get('deleted_total') or 0)
+            regenerated_total_expected = int(recalculation_preview.get('regenerated_total') or 0)
+            per_txn_expected = recalculation_preview.get('per_transaction') or []
+
+            deleted_positions_preview = None
+            deleted_by_transaction = recalculation_preview.get('deleted_by_transaction') or {}
+            if deleted_total_expected > 0:
+                deleted_positions_preview = {
+                    'total_count': deleted_total_expected,
+                    'deleted_by_transaction': deleted_by_transaction,
+                    'positions': [],
+                    'note': 'Previsualisation dry-run basee sur execution reelle (sans ecriture base).',
+                }
+
+            product = None
+            if transaction.transfer_to and transaction.transfer_to != 'balance':
+                try:
+                    from .models import Product
+                    product = Product.objects.get(id=transaction.transfer_to)
+                except Product.DoesNotExist:
+                    product = None
+            if product is None and transaction.product:
+                product = transaction.product
+
+            addition_metadata = (
+                calculate_addition_recalculation_metadata(addition_txn=transaction, product=product)
+                if product is not None else None
+            )
+
+            response_data = {
+                'positions': recalculation_preview.get('generated_positions_preview') or [],
+                'recalculation_execution_preview': {
+                    'deleted_total_expected': deleted_total_expected,
+                    'regenerated_total_expected': regenerated_total_expected,
+                    'per_transaction_expected': per_txn_expected,
+                    'status': recalculation_preview.get('status'),
+                    'errors': recalculation_preview.get('errors') or [],
+                    'generated_positions_preview_note': recalculation_preview.get('generated_positions_preview_note'),
+                    'source': 'recalculate_positions_for_product_addition_dry_run',
+                },
+            }
+            if deleted_positions_preview:
+                response_data['deleted_positions'] = deleted_positions_preview
+            if addition_metadata:
+                response_data['addition_recalculation'] = addition_metadata
+            return Response(response_data)
+
+        if is_withdrawal:
+            # Use the same recalculation engine as save-positions, but in dry-run mode.
+            recalculation_preview = recalculate_positions_for_product_withdrawal(
+                transaction,
+                force_recalculate=True,
+                strict=False,
+                dry_run=True,
+                positions_per_month_min=min_val if positions_per_month_min is not None else None,
+                positions_per_month_max=max_val if positions_per_month_max is not None else None,
+            )
+
+            deleted_total_expected = int(recalculation_preview.get('deleted_total') or 0)
+            regenerated_total_expected = int(recalculation_preview.get('regenerated_total') or 0)
+            per_txn_expected = recalculation_preview.get('per_transaction') or []
+
+            deleted_positions_preview = None
+            deleted_by_transaction = recalculation_preview.get('deleted_by_transaction') or {}
+            if deleted_total_expected > 0:
+                deleted_positions_preview = {
+                    'total_count': deleted_total_expected,
+                    'deleted_by_transaction': deleted_by_transaction,
+                    'positions': [],
+                    'note': 'Prévisualisation dry-run basée sur l’exécution réelle (sans écriture base).',
+                }
+
+            product = None
+            if transaction.transfer_from and transaction.transfer_from != 'balance':
+                try:
+                    from .models import Product
+                    product = Product.objects.get(id=transaction.transfer_from)
+                except Product.DoesNotExist:
+                    product = None
+            if product is None and transaction.product:
+                product = transaction.product
+
+            withdrawal_metadata = (
+                calculate_withdrawal_recalculation_metadata(withdrawal_txn=transaction, product=product)
+                if product is not None else None
+            )
+
+            response_data = {
+                'positions': recalculation_preview.get('generated_positions_preview') or [],
+                'recalculation_execution_preview': {
+                    'deleted_total_expected': deleted_total_expected,
+                    'regenerated_total_expected': regenerated_total_expected,
+                    'per_transaction_expected': per_txn_expected,
+                    'status': recalculation_preview.get('status'),
+                    'errors': recalculation_preview.get('errors') or [],
+                    'generated_positions_preview_note': recalculation_preview.get('generated_positions_preview_note'),
+                    'source': 'recalculate_positions_for_product_withdrawal_dry_run',
+                },
+            }
+            if deleted_positions_preview:
+                response_data['deleted_positions'] = deleted_positions_preview
+            if withdrawal_metadata:
+                response_data['withdrawal_recalculation'] = withdrawal_metadata
+            return Response(response_data)
+
         withdrawal_metadata = None
         # For withdrawals, create a temporary transaction pointing to source product
         txn_to_use = transaction
@@ -7367,6 +7536,19 @@ def transaction_save_positions(request, client_id, transaction_id):
         and transaction.transfer_to == 'balance'
     )
     
+    # Check if this investment requires recalculation (existing pending positions on same product)
+    requires_addition_recalculation = False
+    if is_investment:
+        product_id = transaction.transfer_to
+        if product_id and product_id != 'balance':
+            from .models import Position
+            pending_count = Position.objects.filter(
+                product_id=product_id,
+                client_id=transaction.client_id,
+                status='pending'
+            ).count()
+            requires_addition_recalculation = pending_count > 0
+    
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
@@ -7390,56 +7572,52 @@ def transaction_save_positions(request, client_id, transaction_id):
         period_summaries = None
     
     try:
-        if is_withdrawal:
-            # For withdrawals, only save the generation history (no positions are created for the withdrawal itself)
-            save_position_generation_history(
-                transaction,
-                rates_used=rates_used,
-                period_summaries=period_summaries,
-                positions_data=positions_data,
-            )
+        if requires_addition_recalculation:
+            # Handle addition with recalculation (existing pending positions)
+            from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
             
-            # Collect information about positions that will be deleted before recalculation
-            # IMPORTANT: Always recalculate positions for withdrawals when save-positions is called,
-            # regardless of transaction status. This ensures positions are recalculated even if
-            # the frontend creates withdrawals with status 'en_cours' and fails to update to 'valide'.
-            # The save-positions call indicates the user is finalizing the withdrawal.
-            deleted_positions_info = None
-            withdrawal_metadata = None
-            try:
-                # Get product from withdrawal transaction
+            with db_transaction.atomic():
+                # Save the generation history
+                save_position_generation_history(
+                    transaction,
+                    rates_used=rates_used,
+                    period_summaries=period_summaries,
+                    positions_data=positions_data,
+                )
+
+                # Collect information about positions that are expected to be deleted
+                deleted_positions_info = None
+                addition_metadata = None
                 product = None
-                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                if transaction.transfer_to and transaction.transfer_to != 'balance':
                     from .models import Product
                     try:
-                        product = Product.objects.get(id=transaction.transfer_from)
+                        product = Product.objects.get(id=transaction.transfer_to)
                     except Product.DoesNotExist:
-                        pass
-                
+                        product = None
+
                 if product is None and transaction.product:
                     product = transaction.product
-                
+
                 if product:
-                    withdrawal_metadata = calculate_withdrawal_recalculation_metadata(
-                        withdrawal_txn=transaction,
+                    addition_metadata = calculate_addition_recalculation_metadata(
+                        addition_txn=transaction,
                         product=product,
                     )
-                    # Find all pending positions that will be deleted
                     from .models import Position
                     from django.db.models import Count
-                    
+
                     all_pending_positions = Position.objects.filter(
                         product_id=product.id,
                         client_id=transaction.client_id,
                         status='pending'
                     ).select_related('transaction', 'asset')
-                    
+
                     total_pending_count = all_pending_positions.count()
                     deleted_by_transaction = {}
                     deleted_positions_list = []
-                    
+
                     if total_pending_count > 0:
-                        # Get breakdown by transaction
                         pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
                             count=Count('id')
                         )
@@ -7447,8 +7625,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                             txn_id = item['transaction_id']
                             count = item['count']
                             deleted_by_transaction[txn_id] = count
-                        
-                        # Get detailed position information (limit to first 100)
+
                         positions_to_delete = list(all_pending_positions[:100])
                         for pos in positions_to_delete:
                             deleted_positions_list.append({
@@ -7463,29 +7640,149 @@ def transaction_save_positions(request, client_id, transaction_id):
                                 'period_index': pos.period_index,
                                 'period_date': pos.period_date.isoformat() if pos.period_date else None,
                             })
-                        
+
                         deleted_positions_info = {
                             'total_count': total_pending_count,
                             'deleted_by_transaction': deleted_by_transaction,
                             'positions': deleted_positions_list,
                             'note': f'{len(deleted_positions_list)} positions shown (out of {total_pending_count} total)' if total_pending_count > len(deleted_positions_list) else None
                         }
-                
-                # Now recalculate positions (this will delete the pending positions)
-                # This happens regardless of transaction status to ensure positions are always recalculated
-                # when save-positions is called for a withdrawal
-                # Use force_recalculate=True to bypass status check since frontend may call this with status 'en_cours'
-                recalculate_positions_for_product_withdrawal(transaction, force_recalculate=True)
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Recalculated positions for product after withdrawal {transaction.id} via save-positions API "
-                           f"(status={transaction.status})")
-            except Exception as recalc_err:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Failed to recalculate positions after withdrawal {transaction.id} via save-positions API: {str(recalc_err)}", exc_info=True)
-                # Don't fail the request if recalculation fails, but log the error
+
+                # STRICT execution mode: if recalculation is partial/inconsistent, it raises and this request fails.
+                save_positions_per_month_min = request.data.get('positions_per_month_min')
+                save_positions_per_month_max = request.data.get('positions_per_month_max')
+                save_min_val = None
+                save_max_val = None
+                if save_positions_per_month_min is not None or save_positions_per_month_max is not None:
+                    if save_positions_per_month_min is None or save_positions_per_month_max is None:
+                        raise ValueError('positions_per_month_min et positions_per_month_max doivent être fournis ensemble')
+                    try:
+                        save_min_val = int(save_positions_per_month_min)
+                        save_max_val = int(save_positions_per_month_max)
+                    except (ValueError, TypeError):
+                        raise ValueError('positions_per_month_min et positions_per_month_max doivent être des entiers')
+                    if save_min_val < 0 or save_max_val < save_min_val:
+                        raise ValueError(f'Fourchette invalide: min ({save_min_val}) doit être >= 0 et <= max ({save_max_val})')
+
+                recalculation_execution = recalculate_positions_for_product_addition(
+                    transaction,
+                    force_recalculate=True,
+                    strict=True,
+                    positions_per_month_min=save_min_val,
+                    positions_per_month_max=save_max_val,
+                )
+
+            response_data = {
+                'positions': [], 
+                'count': 0, 
+                'message': 'Historique de génération enregistré pour l\'ajout avec recalcul'
+            }
             
+            if deleted_positions_info:
+                response_data['deleted_positions'] = deleted_positions_info
+            if addition_metadata:
+                response_data['addition_recalculation'] = addition_metadata
+            response_data['recalculation_execution'] = recalculation_execution
+            
+            return Response(response_data)
+        
+        if is_withdrawal:
+            with db_transaction.atomic():
+                # For withdrawals, only save the generation history (no positions are created for the withdrawal itself)
+                save_position_generation_history(
+                    transaction,
+                    rates_used=rates_used,
+                    period_summaries=period_summaries,
+                    positions_data=positions_data,
+                )
+
+                # Collect information about positions that are expected to be deleted (preview)
+                deleted_positions_info = None
+                withdrawal_metadata = None
+                product = None
+                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                    from .models import Product
+                    try:
+                        product = Product.objects.get(id=transaction.transfer_from)
+                    except Product.DoesNotExist:
+                        product = None
+
+                if product is None and transaction.product:
+                    product = transaction.product
+
+                if product:
+                    withdrawal_metadata = calculate_withdrawal_recalculation_metadata(
+                        withdrawal_txn=transaction,
+                        product=product,
+                    )
+                    from .models import Position
+                    from django.db.models import Count
+
+                    all_pending_positions = Position.objects.filter(
+                        product_id=product.id,
+                        client_id=transaction.client_id,
+                        status='pending'
+                    ).select_related('transaction', 'asset')
+
+                    total_pending_count = all_pending_positions.count()
+                    deleted_by_transaction = {}
+                    deleted_positions_list = []
+
+                    if total_pending_count > 0:
+                        pending_by_transaction = all_pending_positions.values('transaction_id').annotate(
+                            count=Count('id')
+                        )
+                        for item in pending_by_transaction:
+                            txn_id = item['transaction_id']
+                            count = item['count']
+                            deleted_by_transaction[txn_id] = count
+
+                        positions_to_delete = list(all_pending_positions[:100])
+                        for pos in positions_to_delete:
+                            deleted_positions_list.append({
+                                'id': pos.id,
+                                'transaction_id': pos.transaction_id,
+                                'asset_id': pos.asset_id,
+                                'asset_name': pos.asset.name if pos.asset else None,
+                                'invested_amount': str(pos.invested_amount),
+                                'profit_loss': str(pos.profit_loss) if pos.profit_loss else '0',
+                                'opened_at': pos.opened_at.isoformat() if pos.opened_at else None,
+                                'closed_at': pos.closed_at.isoformat() if pos.closed_at else None,
+                                'period_index': pos.period_index,
+                                'period_date': pos.period_date.isoformat() if pos.period_date else None,
+                            })
+
+                        deleted_positions_info = {
+                            'total_count': total_pending_count,
+                            'deleted_by_transaction': deleted_by_transaction,
+                            'positions': deleted_positions_list,
+                            'note': f'{len(deleted_positions_list)} positions shown (out of {total_pending_count} total)' if total_pending_count > len(deleted_positions_list) else None
+                        }
+
+                # STRICT execution mode: if recalculation is partial/inconsistent, it raises and this request fails.
+                save_positions_per_month_min = request.data.get('positions_per_month_min')
+                save_positions_per_month_max = request.data.get('positions_per_month_max')
+                save_min_val = None
+                save_max_val = None
+                if save_positions_per_month_min is not None or save_positions_per_month_max is not None:
+                    if save_positions_per_month_min is None or save_positions_per_month_max is None:
+                        raise ValueError('positions_per_month_min et positions_per_month_max doivent être fournis ensemble')
+                    try:
+                        save_min_val = int(save_positions_per_month_min)
+                        save_max_val = int(save_positions_per_month_max)
+                    except (ValueError, TypeError):
+                        raise ValueError('positions_per_month_min et positions_per_month_max doivent être des entiers')
+                    if save_min_val < 0 or save_max_val < save_min_val:
+                        raise ValueError(f'Fourchette invalide: min ({save_min_val}) doit être >= 0 et <= max ({save_max_val})')
+
+                recalculation_execution = recalculate_positions_for_product_withdrawal(
+                    transaction,
+                    force_recalculate=True,
+                    strict=True,
+                    positions_per_month_min=save_min_val,
+                    positions_per_month_max=save_max_val,
+                )
+
             response_data = {
                 'positions': [], 
                 'count': 0, 
@@ -7496,6 +7793,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                 response_data['deleted_positions'] = deleted_positions_info
             if withdrawal_metadata:
                 response_data['withdrawal_recalculation'] = withdrawal_metadata
+            response_data['recalculation_execution'] = recalculation_execution
             
             return Response(response_data)
         else:
