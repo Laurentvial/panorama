@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
@@ -81,9 +80,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
   const [allPositions, setAllPositions] = useState<ClientPositionRow[]>([]); // All positions for counts
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
-  const [search, setSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
-  const [products, setProducts] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
 
@@ -162,18 +159,6 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   }, [clientId, activeTab]);
 
   useEffect(() => {
-    const loadProducts = async () => {
-      try {
-        const productsData = await apiCall('/api/products/').catch(() => ({ products: [] }));
-        setProducts(productsData.products || productsData || []);
-      } catch (error) {
-        console.error('Error loading products:', error);
-      }
-    };
-    loadProducts();
-  }, []);
-
-  useEffect(() => {
     const loadAssets = async () => {
       try {
         const assetsData = await apiCall('/api/assets/').catch(() => ({ assets: [] }));
@@ -185,48 +170,47 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
     loadAssets();
   }, []);
 
-  // Filter by product and search (without status filter) - use allPositions for counts
-  const filteredByProductAndSearch = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  const productOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of allPositions) {
+      const productId = String(p.productId || '').trim();
+      if (!productId) continue;
+      const productName = String(p.productName || productId).trim();
+      if (!map.has(productId)) map.set(productId, productName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }, [allPositions]);
+
+  useEffect(() => {
+    if (!selectedProductId) return;
+    const stillExists = productOptions.some((p) => p.id === selectedProductId);
+    if (!stillExists) setSelectedProductId(undefined);
+  }, [productOptions, selectedProductId]);
+
+  // Filter by product (without status filter) - use allPositions for counts
+  const filteredByProduct = useMemo(() => {
     return allPositions.filter((p) => {
       // Filter by product
       if (selectedProductId && p.productId !== selectedProductId) return false;
-      
-      // Filter by search query
-      if (!q) return true;
-      return (
-        (p.productName || '').toLowerCase().includes(q) ||
-        (p.productId || '').toLowerCase().includes(q) ||
-        (p.assetName || '').toLowerCase().includes(q) ||
-        (p.assetId || '').toLowerCase().includes(q) ||
-        (p.transactionId || '').toLowerCase().includes(q)
-      );
+      return true;
     });
-  }, [allPositions, search, selectedProductId]);
+  }, [allPositions, selectedProductId]);
 
-  // Filter paginated positions by product and search (for display)
-  const filteredPaginatedByProductAndSearch = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  // Filter paginated positions by product (for display)
+  const filteredPaginatedByProduct = useMemo(() => {
     return positions.filter((p) => {
       // Filter by product
       if (selectedProductId && p.productId !== selectedProductId) return false;
-      
-      // Filter by search query
-      if (!q) return true;
-      return (
-        (p.productName || '').toLowerCase().includes(q) ||
-        (p.productId || '').toLowerCase().includes(q) ||
-        (p.assetName || '').toLowerCase().includes(q) ||
-        (p.assetId || '').toLowerCase().includes(q) ||
-        (p.transactionId || '').toLowerCase().includes(q)
-      );
+      return true;
     });
-  }, [positions, search, selectedProductId]);
+  }, [positions, selectedProductId]);
 
-  // Filter paginated positions by product, search AND active tab status
+  // Filter paginated positions by product AND active tab status
   // Backend already handles sorting, so we just filter here
   const filtered = useMemo(() => {
-    return filteredPaginatedByProductAndSearch.filter((p) => {
+    return filteredPaginatedByProduct.filter((p) => {
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
@@ -235,20 +219,20 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       if (activeTab === 'closed' && !isClosed) return false;
       return true;
     });
-  }, [filteredPaginatedByProductAndSearch, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [filteredPaginatedByProduct, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
 
-  // Counts should reflect filtered positions (by product and search, but not by active tab)
+  // Counts should reflect filtered positions by product, but not by active tab
   const counts = useMemo(() => {
     let upcoming = 0;
     let open = 0;
     let closed = 0;
-    for (const p of filteredByProductAndSearch) {
+    for (const p of filteredByProduct) {
       if (upcomingStatuses.has(p.status)) upcoming += 1;
       else if (openStatuses.has(p.status)) open += 1;
       else if (closedStatuses.has(p.status)) closed += 1;
     }
     return { upcoming, open, closed };
-  }, [filteredByProductAndSearch, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [filteredByProduct, upcomingStatuses, openStatuses, closedStatuses]);
 
   return (
     <Card>
@@ -264,13 +248,6 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="w-full md:w-[420px]">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher (produit, asset, transaction...)"
-            />
-          </div>
           <div className="w-full md:w-[300px]">
             <Select 
               value={selectedProductId || 'all'} 
@@ -281,9 +258,9 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les produits</SelectItem>
-                {products.map((product: any) => (
+                {productOptions.map((product) => (
                   <SelectItem key={product.id} value={product.id}>
-                    {product.name}{product.reference ? ` (${product.reference})` : ''}
+                    {product.name}
                   </SelectItem>
                 ))}
               </SelectContent>

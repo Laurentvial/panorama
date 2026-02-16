@@ -55,8 +55,6 @@ export function AddProduct() {
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
     interestPeriod: [] as string[],
-    // Cumuler les intérêts (capitalisation_fonds)
-    capitalisationFonds: false,
     availabilityStart: '',
     availabilityEnd: '',
     linkToAssets: false,
@@ -278,7 +276,6 @@ export function AddProduct() {
         interestPeriod: Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 
           ? formData.interestPeriod.filter(p => isValidValue(p)) 
           : [],
-        capitalisationFonds: formData.capitalisationFonds,
         // Gestion des prix
         minEntryValue: isValidValue(formData.minEntryValue) ? formData.minEntryValue : '',
         maxEntryValue: isValidValue(formData.maxEntryValue) ? formData.maxEntryValue : '',
@@ -436,7 +433,6 @@ export function AddProduct() {
         if (!formData.noProfitability) {
           if (formData.profitabilityPeriod) formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod);
           formDataToSend.append('interestPeriod', formData.interestPeriod.join(', '));
-          formDataToSend.append('capitalisationFonds', String(!!formData.capitalisationFonds));
         }
         if (formData.availabilityStart) formDataToSend.append('availabilityStart', formData.availabilityStart);
         if (formData.availabilityEnd) formDataToSend.append('availabilityEnd', formData.availabilityEnd);
@@ -480,7 +476,6 @@ export function AddProduct() {
             variableProfitability: variableProfitabilityValue,
             profitabilityPeriod: !formData.noProfitability ? formData.profitabilityPeriod || undefined : undefined,
             interestPeriod: !formData.noProfitability ? (formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined) : undefined,
-            capitalisationFonds: !formData.noProfitability ? !!formData.capitalisationFonds : undefined,
             availabilityStart: formData.availabilityStart || undefined,
             availabilityEnd: formData.availabilityEnd || undefined,
             linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
@@ -815,10 +810,18 @@ export function AddProduct() {
                     <Label htmlFor="product-duration-profitability">Durée (en mois) *</Label>
                     <Input
                       id="product-duration-profitability"
+                      type="number"
+                      min="1"
+                      step="1"
                       value={formData.duration}
-                      onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          duration: e.target.value.replace(/[^0-9]/g, ''),
+                        })
+                      }
                       required
-                      placeholder="Ex: 12 mois"
+                      placeholder="Ex: 12"
                     />
                   </div>
 
@@ -950,21 +953,6 @@ export function AddProduct() {
                     )}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="product-capitalisation-fonds">Cumuler les intérêts ?</Label>
-                    <Select 
-                      value={formData.capitalisationFonds ? 'Oui' : 'Non'} 
-                      onValueChange={(value) => setFormData({ ...formData, capitalisationFonds: value === 'Oui' })}
-                    >
-                      <SelectTrigger id="product-capitalisation-fonds">
-                        <SelectValue placeholder="Sélectionner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Oui">Oui</SelectItem>
-                        <SelectItem value="Non">Non</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               )}
             </div>

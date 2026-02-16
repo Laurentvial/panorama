@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -95,50 +95,50 @@ export function Positions() {
   const [loading, setLoading] = useState(true);
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
-  const [search, setSearch] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState<string>('all');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
   const openStatuses = useMemo(() => new Set(['open']), []);
   const closedStatuses = useMemo(() => new Set(['done', 'cancelled']), []);
 
+  const productOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of positions) {
+      const productId = String(p.productId || '').trim();
+      if (!productId) continue;
+      const productName = String(p.productName || productId).trim();
+      if (!map.has(productId)) map.set(productId, productName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }, [positions]);
+
+  useEffect(() => {
+    if (selectedProductId === 'all') return;
+    const stillExists = productOptions.some((p) => p.id === selectedProductId);
+    if (!stillExists) setSelectedProductId('all');
+  }, [productOptions, selectedProductId]);
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const list = positions.filter((p) => {
-      // During loading, don't filter by status to avoid flicker
-      // The backend already filters by status, so we only need to filter by search
+    return positions.filter((p) => {
+      // During loading, keep current rows visible and only apply product filter.
       if (loading) {
-        if (!q) return true;
-        return (
-          (p.clientName || '').toLowerCase().includes(q) ||
-          (p.productName || '').toLowerCase().includes(q) ||
-          (p.assetName || '').toLowerCase().includes(q) ||
-          (p.clientId || '').toLowerCase().includes(q) ||
-          (p.productId || '').toLowerCase().includes(q) ||
-          (p.assetId || '').toLowerCase().includes(q) ||
-          (p.transactionId || '').toLowerCase().includes(q)
-        );
+        if (selectedProductId !== 'all' && String(p.productId) !== selectedProductId) return false;
+        return true;
       }
-      
-      // When not loading, filter by both status and search
+
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
       if (activeTab === 'upcoming' && !isUpcoming) return false;
       if (activeTab === 'open' && !isOpen) return false;
       if (activeTab === 'closed' && !isClosed) return false;
-      if (!q) return true;
-      return (
-        (p.clientName || '').toLowerCase().includes(q) ||
-        (p.productName || '').toLowerCase().includes(q) ||
-        (p.assetName || '').toLowerCase().includes(q) ||
-        (p.clientId || '').toLowerCase().includes(q) ||
-        (p.productId || '').toLowerCase().includes(q) ||
-        (p.assetId || '').toLowerCase().includes(q) ||
-        (p.transactionId || '').toLowerCase().includes(q)
-      );
+
+      if (selectedProductId !== 'all' && String(p.productId) !== selectedProductId) return false;
+      return true;
     });
-    return list;
-  }, [positions, activeTab, search, loading, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [positions, activeTab, loading, selectedProductId, upcomingStatuses, openStatuses, closedStatuses]);
 
   const counts = useMemo(() => {
     let upcoming = 0;
@@ -202,11 +202,19 @@ export function Positions() {
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="w-full md:w-[360px]">
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Rechercher (client, produit, transaction...)"
-              />
+              <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filtrer par produit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les produits</SelectItem>
+                  {productOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

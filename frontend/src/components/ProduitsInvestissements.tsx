@@ -174,6 +174,42 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
     setCategoryForm({ ...categoryForm, subcategories: newSubcategories });
   }
 
+  function parseSubcategories(rawSubcategory: any): string[] {
+    const parseStringValue = (value: string): string[] => {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+
+      // Handle JSON array strings first.
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            return parsed.map((item) => String(item).trim()).filter(Boolean);
+          }
+        } catch {
+          // Fallback below for python-style list strings.
+        }
+
+        // Handle python-style serialized list strings, e.g. "['A', 'B']"
+        const inner = trimmed.slice(1, -1).trim();
+        if (!inner) return [];
+        return inner
+          .split(',')
+          .map((item) => item.trim().replace(/^['"]|['"]$/g, '').trim())
+          .filter(Boolean);
+      }
+
+      return [trimmed];
+    };
+
+    const values = Array.isArray(rawSubcategory)
+      ? rawSubcategory.flatMap((item) => parseStringValue(String(item ?? '')))
+      : parseStringValue(String(rawSubcategory ?? ''));
+
+    // Keep insertion order while removing duplicates.
+    return Array.from(new Set(values));
+  }
+
   return (
     <div className="space-y-6">
       <div className="page-header-section">
@@ -217,7 +253,9 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                         <th className="text-left py-3 px-4">Investissement minimum</th>
                         <th className="text-left py-3 px-4">Plafond de souscription</th>
                         <th className="text-left py-3 px-4">Rentabilité</th>
+                        <th className="text-left py-3 px-4">Périodes de rentabilité disponibles</th>
                         <th className="text-left py-3 px-4">Période de rentabilité</th>
+                        <th className="text-left py-3 px-4">Fonds disponible</th>
                         <th className="text-left py-3 px-4">Durée</th>
                         <th className="text-left py-3 px-4">Statut</th>
                         <th className="text-right py-3 px-4">Actions</th>
@@ -260,20 +298,27 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                             <td className="py-3 px-4 text-slate-600">{product.reference}</td>
                             <td className="py-3 px-4">{product.name}</td>
                             <td className="py-3 px-4">
-                              {category ? (
-                                <div className="flex flex-col gap-1">
-                                  <Badge variant="outline">{category.title}</Badge>
-                                  {product.subcategory && (
-                                    <span className="text-xs text-slate-500">{product.subcategory}</span>
-                                  )}
-                                </div>
-                              ) : (
-                                product.subcategory ? (
-                                  <span className="text-xs text-slate-500">{product.subcategory}</span>
-                                ) : (
-                                  '-'
-                                )
-                              )}
+                              {(() => {
+                                const subcategories = parseSubcategories(product.subcategory);
+                                const categoryLabel = category?.title || null;
+                                if (!categoryLabel && subcategories.length === 0) {
+                                  return '-';
+                                }
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    {categoryLabel && <Badge variant="outline">{categoryLabel}</Badge>}
+                                    {subcategories.length > 0 && (
+                                      <div className="flex gap-1 flex-wrap">
+                                        {subcategories.map((subcategory) => (
+                                          <Badge key={subcategory} variant="secondary" className="text-xs">
+                                            {subcategory}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="py-3 px-4">
                               {product.minEntryValue ? (
@@ -299,14 +344,34 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                               )}
                             </td>
                             <td className="py-3 px-4">
+                              {(() => {
+                                const rawPeriods = product.interestPeriod || product.interest_period || '';
+                                const periods = String(rawPeriods)
+                                  .split(',')
+                                  .map((p) => p.trim())
+                                  .filter((p) => p.length > 0);
+                                if (periods.length === 0) {
+                                  return '-';
+                                }
+                                return (
+                                  <div className="flex gap-1 flex-wrap">
+                                    {periods.map((period) => (
+                                      <Badge key={period} variant="outline" className="text-xs">
+                                        {period}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                            <td className="py-3 px-4">
                               {product.profitabilityPeriod || product.profitability_period || '-'}
                             </td>
                             <td className="py-3 px-4">
-                              {product.duration ? (
-                                product.duration.toLowerCase().includes('mois') || product.duration.toLowerCase().includes('month') 
-                                  ? product.duration 
-                                  : `${product.duration} Mois`
-                              ) : '-'}
+                              {(product.availableFunds ?? product.available_funds) ? 'Oui' : 'Non'}
+                            </td>
+                            <td className="py-3 px-4">
+                              {product.duration ? `${String(product.duration)} Mois` : '-'}
                             </td>
                             <td className="py-3 px-4">
                               <Button

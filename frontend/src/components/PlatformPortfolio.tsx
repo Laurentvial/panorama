@@ -247,6 +247,8 @@ export function PlatformPortfolio() {
     }
   };
 
+  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+
   const formatPositionRange = (p: any) => {
     if (p.opened_at) {
       const start = formatDateTime(p.opened_at);
@@ -393,8 +395,8 @@ export function PlatformPortfolio() {
   }, [positions]);
 
   const investedProducts = useMemo(() => {
-    // Products the client is invested in = completed "transfert" transactions
-    // that moved funds into a product (balance -> product), net of withdrawals (product -> balance).
+    // Products shown in "Actifs détenus" should reflect net transaction movement:
+    // include products where inflows > outflows (net > 0), even without open asset positions.
     const map = new Map<
       string,
       {
@@ -417,37 +419,20 @@ export function PlatformPortfolio() {
       return tb > ta ? b : a;
     };
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
-    for (const t of completedTransactions) {
-      if (!t) continue;
-      if (String(t.type || '') !== 'transfert') continue;
+    const normalizeId = (value: any): string | null => {
+      if (value == null) return null;
+      const v = String(value).trim();
+      if (!v || v === 'balance' || v === 'trading') return null;
+      return v;
+    };
 
-      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
-      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
-      // Exclude trading orders (balance -> trading wallet)
-      if (to != null && String(to) === 'trading') continue;
+    const addMovement = (productId: string, delta: number, t: any) => {
+      if (!Number.isFinite(delta) || delta === 0) return;
 
-      const productId =
-        (t?.productId != null ? String(t.productId) : null) ||
-        (to != null ? String(to) : null) ||
-        (t?.subscription_details?.productId != null ? String(t.subscription_details.productId) : null);
-
-      if (!productId || productId === 'balance' || productId === 'trading') continue;
-
-      // Skip technical product if it ever leaks here
       const productReference = String(t?.productReference || t?.product_reference || '').trim();
-      if (productReference === 'TRADING_WALLET') continue;
-
-      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
-      const amt = Number.isFinite(amountNum) ? amountNum : 0;
-      if (!amt) continue;
-
-      const toIsBalance = to != null && String(to) === 'balance';
-      const fromIsBalance = from != null && String(from) === 'balance';
-
-      // Net invested: + when funds go into the product, - when funds exit to balance.
-      const delta = toIsBalance ? -amt : fromIsBalance ? amt : amt;
+      if (productReference === 'TRADING_WALLET') return;
 
       const prev =
         map.get(productId) || ({
@@ -462,10 +447,66 @@ export function PlatformPortfolio() {
       map.set(productId, {
         ...prev,
         productName: t?.productName || prev.productName,
+        productType: t?.productType || t?.product_type || prev.productType,
         productReference: productReference || prev.productReference,
         netInvested: prev.netInvested + delta,
         latestDateIso: pickLatestIso(prev.latestDateIso, t?.datetime || null),
       });
+    };
+
+    for (const t of completedTransactions) {
+      if (!t) continue;
+      if (String(t.type || '') !== 'transfert') continue;
+
+      const toRaw = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const fromRaw = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+      const to = toRaw != null ? String(toRaw).trim() : '';
+      const from = fromRaw != null ? String(fromRaw).trim() : '';
+
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+      if (!amt) continue;
+
+      const productIdFromField =
+        normalizeId(t?.productId) ||
+        normalizeId(t?.product_id) ||
+        normalizeId(t?.subscription_details?.productId);
+
+      const inflowProductId = normalizeId(to);
+      const outflowProductId = normalizeId(from);
+
+      // Direction based on transfer endpoints:
+      // - balance -> product : +amount on destination product
+      // - product -> balance : -amount on source product
+      // - product -> product : -source and +destination
+      if (from === 'balance' && inflowProductId) {
+        addMovement(inflowProductId, amt, t);
+        continue;
+      }
+
+      if (to === 'balance' && outflowProductId) {
+        addMovement(outflowProductId, -amt, t);
+        continue;
+      }
+
+      if (inflowProductId && outflowProductId) {
+        addMovement(outflowProductId, -amt, t);
+        addMovement(inflowProductId, amt, t);
+        continue;
+      }
+
+      // Backward-compatible fallback for historical rows missing one side.
+      if (inflowProductId) {
+        addMovement(inflowProductId, amt, t);
+        continue;
+      }
+      if (outflowProductId) {
+        addMovement(outflowProductId, -amt, t);
+        continue;
+      }
+      if (productIdFromField) {
+        addMovement(productIdFromField, amt, t);
+      }
     }
 
     return Array.from(map.values())
@@ -503,7 +544,7 @@ export function PlatformPortfolio() {
       }
     >();
 
-    const completed = (transactions || []).filter((t: any) => String(t?.status || '').toLowerCase() === 'valide');
+    const completed = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
     for (const t of completed) {
       if (!t) continue;
       if (String(t?.type || '') !== 'transfert') continue;
@@ -752,7 +793,7 @@ export function PlatformPortfolio() {
     let calculatedProfitLoss = 0;
     let calculatedTotalInvesti = 0; // achat + transfert (balance -> product) - transfert (product -> balance) when status is 'valide'
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
     completedTransactions.forEach((transaction: any) => {
       const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
@@ -953,7 +994,7 @@ export function PlatformPortfolio() {
 
   // Calculate gains/losses from interest transactions (these are credited to cash balance)
   const interestGainsInCash = useMemo(() => {
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
     let total = 0;
     completedTransactions.forEach((transaction: any) => {
       if (transaction.type === 'interets') {
@@ -973,7 +1014,7 @@ export function PlatformPortfolio() {
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = useMemo(() => {
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
     const productTypeById = (productId: any): string | null => {
       if (!productId) return null;

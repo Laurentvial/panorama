@@ -39,6 +39,20 @@ interface Position {
   status: string;
 }
 
+interface WithdrawalRecalculationMetadata {
+  product_id: string | null;
+  withdrawal_amount: string;
+  principal_before_withdrawal: string;
+  accrued_gains_before_withdrawal: string;
+  paid_interests_before_withdrawal: string;
+  unpaid_gains_before_withdrawal: string;
+  total_value_before_withdrawal: string;
+  total_value_after_withdrawal: string;
+  withdrawal_ratio: string;
+  capital_scale_factor: string;
+  cutoff_datetime: string;
+}
+
 interface PositionGenerationModalProps {
   isOpen: boolean;
   transaction: any;
@@ -69,6 +83,7 @@ export function PositionGenerationModal({
   const [positionsPerMonthMin, setPositionsPerMonthMin] = useState<string>('');
   const [positionsPerMonthMax, setPositionsPerMonthMax] = useState<string>('');
   const [positionsRangeError, setPositionsRangeError] = useState<string | null>(null);
+  const [withdrawalRecalculation, setWithdrawalRecalculation] = useState<WithdrawalRecalculationMetadata | null>(null);
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
     deleted_by_transaction: Record<string, number>;
@@ -102,6 +117,7 @@ export function PositionGenerationModal({
       setPositionsPerMonthMin('');
       setPositionsPerMonthMax('');
       setPositionsRangeError(null);
+      setWithdrawalRecalculation(null);
       
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
@@ -144,6 +160,9 @@ export function PositionGenerationModal({
       }
       
       const ratesData = (response as any).rates || [];
+      if ((response as any).withdrawal_recalculation) {
+        setWithdrawalRecalculation((response as any).withdrawal_recalculation);
+      }
       console.log('PositionGenerationModal - Parsed rates data:', ratesData);
       
       if (!ratesData || ratesData.length === 0) {
@@ -279,6 +298,9 @@ export function PositionGenerationModal({
       
       const positionsData = (response as any).positions || [];
       setPositions(positionsData);
+      if ((response as any).withdrawal_recalculation) {
+        setWithdrawalRecalculation((response as any).withdrawal_recalculation);
+      }
       
       // Store deleted positions info if available (for preview before validation)
       if ((response as any).deleted_positions) {
@@ -393,6 +415,9 @@ export function PositionGenerationModal({
       } else {
         console.log('No deleted positions info in response');
       }
+      if ((response as any).withdrawal_recalculation) {
+        setWithdrawalRecalculation((response as any).withdrawal_recalculation);
+      }
       
       // Mark positions as saved
       setPositionsSaved(true);
@@ -421,6 +446,7 @@ export function PositionGenerationModal({
     setEditedRates({});
     setPositions([]);
     setError(null);
+    setWithdrawalRecalculation(null);
     onClose();
   };
 
@@ -454,6 +480,22 @@ export function PositionGenerationModal({
       return dateStr;
     }
   };
+
+  const selectedInterestPeriod = (() => {
+    const details = transaction?.subscription_details || {};
+    return (
+      details?.interestPeriod ||
+      details?.interest_period ||
+      transaction?.subscription_interest_period ||
+      ''
+    );
+  })();
+
+  const cumulativeInterestEnabled = String(selectedInterestPeriod || '')
+    .toLowerCase()
+    .includes('fin');
+
+  const cumulativeInterestTakenIntoAccount = Boolean(selectedInterestPeriod);
 
   const calculateTargetProfit = (rate: PeriodRate, editedRate: string | undefined): string => {
     // Use edited rate if available and valid, otherwise use baseRatePct
@@ -522,6 +564,71 @@ export function PositionGenerationModal({
         </div>
 
         <div className="modal-form" style={{ padding: '20px' }}>
+          <div
+            style={{
+              padding: '12px',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              marginBottom: '16px',
+              fontSize: '14px',
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: '6px', color: '#0f172a' }}>
+              Vérification cumul des intérêts
+            </div>
+            <div style={{ color: '#334155' }}>
+              Période d&apos;intérêt de la transaction :{' '}
+              <strong>{selectedInterestPeriod || 'Non renseignée'}</strong>
+            </div>
+            <div style={{ color: '#334155' }}>
+              Cumul des intérêts (équivalent métier) :{' '}
+              <strong>{cumulativeInterestEnabled ? 'Oui (Fin de contrat)' : 'Non'}</strong>
+            </div>
+            <div style={{ color: cumulativeInterestTakenIntoAccount ? '#166534' : '#b45309' }}>
+              Pris en compte pour la génération :{' '}
+              <strong>{cumulativeInterestTakenIntoAccount ? 'Oui' : 'Non (période manquante)'}</strong>
+            </div>
+          </div>
+
+          {isWithdrawal && withdrawalRecalculation && (
+            <div
+              style={{
+                padding: '12px',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                fontSize: '14px',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: '6px', color: '#0f172a' }}>
+                Audit retrait et recalcul
+              </div>
+              <div style={{ color: '#334155' }}>
+                Capital principal avant retrait : <strong>{formatCurrency(withdrawalRecalculation.principal_before_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Gains cumulés observés : <strong>{formatCurrency(withdrawalRecalculation.accrued_gains_before_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Intérêts déjà versés (transactions intérêts) : <strong>{formatCurrency(withdrawalRecalculation.paid_interests_before_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Gains encore dans le produit : <strong>{formatCurrency(withdrawalRecalculation.unpaid_gains_before_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Valeur avant retrait : <strong>{formatCurrency(withdrawalRecalculation.total_value_before_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Valeur après retrait : <strong>{formatCurrency(withdrawalRecalculation.total_value_after_withdrawal)}</strong>
+              </div>
+              <div style={{ color: '#334155' }}>
+                Facteur appliqué à la régénération : <strong>{withdrawalRecalculation.capital_scale_factor}</strong>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div style={{ 
               padding: '12px', 

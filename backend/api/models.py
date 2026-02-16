@@ -569,9 +569,6 @@ class Product(models.Model):
     variable_profitability = models.CharField(max_length=100, default="", blank=True)  # Taux maximum si variable, sinon vide
     profitability_period = models.CharField(max_length=50, default="", blank=True)  # Période de rentabilité
     interest_period = models.CharField(max_length=50, default="", blank=True)  # Période d'intérêt disponible
-    # Capitalisation des fonds (compounding between profitability periods)
-    # NOTE: historically stored as 'Oui'/'Non' (string). Migrated to boolean.
-    capitalisation_fonds = models.BooleanField(default=False)
     
     # Gestion du produit
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité

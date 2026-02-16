@@ -78,6 +78,7 @@ from .position_service import (
     save_generated_positions,
     save_position_generation_history,
     recalculate_positions_for_product_withdrawal,
+    calculate_withdrawal_recalculation_metadata,
 )
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
@@ -179,6 +180,24 @@ def _parse_months_from_duration(duration_str: str | None) -> int:
         return v if v > 0 else 1
     except Exception:
         return 1
+
+
+def _normalize_duration_value(raw_duration) -> str:
+    """
+    Normalize duration to a positive integer (as string, months).
+    Raises ValueError when value is invalid.
+    """
+    if raw_duration is None:
+        return ''
+    duration = str(raw_duration).strip()
+    if duration == '':
+        return ''
+    if not duration.isdigit():
+        raise ValueError("La durée doit être un nombre entier (en mois).")
+    months = int(duration)
+    if months <= 0:
+        raise ValueError("La durée doit être supérieure à 0.")
+    return str(months)
 
 
 def _add_months_keep_day(d: date, months: int) -> date:
@@ -5673,6 +5692,19 @@ def client_transaction_create(request, client_id):
                 subscription_details_data = {}
     elif subscription_details_data is None:
         subscription_details_data = {}
+
+    # Normalize interest period keys for compatibility (interestPeriod <-> interest_period).
+    if isinstance(subscription_details_data, dict):
+        if not subscription_details_data.get('interestPeriod') and subscription_details_data.get('interest_period'):
+            subscription_details_data['interestPeriod'] = subscription_details_data.get('interest_period')
+        elif not subscription_details_data.get('interest_period') and subscription_details_data.get('interestPeriod'):
+            subscription_details_data['interest_period'] = subscription_details_data.get('interestPeriod')
+
+        # Extra tolerance: allow top-level interestPeriod when admin payload omits nested field.
+        top_level_interest = request.data.get('interestPeriod') or request.data.get('interest_period')
+        if top_level_interest and not subscription_details_data.get('interestPeriod'):
+            subscription_details_data['interestPeriod'] = top_level_interest
+            subscription_details_data['interest_period'] = top_level_interest
     
     # Get product (subscription productId preferred; otherwise infer from transfer_to)
     product = None
@@ -5791,6 +5823,17 @@ def client_transaction_create(request, client_id):
         and transfer_to 
         and transfer_to != 'balance'
     )
+    if is_investment_transfert:
+        chosen_interest_period = (
+            (subscription_details_data or {}).get('interestPeriod')
+            or (subscription_details_data or {}).get('interest_period')
+            or ''
+        )
+        if not str(chosen_interest_period).strip():
+            return Response(
+                {'error': "La période d'intérêt est obligatoire pour une transaction d'investissement."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     # IMPORTANT: For investment transactions with status 'valide', we MUST generate positions
     # even if skip_position_generation is True (which is set by frontend to show modal).
     # The frontend will handle showing the modal, but if the user closes it without completing,
@@ -6138,8 +6181,8 @@ def client_transaction_create(request, client_id):
             # Interest period
             interest_period = subscription_details_data.get('interestPeriod', '') if subscription_details_data else (product.interest_period or 'Fin de contrat')
             
-            # Auto-renewal
-            auto_renewal = 'OUI' if str(product.capitalisation_fonds or '').lower() == 'oui' else 'NON'
+            # Auto-renewal (derived from the chosen interest period)
+            auto_renewal = 'OUI' if 'fin' in str(interest_period or '').strip().lower() else 'NON'
             
             # Today's date formatted
             today_formatted = contract_start_date.strftime('%A %d %B %Y').replace('Monday', 'lundi').replace('Tuesday', 'mardi').replace('Wednesday', 'mercredi').replace('Thursday', 'jeudi').replace('Friday', 'vendredi').replace('Saturday', 'samedi').replace('Sunday', 'dimanche').replace('January', 'janvier').replace('February', 'février').replace('March', 'mars').replace('April', 'avril').replace('May', 'mai').replace('June', 'juin').replace('July', 'juillet').replace('August', 'août').replace('September', 'septembre').replace('October', 'octobre').replace('November', 'novembre').replace('December', 'décembre')
@@ -6688,6 +6731,34 @@ def client_transaction_update(request, client_id, transaction_id):
         transaction_datetime = parse_datetime(datetime_str)
         if transaction_datetime:
             transaction.datetime = transaction_datetime
+
+    # Allow explicit admin update of subscription details (including interest period) from edit modal.
+    if 'subscription_details' in request.data:
+        incoming_details = request.data.get('subscription_details') or {}
+        if isinstance(incoming_details, str):
+            try:
+                incoming_details = json.loads(incoming_details)
+            except Exception:
+                incoming_details = {}
+        if isinstance(incoming_details, dict):
+            merged_details = dict(transaction.subscription_details or {})
+            merged_details.update(incoming_details)
+            if merged_details.get('interest_period') and not merged_details.get('interestPeriod'):
+                merged_details['interestPeriod'] = merged_details.get('interest_period')
+            if merged_details.get('interestPeriod') and not merged_details.get('interest_period'):
+                merged_details['interest_period'] = merged_details.get('interestPeriod')
+            transaction.subscription_details = merged_details
+            if str(merged_details.get('interestPeriod') or '').strip():
+                transaction.subscription_interest_period = str(merged_details.get('interestPeriod')).strip()
+
+    # Additional compatibility for top-level keys.
+    if 'interestPeriod' in request.data or 'interest_period' in request.data:
+        chosen_interest = request.data.get('interestPeriod') or request.data.get('interest_period') or ''
+        details = dict(transaction.subscription_details or {})
+        details['interestPeriod'] = chosen_interest
+        details['interest_period'] = chosen_interest
+        transaction.subscription_details = details
+        transaction.subscription_interest_period = str(chosen_interest or '').strip()
     
     # Update transfer_to field (accept both to_field and transfer_to)
     # We mainly use transfer_to: product ID = investment, 'balance' = withdrawal
@@ -6890,6 +6961,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
+        withdrawal_metadata = None
         # For withdrawals, we need to generate rates for the product source
         # Create a temporary transaction-like object pointing to the source product
         if is_withdrawal:
@@ -6926,10 +6998,19 @@ def transaction_generate_rates(request, client_id, transaction_id):
             )
             # Mark this as a withdrawal temp transaction so build_investment_context can handle it correctly
             temp_transaction._is_withdrawal_temp = True
+            withdrawal_metadata = calculate_withdrawal_recalculation_metadata(
+                withdrawal_txn=transaction,
+                product=product,
+            )
+            temp_transaction._capital_cutoff_datetime = transaction.datetime or timezone.now()
+            temp_transaction._withdrawal_recalc_metadata = withdrawal_metadata
             rates = generate_rates_for_investment(temp_transaction)
         else:
             rates = generate_rates_for_investment(transaction)
-        return Response({'rates': rates})
+        response_payload = {'rates': rates}
+        if withdrawal_metadata:
+            response_payload['withdrawal_recalculation'] = withdrawal_metadata
+        return Response(response_payload)
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -7044,6 +7125,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
         transaction.subscription_details = subscription_details
     
     try:
+        withdrawal_metadata = None
         # For withdrawals, create a temporary transaction pointing to source product
         txn_to_use = transaction
         if is_withdrawal:
@@ -7088,6 +7170,12 @@ def transaction_generate_positions(request, client_id, transaction_id):
             )
             # Mark this as a withdrawal temp transaction so build_investment_context can handle it correctly
             txn_to_use._is_withdrawal_temp = True
+            withdrawal_metadata = calculate_withdrawal_recalculation_metadata(
+                withdrawal_txn=transaction,
+                product=product,
+            )
+            txn_to_use._capital_cutoff_datetime = transaction.datetime or timezone.now()
+            txn_to_use._withdrawal_recalc_metadata = withdrawal_metadata
         
         try:
             positions = generate_positions_with_rates(
@@ -7236,6 +7324,8 @@ def transaction_generate_positions(request, client_id, transaction_id):
         response_data = {'positions': positions_data}
         if deleted_positions_preview:
             response_data['deleted_positions'] = deleted_positions_preview
+        if withdrawal_metadata:
+            response_data['withdrawal_recalculation'] = withdrawal_metadata
         
         return Response(response_data)
     except Exception as e:
@@ -7315,6 +7405,7 @@ def transaction_save_positions(request, client_id, transaction_id):
             # the frontend creates withdrawals with status 'en_cours' and fails to update to 'valide'.
             # The save-positions call indicates the user is finalizing the withdrawal.
             deleted_positions_info = None
+            withdrawal_metadata = None
             try:
                 # Get product from withdrawal transaction
                 product = None
@@ -7329,6 +7420,10 @@ def transaction_save_positions(request, client_id, transaction_id):
                     product = transaction.product
                 
                 if product:
+                    withdrawal_metadata = calculate_withdrawal_recalculation_metadata(
+                        withdrawal_txn=transaction,
+                        product=product,
+                    )
                     # Find all pending positions that will be deleted
                     from .models import Position
                     from django.db.models import Count
@@ -7399,6 +7494,8 @@ def transaction_save_positions(request, client_id, transaction_id):
             
             if deleted_positions_info:
                 response_data['deleted_positions'] = deleted_positions_info
+            if withdrawal_metadata:
+                response_data['withdrawal_recalculation'] = withdrawal_metadata
             
             return Response(response_data)
         else:
@@ -7644,6 +7741,11 @@ def product_create(request):
     else:
         # Default to True if not provided
         no_profitability_value = True
+
+    try:
+        duration_value = _normalize_duration_value(request.data.get('duration', ''))
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
     subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
@@ -7665,7 +7767,7 @@ def product_create(request):
         subcategory=subcategory_value,
         status=request.data.get('status', 'Brouillon'),
         profitability=profitability,
-        duration=request.data.get('duration', ''),
+        duration=duration_value,
         description=request.data.get('description', ''),
         cgv=request.data.get('cgv', ''),
         # Gestion de la rentabilité
@@ -7674,12 +7776,6 @@ def product_create(request):
         variable_profitability=request.data.get('variableProfitability', ''),
         profitability_period=request.data.get('profitabilityPeriod', ''),
         interest_period=request.data.get('interestPeriod', ''),
-        # Support both legacy string ('Oui'/'Non') and boolean values
-        capitalisation_fonds=(
-            (str(request.data.get('capitalisationFonds', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
-            if isinstance(request.data.get('capitalisationFonds', False), str)
-            else bool(request.data.get('capitalisationFonds', False))
-        ),
         # Gestion du produit
         availability_start=availability_start,
         availability_end=availability_end,
@@ -8109,8 +8205,8 @@ def product_contract_pdf(request, product_id):
     # Interest period
     interest_period = subscription_interest_period or product.interest_period or 'Fin de contrat'
     
-    # Auto-renewal
-    auto_renewal = 'OUI' if str(product.capitalisation_fonds or '').lower() == 'oui' else 'NON'
+    # Auto-renewal (derived from the chosen interest period)
+    auto_renewal = 'OUI' if 'fin' in str(interest_period or '').strip().lower() else 'NON'
     
     # Today's date formatted
     today_formatted = contract_start_date.strftime('%A %d %B %Y').replace('Monday', 'lundi').replace('Tuesday', 'mardi').replace('Wednesday', 'mercredi').replace('Thursday', 'jeudi').replace('Friday', 'vendredi').replace('Saturday', 'samedi').replace('Sunday', 'dimanche').replace('January', 'janvier').replace('February', 'février').replace('March', 'mars').replace('April', 'avril').replace('May', 'mai').replace('June', 'juin').replace('July', 'juillet').replace('August', 'août').replace('September', 'septembre').replace('October', 'octobre').replace('November', 'novembre').replace('December', 'décembre')
@@ -8559,7 +8655,10 @@ def product_update(request, product_id):
             if no_prof_value:
                 product.profitability = None
     if 'duration' in request.data:
-        product.duration = request.data['duration']
+        try:
+            product.duration = _normalize_duration_value(request.data['duration'])
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     if 'description' in request.data:
         product.description = request.data['description']
     if 'cgv' in request.data:
@@ -8715,13 +8814,6 @@ def product_update(request, product_id):
             product.interest_period = str(interest_period_value).strip()
         else:
             product.interest_period = ''
-    if 'capitalisationFonds' in request.data:
-        v = request.data['capitalisationFonds']
-        if isinstance(v, str):
-            product.capitalisation_fonds = v.strip().lower() in ['oui', 'true', '1', 'yes']
-        else:
-            product.capitalisation_fonds = bool(v)
-    
     # Gestion du produit
     if 'availabilityStart' in request.data:
         if request.data['availabilityStart']:
@@ -8965,7 +9057,6 @@ def product_duplicate(request, product_id):
         variable_profitability=original_product.variable_profitability,
         profitability_period=original_product.profitability_period,
         interest_period=original_product.interest_period,
-        capitalisation_fonds=original_product.capitalisation_fonds,
         # Gestion du produit
         availability_start=original_product.availability_start,
         availability_end=original_product.availability_end,

@@ -59,8 +59,6 @@ export function EditProduct() {
     profitabilityMax: '', // Taux maximum (si variable)
     profitabilityPeriod: '',
     interestPeriod: [] as string[],
-    // Cumuler les intérêts (capitalisation_fonds)
-    capitalisationFonds: false,
     // Gestion du produit
     availabilityStart: '',
     availabilityEnd: '',
@@ -318,12 +316,6 @@ export function EditProduct() {
           };
           return legacyMapping[trimmed] || trimmed;
         }).filter(p => p) : [],
-        capitalisationFonds: (() => {
-          const v = (product as any).capitalisationFonds ?? (product as any).capitalisation_fonds;
-          if (typeof v === 'boolean') return v;
-          if (typeof v === 'string') return v.trim().toLowerCase() === 'oui' || v.trim().toLowerCase() === 'true' || v.trim() === '1';
-          return Boolean(v);
-        })(),
         availabilityStart: formatDate(product.availabilityStart),
         availabilityEnd: formatDate(product.availabilityEnd),
         linkToAssets: product.linkToAssets === 'Oui' || product.linkToAssets === true,
@@ -495,7 +487,6 @@ export function EditProduct() {
         interestPeriod: Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 
           ? formData.interestPeriod.filter(p => isValidValue(p)) 
           : [],
-        capitalisationFonds: formData.capitalisationFonds,
         // Gestion des prix
         minEntryValue: isValidValue(formData.minEntryValue) ? formData.minEntryValue : '',
         maxEntryValue: isValidValue(formData.maxEntryValue) ? formData.maxEntryValue : '',
@@ -672,7 +663,6 @@ export function EditProduct() {
         formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod || '');
         // Always send interestPeriod, even if empty - join array with comma and space
         formDataToSend.append('interestPeriod', Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : '');
-        formDataToSend.append('capitalisationFonds', String(!!formData.capitalisationFonds));
         // Always send availability dates, even if empty
         formDataToSend.append('availabilityStart', formData.availabilityStart || '');
         formDataToSend.append('availabilityEnd', formData.availabilityEnd || '');
@@ -739,7 +729,6 @@ export function EditProduct() {
           variableProfitability: variableProfitabilityValue || undefined,
           profitabilityPeriod: formData.profitabilityPeriod || undefined,
           interestPeriod: Array.isArray(formData.interestPeriod) && formData.interestPeriod.length > 0 ? formData.interestPeriod.join(', ') : undefined,
-          capitalisationFonds: !!formData.capitalisationFonds,
           duration: formData.duration || undefined,
           // Gestion du produit
           availabilityStart: formData.availabilityStart || undefined,
@@ -1181,10 +1170,18 @@ export function EditProduct() {
                     <Label htmlFor="product-duration-profitability">Durée (en mois) *</Label>
                     <Input
                       id="product-duration-profitability"
+                      type="number"
+                      min="1"
+                      step="1"
                       value={formData.duration}
-                      onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          duration: e.target.value.replace(/[^0-9]/g, ''),
+                        })
+                      }
                       required
-                      placeholder="Ex: 12 mois"
+                      placeholder="Ex: 12"
                     />
                   </div>
 
@@ -1345,21 +1342,6 @@ export function EditProduct() {
                     })()}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="product-capitalisation-fonds">Cumuler les intérêts ?</Label>
-                    <Select 
-                      value={formData.capitalisationFonds ? 'Oui' : 'Non'} 
-                      onValueChange={(value) => setFormData({ ...formData, capitalisationFonds: value === 'Oui' })}
-                    >
-                      <SelectTrigger id="product-capitalisation-fonds">
-                        <SelectValue placeholder="Sélectionner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Oui">Oui</SelectItem>
-                        <SelectItem value="Non">Non</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               )}
             </div>

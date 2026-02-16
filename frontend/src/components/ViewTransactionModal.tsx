@@ -60,9 +60,17 @@ export function ViewTransactionModal({
     
     if (isOpen && transaction && transaction.type === 'transfert') {
       const subscriptionDetails = parseSubscriptionDetails(transaction);
-      if (subscriptionDetails && subscriptionDetails.productId) {
+      const productId =
+        subscriptionDetails?.productId ||
+        transaction?.productId ||
+        transaction?.product_id ||
+        transaction?.transfer_to ||
+        transaction?.to_field ||
+        null;
+      const normalizedProductId = productId && productId !== 'balance' && productId !== 'trading' ? String(productId) : null;
+      if (normalizedProductId) {
         setProductLoadError(null);
-        apiCall(`/api/products/${subscriptionDetails.productId}/`)
+        apiCall(`/api/products/${normalizedProductId}/`)
           .then(response => {
             if (isMounted) {
               setSelectedProduct(response.product || response);
@@ -194,11 +202,55 @@ export function ViewTransactionModal({
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
   const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
+  const transferTo = transaction.transfer_to || transaction.to_field || transaction.to || null;
+  const hasTransferProductTarget = transferTo && transferTo !== 'balance' && transferTo !== 'trading';
+  const hasSubscriptionProductId = Boolean(
+    subscriptionDetails?.productId || transaction.productId || transaction.product_id
+  );
   
   // Check if this is an investment transfert (transfer_to is a product ID, not 'balance')
-  const isInvestmentTransfer = transaction.type === 'transfert' && 
-                               transaction.transfer_to && 
-                               transaction.transfer_to !== 'balance';
+  const isInvestmentTransfer = transaction.type === 'transfert' && (hasTransferProductTarget || hasSubscriptionProductId);
+
+  const formatDateValue = (value: any) => {
+    if (!value) return 'N/A';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const productDuration = selectedProduct?.duration || subscriptionDetails?.duration || 'N/A';
+  const productProfitabilityPeriod =
+    selectedProduct?.profitabilityPeriod || selectedProduct?.profitability_period || 'N/A';
+  const productInterestPeriod = selectedProduct?.interestPeriod || selectedProduct?.interest_period || 'N/A';
+  const productProfitability = (() => {
+    const isVariableRaw = selectedProduct?.isVariableProfitability ?? selectedProduct?.is_variable_profitability;
+    const isVariable = String(isVariableRaw || '').toLowerCase() === 'oui';
+    const baseRate = selectedProduct?.profitability;
+    const maxRate = selectedProduct?.variableProfitability ?? selectedProduct?.variable_profitability;
+    if (isVariable && baseRate != null && maxRate != null && baseRate !== '' && maxRate !== '') {
+      return `${baseRate}% à ${maxRate}%`;
+    }
+    if (baseRate != null && baseRate !== '') {
+      return `${baseRate}%`;
+    }
+    return subscriptionDetails?.profitability || 'N/A';
+  })();
+  const productAvailabilityStart = formatDateValue(
+    selectedProduct?.availabilityStart ?? selectedProduct?.availability_start
+  );
+  const productAvailabilityEnd = formatDateValue(
+    selectedProduct?.availabilityEnd ?? selectedProduct?.availability_end
+  );
+  const transactionIp = subscriptionDetails?.ip || transaction.subscription_ip || 'N/A';
+  const chosenInterestPeriod =
+    subscriptionDetails?.interestPeriod || subscriptionDetails?.interest_period || transaction.subscription_interest_period || 'N/A';
+  const hasSubscriptionOrProductInfo = transaction.type === 'transfert' && Boolean(subscriptionDetails || selectedProduct || productLoadError);
 
   const findAssetOrProduct = () => {
     if (assetInfo.reference) {
@@ -411,7 +463,7 @@ export function ViewTransactionModal({
               </div>
             )}
             
-            {transaction.type === 'transfert' && subscriptionDetails && isInvestmentTransfer && (
+            {hasSubscriptionOrProductInfo && isInvestmentTransfer && (
               <>
                 <div className="border-t pt-4 mt-4">
                   <h3 className="text-lg font-semibold mb-4">Formulaire de Souscription</h3>
@@ -431,32 +483,32 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Prénom / Nom</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.firstName} {subscriptionDetails.lastName}
+                        {`${subscriptionDetails?.firstName || ''} ${subscriptionDetails?.lastName || ''}`.trim() || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">IP</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.ip || 'N/A'}
+                        {transactionIp}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Ville</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.city || 'N/A'}
+                        {subscriptionDetails?.city || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Date de naissance</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.birthDate || 'N/A'}
+                        {subscriptionDetails?.birthDate || 'N/A'}
                       </p>
                     </div>
                   </div>
                 </div>
                 
                 <div className="border-t pt-4 mt-4">
-                  <h3 className="text-lg font-semibold mb-4">Produit</h3>
+                  <h3 className="text-lg font-semibold mb-4">Produit (détails)</h3>
                   {productLoadError && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
                       <p className="text-sm text-red-700">{productLoadError}</p>
@@ -466,67 +518,91 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Catégorie</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.category || 'N/A'}
+                        {subscriptionDetails?.category || selectedProduct?.categoryTitle || selectedProduct?.category || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Nom</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.productName || 'N/A'}
+                        {subscriptionDetails?.productName || selectedProduct?.name || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">N° contrat</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.productReference || 'N/A'}
+                        {subscriptionDetails?.productReference || selectedProduct?.reference || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Pays</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.country || 'N/A'}
+                        {subscriptionDetails?.country || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Date de souscription</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.subscriptionDate || 'N/A'}
+                        {subscriptionDetails?.subscriptionDate || 'N/A'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Durée</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.duration || 'N/A'}
+                        {productDuration}
                       </p>
                     </div>
                     <div>
-                      <Label className="text-slate-600 font-semibold">Versement des intérêts</Label>
+                      <Label className="text-slate-600 font-semibold">Période d&apos;intérêt choisie</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.interestPeriod || 'N/A'}
+                        {chosenInterestPeriod}
                       </p>
                     </div>
                     <div>
-                      <Label className="text-slate-600 font-semibold">TAUX FIXE ANNUEL (sur le tarif de base)</Label>
+                      <Label className="text-slate-600 font-semibold">Rentabilité produit</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.profitability || 'N/A'}
+                        {productProfitability}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600 font-semibold">Période de rentabilité (disponible)</Label>
+                      <p className="text-slate-900 mt-1">
+                        {productProfitabilityPeriod}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600 font-semibold">Période de versement (disponible)</Label>
+                      <p className="text-slate-900 mt-1">
+                        {productInterestPeriod}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600 font-semibold">Fonds disponibles à partir du</Label>
+                      <p className="text-slate-900 mt-1">
+                        {productAvailabilityStart}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-slate-600 font-semibold">Fonds disponibles jusqu&apos;au</Label>
+                      <p className="text-slate-900 mt-1">
+                        {productAvailabilityEnd}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Investissement</Label>
                       <p className="text-slate-900 mt-1 font-semibold">
-                        {subscriptionDetails.investment ? subscriptionDetails.investment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.investment ? subscriptionDetails.investment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Profits</Label>
                       <p className="text-slate-900 mt-1 font-semibold text-green-600">
-                        {subscriptionDetails.profits ? subscriptionDetails.profits.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.profits ? subscriptionDetails.profits.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
                       </p>
                     </div>
                     <div className="col-span-3">
                       <Label className="text-slate-600 font-semibold">TOTAL (Investissement + Profits)</Label>
                       <p className="text-slate-900 mt-1 font-bold text-lg">
-                        {subscriptionDetails.total ? subscriptionDetails.total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.total ? subscriptionDetails.total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
                       </p>
                     </div>
                     <div>
@@ -538,7 +614,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Signature de la transaction</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails.hasSignature ? 'Signature' : 'N/A'}
+                        {subscriptionDetails?.hasSignature ? 'Signature' : 'N/A'}
                       </p>
                     </div>
                     <div>

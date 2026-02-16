@@ -26,16 +26,43 @@ export function EditTransactionModal({
   onClose,
   onSuccess
 }: EditTransactionModalProps) {
+  const normalizeInterestPeriod = (value: string): string => {
+    const v = String(value || '').trim();
+    const legacyMapping: Record<string, string> = {
+      Trimestriel: 'Trimestrielle',
+      Semestriel: 'Semestrielle',
+      Annuel: 'Annuelle',
+    };
+    return legacyMapping[v] || v;
+  };
+
+  const getInterestPeriodOptions = (product: any): string[] => {
+    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat'];
+    if (!product) return allOptions;
+    const raw = product.interestPeriod ?? product.interest_period ?? '';
+    if (!raw) return allOptions;
+    const parsed = String(raw)
+      .split(',')
+      .map((item) => normalizeInterestPeriod(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const valid = parsed.filter((item) => allOptions.includes(item));
+    return valid.length > 0 ? Array.from(new Set(valid)) : allOptions;
+  };
+
   const [transactionForm, setTransactionForm] = useState({
     type: 'depot',
     amount: '',
     description: '',
     status: 'en_attente_paiement',
-    datetime: ''
+    datetime: '',
+    interestPeriod: '',
   });
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
   const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
+  const [transferProduct, setTransferProduct] = useState<any>(null);
+  const [loadingTransferProduct, setLoadingTransferProduct] = useState(false);
 
   const bustTransactionsCache = (cid: string) => {
     // apiCall caches GET requests; after a successful edit we must bust list caches
@@ -77,10 +104,86 @@ export function EditTransactionModal({
         amount: transaction.amount?.toString() || '',
         description: transaction.description || '',
         status: transaction.status || 'en_cours',
-        datetime: datetimeLocal
+        datetime: datetimeLocal,
+        interestPeriod:
+          transaction.subscription_interest_period ||
+          transaction.subscription_details?.interestPeriod ||
+          transaction.subscription_details?.interest_period ||
+          ''
       });
     }
   }, [isOpen, transaction]);
+
+  // Load related transfer product to expose interest period choices in edit mode.
+  useEffect(() => {
+    let cancelled = false;
+    const loadTransferProduct = async () => {
+      if (!isOpen || !transaction || transactionForm.type !== 'transfert') {
+        setTransferProduct(null);
+        setLoadingTransferProduct(false);
+        return;
+      }
+
+      const transferTo = transaction.transfer_to || transaction.to_field || transaction.to || transaction.transferTo || null;
+      const transferFrom = transaction.transfer_from || transaction.from_field || null;
+      const productIdFromSubscription =
+        transaction.subscription_details?.productId ||
+        transaction.subscriptionDetails?.productId ||
+        transaction.product_id ||
+        transaction.product?.id ||
+        null;
+      const productId =
+        (transferTo && transferTo !== 'balance' ? transferTo : null) ||
+        (transferFrom && transferFrom !== 'balance' ? transferFrom : null) ||
+        productIdFromSubscription;
+
+      if (!productId) {
+        setTransferProduct(null);
+        setLoadingTransferProduct(false);
+        return;
+      }
+
+      setLoadingTransferProduct(true);
+      try {
+        const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
+        if (!cancelled) {
+          setTransferProduct(res?.product || res || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setTransferProduct(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingTransferProduct(false);
+        }
+      }
+    };
+
+    loadTransferProduct();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, transaction, transactionForm.type]);
+
+  // Ensure selected interest period remains valid for the selected product.
+  useEffect(() => {
+    if (transactionForm.type !== 'transfert') {
+      if (transactionForm.interestPeriod) {
+        setTransactionForm(prev => ({ ...prev, interestPeriod: '' }));
+      }
+      return;
+    }
+    if (!transferProduct) return;
+
+    const options = getInterestPeriodOptions(transferProduct);
+    if (!transactionForm.interestPeriod || !options.includes(transactionForm.interestPeriod)) {
+      setTransactionForm(prev => ({
+        ...prev,
+        interestPeriod: options.length === 1 ? options[0] : '',
+      }));
+    }
+  }, [transactionForm.type, transactionForm.interestPeriod, transferProduct]);
 
   // Update status when type changes
   useEffect(() => {
@@ -103,9 +206,48 @@ export function EditTransactionModal({
       amount: '',
       description: '',
       status: 'en_attente_paiement',
-      datetime: ''
+      datetime: '',
+      interestPeriod: '',
     });
+    setTransferProduct(null);
     onClose();
+  };
+
+  const buildSubscriptionDetailsForUpdate = () => {
+    const existing = transaction?.subscription_details && typeof transaction.subscription_details === 'object'
+      ? { ...transaction.subscription_details }
+      : {};
+    const productId =
+      existing.productId ||
+      transaction?.product?.id ||
+      transaction?.product_id ||
+      transaction?.transfer_to ||
+      transaction?.transfer_from ||
+      undefined;
+    return {
+      ...existing,
+      ...(productId && productId !== 'balance' ? { productId } : {}),
+      interestPeriod: transactionForm.interestPeriod || '',
+      interest_period: transactionForm.interestPeriod || '',
+    };
+  };
+
+  const buildUpdatePayload = (statusValue: string, skipPositionGeneration: boolean) => {
+    const datetimeISO = new Date(transactionForm.datetime).toISOString();
+    return {
+      type: transactionForm.type,
+      amount: parseFloat(transactionForm.amount),
+      description: transactionForm.description,
+      status: statusValue,
+      datetime: datetimeISO,
+      skip_position_generation: skipPositionGeneration,
+      ...(transactionForm.type === 'transfert'
+        ? {
+            subscription_details: buildSubscriptionDetailsForUpdate(),
+            interestPeriod: transactionForm.interestPeriod || '',
+          }
+        : {}),
+    };
   };
 
   async function handleSubmit(e: React.FormEvent) {
@@ -120,6 +262,11 @@ export function EditTransactionModal({
 
     if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
       toast.error('Le montant doit être supérieur à 0');
+      return;
+    }
+
+    if (transactionForm.type === 'transfert' && transferProduct && !String(transactionForm.interestPeriod || '').trim()) {
+      toast.error("La période d'intérêt est obligatoire pour un transfert impliquant un produit.");
       return;
     }
     
@@ -176,6 +323,11 @@ export function EditTransactionModal({
         // has external asset allocations configured.
         const hasAllocations = await productHasAllocations(finalProductId);
         if (hasAllocations) {
+          // Persist edited details before opening generation modal so backend uses latest interest period.
+          await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+            method: 'PUT',
+            body: JSON.stringify(buildUpdatePayload(transaction.status || 'en_cours', true))
+          });
           console.log('EditTransactionModal - Showing position generation modal for investment');
           setIsWithdrawalTransaction(false);
           setPendingStatusUpdate(transactionForm.status);
@@ -187,6 +339,11 @@ export function EditTransactionModal({
         const relevantProductId = transferFrom && transferFrom !== 'balance' ? transferFrom : null;
         const hasAllocations = await productHasAllocations(relevantProductId);
         if (hasAllocations) {
+          // Persist edited details before opening generation modal so backend uses latest interest period.
+          await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+            method: 'PUT',
+            body: JSON.stringify(buildUpdatePayload(transaction.status || 'en_cours', true))
+          });
           console.log('EditTransactionModal - Showing position generation modal for withdrawal');
           setIsWithdrawalTransaction(true);
           setPendingStatusUpdate(transactionForm.status);
@@ -197,9 +354,6 @@ export function EditTransactionModal({
     }
     
     try {
-      // Convert datetime-local format to ISO string
-      const datetimeISO = new Date(transactionForm.datetime).toISOString();
-      
       // Check if this is a withdrawal (transfert from product to balance)
       // Only recalculate if status is changing TO "valide" (not if it was already "valide")
       const transferTo = transaction.transfer_to || 
@@ -216,14 +370,7 @@ export function EditTransactionModal({
       
       const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
         method: 'PUT',
-        body: JSON.stringify({
-          type: transactionForm.type,
-          amount: parseFloat(transactionForm.amount),
-          description: transactionForm.description,
-          status: transactionForm.status,
-          datetime: datetimeISO,
-          skip_position_generation: wasAlreadyTermine // Skip if already "valide" (no regeneration needed)
-        })
+        body: JSON.stringify(buildUpdatePayload(transactionForm.status, wasAlreadyTermine))
       });
       bustTransactionsCache(clientId);
       
@@ -244,18 +391,9 @@ export function EditTransactionModal({
     // After positions are generated (or withdrawal confirmed), update transaction status to valide
     if (pendingStatusUpdate) {
       try {
-        const datetimeISO = new Date(transactionForm.datetime).toISOString();
-        
         const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
           method: 'PUT',
-          body: JSON.stringify({
-            type: transactionForm.type,
-            amount: parseFloat(transactionForm.amount),
-            description: transactionForm.description,
-            status: pendingStatusUpdate,
-            datetime: datetimeISO,
-            skip_position_generation: !isWithdrawalTransaction // For withdrawals, allow signal to recalculate; for investments, skip since modal already generated
-          })
+          body: JSON.stringify(buildUpdatePayload(pendingStatusUpdate, !isWithdrawalTransaction))
         });
         bustTransactionsCache(clientId);
         
@@ -303,6 +441,8 @@ export function EditTransactionModal({
     }
   };
 
+  const interestPeriodOptions = getInterestPeriodOptions(transferProduct);
+
   if (!isOpen || !transaction) return null;
 
   return (
@@ -335,6 +475,37 @@ export function EditTransactionModal({
                 </SelectContent>
               </Select>
             </div>
+            {transactionForm.type === 'transfert' && transferProduct && (
+              <div className="modal-form-field">
+                <Label>Période d&apos;intérêt</Label>
+                <Select
+                  value={transactionForm.interestPeriod}
+                  onValueChange={(value) =>
+                    setTransactionForm({
+                      ...transactionForm,
+                      interestPeriod: value,
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        loadingTransferProduct
+                          ? 'Chargement des périodes...'
+                          : "Sélectionnez une période d'intérêt"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {interestPeriodOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="modal-form-field">
               <Label>Date et heure</Label>
               <Input
@@ -402,7 +573,16 @@ export function EditTransactionModal({
       {showPositionModal && (
         <PositionGenerationModal
           isOpen={showPositionModal}
-          transaction={transaction}
+          transaction={{
+            ...transaction,
+            subscription_interest_period:
+              transactionForm.interestPeriod || transaction.subscription_interest_period || '',
+            subscription_details: {
+              ...(transaction.subscription_details || {}),
+              interestPeriod: transactionForm.interestPeriod || '',
+              interest_period: transactionForm.interestPeriod || '',
+            },
+          }}
           clientId={clientId}
           onClose={handlePositionModalClose}
           onSuccess={handlePositionModalSuccess}

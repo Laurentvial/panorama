@@ -95,6 +95,30 @@ def _period_months_from_profitability_period(period: str | None) -> float:
     return 1.0
 
 
+def _resolve_interest_period_for_txn(txn: Transaction, product: Product | None = None) -> str:
+    """
+    Return the selected interest period for a transaction.
+    Transaction selection is the source of truth, with product fallback for legacy rows.
+    """
+    raw = (
+        getattr(txn, 'subscription_interest_period', None)
+        or (getattr(txn, 'subscription_details', {}) or {}).get('interestPeriod')
+        or (getattr(txn, 'subscription_details', {}) or {}).get('interest_period')
+        or (getattr(product, 'interest_period', None) if product is not None else None)
+        or 'Fin de contrat'
+    )
+    return str(raw).strip()
+
+
+def _txn_compounds_interests(txn: Transaction, product: Product | None = None) -> bool:
+    """
+    Cumulative interests are inferred from selected interest period.
+    Fin de contrat => profits stay invested until contract end.
+    """
+    p = _resolve_interest_period_for_txn(txn, product).lower()
+    return 'fin' in p and ('contrat' in p or 'matur' in p)
+
+
 def _is_smart_portfolio(product: Product) -> bool:
     t = (product.type or '').lower()
     s = (product.subcategory or '').lower()
@@ -103,6 +127,15 @@ def _is_smart_portfolio(product: Product) -> bool:
 
 def _parse_decimal(value) -> Decimal | None:
     return _to_decimal(value)
+
+
+def _quantize_rate_pct(value: Decimal | None) -> Decimal:
+    """
+    Normalize profitability rates to max 3 decimals.
+    """
+    if value is None:
+        return Decimal('0.000')
+    return Decimal(str(value)).quantize(Decimal('0.001'))
 
 
 def _weighted_choice(items_with_weights: list[tuple[object, Decimal]]):
@@ -616,19 +649,6 @@ def _schedule_trades_for_day(
     return scheduled
 
 
-def _product_compounds(product: Product | None) -> bool:
-    """
-    Return True when the product is configured to compound profits between profitability periods.
-    """
-    if product is None:
-        return False
-    v = getattr(product, 'capitalisation_fonds', False)
-    # Backward compatibility: historical DB values were 'Oui'/'Non'
-    if isinstance(v, str):
-        return v.strip().lower() in {'oui', 'true', '1', 'yes'}
-    return bool(v)
-
-
 def _choose_profitability_rate_pct(product: Product | None, *, rng: random.Random) -> Decimal:
     """
     Pick a profitability rate (percent) expressed in the unit of product.profitability_period.
@@ -655,8 +675,8 @@ def _choose_profitability_rate_pct(product: Product | None, *, rng: random.Rando
     if (getattr(product, 'is_variable_profitability', '') or '').lower() == 'oui':
         rate_max = _parse_decimal(getattr(product, 'variable_profitability', None))
         if rate_max is not None and rate_max > rate_min:
-            return Decimal(str(rng.uniform(float(rate_min), float(rate_max))))
-    return rate_min
+            return _quantize_rate_pct(Decimal(str(rng.uniform(float(rate_min), float(rate_max)))))
+    return _quantize_rate_pct(rate_min)
 
 
 def _weighted_choice_with_rng(items_with_weights: list[tuple[object, Decimal]], rng: random.Random):
@@ -755,7 +775,7 @@ def _log_positions_generation(
             "endDt": end_dt.isoformat() if end_dt else None,
             "durationMonths": ctx.duration_months,
             "profitabilityPeriod": getattr(product, "profitability_period", None) if product else None,
-            "capitalisationFonds": bool(getattr(product, "capitalisation_fonds", False)) if product is not None else False,
+            "interestPeriod": _resolve_interest_period_for_txn(txn, product),
             "existingPositionsBefore": int(existing_count_before or 0),
             "createdPositions": int(len(created_positions)),
             "createdInvestedTotal": str(created_invested),
@@ -794,8 +814,7 @@ def _create_trade_positions_compounding(
     - Multiple trades possible per day, but not guaranteed (avoids 1 trade/day pattern)
     - Market hours only (specific to each asset's exchange/region, in French time)
     - Maximum trade duration: 1h30
-    - profitability_period support (mensuel/trimestriel/semestriel/annuel/fin de contrat)
-    - compounding: profits credited at each profitability period boundary
+    - interest-period support (mensuel/trimestriel/semestriel/annuel/fin de contrat)
 
     Idempotent-by-day: it checks existing Position rows for this transaction and only fills missing
     trades up to the per-day target.
@@ -858,11 +877,11 @@ def _create_trade_positions_compounding(
     existing_counts, max_idx = _existing_trade_counts(txn.id)
     next_idx = max_idx + 1
 
-    # Profitability config (rate unit is product.profitability_period)
+    # Position generation cadence follows product profitability period.
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _product_compounds(product)
+    does_compound = _txn_compounds_interests(txn, product)
 
     assets_weighted: list[tuple[object, Decimal]] = []
     if allocations:
@@ -909,13 +928,13 @@ def _create_trade_positions_compounding(
         # If this period is shorter than the configured period (e.g. last half-year for annual),
         # pro-rate linearly by months.
         rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
-        period_rate_pct = _choose_profitability_rate_pct(product, rng=rate_rng)
+        period_rate_pct = _quantize_rate_pct(_choose_profitability_rate_pct(product, rng=rate_rng))
         proration = (
             (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
             if profit_period_months and step_months != profit_period_months
             else Decimal('1')
         )
-        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
 
         capital_base = capital if does_compound else invested_total
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
@@ -1017,7 +1036,6 @@ def _create_trade_positions_compounding(
                 )
                 next_idx += 1
 
-        # Compound (if enabled) at period boundary using realized profit (existing + newly created for this period)
         if does_compound:
             new_profit = sum(
                 (p.profit_loss or Decimal('0')) for p in created
@@ -1116,20 +1134,15 @@ def generate_rates_for_investment(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _product_compounds(product)
+    does_compound = _txn_compounds_interests(txn, product)
 
-    # Calculate initial capital: if compounding, add profits from all closed and open positions
-    # IMPORTANT: Exclude ALL pending positions (even those with opened_at <= now) because they will
-    # be regenerated with new rates. Only count positions that are already closed (done) or currently
-    # open - these cannot be changed. This must match the logic in the per-period profit calculation.
     capital = invested_total.quantize(Decimal('0.01'))
-    if does_compound:
+    skip_compound_rollforward = bool(getattr(txn, '_withdrawal_recalc_metadata', None))
+    if does_compound and not skip_compound_rollforward:
         existing_profits = Position.objects.filter(
             transaction_id=ctx.transaction_id
         ).filter(
-            # Only count positions that are already closed (done) or currently open
-            # Exclude ALL pending positions - they will be regenerated with new rates
-            Q(status='done') | 
+            Q(status='done') |
             Q(status='open')
         ).aggregate(
             total_profit=Sum('profit_loss')
@@ -1177,17 +1190,17 @@ def generate_rates_for_investment(
 
         # Use custom rate if provided, otherwise generate
         if custom_rates and period_idx in custom_rates:
-            period_rate_pct = custom_rates[period_idx]
+            period_rate_pct = _quantize_rate_pct(custom_rates[period_idx])
         else:
             rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
-            period_rate_pct = _choose_profitability_rate_pct(product, rng=rate_rng)
+            period_rate_pct = _quantize_rate_pct(_choose_profitability_rate_pct(product, rng=rate_rng))
 
         proration = (
             (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
             if profit_period_months and step_months != profit_period_months
             else Decimal('1')
         )
-        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
 
         capital_base = capital if does_compound else invested_total
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
@@ -1202,6 +1215,9 @@ def generate_rates_for_investment(
             "capitalBase": str(capital_base.quantize(Decimal("0.01"))),
             "targetProfit": str(target_profit),
         })
+
+        if does_compound:
+            capital = (capital + target_profit).quantize(Decimal('0.01'))
 
         cursor_dt = period_end_dt
         remaining_months -= step_months
@@ -1312,7 +1328,7 @@ def generate_positions_with_rates(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _product_compounds(product)
+    does_compound = _txn_compounds_interests(txn, product)
 
     # Market hours will be determined per asset in the loop
     tz = timezone.get_current_timezone()
@@ -1330,18 +1346,13 @@ def generate_positions_with_rates(
             logger = logging.getLogger(__name__)
             logger.warning(f"Product {product.id if product else 'unknown'} has {len(allocations)} allocations but no valid assets")
 
-    # Calculate initial capital: if compounding, add profits from all closed and open positions
-    # IMPORTANT: Exclude ALL pending positions (even those with opened_at <= now) because they will
-    # be regenerated with new rates. Only count positions that are already closed (done) or currently
-    # open - these cannot be changed. This must match the logic in the per-period profit calculation.
     capital = invested_total.quantize(Decimal('0.01'))
-    if does_compound:
+    skip_compound_rollforward = bool(getattr(txn, '_withdrawal_recalc_metadata', None))
+    if does_compound and not skip_compound_rollforward:
         existing_profits = Position.objects.filter(
             transaction_id=ctx.transaction_id
         ).filter(
-            # Only count positions that are already closed (done) or currently open
-            # Exclude ALL pending positions - they will be regenerated with new rates
-            Q(status='done') | 
+            Q(status='done') |
             Q(status='open')
         ).aggregate(
             total_profit=Sum('profit_loss')
@@ -1397,7 +1408,7 @@ def generate_positions_with_rates(
             # Fallback: use 0 (should not happen in normal flow)
             period_rate_pct = Decimal('0')
         else:
-            period_rate_pct = custom_rates[period_idx]
+            period_rate_pct = _quantize_rate_pct(custom_rates[period_idx])
             # Debug: log which rate is being used
             logger.info(f"Period {period_idx}: Using custom rate {period_rate_pct}% (received from frontend)")
         
@@ -1406,7 +1417,7 @@ def generate_positions_with_rates(
             if profit_period_months and step_months != profit_period_months
             else Decimal('1')
         )
-        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.0001'))
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
 
         capital_base = capital if does_compound else invested_total
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
@@ -1563,14 +1574,12 @@ def generate_positions_with_rates(
                 next_idx += 1
 
         if does_compound:
-            # For compounding, add existing profit (from closed and open positions) + new profit from this period
             new_profit = sum(
                 Decimal(str(p.get('profit_loss', 0) if isinstance(p, dict) else (p.profit_loss or Decimal('0'))))
                 for p in created
                 if (isinstance(p, dict) and p.get('period_date') and period_days[0] <= date.fromisoformat(p['period_date']) <= period_days[-1])
                 or (not isinstance(p, dict) and p.period_date and period_days[0] <= p.period_date <= period_days[-1])
             )
-            # Capital grows with existing profit (from closed and open positions) + new profit
             capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
 
         cursor_dt = period_end_dt
@@ -2273,6 +2282,153 @@ def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_d
     return total.quantize(Decimal('0.01'))
 
 
+def _sum_paid_interest_transactions(
+    *,
+    client_id: str,
+    product_id: str,
+    up_to_datetime: datetime | None = None,
+    investment_transaction_id: str | None = None,
+) -> Decimal:
+    """
+    Sum already paid interest transfers (type='interets') for a client/product.
+    If investment_transaction_id is provided, narrow by description reference when available.
+    """
+    qs = Transaction.objects.filter(
+        client_id=client_id,
+        product_id=product_id,
+        type='interets',
+        status__in=COMPLETED_TRANSACTION_STATUSES,
+    )
+    if up_to_datetime:
+        qs = qs.filter(datetime__lte=up_to_datetime)
+
+    if investment_transaction_id:
+        qs = qs.filter(
+            Q(description__icontains=f"transaction {investment_transaction_id}") |
+            Q(description__icontains=f"txn {investment_transaction_id}")
+        )
+
+    total = Decimal('0')
+    for txn in qs.only('amount').iterator():
+        total += _to_decimal(txn.amount) or Decimal('0')
+    return total.quantize(Decimal('0.01'))
+
+
+def _sum_accrued_position_gains(
+    *,
+    client_id: str,
+    product_id: str,
+    up_to_datetime: datetime | None = None,
+    investment_transaction_id: str | None = None,
+) -> Decimal:
+    """
+    Sum accrued gains currently represented by positions (done/open) for a client/product.
+    """
+    qs = Position.objects.filter(
+        client_id=client_id,
+        product_id=product_id,
+    ).filter(
+        Q(status='done') | Q(status='open')
+    )
+
+    if investment_transaction_id:
+        qs = qs.filter(transaction_id=investment_transaction_id)
+
+    if up_to_datetime:
+        cutoff_date = up_to_datetime.date()
+        qs = qs.filter(
+            Q(period_date__isnull=True) | Q(period_date__lte=cutoff_date)
+        ).filter(
+            Q(opened_at__isnull=True) | Q(opened_at__lte=up_to_datetime)
+        )
+
+    agg = qs.aggregate(total=Sum('profit_loss'))
+    return (Decimal(str(agg.get('total') or '0'))).quantize(Decimal('0.01'))
+
+
+def calculate_withdrawal_recalculation_metadata(
+    *,
+    withdrawal_txn: Transaction,
+    product: Product | None = None,
+) -> dict:
+    """
+    Compute withdrawal metadata used for proportional recalculation:
+    - principal before withdrawal
+    - accrued gains not yet transferred via 'interets'
+    - total value before / after withdrawal
+    - scale factor
+    """
+    resolved_product = product
+    if resolved_product is None:
+        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
+            resolved_product = Product.objects.filter(id=withdrawal_txn.transfer_from).first()
+        if resolved_product is None and withdrawal_txn.product:
+            resolved_product = withdrawal_txn.product
+    if resolved_product is None:
+        return {
+            'product_id': None,
+            'withdrawal_amount': '0.00',
+            'principal_before_withdrawal': '0.00',
+            'accrued_gains_before_withdrawal': '0.00',
+            'paid_interests_before_withdrawal': '0.00',
+            'unpaid_gains_before_withdrawal': '0.00',
+            'total_value_before_withdrawal': '0.00',
+            'total_value_after_withdrawal': '0.00',
+            'withdrawal_ratio': '0',
+            'capital_scale_factor': '0',
+            'cutoff_datetime': (withdrawal_txn.datetime or timezone.now()).isoformat(),
+        }
+
+    cutoff_dt = withdrawal_txn.datetime or timezone.now()
+    withdrawal_amount = (_to_decimal(withdrawal_txn.amount) or Decimal('0')).quantize(Decimal('0.01'))
+
+    principal_before = _calculate_real_invested_capital(
+        client_id=withdrawal_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+        exclude_transaction_id=withdrawal_txn.id,
+    ).quantize(Decimal('0.01'))
+
+    accrued_before = _sum_accrued_position_gains(
+        client_id=withdrawal_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+    ).quantize(Decimal('0.01'))
+
+    paid_interests_before = _sum_paid_interest_transactions(
+        client_id=withdrawal_txn.client_id,
+        product_id=resolved_product.id,
+        up_to_datetime=cutoff_dt,
+    ).quantize(Decimal('0.01'))
+
+    unpaid_gains_before = (accrued_before - paid_interests_before).quantize(Decimal('0.01'))
+    total_before = (principal_before + unpaid_gains_before).quantize(Decimal('0.01'))
+
+    if total_before <= 0:
+        ratio = Decimal('0')
+        total_after = Decimal('0.00')
+        scale_factor = Decimal('0')
+    else:
+        capped_withdrawal = withdrawal_amount if withdrawal_amount <= total_before else total_before
+        ratio = (capped_withdrawal / total_before).quantize(Decimal('0.000001'))
+        total_after = (total_before - capped_withdrawal).quantize(Decimal('0.01'))
+        scale_factor = (total_after / total_before).quantize(Decimal('0.000001'))
+
+    return {
+        'product_id': resolved_product.id,
+        'withdrawal_amount': str(withdrawal_amount),
+        'principal_before_withdrawal': str(principal_before),
+        'accrued_gains_before_withdrawal': str(accrued_before),
+        'paid_interests_before_withdrawal': str(paid_interests_before),
+        'unpaid_gains_before_withdrawal': str(unpaid_gains_before),
+        'total_value_before_withdrawal': str(total_before),
+        'total_value_after_withdrawal': str(total_after),
+        'withdrawal_ratio': str(ratio),
+        'capital_scale_factor': str(scale_factor),
+        'cutoff_datetime': cutoff_dt.isoformat(),
+    }
+
+
 def _extract_product_from_description(description: str) -> Product | None:
     """
     Best-effort inference used when admin edits a transaction but transfer_to/product
@@ -2508,10 +2664,13 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     # Only counts transactions with status='valide' (completed)
     
     # Exclude current transaction from calculation (we'll add it manually below)
+    # Optional cutoff override used during withdrawal-driven recalculation.
+    capital_cutoff_datetime = getattr(txn, '_capital_cutoff_datetime', None) or (txn.datetime if txn.datetime else None)
+
     real_invested_capital = _calculate_real_invested_capital(
         client_id=txn.client_id,
         product_id=product.id,
-        up_to_datetime=txn.datetime if txn.datetime else None,
+        up_to_datetime=capital_cutoff_datetime,
         exclude_transaction_id=txn.id  # Always exclude current transaction, add it manually below
     )
     
@@ -2627,6 +2786,19 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     # Use real invested capital instead of just this transaction's amount
     # This ensures that when capital is added/removed, we use the net invested amount
     invested_amount = real_invested_capital
+
+    # Optional metadata override (withdrawal recalculation path):
+    # use total product value after withdrawal (principal + unpaid gains)
+    # then apply a proportional scale to preserve contractual schedule while
+    # reducing all future generated positions consistently.
+    withdrawal_recalc_meta = getattr(txn, '_withdrawal_recalc_metadata', None)
+    if isinstance(withdrawal_recalc_meta, dict):
+        try:
+            total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_withdrawal')) or Decimal('0')
+            if total_after >= 0:
+                invested_amount = total_after.quantize(Decimal('0.01'))
+        except Exception:
+            pass
     
     # Log final capital for debugging - ALWAYS log for withdrawal temp transactions
     if txn.transfer_from == 'balance' and txn.transfer_to == product.id:
@@ -2758,7 +2930,7 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
             )
             return []
 
-    # Non-smart internal products: trade-like positions without asset linkage, with profitability_period + compounding.
+    # Non-smart internal products: trade-like positions without asset linkage, using selected interest period cadence.
     start_dt = txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
@@ -2837,6 +3009,18 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
     
     import logging
     logger = logging.getLogger(__name__)
+    withdrawal_meta = calculate_withdrawal_recalculation_metadata(
+        withdrawal_txn=withdrawal_txn,
+        product=product,
+    )
+    logger.info(
+        "Withdrawal recalculation context "
+        f"(txn_id={withdrawal_txn.id}, product_id={product.id}, "
+        f"total_before={withdrawal_meta.get('total_value_before_withdrawal')}, "
+        f"withdrawal_amount={withdrawal_meta.get('withdrawal_amount')}, "
+        f"total_after={withdrawal_meta.get('total_value_after_withdrawal')}, "
+        f"scale={withdrawal_meta.get('capital_scale_factor')})"
+    )
     
     # CRITICAL: Delete ALL pending positions for this product and client BEFORE recalculating
     # This ensures we delete positions from ALL transactions, not just investment transactions
@@ -2911,6 +3095,10 @@ def recalculate_positions_for_product_withdrawal(withdrawal_txn: Transaction, *,
     # Note: We already deleted all pending positions above, so delete_pending=False
     for inv_txn in investment_transactions:
         try:
+            # Pass recalculation context to context builder without persisting anything.
+            inv_txn._capital_cutoff_datetime = withdrawal_txn.datetime or timezone.now()
+            inv_txn._withdrawal_recalc_metadata = withdrawal_meta
+
             # Check all existing positions before recalculation
             # Note: All pending positions have already been deleted above for the entire product/client
             all_existing = Position.objects.filter(transaction_id=inv_txn.id)
@@ -2940,8 +3128,7 @@ def create_interest_transaction_for_period_if_complete(
     trigger: str | None = None,
 ) -> Transaction | None:
     """
-    Create an 'interets' transaction for a completed period if all positions of that period are 'done'
-    and the product doesn't compound (capitalisation_fonds = False).
+    Create an 'interets' transaction for a completed period if all positions of that period are 'done'.
     
     This function is idempotent: it checks if an interest transaction already exists for this period
     before creating a new one.
@@ -2971,10 +3158,9 @@ def create_interest_transaction_for_period_if_complete(
                 logger.warning(f"Cannot create interest transaction: product {txn.transfer_to} not found")
                 return None
         
-        # Only create interest transactions for non-compounding products
-        if _product_compounds(product):
+        if _txn_compounds_interests(txn, product):
             return None
-        
+
         # Get all positions for this transaction and period
         positions_in_period = Position.objects.filter(
             transaction_id=txn.id,

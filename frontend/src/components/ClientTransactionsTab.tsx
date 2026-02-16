@@ -92,7 +92,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   const loadTransactions = async (page: number = 1, limit: number = 50) => {
     try {
       setLoading(true);
-      const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+      // Add a cache-buster so newly created rows appear immediately.
+      const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}&_ts=${Date.now()}`);
       setTransactions((data as any).transactions || []);
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
@@ -230,9 +231,34 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     from_field: 'balance',
     to_field: 'balance',
     productId: '',
+    interestPeriod: '',
     // kept for backward compatibility with existing UI resets
     visibleByClient: true
   });
+
+  const normalizeInterestPeriod = (value: string): string => {
+    const v = String(value || '').trim();
+    const legacyMapping: Record<string, string> = {
+      Trimestriel: 'Trimestrielle',
+      Semestriel: 'Semestrielle',
+      Annuel: 'Annuelle',
+    };
+    return legacyMapping[v] || v;
+  };
+
+  const getInterestPeriodOptions = (product: any): string[] => {
+    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat'];
+    if (!product) return allOptions;
+    const raw = product.interestPeriod ?? product.interest_period ?? '';
+    if (!raw) return allOptions;
+    const parsed = String(raw)
+      .split(',')
+      .map((item) => normalizeInterestPeriod(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const valid = parsed.filter((item) => allOptions.includes(item));
+    return valid.length > 0 ? Array.from(new Set(valid)) : allOptions;
+  };
 
   // Update status when type changes
   useEffect(() => {
@@ -255,6 +281,37 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       setTransactionForm(prev => ({ ...prev, datetime: `${year}-${month}-${day}T${hours}:${minutes}` }));
     }
   }, [isTransactionDialogOpen]);
+
+  // Keep interest period aligned with selected transfer product options.
+  useEffect(() => {
+    if (transactionForm.type !== 'transfert') {
+      if (transactionForm.interestPeriod) {
+        setTransactionForm(prev => ({ ...prev, interestPeriod: '' }));
+      }
+      return;
+    }
+
+    const transferProductId =
+      transactionForm.from_field && transactionForm.from_field !== 'balance'
+        ? transactionForm.from_field
+        : (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
+
+    if (!transferProductId) {
+      if (transactionForm.interestPeriod) {
+        setTransactionForm(prev => ({ ...prev, interestPeriod: '' }));
+      }
+      return;
+    }
+
+    const selectedProduct = products.find((p: any) => String(p?.id) === String(transferProductId));
+    const options = getInterestPeriodOptions(selectedProduct);
+    if (!transactionForm.interestPeriod || !options.includes(transactionForm.interestPeriod)) {
+      setTransactionForm(prev => ({
+        ...prev,
+        interestPeriod: options.length === 1 ? options[0] : '',
+      }));
+    }
+  }, [transactionForm.type, transactionForm.from_field, transactionForm.to_field, transactionForm.interestPeriod, products]);
 
   // Auto-generate description for transfert transactions
   useEffect(() => {
@@ -317,6 +374,15 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
     if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
       toast.error('Le montant doit être supérieur à 0');
+      return;
+    }
+
+    const isTransferWithProduct =
+      transactionForm.type === 'transfert' &&
+      ((transactionForm.from_field && transactionForm.from_field !== 'balance') ||
+        (transactionForm.to_field && transactionForm.to_field !== 'balance'));
+    if (isTransferWithProduct && !String(transactionForm.interestPeriod || '').trim()) {
+      toast.error("La période d'intérêt est obligatoire pour un transfert impliquant un produit.");
       return;
     }
     
@@ -391,7 +457,10 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 to_field: transactionForm.to_field || undefined,
                 // help backend reliably resolve product
                 subscription_details: transactionForm.productId
-                  ? { productId: transactionForm.productId }
+                  ? {
+                      productId: transactionForm.productId,
+                      ...(transactionForm.interestPeriod ? { interestPeriod: transactionForm.interestPeriod } : {}),
+                    }
                   : undefined,
               }
             : {}),
@@ -450,6 +519,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             from_field: 'balance',
             to_field: 'balance',
             productId: '',
+            interestPeriod: '',
             visibleByClient: true
           });
           // Don't call onRefresh yet - wait for modal to complete
@@ -475,6 +545,11 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       }
       
       toast.success('Transaction créée avec succès');
+      // Optimistic UI update so the new row appears instantly.
+      setTransactions((prev) => {
+        const next = [response, ...prev.filter((t) => t?.id !== response?.id)];
+        return next;
+      });
       setIsTransactionDialogOpen(false);
       setTransactionForm({
         type: 'depot',
@@ -485,10 +560,11 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         from_field: 'balance',
         to_field: 'balance',
         productId: '',
+        interestPeriod: '',
         visibleByClient: true
       });
-      // Reload transactions to show the new one
-      loadTransactions(pagination.page, pagination.limit);
+      // Reload first page to guarantee visibility of the newly created transaction.
+      loadTransactions(1, pagination.limit);
       loadContractDocuments();
       onRefresh();
     } catch (error: any) {
@@ -612,6 +688,15 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   const sourceProduct = shouldShowWarning 
     ? products.find((p: any) => p.id === transactionForm.from_field)
     : null;
+
+  const transferProductId =
+    transactionForm.from_field && transactionForm.from_field !== 'balance'
+      ? transactionForm.from_field
+      : (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
+  const transferProduct = transferProductId
+    ? products.find((p: any) => String(p?.id) === String(transferProductId))
+    : null;
+  const interestPeriodOptions = getInterestPeriodOptions(transferProduct);
   
   const hasAvailableFunds = sourceProduct 
     ? (sourceProduct.availableFunds ?? sourceProduct.available_funds ?? false)
@@ -635,6 +720,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             from_field: 'balance',
             to_field: 'balance',
             productId: '',
+            interestPeriod: '',
             visibleByClient: true
           });
         }}>
@@ -773,6 +859,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             from_field: 'balance',
             to_field: 'balance',
             productId: '',
+            interestPeriod: '',
             visibleByClient: true
           });
         }}>
@@ -796,6 +883,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     from_field: 'balance',
                     to_field: 'balance',
                     productId: '',
+                    interestPeriod: '',
                     visibleByClient: true
                   });
                 }}
@@ -926,6 +1014,32 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     </Select>
                   </div>
 
+                  {transferProduct && (
+                    <div className="modal-form-field">
+                      <Label>Période d&apos;intérêt</Label>
+                      <Select
+                        value={transactionForm.interestPeriod}
+                        onValueChange={(value) =>
+                          setTransactionForm({
+                            ...transactionForm,
+                            interestPeriod: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionnez une période d'intérêt" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {interestPeriodOptions.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
                   {/* Warning message for products without available funds */}
                   {showAvailableFundsWarning && (
                     <div className="modal-form-field">
@@ -996,6 +1110,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     from_field: 'balance',
                     to_field: 'balance',
                     productId: '',
+                    interestPeriod: '',
                     visibleByClient: true
                   });
                 }}>
@@ -1217,7 +1332,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             setIsWithdrawalForPositionGeneration(false);
             setIsTransactionDialogOpen(false);
             toast.success('Transaction créée avec succès');
-            loadTransactions(pagination.page, pagination.limit);
+            // After modal completion, bring newest rows immediately.
+            loadTransactions(1, pagination.limit);
             loadContractDocuments();
             onRefresh();
           }}

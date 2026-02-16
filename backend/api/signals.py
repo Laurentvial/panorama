@@ -12,7 +12,6 @@ from .models import Transaction, Position, Product
 from .position_service import (
     create_positions_for_investment,
     recalculate_positions_for_product_withdrawal,
-    _product_compounds,
     create_interest_transaction_for_period_if_complete,
 )
 
@@ -175,7 +174,6 @@ def _position_capture_previous_state(sender, instance: Position, **kwargs):
 def _position_create_interest_transaction_for_period(sender, instance: Position, created: bool, **kwargs):
     """
     Automatically create an 'interets' transaction when all positions of a period are closed ('done')
-    for a product without compounding (capitalisation_fonds = False).
     
     This creates one interest transaction per period (monthly, quarterly, etc.) with the total
     profit_loss of all positions in that period.
@@ -206,16 +204,11 @@ def _position_create_interest_transaction_for_period(sender, instance: Position,
         if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'balance':
             return
         
-        # Get the product to check compounding setting
+        # Ensure the position's product reference is still valid
         try:
-            product = instance.product
+            _ = instance.product
         except Product.DoesNotExist:
             logger.warning("Position %s references non-existent product %s", instance.id, instance.product_id)
-            return
-        
-        # Only create interest transactions for non-compounding products
-        if _product_compounds(product):
-            # Product compounds interests, no interest transaction needed
             return
         
         # Check if position has a period_index

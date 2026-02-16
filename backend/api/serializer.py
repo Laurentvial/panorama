@@ -1025,7 +1025,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'name', 'reference', 'type', 'categoryId', 'categoryTitle', 'subcategory', 'status', 
             'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
-            'interest_period', 'capitalisation_fonds',
+            'interest_period',
             'availability_start', 'availability_end',
             'link_to_assets', 'min_entry_value', 'max_entry_value',
             'default', 'available_funds',
@@ -1100,7 +1100,6 @@ class ProductSerializer(serializers.ModelSerializer):
             'variableProfitability': 'variable_profitability',
             'profitabilityPeriod': 'profitability_period',
             'interestPeriod': 'interest_period',
-            'capitalisationFonds': 'capitalisation_fonds',
             'availabilityStart': 'availability_start',
             'availabilityEnd': 'availability_end',
             'linkToAssets': 'link_to_assets',
@@ -1118,12 +1117,6 @@ class ProductSerializer(serializers.ModelSerializer):
                 internal_data[key] = value
 
         # Normalize booleans that historically arrived as 'Oui'/'Non'
-        if 'capitalisation_fonds' in internal_data:
-            v = internal_data.get('capitalisation_fonds')
-            if isinstance(v, str):
-                internal_data['capitalisation_fonds'] = v.strip().lower() in ['oui', 'true', '1', 'yes']
-            else:
-                internal_data['capitalisation_fonds'] = bool(v)
         if 'available_funds' in internal_data:
             v = internal_data.get('available_funds')
             if isinstance(v, str):
@@ -1146,7 +1139,6 @@ class ProductSerializer(serializers.ModelSerializer):
         ret['variableProfitability'] = ret.pop('variable_profitability', '')
         ret['profitabilityPeriod'] = ret.pop('profitability_period', '')
         ret['interestPeriod'] = ret.pop('interest_period', '')
-        ret['capitalisationFonds'] = bool(ret.pop('capitalisation_fonds', False))
         ret['availabilityStart'] = ret.pop('availability_start', None)
         ret['availabilityEnd'] = ret.pop('availability_end', None)
         ret['linkToAssets'] = ret.pop('link_to_assets', 'Non')

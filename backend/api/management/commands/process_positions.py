@@ -7,7 +7,6 @@ from datetime import date
 
 from api.models import Position, Transaction, Product
 from api.position_service import (
-    _product_compounds,
     create_interest_transaction_for_period_if_complete,
     generate_rates_for_investment,
 )
@@ -56,7 +55,7 @@ class Command(BaseCommand):
         opened = open_qs.update(status="open")
         closed = close_qs.update(status="done")
         
-        # After closing positions, create interest transfers for non-compounding products
+        # After closing positions, create interest transfers for completed periods
         # Note: .update() doesn't trigger signals, so we need to process manually
         if closed > 0 and positions_to_close_ids:
             self._create_interest_transfers_for_closed_positions(positions_to_close_ids)
@@ -73,7 +72,7 @@ class Command(BaseCommand):
     
     def _create_interest_transfers_for_closed_positions(self, position_ids):
         """
-        Create interest transactions for completed periods on non-compounding products.
+        Create interest transactions for completed periods.
         This handles the case where positions are closed via .update() which doesn't trigger signals.
         """
         # Get the actual closed positions (after the update)
@@ -124,8 +123,8 @@ class Command(BaseCommand):
 
     def _create_interest_transfers_for_validated_transactions_without_positions(self, now):
         """
-        Ensure non-compounding validated transfer transactions generate 'interets' at each completed
-        profitability period, even when no positions were created for that transaction.
+        Ensure validated transfer transactions generate 'interets' at each completed
+        selected interest period, even when no positions were created for that transaction.
         """
         candidates = (
             Transaction.objects
@@ -147,9 +146,6 @@ class Command(BaseCommand):
                 product = Product.objects.filter(id=txn.transfer_to).first()
             if not product:
                 continue
-            if _product_compounds(product):
-                continue
-
             checked_count += 1
             period_summaries = generate_rates_for_investment(txn)
             if not period_summaries:

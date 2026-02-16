@@ -392,7 +392,7 @@ export function ProductDetail() {
 
   // Get available interest period options from product
   const getInterestPeriodOptions = (product: any): string[] => {
-    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat', 'Capitalisation des fonds'];
+    const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat'];
     const legacyOptions = ['Trimestriel', 'Semestriel', 'Annuel']; // Legacy masculine forms
     
     if (!product || !product.interestPeriod) {
@@ -484,7 +484,6 @@ export function ProductDetail() {
   ): {
     durationMonths: number;
     periodMonths: number;
-    compound: boolean;
     pickedRatePct: number;
     rows: Array<{
       index: number;
@@ -500,7 +499,6 @@ export function ProductDetail() {
   } => {
     const durationMonths = parseDurationMonths(product?.duration);
     const periodMonths = profitabilityPeriodMonths(product?.profitabilityPeriod, durationMonths);
-    const compound = normalizeBool(product?.capitalisationFonds ?? product?.capitalisation_fonds);
 
     const bounds = getRateBoundsPct(product);
     let pickedRatePct = bounds.avg;
@@ -514,7 +512,7 @@ export function ProductDetail() {
     const rows: Array<{ index: number; months: number; base: number; ratePct: number; profit: number; end: number }> = [];
     const safePrincipal = Number.isFinite(principal) ? Math.max(0, principal) : 0;
     if (!product || safePrincipal <= 0 || durationMonths <= 0 || pickedRatePct <= 0) {
-      return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
+      return { durationMonths, periodMonths, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
     }
 
     let remaining = durationMonths;
@@ -526,10 +524,10 @@ export function ProductDetail() {
       const step = Math.min(periodMonths, remaining);
       const proration = periodMonths > 0 ? step / periodMonths : 1;
       const effectiveRatePct = pickedRatePct * proration;
-      const base = compound ? capital : safePrincipal;
+      const base = safePrincipal;
       const profit = base * (effectiveRatePct / 100);
       totalProfit += profit;
-      const end = compound ? (base + profit) : (safePrincipal + totalProfit);
+      const end = safePrincipal + totalProfit;
       rows.push({
         index: idx,
         months: step,
@@ -543,13 +541,13 @@ export function ProductDetail() {
       idx += 1;
     }
 
-    const endCapital = compound ? capital : safePrincipal + totalProfit;
+    const endCapital = safePrincipal + totalProfit;
     const annualizedPct =
       durationMonths > 0 && endCapital > 0
         ? (Math.pow(endCapital / safePrincipal, 12 / durationMonths) - 1) * 100
         : null;
 
-    return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
+    return { durationMonths, periodMonths, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
   };
 
   // Initialize signature canvas
@@ -647,7 +645,7 @@ export function ProductDetail() {
         };
         
         const productValues = String(product.interestPeriod).split(',').map(p => p.trim()).filter(p => p);
-        const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat', 'Capitalisation des fonds'];
+        const allOptions = ['Quotidien', 'Hebdomadaire', 'Mensuel', 'Trimestrielle', 'Semestrielle', 'Annuelle', 'Fin de contrat'];
         const normalizedValues = productValues.map(v => normalizeInterestPeriod(v));
         const validOptions = normalizedValues.filter(v => allOptions.includes(v));
         // If only one option available, pre-select it (normalized)
@@ -926,8 +924,8 @@ export function ProductDetail() {
     // Interest period
     const interestPeriod = subscriptionData.interestPeriod || productData.interestPeriod || 'Fin de contrat';
 
-    // Auto-renewal / compounding
-    const autoRenewal = normalizeBool(productData.capitalisationFonds ?? productData.capitalisation_fonds) ? 'OUI' : 'NON';
+    // Auto-renewal now follows selected payout period
+    const autoRenewal = String(interestPeriod).toLowerCase().includes('fin') ? 'OUI' : 'NON';
 
     // Min/Max investment
     const minInvestment = parseFinancialValue(productData.minEntryValue) || 0;
@@ -1174,12 +1172,6 @@ export function ProductDetail() {
                     </div>
                   )}
                   
-                  <div>
-                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Capitalisation des fonds</div>
-                    <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {product.capitalisationFonds || product.capitalisation_fonds ? 'Oui' : 'Non'}
-                    </div>
-                  </div>
                 </div>
                 
                 <div style={{ marginTop: '20px', display: 'flex', gap: '12px' }}>
