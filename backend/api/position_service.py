@@ -1797,37 +1797,9 @@ def save_generated_positions(
         if timezone.is_naive(closed_at):
             closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
 
-        # Ne pas enregistrer les conversions FX pour les positions futures
-        # car on ne peut pas connaître le taux de change dans le futur
-        now = timezone.now()
-        is_future_position = opened_at > now
-        fx_rate_eur_to_asset = None
-        invested_amount_asset_currency = None
-        
-        if not is_future_position:
-            # Try to get FX rate from pos_data first
-            fx_rate_eur_to_asset = Decimal(str(pos_data['fx_rate_eur_to_asset'])) if pos_data.get('fx_rate_eur_to_asset') else None
-            invested_amount_asset_currency = Decimal(str(pos_data['invested_amount_asset_currency'])) if pos_data.get('invested_amount_asset_currency') else None
-            
-            # If pos_data doesn't have FX rate (e.g., position was future when generated),
-            # recalculate it now that the position is no longer future
-            if fx_rate_eur_to_asset is None and pos_data.get('asset_id'):
-                try:
-                    asset_id = pos_data.get('asset_id')
-                    asset = Asset.objects.filter(id=asset_id).first()
-                    if asset:
-                        asset_currency = (getattr(asset, 'currency', None) or '').strip().upper() or None
-                        if asset_currency:
-                            fx_rate_eur_to_asset = _get_fx_rate_eur_to_ccy(asset_currency)
-                            if fx_rate_eur_to_asset is not None:
-                                invested_amount = Decimal(str(pos_data['invested_amount']))
-                                try:
-                                    invested_amount_asset_currency = (invested_amount * fx_rate_eur_to_asset).quantize(Decimal('0.00000001'))
-                                except Exception:
-                                    invested_amount_asset_currency = None
-                except Exception:
-                    # If asset lookup or FX calculation fails, keep None values
-                    pass
+        # Get FX rate from position data if available
+        fx_rate_eur_to_asset = Decimal(str(pos_data['fx_rate_eur_to_asset'])) if pos_data.get('fx_rate_eur_to_asset') else None
+        invested_amount_asset_currency = Decimal(str(pos_data['invested_amount_asset_currency'])) if pos_data.get('invested_amount_asset_currency') else None
 
         # CRITICAL: Always use txn.id for transaction_id, not pos_data.get('transaction_id')
         # This ensures positions are linked to the correct transaction even if pos_data contains wrong transaction_id
