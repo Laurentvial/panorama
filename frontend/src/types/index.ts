@@ -52,3 +52,29 @@ export interface RegisterPayload extends LoginPayload {
   teamId: string | null;
 }
 
+// Asset types
+export interface Asset {
+  id: string;
+  type: string;
+  name: string;
+  reference: string;
+  category?: string;
+  subcategory?: string;
+  default?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Client Asset types
+export interface ClientAsset {
+  id: string;
+  clientId: string;
+  asset: Asset;
+  assetId: string;
+  featured: boolean;
+  availabilityStart?: string;  // Format: YYYY-MM-DD
+  availabilityEnd?: string;    // Format: YYYY-MM-DD
+  createdAt: string;
+  updatedAt: string;
+}
+

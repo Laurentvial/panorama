@@ -759,12 +759,14 @@ class ClientAssetSerializer(serializers.ModelSerializer):
     assetId = serializers.CharField(write_only=True, required=False)
     clientId = serializers.CharField(source='client.id', read_only=True)
     featured = serializers.BooleanField()
+    availabilityStart = serializers.DateField(source='availability_start', required=False, allow_null=True)
+    availabilityEnd = serializers.DateField(source='availability_end', required=False, allow_null=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
     class Meta:
         model = ClientAsset
-        fields = ['id', 'clientId', 'asset', 'assetId', 'featured', 'createdAt', 'updatedAt']
+        fields = ['id', 'clientId', 'asset', 'assetId', 'featured', 'availabilityStart', 'availabilityEnd', 'createdAt', 'updatedAt']
         read_only_fields = ['id', 'createdAt', 'updatedAt']
     
     def to_representation(self, instance):
@@ -773,9 +775,13 @@ class ClientAssetSerializer(serializers.ModelSerializer):
         # Only serialize asset if it exists (handle case where asset was deleted but ClientAsset remains)
         if instance.asset:
             ret['asset'] = AssetSerializer(instance.asset).data
+            ret['assetId'] = instance.asset.id
         else:
             ret['asset'] = None
+            ret['assetId'] = None
         ret['featured'] = bool(instance.featured)
+        ret['availabilityStart'] = instance.availability_start
+        ret['availabilityEnd'] = instance.availability_end
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret
@@ -1160,12 +1166,14 @@ class ClientProductSerializer(serializers.ModelSerializer):
     productId = serializers.CharField(write_only=True, required=False)
     clientId = serializers.CharField(source='client.id', read_only=True)
     featured = serializers.BooleanField()
+    availabilityStart = serializers.DateField(source='availability_start', required=False, allow_null=True)
+    availabilityEnd = serializers.DateField(source='availability_end', required=False, allow_null=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
     class Meta:
         model = ClientProduct
-        fields = ['id', 'clientId', 'product', 'productId', 'featured', 'createdAt', 'updatedAt']
+        fields = ['id', 'clientId', 'product', 'productId', 'featured', 'availabilityStart', 'availabilityEnd', 'createdAt', 'updatedAt']
         read_only_fields = ['id', 'createdAt', 'updatedAt']
     
     def to_representation(self, instance):
@@ -1176,9 +1184,13 @@ class ClientProductSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if instance.product:
             ret['product'] = ProductSerializer(instance.product, context={'request': request}).data
+            ret['productId'] = instance.product.id
         else:
             ret['product'] = None
+            ret['productId'] = None
         ret['featured'] = bool(instance.featured)
+        ret['availabilityStart'] = instance.availability_start
+        ret['availabilityEnd'] = instance.availability_end
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret

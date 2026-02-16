@@ -58,12 +58,14 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
-      # SMS OTP (client platform)
-      - key: INFOBIP_BASE_URL
+      # SMS OTP (client platform, Prelude)
+      - key: PRELUDE_BASE_URL
+        value: https://api.prelude.dev
+      - key: PRELUDE_API_KEY
         sync: false
-      - key: INFOBIP_API_KEY
+      - key: PRELUDE_TEMPLATE_ID
         sync: false
-      - key: INFOBIP_SENDER
+      - key: PRELUDE_SENDER
         sync: false
       - key: FRONTEND_PUBLIC_URL
         fromService:
@@ -177,19 +179,24 @@ services:
           type: web
           name: backend
           envVarKey: FRONTEND_PUBLIC_URL
-      - key: INFOBIP_BASE_URL
+      - key: PRELUDE_BASE_URL
         fromService:
           type: web
           name: backend
-          envVarKey: INFOBIP_BASE_URL
-      - key: INFOBIP_API_KEY
+          envVarKey: PRELUDE_BASE_URL
+      - key: PRELUDE_API_KEY
         fromService:
           type: web
           name: backend
-          envVarKey: INFOBIP_API_KEY
-      - key: INFOBIP_SENDER
+          envVarKey: PRELUDE_API_KEY
+      - key: PRELUDE_TEMPLATE_ID
         fromService:
           type: web
           name: backend
-          envVarKey: INFOBIP_SENDER
+          envVarKey: PRELUDE_TEMPLATE_ID
+      - key: PRELUDE_SENDER
+        fromService:
+          type: web
+          name: backend
+          envVarKey: PRELUDE_SENDER
 

@@ -4,9 +4,11 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { TrendingUp, Plus, Trash2, X, Star } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, X, Star, Calendar } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
+import { AssetAvailabilityModal } from './AssetAvailabilityModal';
+import { ProductAvailabilityModal } from './ProductAvailabilityModal';
 import '../styles/Modal.css';
 
 interface ClientAssetsTabProps {
@@ -21,6 +23,10 @@ interface ClientAssetsTabProps {
 export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clientProducts, availableProducts, onRefresh }: ClientAssetsTabProps) {
   const [isAddAssetDialogOpen, setIsAddAssetDialogOpen] = useState(false);
   const [isAddProductDialogOpen, setIsAddProductDialogOpen] = useState(false);
+  const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
+  const [isProductAvailabilityModalOpen, setIsProductAvailabilityModalOpen] = useState(false);
+  const [selectedClientAsset, setSelectedClientAsset] = useState<any>(null);
+  const [selectedClientProduct, setSelectedClientProduct] = useState<any>(null);
   const [filterType, setFilterType] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterSubcategory, setFilterSubcategory] = useState<string>('all');
@@ -34,6 +40,27 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   useEffect(() => {
     setLocalClientProducts(clientProducts || []);
   }, [clientProducts]);
+
+  // Format date from YYYY-MM-DD to DD/MM/YYYY
+  const formatDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    if (isNaN(date.getTime())) return '';
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const openAvailabilityModal = (clientAsset: any) => {
+    setSelectedClientAsset(clientAsset);
+    setIsAvailabilityModalOpen(true);
+  };
+
+  const openProductAvailabilityModal = (clientProduct: any) => {
+    setSelectedClientProduct(clientProduct);
+    setIsProductAvailabilityModalOpen(true);
+  };
 
   async function handleAddAsset(assetId: string) {
     try {
@@ -304,6 +331,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                             <th className="text-left py-2 px-3">Catégorie</th>
                             <th className="text-left py-2 px-3">Sous-catégorie</th>
                             <th className="text-center py-2 px-3">Mis en avant</th>
+                            <th className="text-left py-2 px-3">Dates de disponibilité</th>
                             <th className="text-left py-2 px-3">Actions</th>
                           </tr>
                         </thead>
@@ -342,14 +370,39 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                   </Button>
                                 </td>
                                 <td className="py-2 px-3">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleRemoveAsset(asset.id)}
-                                    className="text-red-600"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
+                                  {clientAsset.availabilityStart || clientAsset.availabilityEnd ? (
+                                    <div className="text-xs">
+                                      {clientAsset.availabilityStart && (
+                                        <div>Début: {formatDate(clientAsset.availabilityStart)}</div>
+                                      )}
+                                      {clientAsset.availabilityEnd && (
+                                        <div>Fin: {formatDate(clientAsset.availabilityEnd)}</div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400 text-xs">Toujours visible</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <div className="flex gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => openAvailabilityModal(clientAsset)}
+                                      className="text-blue-600"
+                                      title="Configurer les dates de disponibilité"
+                                    >
+                                      <Calendar className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleRemoveAsset(asset.id)}
+                                      className="text-red-600"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -460,6 +513,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           <th className="text-left py-2 px-3">Référence</th>
                           <th className="text-left py-2 px-3">Statut</th>
                           <th className="text-center py-2 px-3">Mis en avant</th>
+                          <th className="text-left py-2 px-3">Dates de disponibilité</th>
                           <th className="text-left py-2 px-3">Actions</th>
                         </tr>
                       </thead>
@@ -497,14 +551,48 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                 </Button>
                               </td>
                               <td className="py-2 px-3">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleRemoveProduct(product.id)}
-                                  className="text-red-600"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                {clientProduct.availabilityStart || clientProduct.availabilityEnd ? (
+                                  <div className="text-xs">
+                                    {clientProduct.availabilityStart && (
+                                      <div className="font-medium text-green-600">Client: {formatDate(clientProduct.availabilityStart)}</div>
+                                    )}
+                                    {clientProduct.availabilityEnd && (
+                                      <div className="font-medium text-green-600">Fin: {formatDate(clientProduct.availabilityEnd)}</div>
+                                    )}
+                                  </div>
+                                ) : (product.availabilityStart || product.availabilityEnd) ? (
+                                  <div className="text-xs text-gray-500">
+                                    {product.availabilityStart && (
+                                      <div>Défaut: {formatDate(product.availabilityStart)}</div>
+                                    )}
+                                    {product.availabilityEnd && (
+                                      <div>Fin: {formatDate(product.availabilityEnd)}</div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400 text-xs">Toujours visible</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openProductAvailabilityModal(clientProduct)}
+                                    className="text-blue-600"
+                                    title="Configurer les dates de disponibilité"
+                                  >
+                                    <Calendar className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveProduct(product.id)}
+                                    className="text-red-600"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -520,6 +608,34 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Asset Availability Modal */}
+      {selectedClientAsset && (
+        <AssetAvailabilityModal
+          clientId={clientId}
+          clientAsset={selectedClientAsset}
+          isOpen={isAvailabilityModalOpen}
+          onClose={() => {
+            setIsAvailabilityModalOpen(false);
+            setSelectedClientAsset(null);
+          }}
+          onSuccess={onRefresh}
+        />
+      )}
+
+      {/* Product Availability Modal */}
+      {selectedClientProduct && (
+        <ProductAvailabilityModal
+          clientId={clientId}
+          clientProduct={selectedClientProduct}
+          isOpen={isProductAvailabilityModalOpen}
+          onClose={() => {
+            setIsProductAvailabilityModalOpen(false);
+            setSelectedClientProduct(null);
+          }}
+          onSuccess={onRefresh}
+        />
+      )}
     </div>
   );
 }

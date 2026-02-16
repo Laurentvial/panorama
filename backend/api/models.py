@@ -330,6 +330,8 @@ class ClientAsset(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_assets')
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='client_assets')
     featured = models.BooleanField(default=False)  # Si True, l'actif est mis en avant pour ce client
+    availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité pour ce client
+    availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité pour ce client
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -615,6 +617,8 @@ class ClientProduct(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_products')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='client_products')
     featured = models.BooleanField(default=False)  # Si True, le produit est mis en avant pour ce client
+    availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité pour ce client
+    availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité pour ce client
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

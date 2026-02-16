@@ -3108,13 +3108,18 @@ def asset_upload_logo(request, asset_id):
 @permission_classes([AllowAny])
 def client_assets(request, client_id):
     """Liste les assets d'un client"""
+    from datetime import date
+    from django.db.models import Q
+    
     client = get_object_or_404(Client, id=client_id)
     
     # Check if it's a client accessing their own data
     auth_header = request.headers.get('Authorization', '')
     token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
     
+    is_client_access = False
     if token and token.startswith('client_'):
+        is_client_access = True
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
@@ -3139,7 +3144,18 @@ def client_assets(request, client_id):
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Get all client assets
     client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
+    
+    # Filter by availability dates ONLY if it's a client accessing (not admin)
+    if is_client_access:
+        today = date.today()
+        client_assets = client_assets.filter(
+            Q(availability_start__isnull=True) | Q(availability_start__lte=today)
+        ).filter(
+            Q(availability_end__isnull=True) | Q(availability_end__gte=today)
+        )
+    
     serializer = ClientAssetSerializer(client_assets, many=True)
     return Response({'assets': serializer.data})
 
@@ -3207,6 +3223,29 @@ def client_asset_toggle_featured(request, client_id, asset_id):
     except ClientAsset.DoesNotExist:
         return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
 
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def client_asset_update_availability(request, client_id, asset_id):
+    """Mettre à jour les dates de disponibilité pour un actif d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    asset = get_object_or_404(Asset, id=asset_id)
+    
+    try:
+        client_asset = ClientAsset.objects.get(client=client, asset=asset)
+    except ClientAsset.DoesNotExist:
+        return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Use serializer for validation
+    serializer = ClientAssetSerializer(client_asset, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def client_assets_reset(request, client_id):
@@ -3262,7 +3301,9 @@ def client_products(request, client_id):
     auth_header = request.headers.get('Authorization', '')
     token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
     
+    is_client_access = False
     if token and token.startswith('client_'):
+        is_client_access = True
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
@@ -3290,21 +3331,29 @@ def client_products(request, client_id):
     from datetime import date
     today = date.today()
     
-    # Filter client products and exclude those where:
-    # - availability_start is in the future (not yet available), OR
-    # - availability_end has passed (no longer available)
-    # Products are available if:
-    # - availability_start is None (always available from the start), OR availability_start is today or in the past (already started)
-    # - AND
-    # - availability_end is None (always available), OR availability_end is today or in the future (not yet ended)
+    # Get all client products
     client_products = ClientProduct.objects.filter(
         client=client,
         product__isnull=False  # Exclude products that have been deleted
-    ).filter(
-        Q(product__availability_start__isnull=True) | Q(product__availability_start__lte=today)
-    ).filter(
-        Q(product__availability_end__isnull=True) | Q(product__availability_end__gte=today)
     ).select_related('product')
+    
+    # Filter by availability dates ONLY if it's a client accessing (not admin)
+    if is_client_access:
+        # Filter client products with priority logic:
+        # - Use ClientProduct dates if set (client-specific override)
+        # - Otherwise use Product dates (global product availability)
+        # - If neither set, product is always available
+        client_products = client_products.filter(
+            # Start date check: use ClientProduct.availability_start if set, otherwise Product.availability_start
+            Q(availability_start__isnull=True, product__availability_start__isnull=True) |  # Both null = always available
+            Q(availability_start__isnull=True, product__availability_start__lte=today) |     # ClientProduct null, use Product date
+            Q(availability_start__lte=today)                                                  # ClientProduct date has priority
+        ).filter(
+            # End date check: use ClientProduct.availability_end if set, otherwise Product.availability_end
+            Q(availability_end__isnull=True, product__availability_end__isnull=True) |      # Both null = always available
+            Q(availability_end__isnull=True, product__availability_end__gte=today) |         # ClientProduct null, use Product date
+            Q(availability_end__gte=today)                                                    # ClientProduct date has priority
+        )
     
     serializer = ClientProductSerializer(client_products, many=True, context={'request': request})
     return Response({'products': serializer.data})
@@ -3378,6 +3427,29 @@ def client_product_toggle_featured(request, client_id, product_id):
         return Response(serializer.data, status=status.HTTP_200_OK)
     except ClientProduct.DoesNotExist:
         return Response({'error': 'Client product relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def client_product_update_availability(request, client_id, product_id):
+    """Mettre à jour les dates de disponibilité pour un produit d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    product = get_object_or_404(Product, id=product_id)
+    
+    try:
+        client_product = ClientProduct.objects.get(client=client, product=product)
+    except ClientProduct.DoesNotExist:
+        return Response({'error': 'Client product relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Use serializer for validation
+    serializer = ClientProductSerializer(client_product, data=request.data, partial=True, context={'request': request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
