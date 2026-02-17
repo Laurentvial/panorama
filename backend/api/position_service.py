@@ -119,6 +119,137 @@ def _txn_compounds_interests(txn: Transaction, product: Product | None = None) -
     return 'fin' in p and ('contrat' in p or 'matur' in p)
 
 
+def _parse_interest_payment_period_months(interest_period: str) -> float:
+    """
+    Convert interest payment period string to number of months.
+    This determines how often interest transactions are created and paid to the client.
+    
+    NOTE: This is different from _period_months_from_profitability_period which 
+    determines how often profits are calculated.
+    
+    Returns float to support daily (1/30) and weekly (1/4) periods.
+    """
+    if not interest_period:
+        return 0.0  # End of contract
+    
+    p = str(interest_period).strip().lower()
+    
+    # End of contract / maturity (interests paid at contract end only)
+    if 'fin' in p and ('contrat' in p or 'matur' in p):
+        return 0.0
+    
+    # Daily payment: ~1/30 of a month
+    if 'quotid' in p or p in {'daily', 'jour', 'journee'}:
+        return 1.0 / 30.0  # Approximately 0.033 months
+    
+    # Weekly payment: ~1/4 of a month
+    if 'hebdo' in p or 'semaine' in p or p in {'weekly', 'week'}:
+        return 1.0 / 4.0  # Approximately 0.25 months
+    
+    # Monthly payment
+    if 'mens' in p or p in {'month', 'mois'}:
+        return 1.0
+    
+    # Quarterly payment
+    if 'trim' in p or p in {'quarter', 'trimestre'}:
+        return 3.0
+    
+    # Semester payment
+    if 'sem' in p or p in {'semester', 'semestre'}:
+        return 6.0
+    
+    # Annual payment
+    if 'ann' in p or p in {'year', 'année', 'an'}:
+        return 12.0
+    
+    # Fallback: try to parse number
+    m = _DURATION_RE.search(p)
+    if m:
+        try:
+            v = int(m.group(1))
+            return float(v) if v > 0 else 1.0
+        except Exception:
+            return 1.0
+    
+    # Default to monthly if unable to parse
+    return 1.0
+
+
+def _should_create_interest_payment_for_date(
+    txn: Transaction,
+    product: Product | None,
+    check_date: date,
+) -> bool:
+    """
+    Determine if an interest payment should be created for the given date.
+    
+    This checks if enough time has elapsed since the contract start based on
+    the selected interest_period (payment frequency).
+    
+    Args:
+        txn: Investment transaction
+        product: Product (for interest_period fallback)
+        check_date: Date to check if payment is due
+    
+    Returns:
+        True if a payment should be created, False otherwise
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get contract start date
+    contract_start = txn.datetime.date() if txn.datetime else None
+    if not contract_start:
+        logger.warning(f"Cannot determine contract start date for transaction {txn.id}")
+        return False
+    
+    # Get the selected interest payment period
+    interest_period_str = _resolve_interest_period_for_txn(txn, product)
+    payment_period_months = _parse_interest_payment_period_months(interest_period_str)
+    
+    # Special case: end of contract (interests compound until end)
+    if payment_period_months == 0.0:
+        # For "Fin de contrat", only pay at the very end
+        # This will be handled separately by the contract end logic
+        return False
+    
+    # Calculate the time elapsed since contract start
+    days_elapsed = (check_date - contract_start).days
+    
+    # Convert payment period to days (approximate)
+    # Using 30 days per month as an approximation
+    payment_period_days = payment_period_months * 30
+    
+    # For the first payment period, we need at least one full period to elapse
+    # For example, if interest_period is "Quotidien", we need at least 1 day to pass
+    # If it's "Mensuel", we need at least 30 days to pass
+    if days_elapsed < payment_period_days:
+        logger.debug(
+            f"Transaction {txn.id}: Not enough time elapsed for first payment. "
+            f"days_elapsed={days_elapsed}, payment_period_days={payment_period_days}, "
+            f"interest_period={interest_period_str}"
+        )
+        return False
+    
+    # Check if check_date aligns with a payment date
+    # Payment dates are contract_start + N * payment_period_months
+    # We allow payments when we've completed at least one full period
+    
+    # Calculate how many complete periods have elapsed
+    periods_elapsed = days_elapsed / payment_period_days
+    
+    # We should have completed at least 1 full period
+    if periods_elapsed >= 1.0:
+        logger.debug(
+            f"Transaction {txn.id}: Payment condition met. "
+            f"days_elapsed={days_elapsed}, periods_elapsed={periods_elapsed:.2f}, "
+            f"interest_period={interest_period_str}"
+        )
+        return True
+    
+    return False
+
+
 def _is_smart_portfolio(product: Product) -> bool:
     t = (product.type or '').lower()
     s = (product.subcategory or '').lower()
@@ -900,6 +1031,14 @@ def _create_trade_positions_compounding(
     while remaining_months > 0:
         step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
+        
+        # CRITICAL: Ensure we don't go beyond the contract end date
+        if period_end_dt > end_dt:
+            period_end_dt = end_dt
+        
+        # CRITICAL: Stop if cursor has reached or passed the end date
+        if cursor_dt.date() >= end_dt.date():
+            break
 
         # Days within this profitability period
         period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
@@ -1126,10 +1265,10 @@ def generate_rates_for_investment(
         logger.warning(f"invested_amount is {invested_total} for transaction {txn.id}. Cannot generate rates.")
         return []
     
-    # Debug logging
+    # Debug logging - CRITICAL: Check if trading_days extends beyond contract duration
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating rates for transaction {txn.id}: invested_amount={invested_total}, duration_months={ctx.duration_months}, trading_days={len(trading_days)}")
+    logger.info(f"Generating rates for transaction {txn.id}: invested_amount={invested_total}, duration_months={ctx.duration_months}, start_dt={start_dt.date()}, end_dt={end_dt.date()}, trading_days_count={len(trading_days)}, first_day={trading_days[0] if trading_days else None}, last_day={trading_days[-1] if trading_days else None}")
 
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
@@ -1157,6 +1296,14 @@ def generate_rates_for_investment(
     while remaining_months > 0:
         step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
+        
+        # CRITICAL: Ensure we don't go beyond the contract end date
+        if period_end_dt > end_dt:
+            period_end_dt = end_dt
+        
+        # CRITICAL: Stop if cursor has reached or passed the end date
+        if cursor_dt.date() >= end_dt.date():
+            break
 
         period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
         if not period_days:
@@ -1367,6 +1514,14 @@ def generate_positions_with_rates(
     while remaining_months > 0:
         step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
+        
+        # CRITICAL: Ensure we don't go beyond the contract end date
+        if period_end_dt > end_dt:
+            period_end_dt = end_dt
+        
+        # CRITICAL: Stop if cursor has reached or passed the end date
+        if cursor_dt.date() >= end_dt.date():
+            break
 
         period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
         if not period_days:
@@ -2602,29 +2757,46 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     start = txn.datetime.date() if txn.datetime else date.today()
     start = date(start.year, start.month, 1)
 
-    # Determine duration (months): subscription_details.duration first, fallback to product.duration
-    # Some historical transactions stored "N/A" (or empty) in subscription_details.duration;
-    # in that case we must fall back to the product duration to generate the correct number of periods.
-    duration_candidates: list[str | None] = []
+    # Determine duration (months): product.duration is the source of truth
+    # If subscription_details contains a different duration, it's logged as a warning but product.duration is used
+    # This prevents positions from being generated beyond the actual contract duration
+    
+    # CRITICAL: Always use product.duration as the source of truth
+    # The product defines the contract terms, and subscription_details is just metadata
+    duration_str = product.duration
+    
+    # Validate subscription_details for consistency (but don't use it)
     if isinstance(txn.subscription_details, dict):
-        duration_candidates.append(txn.subscription_details.get('duration'))
-    # Also consider the explicit column (admin edits may fill it).
-    duration_candidates.append(getattr(txn, 'subscription_duration', None) or None)
-    duration_candidates.append(product.duration)
-
-    duration_str: str | None = None
-    for cand in duration_candidates:
-        if cand and _DURATION_RE.search(str(cand)):
-            duration_str = str(cand)
-            break
+        sub_duration = txn.subscription_details.get('duration')
+        if sub_duration and str(sub_duration) != str(product.duration):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Duration mismatch for transaction {txn.id}: "
+                f"subscription_details.duration='{sub_duration}' != product.duration='{product.duration}'. "
+                f"Using product.duration={product.duration} as source of truth."
+            )
+    
+    # Also check subscription_duration column
+    sub_duration_col = getattr(txn, 'subscription_duration', None)
+    if sub_duration_col and str(sub_duration_col) != str(product.duration):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"Duration mismatch for transaction {txn.id}: "
+            f"subscription_duration='{sub_duration_col}' != product.duration='{product.duration}'. "
+            f"Using product.duration={product.duration} as source of truth."
+        )
 
     months = _parse_months(duration_str)
     
     # Log duration resolution for debugging
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Duration resolution for transaction {txn.id}: duration_candidates={duration_candidates}, "
-                f"duration_str={duration_str}, months={months}, product.duration={product.duration}")
+    logger.info(f"Duration resolution for transaction {txn.id}: "
+                f"product.duration={product.duration}, months={months}, "
+                f"subscription_details.duration={txn.subscription_details.get('duration') if isinstance(txn.subscription_details, dict) else 'N/A'}, "
+                f"subscription_duration={getattr(txn, 'subscription_duration', 'N/A')}")
     
     # Ensure we have a valid duration (at least 1 month)
     if months <= 0:
@@ -3667,6 +3839,122 @@ def recalculate_positions_for_product_addition(
 
 
 @db_transaction.atomic
+def _group_calculation_periods_by_payment_period(
+    txn: Transaction,
+    product: Product | None,
+    period_summaries: list[dict],
+) -> list[dict]:
+    """
+    Group calculation periods (based on profitability_period) into payment periods
+    (based on interest_period).
+    
+    For example, if profitability is calculated daily (90 periods for 3 months)
+    but interest is paid monthly, this groups the 90 periods into 3 payment groups.
+    
+    Args:
+        txn: Investment transaction
+        product: Product (for interest_period fallback)
+        period_summaries: List of period summaries from generate_rates_for_investment
+    
+    Returns:
+        List of payment period summaries, each containing:
+        - paymentPeriodIndex: Index of the payment period (0-based)
+        - calculationPeriods: List of period_index values included in this payment
+        - startDate: Start date of the payment period
+        - endDate: End date of the payment period
+        - totalProfit: Sum of targetProfit from all calculation periods
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if not period_summaries:
+        return []
+    
+    # Get the selected interest payment period
+    interest_period_str = _resolve_interest_period_for_txn(txn, product)
+    payment_period_months = _parse_interest_payment_period_months(interest_period_str)
+    
+    # Special case: end of contract (no periodic payments)
+    if payment_period_months == 0.0:
+        # All profits are paid at the end
+        total_profit = sum(
+            Decimal(str(p.get('targetProfit', '0')))
+            for p in period_summaries
+        )
+        return [{
+            'paymentPeriodIndex': 0,
+            'calculationPeriods': [p.get('periodIndex') for p in period_summaries],
+            'startDate': period_summaries[0].get('startDate'),
+            'endDate': period_summaries[-1].get('endDate'),
+            'totalProfit': str(total_profit),
+        }]
+    
+    # Get contract start date
+    contract_start = txn.datetime.date() if txn.datetime else None
+    if not contract_start:
+        logger.warning(f"Cannot determine contract start date for transaction {txn.id}")
+        return []
+    
+    # Group calculation periods into payment periods
+    payment_groups: list[dict] = []
+    current_payment_idx = 0
+    
+    # Calculate payment period boundaries in days
+    payment_period_days = payment_period_months * 30
+    
+    for period in period_summaries:
+        period_end_str = period.get('endDate')
+        if not period_end_str:
+            continue
+        
+        try:
+            period_end = date.fromisoformat(str(period_end_str))
+        except Exception:
+            continue
+        
+        # Determine which payment period this calculation period belongs to
+        days_since_start = (period_end - contract_start).days
+        payment_idx = int(days_since_start / payment_period_days)
+        
+        # Find or create the payment group
+        payment_group = next(
+            (g for g in payment_groups if g['paymentPeriodIndex'] == payment_idx),
+            None
+        )
+        
+        if payment_group is None:
+            payment_group = {
+                'paymentPeriodIndex': payment_idx,
+                'calculationPeriods': [],
+                'startDate': period.get('startDate'),
+                'endDate': period.get('endDate'),
+                'totalProfit': Decimal('0'),
+            }
+            payment_groups.append(payment_group)
+        
+        # Add this calculation period to the payment group
+        payment_group['calculationPeriods'].append(period.get('periodIndex'))
+        payment_group['endDate'] = period.get('endDate')  # Update to latest end date
+        
+        # Accumulate profit
+        try:
+            period_profit = Decimal(str(period.get('targetProfit', '0')))
+            payment_group['totalProfit'] += period_profit
+        except Exception:
+            pass
+    
+    # Convert totalProfit back to string
+    for group in payment_groups:
+        group['totalProfit'] = str(group['totalProfit'].quantize(Decimal('0.01')))
+    
+    logger.info(
+        f"Transaction {txn.id}: Grouped {len(period_summaries)} calculation periods "
+        f"into {len(payment_groups)} payment periods (interest_period={interest_period_str})"
+    )
+    
+    return payment_groups
+
+
 def create_interest_transaction_for_period_if_complete(
     txn: Transaction,
     period_index: int,
@@ -3678,6 +3966,11 @@ def create_interest_transaction_for_period_if_complete(
     
     This function is idempotent: it checks if an interest transaction already exists for this period
     before creating a new one.
+    
+    IMPORTANT: This function now respects the selected interest_period (payment frequency).
+    It will NOT create interest transactions for every calculation period when using
+    daily/weekly profitability. Instead, it groups calculation periods according to
+    the payment frequency.
     
     Args:
         txn: Investment transaction (transfert balance -> product)
@@ -3714,7 +4007,9 @@ def create_interest_transaction_for_period_if_complete(
         )
 
         period_summary: dict | None = None
+        period_end_date: date | None = None
         used_positions = positions_in_period.exists()
+        
         if used_positions:
             # Check if all positions in this period are 'done'
             total_positions = positions_in_period.count()
@@ -3723,6 +4018,11 @@ def create_interest_transaction_for_period_if_complete(
             if done_positions < total_positions:
                 # Period not yet complete
                 return None
+            
+            # Get the period end date from the latest position in this period
+            latest_position = positions_in_period.order_by('-period_date').first()
+            if latest_position and latest_position.period_date:
+                period_end_date = latest_position.period_date
         else:
             # Fallback path: no positions linked to this validated transfer.
             # We still create "interets" at period end using generated target profit.
@@ -3748,6 +4048,21 @@ def create_interest_transaction_for_period_if_complete(
             # Only create interest once the period is fully elapsed.
             if period_end_date > timezone.localdate():
                 return None
+        
+        # CRITICAL: Check if we should create a payment for this date based on interest_period
+        # This check must be applied REGARDLESS of whether positions exist or not
+        if period_end_date is None:
+            logger.warning(
+                f"Cannot determine period end date for transaction {txn.id}, period {period_index}"
+            )
+            return None
+        
+        if not _should_create_interest_payment_for_date(txn, product, period_end_date):
+            logger.debug(
+                f"Skipping interest transaction for transaction {txn.id}, period {period_index}: "
+                f"payment not yet due based on interest_period (period_end={period_end_date.isoformat()})"
+            )
+            return None
 
         # Check if an interest transaction already exists for this period (idempotent)
         # We identify it by checking for an 'interets' transaction with:

@@ -175,9 +175,16 @@ def _position_create_interest_transaction_for_period(sender, instance: Position,
     """
     Automatically create an 'interets' transaction when all positions of a period are closed ('done')
     
-    This creates one interest transaction per period (monthly, quarterly, etc.) with the total
-    profit_loss of all positions in that period.
+    This creates one interest transaction per PAYMENT period (based on interest_period),
+    not per calculation period. For example, with daily profitability but monthly payments,
+    this will only create an interest transaction once per month, not every day.
     """
+    from .position_service import (
+        create_interest_transaction_for_period_if_complete,
+        generate_rates_for_investment,
+        _group_calculation_periods_by_payment_period,
+    )
+    
     try:
         # Only process positions that just transitioned to 'done'
         if instance.status != 'done':
@@ -206,7 +213,7 @@ def _position_create_interest_transaction_for_period(sender, instance: Position,
         
         # Ensure the position's product reference is still valid
         try:
-            _ = instance.product
+            product = instance.product
         except Product.DoesNotExist:
             logger.warning("Position %s references non-existent product %s", instance.id, instance.product_id)
             return
@@ -216,10 +223,55 @@ def _position_create_interest_transaction_for_period(sender, instance: Position,
             # Position doesn't belong to a period (e.g., manual trading position)
             return
         
-        # Try to create interest transaction for this period if all positions are done
+        # Get calculation periods and group by payment period
+        period_summaries = generate_rates_for_investment(txn)
+        if not period_summaries:
+            return
+        
+        payment_periods = _group_calculation_periods_by_payment_period(
+            txn, product, period_summaries
+        )
+        
+        # Find which payment period this calculation period belongs to
+        payment_group = None
+        for pg in payment_periods:
+            if instance.period_index in pg.get('calculationPeriods', []):
+                payment_group = pg
+                break
+        
+        if not payment_group:
+            # This shouldn't happen, but handle gracefully
+            logger.warning(
+                "Position %s (period_index=%s) not found in any payment group",
+                instance.id, instance.period_index
+            )
+            return
+        
+        # Check if ALL positions in ALL calculation periods of this payment group are done
+        calculation_periods = payment_group.get('calculationPeriods', [])
+        for calc_period_idx in calculation_periods:
+            positions_in_calc_period = Position.objects.filter(
+                transaction_id=txn.id,
+                period_index=calc_period_idx
+            )
+            if positions_in_calc_period.exists():
+                total = positions_in_calc_period.count()
+                done = positions_in_calc_period.filter(status='done').count()
+                if done < total:
+                    # Not all positions in this payment group are done yet
+                    logger.debug(
+                        "Payment group not yet complete: calculation period %s has %s/%s done",
+                        calc_period_idx, done, total
+                    )
+                    return
+        
+        # All positions in the payment group are done - create interest transaction
+        # Use the last calculation period as representative
+        representative_period_idx = calculation_periods[-1] if calculation_periods else instance.period_index
+        
         create_interest_transaction_for_period_if_complete(
             txn,
-            instance.period_index,
+            representative_period_idx,
             trigger="position_closed"
         )
         
