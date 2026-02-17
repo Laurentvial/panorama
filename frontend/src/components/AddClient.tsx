@@ -33,7 +33,6 @@ export function AddClient() {
     password: '',
     phone: '',
     mobile: '',
-    platformAccess: true,
     active: true,
     birthDate: '',
     birthPlace: '',
@@ -194,7 +193,6 @@ export function AddClient() {
         formDataToSend.append('password', formData.password);
         formDataToSend.append('phone', formData.phone || '');
         formDataToSend.append('mobile', formData.mobile || '');
-        formDataToSend.append('platformAccess', formData.platformAccess.toString());
         formDataToSend.append('active', formData.active.toString());
         formDataToSend.append('birthDate', formData.birthDate || '');
         formDataToSend.append('birthPlace', formData.birthPlace || '');
@@ -244,7 +242,6 @@ export function AddClient() {
           password: formData.password,
           phone: formData.phone || '',
           mobile: formData.mobile || '',
-          platformAccess: formData.platformAccess,
           active: formData.active,
           birthDate: formData.birthDate || '',
           birthPlace: formData.birthPlace || '',
@@ -640,17 +637,6 @@ export function AddClient() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="platformAccess"
-                  checked={formData.platformAccess}
-                  onCheckedChange={(checked) => setFormData({ ...formData, platformAccess: checked === true })}
-                />
-                <Label htmlFor="platformAccess" className="cursor-pointer">
-                  Connexion à la plateforme
-                </Label>
-              </div>
-
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="active"

@@ -193,10 +193,6 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
 
   function handlePlatformAccess() {
-    if (!client?.platform_access) {
-      toast.error('Accès à la plateforme désactivé pour ce client');
-      return;
-    }
     if (!client?.active) {
       toast.error('Compte client désactivé');
       return;

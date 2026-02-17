@@ -47,8 +47,7 @@ class Client(models.Model):
     legal_name = models.CharField(max_length=200, default="", blank=True)  # Dénomination légale (nom complet)
     sex = models.CharField(max_length=20, default="", blank=True)  # male | female | other
     account_verified = models.BooleanField(default=False)
-    platform_access = models.BooleanField(default=True)  # Connexion à la plateforme
-    active = models.BooleanField(null=False, default=True)
+    active = models.BooleanField(null=False, default=True)  # Si actif, le client peut accéder à la plateforme
     password = models.CharField(max_length=100, default="Access@123")
     phone = models.CharField(max_length=20, default="", blank=True)
     mobile = models.CharField(max_length=20, default="", blank=True)
@@ -456,7 +455,7 @@ class Transaction(models.Model):
     amount_in_asset_currency = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
     subscription_first_name = models.CharField(max_length=100, default="", blank=True)
     subscription_last_name = models.CharField(max_length=100, default="", blank=True)
-    subscription_birth_date = models.CharField(max_length=20, default="", blank=True)
+    subscription_birth_date = models.CharField(max_length=20, default="", blank=True, null=True)
     subscription_city = models.CharField(max_length=100, default="", blank=True)
     subscription_ip = models.CharField(max_length=50, default="", blank=True)
     subscription_date = models.CharField(max_length=20, default="", blank=True)

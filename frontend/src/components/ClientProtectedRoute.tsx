@@ -123,15 +123,14 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
             if (clientData) {
                 try {
                     const client = JSON.parse(clientData);
-                    // Check if client has platform access and is active
-                    if (client.platform_access && client.active) {
+                    // Check if client is active
+                    if (client.active) {
                         console.log('ClientProtectedRoute: Client data found in storage, authenticated');
                         setIsAuthenticated(true);
                         setCachedClientAuth(true, tokenHash, storageType);
                         return;
                     } else {
                         console.log('ClientProtectedRoute: Client data found but access denied', {
-                            platform_access: client.platform_access,
                             active: client.active
                         });
                     }
@@ -155,7 +154,7 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
                 
                 if (response.ok) {
                     const data = await response.json();
-                    if (data.client && data.client.platform_access && data.client.active) {
+                    if (data.client && data.client.active) {
                         storage.setItem('clientData', JSON.stringify(data.client));
                         console.log('ClientProtectedRoute: API authentication successful');
                         setIsAuthenticated(true);

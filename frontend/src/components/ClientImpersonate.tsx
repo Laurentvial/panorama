@@ -103,10 +103,7 @@ export function ClientImpersonate() {
           throw new Error('Données client introuvables');
         }
 
-        // Verify client has platform access and is active
-        if (!data.client.platform_access) {
-          throw new Error('Accès à la plateforme désactivé pour ce client');
-        }
+        // Verify client is active
         if (!data.client.active) {
           throw new Error('Compte client désactivé');
         }

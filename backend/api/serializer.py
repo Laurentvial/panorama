@@ -308,7 +308,6 @@ class ClientSerializer(serializers.ModelSerializer):
             ret['profilePhoto'] = ''
         ret['civility'] = ret.get('civility', '') or ''
         ret['password'] = ret.get('password', '') or ''
-        ret['platformAccess'] = bool(ret.get('platform_access', True))
         ret['active'] = bool(ret.get('active', True))
         ret['middleName'] = ret.get('middle_name', '') or ''
         ret['legalName'] = ret.get('legal_name', '') or ''

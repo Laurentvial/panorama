@@ -224,11 +224,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
       return;
     }
     
-    if (!client.platform_access) {
-      toast.error('Accès à la plateforme désactivé pour ce client');
-      return;
-    }
-    
     if (!client.active) {
       toast.error('Compte client désactivé');
       return;

@@ -116,7 +116,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           try {
             const cachedClient = JSON.parse(clientData);
             // Check cached data - if client is disabled, don't use cached data
-            if (!cachedClient.active || !cachedClient.platform_access) {
+            if (!cachedClient.active) {
               // Clear invalid cached data
               storage.removeItem('clientData');
               storage.removeItem(ACCESS_TOKEN);
@@ -158,9 +158,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const data = await response.json();
           const client = data.client;
           
-          // Check if client is active and has platform access
-          if (!client.active || !client.platform_access) {
-            // Client is disabled or doesn't have platform access - sign out
+          // Check if client is active
+          if (!client.active) {
+            // Client is disabled - sign out
             storage.removeItem(ACCESS_TOKEN);
             storage.removeItem(CLIENT_ACCESS_TOKEN);
             storage.removeItem('userType');

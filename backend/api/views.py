@@ -707,7 +707,6 @@ def client_create(request):
         'legal_name': request.data.get('legalName', '') or '',
         'sex': request.data.get('sex', '') or '',
         'account_verified': request.data.get('accountVerified', False),
-        'platform_access': request.data.get('platformAccess', True),
         'active': request.data.get('active', True),
         'password': request.data.get('password', 'Access@123') or 'Access@123',
         'phone': request.data.get('phone', '') or '',
@@ -736,9 +735,7 @@ def client_create(request):
     if 'profilePhoto' in request.FILES:
         profile_photo_file = request.FILES['profilePhoto']
     
-    # Convert platformAccess and active from string to boolean if needed (FormData sends strings)
-    if isinstance(client_data.get('platform_access'), str):
-        client_data['platform_access'] = client_data['platform_access'].lower() == 'true'
+    # Convert active from string to boolean if needed (FormData sends strings)
     if isinstance(client_data.get('active'), str):
         client_data['active'] = client_data['active'].lower() == 'true'
     if isinstance(client_data.get('account_verified'), str):
@@ -1176,15 +1173,6 @@ def client_detail(request, client_id):
                 # Si teamId est 'none' ou vide, supprimer l'équipe
                 client.team = None
         
-        # Update platform_access if provided
-        if 'platformAccess' in request.data:
-            platform_access = request.data.get('platformAccess')
-            # Handle both boolean and string values
-            if isinstance(platform_access, str):
-                client.platform_access = platform_access.lower() == 'true'
-            else:
-                client.platform_access = bool(platform_access)
-        
         # Helper functions for patrimonial data
         def to_decimal(value, default=0):
             if value is None or value == '':
@@ -1338,7 +1326,7 @@ def client_verification_config(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id == client_id:
             is_client_access = True
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     else:
         # Try to validate JWT token manually for admin access
@@ -1527,7 +1515,7 @@ def client_platform_logs(request, client_id):
             token_client_id = token.replace('client_', '')
             if token_client_id == client_id:
                 is_client_access = True
-                if not client.platform_access or not client.active:
+                if not client.active:
                     return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         
         # Check if it's an admin token
@@ -1588,10 +1576,10 @@ def client_login(request):
         logger.error(f"Multiple clients found for email: {email}")
         client = Client.objects.filter(email__iexact=email).first()
     
-    # Check if client has platform access
-    if not client.platform_access:
-        logger.warning(f"Login attempt for client {client.id} without platform access")
-        return Response({'error': 'Accès à la plateforme désactivé'}, status=status.HTTP_403_FORBIDDEN)
+    # Check if client is active
+    if not client.active:
+        logger.warning(f"Login attempt for inactive client {client.id}")
+        return Response({'error': 'Compte désactivé'}, status=status.HTTP_403_FORBIDDEN)
     
     # Check if client is active
     if not client.active:
@@ -1638,7 +1626,7 @@ def client_login(request):
 
 
 def _client_can_access_platform(client: Client) -> bool:
-    return bool(client and client.platform_access and client.active)
+    return bool(client and client.active)
 
 
 def _get_client_by_email(email: str) -> Client | None:
@@ -1681,7 +1669,7 @@ def _get_client_by_phone(phone: str) -> Client | None:
     # Fallback: if numbers are stored with spaces/punctuation, icontains prefilter may miss.
     # Scan a limited subset and compare digits-only values.
     try:
-        qs = Client.objects.exclude(Q(mobile='') & Q(phone='')).only('id', 'mobile', 'phone', 'email', 'active', 'platform_access')[:5000]
+        qs = Client.objects.exclude(Q(mobile='') & Q(phone='')).only('id', 'mobile', 'phone', 'email', 'active')[:5000]
         for c in qs:
             if _phones_match(getattr(c, 'mobile', ''), phone) or _phones_match(getattr(c, 'phone', ''), phone):
                 return c
@@ -2052,7 +2040,7 @@ def get_current_client(request):
     client_id = token.replace('client_', '')
     try:
         client = Client.objects.get(id=client_id)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
 
         # Ensure account_verified is consistent with required fields
@@ -2105,7 +2093,7 @@ def client_update_identity(request):
     except Client.DoesNotExist:
         return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not client.platform_access or not client.active:
+    if not client.active:
         return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
 
     def parse_birth_date(value):
@@ -2835,7 +2823,7 @@ def asset_list(request):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -2904,7 +2892,7 @@ def asset_detail(request, asset_id):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -3123,7 +3111,7 @@ def client_assets(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     # Check if user is authenticated via JWT (validate manually to avoid DRF failing on invalid tokens)
     elif auth_header.startswith('Bearer '):
@@ -3307,7 +3295,7 @@ def client_products(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     # Check if user is authenticated via JWT (validate manually to avoid DRF failing on invalid tokens)
     elif auth_header.startswith('Bearer '):
@@ -3851,7 +3839,7 @@ def asset_chart_data(request, asset_id):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -4555,7 +4543,7 @@ def client_ribs(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     else:
         # Try to validate JWT token manually
@@ -4640,7 +4628,7 @@ def client_documents(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif token:
         # Validate JWT manually for admin/staff sessions
@@ -5164,7 +5152,7 @@ def client_positions(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif auth_header.startswith('Bearer '):
         # Try to validate JWT token manually
@@ -5266,7 +5254,7 @@ def client_chat(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif auth_header.startswith('Bearer '):
         # Try to validate JWT token manually
@@ -5399,7 +5387,7 @@ def _client_or_admin_auth(request, client: Client, client_id: str):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif auth_header.startswith('Bearer '):
         from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -5645,7 +5633,7 @@ def client_transactions(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif auth_header.startswith('Bearer '):
         # Try to validate JWT token manually
@@ -5714,7 +5702,7 @@ def client_transaction_create(request, client_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif auth_header.startswith('Bearer '):
         # Try to validate JWT token manually
@@ -6779,7 +6767,7 @@ def client_transaction_update(request, client_id, transaction_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         # No authentication: deny access
@@ -7012,7 +7000,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -7144,7 +7132,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -7591,7 +7579,7 @@ def transaction_save_positions(request, client_id, transaction_id):
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
-        if not client.platform_access or not client.active:
+        if not client.active:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -7945,7 +7933,7 @@ def category_list(request):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -8031,7 +8019,7 @@ def product_list(request):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -8384,7 +8372,7 @@ def product_detail(request, product_id):
         client_id = token.replace('client_', '')
         try:
             client = Client.objects.get(id=client_id)
-            if not client.platform_access or not client.active:
+            if not client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -8440,7 +8428,7 @@ def product_contract_pdf(request, product_id):
         client_id = token.replace('client_', '')
         try:
             current_client = Client.objects.get(id=client_id)
-            if not current_client.platform_access or not current_client.active:
+            if not current_client.active:
                 return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
         except Client.DoesNotExist:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
