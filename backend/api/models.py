@@ -298,6 +298,7 @@ class Asset(models.Model):
     trading_view_symbol = models.CharField(max_length=100, default="", blank=True)  # Native TradingView symbol (e.g., "TSLA", "NASDAQ:TSLA", "BINANCE:BTCUSDT")
     currency = models.CharField(max_length=10, default="USD", blank=True)  # Currency code (USD, EUR, etc.)
     region = models.CharField(max_length=50, default="", blank=True)  # Region (United States, France, etc.)
+    source_index = models.CharField(max_length=50, default="", blank=True)  # Source market index (e.g., "sp500", "cac40", "nasdaq")
     logo_url = models.URLField(max_length=500, default="", blank=True)  # URL of the company logo
     last_price = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Last trading price
     last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last price update

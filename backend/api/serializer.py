@@ -712,6 +712,7 @@ class AssetSerializer(serializers.ModelSerializer):
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     alphaVantageSymbol = serializers.CharField(source='alpha_vantage_symbol', required=False, allow_blank=True)
     tradingViewSymbol = serializers.CharField(source='trading_view_symbol', required=False, allow_blank=True)
+    sourceIndex = serializers.CharField(source='source_index', required=False, allow_blank=True)
     logoUrl = serializers.URLField(source='logo_url', required=False, allow_blank=True)
     lastPrice = serializers.DecimalField(source='last_price', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
     lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
@@ -725,7 +726,7 @@ class AssetSerializer(serializers.ModelSerializer):
         model = Asset
         fields = [
             'id', 'type', 'name', 'reference', 'category', 'subcategory', 'default',
-            'alphaVantageSymbol', 'tradingViewSymbol', 'exchange', 'currency', 'region', 'logoUrl',
+            'alphaVantageSymbol', 'tradingViewSymbol', 'exchange', 'currency', 'region', 'sourceIndex', 'logoUrl',
             'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent',
             'description', 'sector', 'industry', 'headquarters', 'ceo', 'employees', 'website',
             'marketCap', 'marketCapCurrency', 'foundedYear', 'country',

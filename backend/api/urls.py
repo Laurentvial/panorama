@@ -60,6 +60,8 @@ urlpatterns = [
     # AI (assets) - must be BEFORE the generic assets/<asset_id>/ route
     path('assets/generate-description/', api_views.asset_generate_description, name='asset-generate-description'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
+    path('assets/bulk-import-from-index/', api_views.assets_bulk_import_from_index, name='assets-bulk-import-from-index'),
+    path('assets/supported-indices/', api_views.assets_supported_indices, name='assets-supported-indices'),
     path('assets/get-logo/', api_views.asset_get_logo, name='asset-get-logo'),  # Specific route before generic
     path('assets/<str:asset_id>/upload-logo/', api_views.asset_upload_logo, name='asset-upload-logo'),
     path('assets/<str:asset_id>/update-price/', api_views.asset_update_price, name='asset-update-price'),

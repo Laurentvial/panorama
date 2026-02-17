@@ -457,3 +457,20 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   
   return data;
 }
+
+// Asset bulk import from index
+export async function bulkImportAssetsFromIndex(data: {
+  index: string;
+  fetchFullDetails: boolean;
+  skipDuplicates: boolean;
+}) {
+  return apiCall('/api/assets/bulk-import-from-index/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// Get supported indices for bulk import
+export async function getSupportedIndices() {
+  return apiCall('/api/assets/supported-indices/');
+}

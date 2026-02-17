@@ -10,6 +10,7 @@ import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } 
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
+import { BulkImportFromIndexModal } from './BulkImportFromIndexModal';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
 
@@ -52,6 +53,7 @@ export function ManageAssets() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTypeTab, setActiveTypeTab] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
   // Used only for the Alpha Vantage search mode in the create dialog
   // (separate from CRM "Type" stored in formData.type)
@@ -75,6 +77,8 @@ export function ManageAssets() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [fetchingLogo, setFetchingLogo] = useState(false);
+  const [deletingLogo, setDeletingLogo] = useState(false);
   
   // Alpha Vantage search state (inside modal)
   const [alphaVantageSearch, setAlphaVantageSearch] = useState('');
@@ -146,10 +150,6 @@ export function ManageAssets() {
       { value: 'cryptomonnaie', label: `Crypto`, typeKey: canonicalTypeKey('Cryptomonnaie') },
       { value: 'obligation', label: `Obligations`, typeKey: canonicalTypeKey('Obligation') },
       { value: 'matiere-premiere', label: `Matiere premiere`, typeKey: canonicalTypeKey('Matière première') },
-      { value: 'or', label: `Or`, typeKey: canonicalTypeKey('Or') },
-      { value: 'argent', label: `Argent`, typeKey: canonicalTypeKey('Argent') },
-      { value: 'petrole', label: `Petrole`, typeKey: canonicalTypeKey('Pétrole') },
-      { value: 'gaz', label: `Gaz`, typeKey: canonicalTypeKey('Gaz') },
       { value: 'devise', label: `Devises`, typeKey: canonicalTypeKey('Devise') },
       { value: 'indice', label: `Indices`, typeKey: canonicalTypeKey('Indice') },
       { value: 'autre', label: `Autres`, typeKey: canonicalTypeKey('Autre') },
@@ -648,6 +648,74 @@ export function ManageAssets() {
     }
   }
 
+  async function handleFetchLogoFromAPI() {
+    if (!editingAsset || !formData.alphaVantageSymbol) {
+      toast.error('Symbole Alpha Vantage manquant');
+      return;
+    }
+
+    try {
+      setFetchingLogo(true);
+      const assetType = (formData.type || 'action').toLowerCase();
+      
+      // Extract base symbol (remove exchange suffix like .PA, .DE, .L, etc.)
+      const baseSymbol = formData.alphaVantageSymbol.split('.')[0];
+      
+      const response = await apiCall(
+        `/api/assets/get-logo/?symbol=${encodeURIComponent(baseSymbol)}&type=${assetType}`
+      );
+
+      if (response.logo_url) {
+        // Update the asset with the new logo
+        await apiCall(`/api/assets/${editingAsset.id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ logoUrl: response.logo_url })
+        });
+
+        setFormData((prevFormData) => ({ ...prevFormData, logoUrl: response.logo_url }));
+        setLogoPreview(response.logo_url);
+        bustAssetsCache(String(editingAsset.id));
+        toast.success('Logo récupéré avec succès depuis l\'API');
+        loadAssets();
+      } else {
+        toast.warning('Aucun logo trouvé pour ce symbole');
+      }
+    } catch (error: any) {
+      console.error('Error fetching logo from API:', error);
+      toast.error(error?.message || 'Erreur lors de la récupération du logo');
+    } finally {
+      setFetchingLogo(false);
+    }
+  }
+
+  async function handleDeleteLogo() {
+    if (!editingAsset) {
+      return;
+    }
+
+    try {
+      setDeletingLogo(true);
+      
+      // Update the asset to remove the logo
+      await apiCall(`/api/assets/${editingAsset.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ logoUrl: '' })
+      });
+
+      setFormData((prevFormData) => ({ ...prevFormData, logoUrl: '' }));
+      setLogoPreview(null);
+      setLogoFile(null);
+      bustAssetsCache(String(editingAsset.id));
+      toast.success('Logo supprimé avec succès');
+      loadAssets();
+    } catch (error: any) {
+      console.error('Error deleting logo:', error);
+      toast.error(error?.message || 'Erreur lors de la suppression du logo');
+    } finally {
+      setDeletingLogo(false);
+    }
+  }
+
   async function handleSelectSearchResult(result: any) {
     // Set selected result
     setSelectedSearchResult(result);
@@ -658,11 +726,11 @@ export function ManageAssets() {
       (searchAssetType || '').toLowerCase().includes('matiere');
 
     // CRM Type:
-    // - Spot commodities (XAU/XAG): use underlying ("Or"/"Argent") so it matches CRM options.
+    // - Spot commodities (XAU/XAG): use "Matière première" and store metal name in subcategory
     // - Commodity ETFs/proxies: keep "Matière première" and store underlying in subcategory.
     // - Others: infer from Alpha Vantage type.
     const assetType = isCommodityMode
-      ? (result.type === 'Spot' && result.commodity_underlying ? result.commodity_underlying : 'Matière première')
+      ? 'Matière première'
       : result.type === 'Crypto'
         ? 'Cryptomonnaie'
         : result.type === 'Equity'
@@ -727,8 +795,11 @@ export function ManageAssets() {
     const isSpotForex = result.type === 'Spot' || result.exchange === 'FOREX';
     if (!logoUrl && result.symbol && !isSpotForex) {
       try {
+        // Extract base symbol (remove exchange suffix like .PA, .DE, .L, etc.)
+        const baseSymbol = result.symbol.split('.')[0];
+        
         const logoResponse = await apiCall(
-          `/api/assets/get-logo/?symbol=${encodeURIComponent(result.symbol)}&type=${assetType.toLowerCase()}`
+          `/api/assets/get-logo/?symbol=${encodeURIComponent(baseSymbol)}&type=${assetType.toLowerCase()}`
         );
         if (logoResponse.logo_url) {
           logoUrl = logoResponse.logo_url;
@@ -768,15 +839,15 @@ export function ManageAssets() {
     try {
       const response = await apiCall(`/api/assets/${assetId}/update-price/`, { method: 'POST' });
       bustAssetsCache(String(assetId));
-      toast.success('Prix mis à jour avec succès');
+      toast.success('Données actualisées avec succès');
       loadAssets();
     } catch (error: any) {
-      console.error('Error updating price:', error);
+      console.error('Error updating asset:', error);
       // Check if it's a rate limit issue (503 status or rate_limit_reached in response)
       if (error?.status === 503 || error?.response?.rate_limit_reached) {
         toast.warning('Limite de requêtes API atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain.');
       } else {
-        toast.error(error?.message || 'Erreur lors de la mise à jour du prix');
+        toast.error(error?.message || 'Erreur lors de l\'actualisation des données');
       }
     }
   }
@@ -791,17 +862,31 @@ export function ManageAssets() {
     try {
       setUpdatingPrices(true);
       const assetIds = assetsWithSymbols.map(a => a.id);
-      await apiCall('/api/assets/bulk-update-prices/', {
+      const response = await apiCall('/api/assets/bulk-update-prices/', {
         method: 'POST',
         body: JSON.stringify({ assetIds }),
         headers: { 'Content-Type': 'application/json' }
       });
       bustAssetsCache();
-      toast.success(`${assetsWithSymbols.length} prix mis à jour`);
+      
+      // Show detailed success message
+      const updatedCount = response.updated || 0;
+      if (updatedCount > 0) {
+        toast.success(`${updatedCount} actif(s) actualisé(s)`);
+      } else {
+        toast.info('Aucune donnée à actualiser');
+      }
+      
+      // Show errors if any
+      if (response.errors && response.errors.length > 0) {
+        const errorCount = response.errors.length;
+        toast.warning(`${errorCount} erreur(s) lors de l'actualisation`);
+      }
+      
       loadAssets();
     } catch (error: any) {
-      console.error('Error updating prices:', error);
-      toast.error(error?.message || 'Erreur lors de la mise à jour des prix');
+      console.error('Error updating assets:', error);
+      toast.error(error?.message || 'Erreur lors de l\'actualisation des données');
     } finally {
       setUpdatingPrices(false);
     }
@@ -850,7 +935,15 @@ export function ManageAssets() {
           >
             {/* @ts-ignore - react-icons accepts className at runtime */}
             <RefreshCw className={`w-4 h-4 mr-2 ${updatingPrices ? 'animate-spin' : ''}`} />
-            Mettre à jour les prix
+            Actualiser les données
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => setIsBulkImportModalOpen(true)}
+          >
+            {/* @ts-ignore - react-icons accepts className at runtime */}
+            <Plus className="w-4 h-4 mr-2" />
+            Import depuis indice
           </Button>
           <Button onClick={() => handleOpenDialog()}>
             {/* @ts-ignore - react-icons accepts className at runtime */}
@@ -948,7 +1041,7 @@ export function ManageAssets() {
                       </td>
                       <td className="p-2">
                         {asset.lastPrice ? (
-                          <span className="font-semibold">${parseFloat(asset.lastPrice).toFixed(2)}</span>
+                          <span className="font-semibold">{getCurrencySymbol(asset.currency)}{parseFloat(asset.lastPrice).toFixed(2)}</span>
                         ) : (
                           <span className="text-slate-400">-</span>
                         )}
@@ -968,7 +1061,7 @@ export function ManageAssets() {
                               </>
                             )}
                             <span className={parseFloat(asset.priceChange) >= 0 ? 'text-green-600' : 'text-red-600'}>
-                              {parseFloat(asset.priceChange) >= 0 ? '+' : ''}{parseFloat(asset.priceChange).toFixed(2)}
+                              {parseFloat(asset.priceChange) >= 0 ? '+' : ''}{getCurrencySymbol(asset.currency)}{parseFloat(asset.priceChange).toFixed(2)}
                               {asset.priceChangePercent !== null && asset.priceChangePercent !== undefined && (
                                 <span className="ml-1">
                                   ({parseFloat(asset.priceChangePercent) >= 0 ? '+' : ''}{parseFloat(asset.priceChangePercent).toFixed(2)}%)
@@ -996,7 +1089,7 @@ export function ManageAssets() {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleUpdatePrice(asset.id)}
-                              title="Mettre à jour le prix"
+                              title="Actualiser toutes les données manquantes depuis l'API"
                             >
                               {/* @ts-ignore - react-icons accepts className at runtime */}
                               <RefreshCw className="w-4 h-4" />
@@ -1210,11 +1303,7 @@ export function ManageAssets() {
                     <SelectItem value="Obligation">Obligation</SelectItem>
                     
                     {/* Matières premières - Actifs externes du marché */}
-                    <SelectItem value="Matière première">Matière première</SelectItem>
-                    <SelectItem value="Or">Or</SelectItem>
-                    <SelectItem value="Argent">Argent</SelectItem>
-                    <SelectItem value="Pétrole">Pétrole</SelectItem>
-                    <SelectItem value="Gaz">Gaz</SelectItem>
+                    <SelectItem value="Matière première">Matière première (Or, Argent, Pétrole, Gaz, etc.)</SelectItem>
                     
                     {/* Devises - Actifs externes du marché */}
                     <SelectItem value="Devise">Devise</SelectItem>
@@ -1276,15 +1365,38 @@ export function ManageAssets() {
                             disabled={uploadingLogo}
                           />
                           {editingAsset && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleUploadLogo}
-                              disabled={uploadingLogo}
-                              className="w-full"
-                            >
-                              {uploadingLogo ? 'Téléchargement...' : 'Télécharger le logo'}
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleUploadLogo}
+                                disabled={uploadingLogo || fetchingLogo || deletingLogo}
+                                className="w-full"
+                              >
+                                {uploadingLogo ? 'Téléchargement...' : 'Télécharger le logo'}
+                              </Button>
+                              {!formData.logoUrl && formData.alphaVantageSymbol && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={handleFetchLogoFromAPI}
+                                  disabled={fetchingLogo || uploadingLogo || deletingLogo}
+                                  className="w-full mt-2"
+                                >
+                                  {fetchingLogo ? 'Récupération...' : 'Récupérer depuis l\'API'}
+                                </Button>
+                              )}
+                              {formData.logoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={handleDeleteLogo}
+                                  disabled={deletingLogo || uploadingLogo || fetchingLogo}
+                                  className="text-sm text-red-600 hover:text-red-700 underline hover:no-underline disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                                >
+                                  {deletingLogo ? 'Suppression...' : 'Supprimer le logo'}
+                                </button>
+                              )}
+                            </>
                           )}
                           {!editingAsset && (
                             <p className="text-sm text-blue-600">
@@ -1301,8 +1413,29 @@ export function ManageAssets() {
                           accept="image/*"
                           onChange={handleLogoFileChange}
                           className="cursor-pointer"
-                          disabled={uploadingLogo}
+                          disabled={uploadingLogo || fetchingLogo || deletingLogo}
                         />
+                        {editingAsset && !formData.logoUrl && formData.alphaVantageSymbol && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleFetchLogoFromAPI}
+                            disabled={fetchingLogo || uploadingLogo || deletingLogo}
+                            className="w-full mt-2"
+                          >
+                            {fetchingLogo ? 'Récupération...' : 'Récupérer depuis l\'API'}
+                          </Button>
+                        )}
+                        {editingAsset && formData.logoUrl && (
+                          <button
+                            type="button"
+                            onClick={handleDeleteLogo}
+                            disabled={deletingLogo || uploadingLogo || fetchingLogo}
+                            className="text-sm text-red-600 hover:text-red-700 underline hover:no-underline disabled:opacity-50 disabled:cursor-not-allowed mt-2 block"
+                          >
+                            {deletingLogo ? 'Suppression...' : 'Supprimer le logo'}
+                          </button>
+                        )}
                         {formData.logoUrl && (
                           <p className="text-xs text-green-600 mt-2">
                             ✓ Logo téléchargé avec succès
@@ -1313,7 +1446,7 @@ export function ManageAssets() {
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
                     {editingAsset 
-                      ? 'Téléchargez un logo manuellement si l\'API ne l\'a pas trouvé. Formats acceptés: JPG, PNG, GIF (max 5MB)'
+                      ? 'Cliquez sur "Récupérer depuis l\'API" pour obtenir le logo automatiquement, ou téléchargez-le manuellement. Formats acceptés: JPG, PNG, GIF (max 5MB)'
                       : 'Sélectionnez un logo à télécharger après la création de l\'actif. Formats acceptés: JPG, PNG, GIF (max 5MB)'}
                   </p>
                 </div>
@@ -1457,6 +1590,16 @@ export function ManageAssets() {
           </div>
         </div>
       )}
+
+      {/* Bulk Import from Index Modal */}
+      <BulkImportFromIndexModal
+        isOpen={isBulkImportModalOpen}
+        onClose={() => setIsBulkImportModalOpen(false)}
+        onSuccess={() => {
+          loadAssets();
+          setIsBulkImportModalOpen(false);
+        }}
+      />
 
     </div>
   );

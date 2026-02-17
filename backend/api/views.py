@@ -4311,7 +4311,8 @@ Entrée (JSON):
 @permission_classes([IsAuthenticated])
 def asset_update_price(request, asset_id):
     """
-    Update asset price from Alpha Vantage (for stocks) or Finnhub (for cryptos)
+    Update asset price and missing information from Alpha Vantage (for stocks) or Finnhub (for cryptos)
+    Updates: prices, logos, descriptions, sectors, and other company details if missing
     """
     asset = get_object_or_404(Asset, id=asset_id)
     
@@ -4321,7 +4322,7 @@ def asset_update_price(request, asset_id):
     try:
         # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
         if asset.type.lower() == 'crypto':
-            from api.alpha_vantage_service import get_crypto_quote_finnhub
+            from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
             quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
             
             if not quote:
@@ -4335,6 +4336,13 @@ def asset_update_price(request, asset_id):
             asset.last_price_update = timezone.now()
             asset.price_change = quote['change']
             asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+            
+            # Update logo if missing
+            if not asset.logo_url:
+                logo_url = get_crypto_logo(asset.alpha_vantage_symbol)
+                if logo_url:
+                    asset.logo_url = logo_url
+            
             asset.save()
         else:
             # Use Alpha Vantage for stocks/ETFs
@@ -4404,6 +4412,110 @@ def asset_update_price(request, asset_id):
                 asset.last_price_update = timezone.now()
                 asset.price_change = quote['change']
                 asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                
+                # Check if we need to fetch additional details
+                needs_details = (
+                    not asset.logo_url or 
+                    not asset.description or 
+                    not asset.sector or 
+                    not asset.industry or
+                    not asset.exchange or
+                    not asset.reference or
+                    not asset.currency or
+                    not asset.category or
+                    not asset.subcategory
+                )
+                
+                if needs_details:
+                    # Get company overview for additional details
+                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    
+                    if overview:
+                        # Update logo if missing
+                        if not asset.logo_url:
+                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            if logo_url:
+                                asset.logo_url = logo_url
+                        
+                        # Update exchange if missing
+                        if not asset.exchange and overview.get('Exchange'):
+                            asset.exchange = overview.get('Exchange', '').strip()
+                        
+                        # Update reference if missing (use symbol as fallback)
+                        if not asset.reference:
+                            asset.reference = asset.alpha_vantage_symbol
+                        
+                        # Update currency if missing
+                        if not asset.currency and overview.get('Currency'):
+                            asset.currency = overview.get('Currency', '').strip()
+                        
+                        # Update category if missing (use country from overview)
+                        if not asset.category and overview.get('Country'):
+                            # Translate country to French
+                            country = overview.get('Country', '').strip()
+                            country_mapping = {
+                                'United States': 'États-Unis',
+                                'USA': 'États-Unis',
+                                'United Kingdom': 'Royaume-Uni',
+                                'UK': 'Royaume-Uni',
+                                'Germany': 'Allemagne',
+                                'France': 'France',
+                                'Spain': 'Espagne',
+                                'Italy': 'Italie',
+                                'Netherlands': 'Pays-Bas',
+                                'Switzerland': 'Suisse',
+                                'Canada': 'Canada',
+                                'China': 'Chine',
+                                'Japan': 'Japon',
+                            }
+                            asset.category = country_mapping.get(country, country)
+                            updated = True
+                        
+                        # Update subcategory if missing (use asset type)
+                        if not asset.subcategory:
+                            # Use the AssetType from overview or infer from current type
+                            asset_type_overview = overview.get('AssetType', '')
+                            if asset_type_overview:
+                                asset.subcategory = asset_type_overview
+                            elif asset.type:
+                                asset.subcategory = asset.type
+                            updated = True
+                        
+                        # Update description if missing
+                        if not asset.description and overview.get('Description'):
+                            asset.description = overview.get('Description', '').strip()
+                        
+                        # Update sector if missing
+                        if not asset.sector and overview.get('Sector'):
+                            asset.sector = overview.get('Sector', '').strip()
+                        
+                        # Update industry if missing
+                        if not asset.industry and overview.get('Industry'):
+                            asset.industry = overview.get('Industry', '').strip()
+                        
+                        # Update other details if missing
+                        if not asset.country and overview.get('Country'):
+                            asset.country = overview.get('Country', '').strip()
+                        
+                        if not asset.website and overview.get('Website'):
+                            asset.website = overview.get('Website', '').strip()
+                        
+                        if not asset.headquarters and overview.get('Address'):
+                            asset.headquarters = overview.get('Address', '').strip()
+                        
+                        if not asset.employees and overview.get('FullTimeEmployees'):
+                            try:
+                                asset.employees = int(overview.get('FullTimeEmployees', ''))
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        if not asset.market_cap and overview.get('MarketCapitalization'):
+                            try:
+                                asset.market_cap = int(overview.get('MarketCapitalization', ''))
+                                asset.market_cap_currency = overview.get('Currency', 'USD')
+                            except (ValueError, TypeError):
+                                pass
+                
                 asset.save()
         
         return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
@@ -4414,9 +4526,13 @@ def asset_update_price(request, asset_id):
 @permission_classes([IsAuthenticated])
 def assets_bulk_update_prices(request):
     """
-    Update prices for multiple assets at once
+    Update prices and missing information for multiple assets at once
     Uses Alpha Vantage for stocks/ETFs and Finnhub for cryptos
+    Updates: prices, logos, descriptions, sectors, and other company details
     """
+    import time
+    from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
+    
     asset_ids = request.data.get('assetIds', [])
     
     if not asset_ids:
@@ -4427,32 +4543,172 @@ def assets_bulk_update_prices(request):
     if not assets.exists():
         return Response({'error': 'No valid assets found with symbols configured'}, status=status.HTTP_404_NOT_FOUND)
     
-    from api.alpha_vantage_service import get_crypto_quote_finnhub
     av_service = get_alpha_vantage_service()
     
     updated_count = 0
     errors = []
     
-    for asset in assets:
+    for idx, asset in enumerate(assets):
         try:
+            # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
+            if idx > 0 and idx % 5 == 0:
+                time.sleep(12)  # 12 seconds = 5 requests per minute
+            
+            updated = False
+            
             # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
             if asset.type.lower() == 'crypto':
                 quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
+                
+                if quote:
+                    asset.last_price = quote['price']
+                    asset.last_price_update = timezone.now()
+                    asset.price_change = quote['change']
+                    asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                    updated = True
+                
+                # Update logo if missing
+                if not asset.logo_url:
+                    logo_url = get_crypto_logo(asset.alpha_vantage_symbol)
+                    if logo_url:
+                        asset.logo_url = logo_url
+                        updated = True
             else:
                 if not av_service:
                     errors.append(f'{asset.alpha_vantage_symbol}: Alpha Vantage API key not configured')
                     continue
+                
+                # Get quote for price update
                 quote = av_service.get_quote(asset.alpha_vantage_symbol)
+                
+                if quote:
+                    asset.last_price = quote['price']
+                    asset.last_price_update = timezone.now()
+                    asset.price_change = quote['change']
+                    asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                    updated = True
+                
+                # Check if we need to fetch additional details
+                needs_details = (
+                    not asset.logo_url or 
+                    not asset.description or 
+                    not asset.sector or 
+                    not asset.industry or
+                    not asset.exchange or
+                    not asset.reference or
+                    not asset.currency or
+                    not asset.category or
+                    not asset.subcategory
+                )
+                
+                if needs_details:
+                    # Get company overview for additional details
+                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    
+                    if overview:
+                        # Update logo if missing
+                        if not asset.logo_url:
+                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            if logo_url:
+                                asset.logo_url = logo_url
+                                updated = True
+                        
+                        # Update exchange if missing
+                        if not asset.exchange and overview.get('Exchange'):
+                            asset.exchange = overview.get('Exchange', '').strip()
+                            updated = True
+                        
+                        # Update reference if missing (use symbol as fallback)
+                        if not asset.reference:
+                            asset.reference = asset.alpha_vantage_symbol
+                            updated = True
+                        
+                        # Update currency if missing
+                        if not asset.currency and overview.get('Currency'):
+                            asset.currency = overview.get('Currency', '').strip()
+                            updated = True
+                        
+                        # Update category if missing (use country from overview)
+                        if not asset.category and overview.get('Country'):
+                            # Translate country to French
+                            country = overview.get('Country', '').strip()
+                            country_mapping = {
+                                'United States': 'États-Unis',
+                                'USA': 'États-Unis',
+                                'United Kingdom': 'Royaume-Uni',
+                                'UK': 'Royaume-Uni',
+                                'Germany': 'Allemagne',
+                                'France': 'France',
+                                'Spain': 'Espagne',
+                                'Italy': 'Italie',
+                                'Netherlands': 'Pays-Bas',
+                                'Switzerland': 'Suisse',
+                                'Canada': 'Canada',
+                                'China': 'Chine',
+                                'Japan': 'Japon',
+                            }
+                            asset.category = country_mapping.get(country, country)
+                            updated = True
+                        
+                        # Update subcategory if missing (use asset type)
+                        if not asset.subcategory:
+                            # Use the AssetType from overview or infer from current type
+                            asset_type_overview = overview.get('AssetType', '')
+                            if asset_type_overview:
+                                asset.subcategory = asset_type_overview
+                            elif asset.type:
+                                asset.subcategory = asset.type
+                            updated = True
+                        
+                        # Update description if missing
+                        if not asset.description and overview.get('Description'):
+                            asset.description = overview.get('Description', '').strip()
+                            updated = True
+                        
+                        # Update sector if missing
+                        if not asset.sector and overview.get('Sector'):
+                            asset.sector = overview.get('Sector', '').strip()
+                            updated = True
+                        
+                        # Update industry if missing
+                        if not asset.industry and overview.get('Industry'):
+                            asset.industry = overview.get('Industry', '').strip()
+                            updated = True
+                        
+                        # Update other details if missing
+                        if not asset.country and overview.get('Country'):
+                            asset.country = overview.get('Country', '').strip()
+                            updated = True
+                        
+                        if not asset.website and overview.get('Website'):
+                            asset.website = overview.get('Website', '').strip()
+                            updated = True
+                        
+                        if not asset.headquarters and overview.get('Address'):
+                            asset.headquarters = overview.get('Address', '').strip()
+                            updated = True
+                        
+                        if not asset.employees and overview.get('FullTimeEmployees'):
+                            try:
+                                asset.employees = int(overview.get('FullTimeEmployees', ''))
+                                updated = True
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        if not asset.market_cap and overview.get('MarketCapitalization'):
+                            try:
+                                asset.market_cap = int(overview.get('MarketCapitalization', ''))
+                                asset.market_cap_currency = overview.get('Currency', 'USD')
+                                updated = True
+                            except (ValueError, TypeError):
+                                pass
             
-            if quote:
-                asset.last_price = quote['price']
-                asset.last_price_update = timezone.now()
-                asset.price_change = quote['change']
-                asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+            if updated:
                 asset.save()
                 updated_count += 1
             else:
-                errors.append(f'{asset.alpha_vantage_symbol}: Symbol not found')
+                errors.append(f'{asset.alpha_vantage_symbol}: No data to update')
+                
         except Exception as e:
             errors.append(f'{asset.alpha_vantage_symbol}: {str(e)}')
     
@@ -4461,6 +4717,252 @@ def assets_bulk_update_prices(request):
         'total': len(assets),
         'errors': errors
     }, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def assets_bulk_import_from_index(request):
+    """
+    Bulk import assets from a market index (NASDAQ, S&P 500, CAC 40, etc.)
+    Fetches constituent symbols and creates assets with full company details
+    """
+    import time
+    from api.index_constituent_service import get_index_constituents
+    from api.alpha_vantage_service import get_crypto_quote_finnhub, get_oanda_quote_finnhub
+    
+    logger = logging.getLogger(__name__)
+    
+    index_name = request.data.get('index', '').strip().lower()
+    default_exchange = request.data.get('exchange', '').strip().upper()
+    fetch_full_details = request.data.get('fetchFullDetails', True)
+    skip_duplicates = request.data.get('skipDuplicates', True)
+    
+    if not index_name:
+        return Response({'error': 'index parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Fetch constituents from the index service
+        logger.info(f"Fetching constituents for index: {index_name}")
+        constituents = get_index_constituents(index_name)
+        
+        if not constituents:
+            return Response({'error': f'No constituents found for index: {index_name}'}, status=status.HTTP_404_NOT_FOUND)
+        
+        total = len(constituents)
+        imported = 0
+        skipped = 0
+        errors = []
+        
+        av_service = get_alpha_vantage_service() if fetch_full_details else None
+        
+        for idx, constituent in enumerate(constituents):
+            symbol = constituent.get('symbol', '').strip().upper()
+            name = constituent.get('name', '').strip()
+            sector = constituent.get('sector', '').strip()
+            
+            if not symbol:
+                errors.append({'symbol': 'Unknown', 'error': 'Missing symbol'})
+                continue
+            
+            # Check if asset already exists (check both exact symbol and base symbol without exchange suffix)
+            if skip_duplicates:
+                # Extract base symbol (remove exchange suffix like .PA, .DE, .L, etc.)
+                base_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+                
+                # Check for exact match or base symbol match
+                from django.db.models import Q
+                existing_asset = Asset.objects.filter(
+                    Q(alpha_vantage_symbol=symbol) |  # Exact match
+                    Q(alpha_vantage_symbol=base_symbol) |  # Base symbol match
+                    Q(alpha_vantage_symbol__startswith=f"{base_symbol}.")  # Base with any suffix
+                ).first()
+                
+                if existing_asset:
+                    skipped += 1
+                    logger.info(f"Skipping existing asset: {symbol} (found as {existing_asset.alpha_vantage_symbol})")
+                    continue
+            
+            try:
+                # Determine asset type (default to Action/Stock)
+                asset_type = 'Action'
+                
+                # Set default currency, region, and exchange based on index
+                if index_name in ['cac40', 'cacmid60']:
+                    currency = 'EUR'
+                    region = 'France'
+                    exchange = default_exchange or 'EURONEXT'
+                elif index_name == 'dax':
+                    currency = 'EUR'
+                    region = 'Allemagne'
+                    exchange = default_exchange or 'XETR'
+                elif index_name == 'ftse100':
+                    currency = 'GBP'
+                    region = 'Royaume-Uni'
+                    exchange = default_exchange or 'LSE'
+                else:
+                    # US indices defaults
+                    currency = 'USD'
+                    region = 'États-Unis'
+                    exchange = default_exchange or ''
+                
+                # Override with constituent data if available
+                if constituent.get('headQuarter'):
+                    region = constituent.get('headQuarter', '')
+                
+                # Generate unique asset ID
+                asset_id = uuid.uuid4().hex[:12]
+                while Asset.objects.filter(id=asset_id).exists():
+                    asset_id = uuid.uuid4().hex[:12]
+                
+                # Initialize asset data
+                asset_data = {
+                    'id': asset_id,
+                    'type': asset_type,
+                    'name': name or symbol,
+                    'alpha_vantage_symbol': symbol,
+                    'exchange': exchange,
+                    'currency': currency,
+                    'region': region,
+                    'sector': sector,
+                    'source_index': index_name,  # Store the source index for filtering
+                    'default': False,  # As per requirements, not default
+                    'reference': symbol,
+                    'category': region,
+                    'subcategory': asset_type,
+                }
+                
+                if av_service:
+                    # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
+                    # Only add delay if we've imported at least one asset
+                    if imported > 0 and imported % 5 == 0:
+                        time.sleep(12)  # 12 seconds = 5 requests per minute
+                    
+                    try:
+                        # Always fetch quote to get current price, regardless of fetch_full_details
+                        quote = av_service.get_quote(symbol)
+                        
+                        if quote:
+                            asset_data['last_price'] = quote.get('price')
+                            asset_data['last_price_update'] = timezone.now()
+                            asset_data['price_change'] = quote.get('change')
+                            asset_data['price_change_percent'] = float(quote.get('change_percent', 0)) if quote.get('change_percent') else None
+                            
+                            # Only fetch detailed company information if requested
+                            if fetch_full_details:
+                                # Fetch company overview for additional details
+                                overview = av_service.get_company_overview(symbol) or {}
+                                if overview:
+                                    asset_data['name'] = overview.get('Name') or name or symbol
+                                    asset_data['description'] = overview.get('Description', '').strip()
+                                    asset_data['sector'] = overview.get('Sector', sector).strip()
+                                    asset_data['industry'] = overview.get('Industry', '').strip()
+                                    asset_data['headquarters'] = overview.get('Address', '').strip()
+                                    asset_data['country'] = overview.get('Country', '').strip()
+                                    asset_data['website'] = overview.get('Website', '').strip()
+                                    
+                                    # For currency, prefer default from index over Alpha Vantage
+                                    # Alpha Vantage often returns USD for non-US stocks
+                                    av_currency = overview.get('Currency', '').strip()
+                                    if av_currency and index_name in ['nasdaq', 'sp500', 'dowjones']:
+                                        # For US indices, trust Alpha Vantage
+                                        asset_data['currency'] = av_currency
+                                    # For European indices, keep the default EUR/GBP we set earlier
+                                    
+                                    # Parse numeric fields
+                                    try:
+                                        employees = overview.get('FullTimeEmployees', '').strip()
+                                        asset_data['employees'] = int(employees) if employees else None
+                                    except Exception:
+                                        pass
+                                    
+                                    try:
+                                        market_cap = overview.get('MarketCapitalization', '').strip()
+                                        asset_data['market_cap'] = int(market_cap) if market_cap else None
+                                        asset_data['market_cap_currency'] = asset_data['currency']
+                                    except Exception:
+                                        pass
+                                
+                                # Fetch logo
+                                logo_url = av_service.get_company_logo(symbol) or ''
+                                if logo_url:
+                                    asset_data['logo_url'] = logo_url
+                                
+                                # Set exchange if available from overview
+                                if overview.get('Exchange'):
+                                    asset_data['exchange'] = overview.get('Exchange', '').strip()
+                                
+                                # Set category based on country with French translation
+                                if overview.get('Country'):
+                                    country = overview.get('Country', '').strip()
+                                    country_mapping = {
+                                        'United States': 'États-Unis',
+                                        'USA': 'États-Unis',
+                                        'United Kingdom': 'Royaume-Uni',
+                                        'UK': 'Royaume-Uni',
+                                        'Germany': 'Allemagne',
+                                        'France': 'France',
+                                        'Spain': 'Espagne',
+                                        'Italy': 'Italie',
+                                        'Netherlands': 'Pays-Bas',
+                                        'Switzerland': 'Suisse',
+                                        'Canada': 'Canada',
+                                        'China': 'Chine',
+                                        'Japan': 'Japon',
+                                    }
+                                    asset_data['category'] = country_mapping.get(country, country)
+                                
+                                # Set subcategory based on asset type from overview
+                                asset_type_overview = overview.get('AssetType', '')
+                                if asset_type_overview:
+                                    asset_data['subcategory'] = asset_type_overview
+                        else:
+                            # Quote fetch failed, but we can still create the asset with basic info
+                            logger.warning(f"Could not fetch quote for {symbol}, creating with basic info")
+                    
+                    except Exception as e:
+                        # Log error but continue with basic asset creation
+                        logger.warning(f"Error fetching details for {symbol}: {str(e)}")
+                        errors.append({'symbol': symbol, 'error': f'Details fetch failed: {str(e)}'})
+                
+                # Create the asset
+                asset = Asset.objects.create(**asset_data)
+                imported += 1
+                logger.info(f"Imported asset {imported}/{total}: {symbol}")
+            
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Error importing {symbol}: {error_msg}")
+                errors.append({'symbol': symbol, 'error': error_msg})
+        
+        return Response({
+            'total': total,
+            'imported': imported,
+            'skipped': skipped,
+            'errors': errors,
+            'index': index_name
+        }, status=status.HTTP_200_OK)
+    
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Error in bulk import: {str(e)}")
+        return Response({'error': f'Bulk import failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def assets_supported_indices(request):
+    """
+    Get list of all supported indices for bulk import
+    """
+    from api.index_constituent_service import get_supported_indices
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        indices = get_supported_indices()
+        return Response({'indices': indices}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error fetching supported indices: {str(e)}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # RIBs endpoints
 @api_view(['GET'])

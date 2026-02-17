@@ -35,6 +35,8 @@ export function AddProduct() {
   const [bulkFilterType, setBulkFilterType] = useState<string>('all');
   const [bulkFilterCategory, setBulkFilterCategory] = useState<string>('all');
   const [bulkFilterSubcategory, setBulkFilterSubcategory] = useState<string>('all');
+  const [bulkFilterExchange, setBulkFilterExchange] = useState<string>('all');
+  const [bulkFilterIndex, setBulkFilterIndex] = useState<string>('all');
   
   const [formData, setFormData] = useState({
     name: '',
@@ -1321,6 +1323,46 @@ export function AddProduct() {
                       </div>
                       
                       <div className="space-y-2">
+                        <Label htmlFor="bulk-filter-exchange">Exchange (Bourse)</Label>
+                        <Select 
+                          value={bulkFilterExchange} 
+                          onValueChange={setBulkFilterExchange}
+                        >
+                          <SelectTrigger id="bulk-filter-exchange">
+                            <SelectValue placeholder="Toutes les bourses" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les bourses</SelectItem>
+                            {(Array.from(new Set(allAssets.map((a: any) => a.exchange).filter(Boolean))) as string[]).sort().map((exchange: string) => (
+                              <SelectItem key={exchange} value={exchange}>{exchange}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="bulk-filter-index">Indice</Label>
+                        <Select 
+                          value={bulkFilterIndex} 
+                          onValueChange={setBulkFilterIndex}
+                        >
+                          <SelectTrigger id="bulk-filter-index">
+                            <SelectValue placeholder="Tous les indices" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Tous les indices</SelectItem>
+                            <SelectItem value="nasdaq">NASDAQ Composite</SelectItem>
+                            <SelectItem value="sp500">S&P 500</SelectItem>
+                            <SelectItem value="dowjones">Dow Jones Industrial Average</SelectItem>
+                            <SelectItem value="cac40">CAC 40</SelectItem>
+                            <SelectItem value="dax">DAX</SelectItem>
+                            <SelectItem value="ftse100">FTSE 100</SelectItem>
+                            <SelectItem value="cacmid60">CAC Mid 60</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
                         <Label htmlFor="bulk-filter-category">Catégorie</Label>
                         <Select 
                           value={bulkFilterCategory} 
@@ -1372,9 +1414,11 @@ export function AddProduct() {
                     // Filtrer les actifs selon les critères
                     const filteredAssets = allAssets.filter((asset: any) => {
                       const typeMatch = bulkFilterType === 'all' || asset.type === bulkFilterType;
+                      const exchangeMatch = bulkFilterExchange === 'all' || asset.exchange === bulkFilterExchange;
+                      const indexMatch = bulkFilterIndex === 'all' || asset.sourceIndex === bulkFilterIndex;
                       const categoryMatch = bulkFilterCategory === 'all' || asset.category === bulkFilterCategory;
                       const subcategoryMatch = bulkFilterSubcategory === 'all' || asset.subcategory === bulkFilterSubcategory;
-                      return typeMatch && categoryMatch && subcategoryMatch;
+                      return typeMatch && exchangeMatch && indexMatch && categoryMatch && subcategoryMatch;
                     });
 
                     // Actifs disponibles (non déjà ajoutés)
