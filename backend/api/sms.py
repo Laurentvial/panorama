@@ -33,6 +33,110 @@ def _normalize_base_url(raw: str) -> str:
     return raw.rstrip("/")
 
 
+def _normalize_phone_e164(raw_phone: str) -> str:
+    to_phone = (raw_phone or "").strip()
+    if not to_phone:
+        raise RuntimeError("Missing destination phone number")
+    if to_phone.startswith("00"):
+        to_phone = "+" + to_phone[2:]
+    if to_phone.startswith("+"):
+        to_phone = "+" + re.sub(r"\D", "", to_phone)
+    else:
+        digits = re.sub(r"\D", "", to_phone)
+        to_phone = f"+{digits}" if digits else ""
+    if len(to_phone) < 8:
+        raise RuntimeError("Invalid destination phone number")
+    return to_phone
+
+
+def _prelude_auth_header() -> dict[str, str]:
+    api_key = (os.getenv("PRELUDE_API_KEY") or os.getenv("INFOBIP_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("Missing required env var: PRELUDE_API_KEY")
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def create_prelude_verification(*, to_phone: str, locale: str | None = None) -> dict[str, Any]:
+    """
+    Start or retry an OTP verification through Prelude Verify API.
+    """
+    base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
+    normalized_phone = _normalize_phone_e164(to_phone)
+    verify_template_id = (os.getenv("PRELUDE_VERIFY_TEMPLATE_ID") or os.getenv("PRELUDE_TEMPLATE_ID") or "").strip()
+
+    options: dict[str, Any] = {
+        "method": "message",
+        "preferred_channel": "sms",
+    }
+    if verify_template_id:
+        options["template_id"] = verify_template_id
+    if locale:
+        options["locale"] = locale
+
+    payload: dict[str, Any] = {
+        "target": {"type": "phone_number", "value": normalized_phone},
+        "options": options,
+    }
+
+    resp = requests.post(
+        f"{base_url}/v2/verification",
+        headers=_prelude_auth_header(),
+        json=payload,
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        err = resp.text[:500]
+        try:
+            data = resp.json()
+            code = data.get("code")
+            message = data.get("message")
+            if code or message:
+                err = f"{code or 'error'}: {message or err}"
+        except Exception:
+            pass
+        raise RuntimeError(f"Prelude verify create failed ({resp.status_code}): {err}")
+    return resp.json()
+
+
+def check_prelude_verification(*, to_phone: str, code: str) -> dict[str, Any]:
+    """
+    Check OTP code validity through Prelude Verify API.
+    """
+    base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
+    normalized_phone = _normalize_phone_e164(to_phone)
+    otp_code = (code or "").strip()
+    if not otp_code:
+        raise RuntimeError("Missing verification code")
+
+    payload: dict[str, Any] = {
+        "target": {"type": "phone_number", "value": normalized_phone},
+        "code": otp_code,
+    }
+
+    resp = requests.post(
+        f"{base_url}/v2/verification/check",
+        headers=_prelude_auth_header(),
+        json=payload,
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        err = resp.text[:500]
+        try:
+            data = resp.json()
+            code_val = data.get("code")
+            message = data.get("message")
+            if code_val or message:
+                err = f"{code_val or 'error'}: {message or err}"
+        except Exception:
+            pass
+        raise RuntimeError(f"Prelude verify check failed ({resp.status_code}): {err}")
+    return resp.json()
+
+
 def send_infobip_sms(*, to_phone: str, text: str) -> dict[str, Any]:
     """
     Backward-compatible function name that now sends SMS through Prelude Notify API.
@@ -44,25 +148,10 @@ def send_infobip_sms(*, to_phone: str, text: str) -> dict[str, Any]:
     - PRELUDE_SENDER (optional, fallback: INFOBIP_SENDER)
     """
     base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
-    api_key = (os.getenv("PRELUDE_API_KEY") or os.getenv("INFOBIP_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("Missing required env var: PRELUDE_API_KEY")
     template_id = _require_env("PRELUDE_TEMPLATE_ID")
     sender = (os.getenv("PRELUDE_SENDER") or os.getenv("INFOBIP_SENDER") or "").strip()
 
-    to_phone = (to_phone or "").strip()
-    if not to_phone:
-        raise RuntimeError("Missing destination phone number")
-    # Prelude expects E.164. Keep '+' if present, convert 00-prefix, otherwise best-effort normalize.
-    if to_phone.startswith("00"):
-        to_phone = "+" + to_phone[2:]
-    if to_phone.startswith("+"):
-        to_phone = "+" + re.sub(r"\D", "", to_phone)
-    else:
-        digits = re.sub(r"\D", "", to_phone)
-        to_phone = f"+{digits}" if digits else ""
-    if len(to_phone) < 8:
-        raise RuntimeError("Invalid destination phone number")
+    to_phone = _normalize_phone_e164(to_phone)
 
     # Prelude Notify endpoint
     url = f"{base_url}/v2/notify"
@@ -79,11 +168,7 @@ def send_infobip_sms(*, to_phone: str, text: str) -> dict[str, Any]:
 
     resp = requests.post(
         url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
+        headers=_prelude_auth_header(),
         json=payload,
         timeout=20,
     )

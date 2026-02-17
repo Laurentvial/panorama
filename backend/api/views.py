@@ -69,7 +69,7 @@ from .emailing import (
     get_platform_logo_url,
     otp_hmac,
 )
-from .sms import send_infobip_sms, get_infobip_sms_reports
+from .sms import create_prelude_verification, check_prelude_verification
 from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import (
     create_positions_for_investment,
@@ -1769,7 +1769,7 @@ def client_password_reset_confirm(request):
 @authentication_classes([])
 def client_login_otp_request(request):
     """
-    Client platform only: request a one-time code by email.
+    Client platform only: request a one-time code by email or SMS.
     Response includes a signed challenge token used to verify the OTP.
     """
     channel = (request.data.get('channel') or 'email').strip().lower()
@@ -1808,25 +1808,30 @@ def client_login_otp_request(request):
             status=status.HTTP_200_OK,
         )
 
-    # 6-digit code.
-    otp_code = f"{secrets.randbelow(1_000_000):06d}"
-    otp_id = secrets.token_hex(16)
     expires_seconds = 10 * 60  # 10 minutes
     expires_minutes = expires_seconds // 60
 
-    expected_hmac = otp_hmac(otp_id=otp_id, code=otp_code, secret=settings.SECRET_KEY)
-    challenge_token = signing.dumps(
-        {
-            'purpose': 'client_login_otp',
-            'client_id': client.id,
-            'otp_id': otp_id,
-            'code_hmac': expected_hmac,
-        },
-        salt='client-login-otp',
-    )
+    # Keep local OTP logic only for the email channel.
+    otp_code = ""
+    challenge_payload: dict[str, object] = {
+        'purpose': 'client_login_otp',
+        'client_id': client.id,
+        'channel': channel,
+    }
+    if channel == 'email':
+        otp_code = f"{secrets.randbelow(1_000_000):06d}"
+        otp_id = secrets.token_hex(16)
+        expected_hmac = otp_hmac(otp_id=otp_id, code=otp_code, secret=settings.SECRET_KEY)
+        challenge_payload.update(
+            {
+                'otp_id': otp_id,
+                'code_hmac': expected_hmac,
+            }
+        )
 
     try:
         if channel == 'email':
+            challenge_token = signing.dumps(challenge_payload, salt='client-login-otp')
             platform_name = get_platform_name()
             logo_url = get_platform_logo_url()
             subject = f"{platform_name} - Code de connexion"
@@ -1866,50 +1871,13 @@ def client_login_otp_request(request):
                     {'sent': False, 'channel': channel, 'error': 'Aucun numéro de téléphone configuré pour ce compte.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            # Keep SMS content ASCII-friendly.
-            sms_text = f"Votre code de connexion: {otp_code}. Expire dans {expires_minutes} min."
-            infobip_resp = send_infobip_sms(to_phone=send_to, text=sms_text)
-            infobip_msg = None
-            try:
-                messages = infobip_resp.get('messages') if isinstance(infobip_resp, dict) else None
-                if isinstance(messages, list) and messages:
-                    infobip_msg = messages[0]
-            except Exception:
-                infobip_msg = None
+            verify_resp = create_prelude_verification(to_phone=send_to, locale='fr-FR')
+            request._prelude_verification_id = verify_resp.get('id') if isinstance(verify_resp, dict) else None
+            request._prelude_verification_status = verify_resp.get('status') if isinstance(verify_resp, dict) else None
+            request._prelude_verification_method = verify_resp.get('method') if isinstance(verify_resp, dict) else None
 
-            infobip_message_id = (infobip_msg or {}).get('messageId') if isinstance(infobip_msg, dict) else None
-            infobip_status = (infobip_msg or {}).get('status') if isinstance(infobip_msg, dict) else None
-            # Attach to request for later response/logging.
-            request._infobip_message_id = infobip_message_id
-            request._infobip_status = infobip_status
-
-            # Some accounts/operators accept the API call (200) but reject the network immediately after.
-            # Query delivery reports to detect REJECTED/FAILED and return a clear error to the UI.
-            if infobip_message_id:
-                try:
-                    reports = get_infobip_sms_reports(message_id=str(infobip_message_id))
-                    result0 = None
-                    if isinstance(reports, dict):
-                        results = reports.get('results')
-                        if isinstance(results, list) and results:
-                            result0 = results[0]
-                    if isinstance(result0, dict):
-                        report_status = result0.get('status') or {}
-                        report_error = result0.get('error') or {}
-                        request._infobip_report_status = report_status
-                        request._infobip_report_error = report_error
-
-                        group_name = str(report_status.get('groupName') or '').upper()
-                        name = str(report_status.get('name') or '').upper()
-                        # If Infobip already knows it's rejected, fail fast.
-                        if group_name in ('REJECTED', 'FAILED') or name.startswith('REJECTED'):
-                            desc = str(report_status.get('description') or '').strip()
-                            err_desc = str(report_error.get('description') or '').strip()
-                            reason = err_desc or desc or 'SMS rejeté par le réseau.'
-                            raise RuntimeError(reason)
-                except Exception as report_err:
-                    # Re-raise as send failure so the response is not misleading.
-                    raise RuntimeError(f"SMS non delivrable: {str(report_err)}")
+            challenge_payload['phone'] = send_to
+            challenge_token = signing.dumps(challenge_payload, salt='client-login-otp')
     except Exception as e:
         # Log details server-side for troubleshooting.
         logger.exception("OTP send failed", extra={"channel": channel, "client_id": getattr(client, "id", None)})
@@ -1924,15 +1892,12 @@ def client_login_otp_request(request):
             pass
         extra: dict[str, object] = {}
         if channel == 'sms':
-            mid = getattr(request, '_infobip_message_id', None)
-            if mid:
-                extra['infobipMessageId'] = mid
-            rep_st = getattr(request, '_infobip_report_status', None)
-            rep_err = getattr(request, '_infobip_report_error', None)
-            if rep_st:
-                extra['infobipReportStatus'] = rep_st
-            if rep_err:
-                extra['infobipReportError'] = rep_err
+            verification_id = getattr(request, '_prelude_verification_id', None)
+            verification_status = getattr(request, '_prelude_verification_status', None)
+            if verification_id:
+                extra['preludeVerificationId'] = verification_id
+            if verification_status:
+                extra['preludeVerificationStatus'] = verification_status
 
         if getattr(settings, 'DEBUG', False):
             return Response({'error': f'OTP send failed: {str(e)}', **extra}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1942,12 +1907,12 @@ def client_login_otp_request(request):
     try:
         details = {'channel': channel}
         if channel == 'sms':
-            mid = getattr(request, '_infobip_message_id', None)
-            if mid:
-                details['infobip_message_id'] = mid
-            st = getattr(request, '_infobip_status', None)
-            if st:
-                details['infobip_status'] = st
+            verification_id = getattr(request, '_prelude_verification_id', None)
+            if verification_id:
+                details['prelude_verification_id'] = verification_id
+            verification_status = getattr(request, '_prelude_verification_status', None)
+            if verification_status:
+                details['prelude_verification_status'] = verification_status
         create_platform_log(client.id, 'otp_login_requested', details, request)
     except Exception:
         pass
@@ -1960,18 +1925,15 @@ def client_login_otp_request(request):
         'channel': channel,
     }
     if channel == 'sms':
-        mid = getattr(request, '_infobip_message_id', None)
-        st = getattr(request, '_infobip_status', None)
-        if mid:
-            resp_payload['infobipMessageId'] = mid
-        if st:
-            resp_payload['infobipStatus'] = st
-        rep_st = getattr(request, '_infobip_report_status', None)
-        rep_err = getattr(request, '_infobip_report_error', None)
-        if rep_st:
-            resp_payload['infobipReportStatus'] = rep_st
-        if rep_err:
-            resp_payload['infobipReportError'] = rep_err
+        verification_id = getattr(request, '_prelude_verification_id', None)
+        verification_status = getattr(request, '_prelude_verification_status', None)
+        verification_method = getattr(request, '_prelude_verification_method', None)
+        if verification_id:
+            resp_payload['preludeVerificationId'] = verification_id
+        if verification_status:
+            resp_payload['preludeVerificationStatus'] = verification_status
+        if verification_method:
+            resp_payload['preludeVerificationMethod'] = verification_method
     return Response(resp_payload, status=status.HTTP_200_OK)
 
 
@@ -1994,21 +1956,39 @@ def client_login_otp_verify(request):
         return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
 
     client_id = payload.get('client_id')
-    otp_id = payload.get('otp_id')
-    expected_hmac = payload.get('code_hmac')
-    if not client_id or not otp_id or not expected_hmac:
+    channel = (payload.get('channel') or 'email').strip().lower()
+    if not client_id or channel not in ('email', 'sms'):
         return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
 
-    actual_hmac = otp_hmac(otp_id=str(otp_id), code=otp_code, secret=settings.SECRET_KEY)
-    if not hmac.compare_digest(str(expected_hmac), str(actual_hmac)):
-        return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+    if channel == 'email':
+        otp_id = payload.get('otp_id')
+        expected_hmac = payload.get('code_hmac')
+        if not otp_id or not expected_hmac:
+            return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+        actual_hmac = otp_hmac(otp_id=str(otp_id), code=otp_code, secret=settings.SECRET_KEY)
+        if not hmac.compare_digest(str(expected_hmac), str(actual_hmac)):
+            return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        phone = (payload.get('phone') or '').strip()
+        if not phone:
+            return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            verify_check = check_prelude_verification(to_phone=phone, code=otp_code)
+            verify_status = (verify_check.get('status') or '').strip().lower() if isinstance(verify_check, dict) else ''
+            if verify_status != 'success':
+                if verify_status == 'expired_or_not_found':
+                    return Response({'error': 'Code invalide ou expire'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': 'Code invalide'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({'error': 'Code invalide ou expire'}, status=status.HTTP_400_BAD_REQUEST)
 
     client = get_object_or_404(Client, id=client_id)
     if not _client_can_access_platform(client):
         return Response({'error': 'Acces refuse'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
-        create_platform_log(client.id, 'login', {'method': 'otp'}, request)
+        create_platform_log(client.id, 'login', {'method': 'otp', 'channel': channel}, request)
     except Exception:
         pass
 

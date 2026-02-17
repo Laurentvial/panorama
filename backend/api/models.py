@@ -453,20 +453,20 @@ class Transaction(models.Model):
     # FX conversion snapshot for trading orders when asset currency != EUR
     fx_rate_eur_to_asset = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
     amount_in_asset_currency = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
-    subscription_first_name = models.CharField(max_length=100, default="", blank=True)
-    subscription_last_name = models.CharField(max_length=100, default="", blank=True)
+    subscription_first_name = models.CharField(max_length=100, default="", blank=True, null=True)
+    subscription_last_name = models.CharField(max_length=100, default="", blank=True, null=True)
     subscription_birth_date = models.CharField(max_length=20, default="", blank=True, null=True)
-    subscription_city = models.CharField(max_length=100, default="", blank=True)
-    subscription_ip = models.CharField(max_length=50, default="", blank=True)
-    subscription_date = models.CharField(max_length=20, default="", blank=True)
-    subscription_duration = models.CharField(max_length=50, default="", blank=True)
-    subscription_interest_period = models.CharField(max_length=50, default="", blank=True)
-    subscription_profitability = models.CharField(max_length=50, default="", blank=True)
+    subscription_city = models.CharField(max_length=100, default="", blank=True, null=True)
+    subscription_ip = models.CharField(max_length=50, default="", blank=True, null=True)
+    subscription_date = models.CharField(max_length=20, default="", blank=True, null=True)
+    subscription_duration = models.CharField(max_length=50, default="", blank=True, null=True)
+    subscription_interest_period = models.CharField(max_length=50, default="", blank=True, null=True)
+    subscription_profitability = models.CharField(max_length=50, default="", blank=True, null=True)
     subscription_investment = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     subscription_profits = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     subscription_total = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    subscription_contract_end = models.CharField(max_length=20, default="", blank=True)
-    subscription_signature = models.TextField(default="", blank=True)  # Base64 encoded signature image
+    subscription_contract_end = models.CharField(max_length=20, default="", blank=True, null=True)
+    subscription_signature = models.TextField(default="", blank=True, null=True)  # Base64 encoded signature image
     
     # Position generation history: stores details of each position generation run
     # Format: [{"timestamp": "...", "rates": {...}, "positions": [...], "summary": {...}}, ...]
