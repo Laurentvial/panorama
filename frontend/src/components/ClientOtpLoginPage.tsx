@@ -21,8 +21,7 @@ export function ClientOtpLoginPage() {
   const { settings, loading: settingsLoading } = useTheme();
 
   const [step, setStep] = useState<Step>('email');
-  // Temporarily disable SMS OTP until Infobip routing is provisioned.
-  const channel: Channel = 'email';
+  const [channel, setChannel] = useState<Channel>('email');
   const [identifier, setIdentifier] = useState('');
   const [challengeToken, setChallengeToken] = useState<string>('');
   const [code, setCode] = useState('');
@@ -55,14 +54,25 @@ export function ClientOtpLoginPage() {
       setError(channel === 'sms' ? 'Veuillez saisir votre numéro de téléphone.' : 'Veuillez saisir votre email.');
       return;
     }
-    const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-    if (!ok) {
-      setError('Veuillez saisir une adresse email valide.');
-      return;
+    if (channel === 'email') {
+      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+      if (!ok) {
+        setError('Veuillez saisir une adresse email valide.');
+        return;
+      }
+    } else {
+      const digits = v.replace(/\D/g, '');
+      if (digits.length < 8) {
+        setError('Veuillez saisir un numéro de téléphone valide.');
+        return;
+      }
     }
     setLoading(true);
     try {
-      const result = await clientRequestOtp({ channel: 'email', email: v });
+      const result =
+        channel === 'sms'
+          ? await clientRequestOtp({ channel: 'sms', phone: v })
+          : await clientRequestOtp({ channel: 'email', email: v });
       const sent = Boolean((result as any)?.sent);
       if (!sent || !result?.challengeToken) {
         setInfo(result?.message || 'Demande prise en compte.');
@@ -70,7 +80,7 @@ export function ClientOtpLoginPage() {
       }
       setChallengeToken(result.challengeToken);
       setStep('code');
-      setInfo('Code envoyé. Vérifiez votre email.');
+      setInfo(channel === 'sms' ? 'Code envoyé. Vérifiez votre téléphone.' : 'Code envoyé. Vérifiez votre email.');
     } catch (err: any) {
       setError(err?.message || 'Erreur lors de l\'envoi du code');
     } finally {
@@ -133,12 +143,56 @@ export function ClientOtpLoginPage() {
                     {error}
                   </div>
                 )}
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChannel('email');
+                      setIdentifier('');
+                      setError('');
+                      setInfo('');
+                    }}
+                    disabled={loading}
+                    style={{
+                      flex: 1,
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: channel === 'email' ? '#0f172a' : '#fff',
+                      color: channel === 'email' ? '#fff' : '#0f172a',
+                      padding: '0.5rem 0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChannel('sms');
+                      setIdentifier('');
+                      setError('');
+                      setInfo('');
+                    }}
+                    disabled={loading}
+                    style={{
+                      flex: 1,
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: channel === 'sms' ? '#0f172a' : '#fff',
+                      color: channel === 'sms' ? '#fff' : '#0f172a',
+                      padding: '0.5rem 0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    SMS
+                  </button>
+                </div>
                 <div className="login-form-field">
                   <Input
                     id="identifier"
                     name="identifier"
-                    type="email"
-                    autoComplete="email"
+                    type={channel === 'sms' ? 'tel' : 'email'}
+                    autoComplete={channel === 'sms' ? 'tel' : 'email'}
                     placeholder=" "
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
@@ -146,7 +200,7 @@ export function ClientOtpLoginPage() {
                     className="login-floating-input"
                   />
                   <label className="login-floating-label" htmlFor="identifier">
-                    Email
+                    {channel === 'sms' ? 'Numéro de téléphone' : 'Email'}
                   </label>
                 </div>
 
@@ -172,7 +226,7 @@ export function ClientOtpLoginPage() {
                 )}
                 <div style={{ display: 'grid', gap: '0.5rem', justifyItems: 'center' }}>
                   <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                    Saisissez le code envoyé par email.
+                    {channel === 'sms' ? 'Saisissez le code envoyé par SMS.' : 'Saisissez le code envoyé par email.'}
                   </div>
                   {/* Use a plain input to ensure visibility even if Tailwind classes
                       from shadcn's InputOTP slots aren't applied in this environment. */}

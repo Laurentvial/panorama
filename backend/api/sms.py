@@ -60,11 +60,18 @@ def _prelude_auth_header() -> dict[str, str]:
     }
 
 
+def _get_prelude_base_url() -> str:
+    raw_base = (os.getenv("PRELUDE_BASE_URL") or "").strip()
+    if not raw_base:
+        raw_base = "https://api.prelude.dev"
+    return _normalize_base_url(raw_base)
+
+
 def create_prelude_verification(*, to_phone: str, locale: str | None = None) -> dict[str, Any]:
     """
     Start or retry an OTP verification through Prelude Verify API.
     """
-    base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
+    base_url = _get_prelude_base_url()
     normalized_phone = _normalize_phone_e164(to_phone)
     verify_template_id = (os.getenv("PRELUDE_VERIFY_TEMPLATE_ID") or os.getenv("PRELUDE_TEMPLATE_ID") or "").strip()
 
@@ -106,7 +113,7 @@ def check_prelude_verification(*, to_phone: str, code: str) -> dict[str, Any]:
     """
     Check OTP code validity through Prelude Verify API.
     """
-    base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
+    base_url = _get_prelude_base_url()
     normalized_phone = _normalize_phone_e164(to_phone)
     otp_code = (code or "").strip()
     if not otp_code:
@@ -147,7 +154,7 @@ def send_infobip_sms(*, to_phone: str, text: str) -> dict[str, Any]:
     - PRELUDE_TEMPLATE_ID (required)
     - PRELUDE_SENDER (optional, fallback: INFOBIP_SENDER)
     """
-    base_url = _normalize_base_url(os.getenv("PRELUDE_BASE_URL", "https://api.prelude.dev"))
+    base_url = _get_prelude_base_url()
     template_id = _require_env("PRELUDE_TEMPLATE_ID")
     sender = (os.getenv("PRELUDE_SENDER") or os.getenv("INFOBIP_SENDER") or "").strip()
 
