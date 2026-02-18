@@ -765,12 +765,12 @@ export function ProductDetail() {
         hasSignature: !!signature
       };
       
-      // Create transaction of type 'transfert' - Transfer from Balance Cash to the chosen product
+      // Create transaction of type 'transfert' - Transfer from Solde to the chosen product
       // We only need to_field: product ID = investment (balance → product)
       const transactionData = {
         type: 'transfert',
         amount: amount,
-        description: `Transfert de Balance Cash vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}.`,
+        description: `Transfert de Solde vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}.`,
         status: 'en_cours',
         datetime: new Date().toISOString(),
         to_field: productData.id, // Transfer to product (investment: balance → product)

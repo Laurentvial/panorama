@@ -320,8 +320,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       const toField = transactionForm.to_field || 'balance';
       
       // Find product names
-      let fromName = 'Balance Cash';
-      let toName = 'Balance Cash';
+      let fromName = 'Solde';
+      let toName = 'Solde';
       
       if (fromField !== 'balance') {
         const fromProduct = products.find((p: any) => p.id === fromField);
@@ -928,8 +928,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                         
                         // Update description based on new values
                         const toField = transactionForm.to_field || 'balance';
-                        let fromName = 'Balance Cash';
-                        let toName = 'Balance Cash';
+                        let fromName = 'Solde';
+                        let toName = 'Solde';
                         
                         if (nextFrom !== 'balance') {
                           const fromProduct = products.find((p: any) => p.id === nextFrom);
@@ -959,7 +959,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="balance">Balance Cash</SelectItem>
+                        <SelectItem value="balance">Solde</SelectItem>
                         {products.map((p: any) => (
                           <SelectItem key={p.id} value={p.id}>
                             {p.name}{p.reference ? ` (${p.reference})` : ''}
@@ -981,8 +981,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                         
                         // Update description based on new values
                         const fromField = transactionForm.from_field || 'balance';
-                        let fromName = 'Balance Cash';
-                        let toName = 'Balance Cash';
+                        let fromName = 'Solde';
+                        let toName = 'Solde';
                         
                         if (fromField !== 'balance') {
                           const fromProduct = products.find((p: any) => p.id === fromField);
@@ -1012,7 +1012,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="balance">Balance Cash</SelectItem>
+                        <SelectItem value="balance">Solde</SelectItem>
                         {products.map((p: any) => (
                           <SelectItem key={p.id} value={p.id}>
                             {p.name}{p.reference ? ` (${p.reference})` : ''}

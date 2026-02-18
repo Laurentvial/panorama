@@ -1034,6 +1034,7 @@ export function PlatformTrading() {
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '10px 8px' }}>Description</th>
                         <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
                         <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
                       </tr>
@@ -1054,6 +1055,7 @@ export function PlatformTrading() {
                               })}
                             </td>
                             <td style={{ padding: '10px 8px' }}>{t.type === 'depot' ? 'Dépôt' : 'Retrait'}</td>
+                            <td style={{ padding: '10px 8px' }}>{t.description || '—'}</td>
                             <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
                               {Number.isFinite(amt)
                                 ? `${t.type === 'depot' ? '+' : '-'}${Math.abs(amt).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`

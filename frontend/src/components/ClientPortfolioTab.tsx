@@ -364,7 +364,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Liquidités Disponibles</CardTitle>
+            <CardTitle className="text-sm font-medium">Solde</CardTitle>
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -384,7 +384,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
             <div className="text-2xl font-bold">
               {formatCurrency(totalInvesti)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)</p>
+            <p className="text-xs text-muted-foreground mt-1">Capital total investi</p>
           </CardContent>
         </Card>
 

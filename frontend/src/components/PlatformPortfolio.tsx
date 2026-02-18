@@ -1131,19 +1131,19 @@ export function PlatformPortfolio() {
           <div className="platform-portfolioSummaryGrid">
             <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="platform-portfolioStatTitle">Liquidités Disponibles</CardTitle>
+                <CardTitle className="platform-portfolioStatTitle">Solde</CardTitle>
                 <Wallet className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="platform-portfolioStatValue">
                   {Math.max(0, availableFunds).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
+                <p className="platform-portfolioStatSub">Fonds disponibles pour investir</p>
                 {interestGainsInCash !== 0 && (
                   <p className={`text-xs mt-1 ${interestGainsInCash >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    dont {interestGainsInCash.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € de {interestGainsInCash >= 0 ? 'gains' : 'pertes'}
+                    dont {interestGainsInCash.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € de {interestGainsInCash >= 0 ? 'gains' : 'pertes'} d'intérêts déjà basculés dans le solde
                   </p>
                 )}
-                <p className="platform-portfolioStatSub">Fonds disponibles pour investir</p>
               </CardContent>
             </Card>
 
@@ -1156,9 +1156,7 @@ export function PlatformPortfolio() {
                 <div className="platform-portfolioStatValue">
                   {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <p className="platform-portfolioStatSub">
-                  Capital total investi (achat + transfert balance→produit - transfert produit→balance validé)
-                </p>
+                <p className="platform-portfolioStatSub">Capital total investi</p>
               </CardContent>
             </Card>
 
@@ -1454,6 +1452,7 @@ export function PlatformPortfolio() {
                         <th className="platform-portfolioTh">Date</th>
                         <th className="platform-portfolioTh">Type</th>
                         <th className="platform-portfolioTh">Produit</th>
+                        <th className="platform-portfolioTh">Description</th>
                         <th className="platform-portfolioTh platform-portfolioAlignRight">Montant</th>
                         <th className="platform-portfolioTh">Statut</th>
                         <th className="platform-portfolioTh platform-portfolioAlignRight">Actions</th>
@@ -1503,6 +1502,7 @@ export function PlatformPortfolio() {
                             <td className="platform-portfolioTd platform-portfolioNowrap">{formatDateTime(t.datetime)}</td>
                             <td className="platform-portfolioTd">{typeLabel}</td>
                             <td className="platform-portfolioTd">{productLabel}</td>
+                            <td className="platform-portfolioTd">{t.description || '—'}</td>
                             <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: amountColor }}>
                               {formatCurrency(t.amount)}
                             </td>

@@ -27,30 +27,50 @@ export function PlatformDashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      // Load client-specific assets and products
-      const [transactionsResponse, clientAssetsResponse, clientProductsResponse, positionsResponse] = await Promise.all([
-        apiCall(`/api/clients/${currentUser.id}/transactions/`),
+      // Load all positions (paginated) and all transactions (paginated) so stats match page Portefeuille
+      const limit = 500;
+      const allPositionsList: any[] = [];
+      let pagePos = 1;
+      let hasMorePos = true;
+      while (hasMorePos) {
+        const positionsResponse = await apiCall(`/api/clients/${currentUser.id}/positions/?page=${pagePos}&limit=${limit}`);
+        const positions = (positionsResponse as any)?.positions || [];
+        allPositionsList.push(...positions);
+        const pagination = (positionsResponse as any).pagination;
+        if (pagination && pagePos >= pagination.total_pages) hasMorePos = false;
+        else if (positions.length < limit) hasMorePos = false;
+        else pagePos++;
+      }
+      const allTransactionsList: any[] = [];
+      let pageTx = 1;
+      let hasMoreTx = true;
+      while (hasMoreTx) {
+        const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/?page=${pageTx}&limit=${limit}`);
+        const txs = (transactionsResponse as any)?.transactions || [];
+        allTransactionsList.push(...txs);
+        const pagination = (transactionsResponse as any).pagination;
+        if (pagination && pageTx >= pagination.total_pages) hasMoreTx = false;
+        else if (txs.length < limit) hasMoreTx = false;
+        else pageTx++;
+      }
+      setPositions(allPositionsList);
+      setAllTransactions(allTransactionsList);
+
+      const [clientAssetsResponse, clientProductsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/assets/`),
         apiCall(`/api/clients/${currentUser.id}/products/`),
-        apiCall(`/api/clients/${currentUser.id}/positions/`),
       ]);
-      
-      setAllTransactions(transactionsResponse.transactions || []);
       // Extract assets from ClientAsset objects
       const clientAssets = (clientAssetsResponse as any)?.assets || [];
       const assetsList = clientAssets.map((ca: any) => {
-        // Handle both structures: {asset: {...}} and direct asset object
         return ca.asset || ca;
       }).filter(Boolean);
       setAssets(assetsList);
-      // Extract products from ClientProduct objects
       const clientProducts = (clientProductsResponse as any)?.products || [];
       const productsList = clientProducts.map((cp: any) => {
-        // Handle both structures: {product: {...}} and direct product object
         return cp.product || cp;
       }).filter(Boolean);
       setProducts(productsList);
-      setPositions((positionsResponse as any)?.positions || []);
       
       // Load verification config separately to avoid breaking the Promise.all if it fails
       try {
@@ -177,58 +197,67 @@ export function PlatformDashboard() {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  // Stats: align with "Mon Portefeuille" (PlatformPortfolio)
+  // Même critère que PlatformPortfolio pour les transactions "complétées"
+  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+
+  // Stats: même logique que page Portefeuille (PlatformPortfolio) pour Valeur du Portefeuille
   const calculatedValues = React.useMemo(() => {
     let calculatedInvestedCapital = 0;
     let calculatedTradingPortfolio = 0;
+    let calculatedProfitLoss = 0;
 
-    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (allTransactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
-    for (const transaction of completedTransactions) {
-      const amount = parseFinancialValue(transaction?.amount);
-      switch (transaction?.type) {
+    completedTransactions.forEach((transaction: any) => {
+      const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
+      const amt = Number.isFinite(amount) ? amount : 0;
+
+      switch (transaction.type) {
         case 'depot':
-          calculatedInvestedCapital += amount;
+          calculatedInvestedCapital += amt;
           break;
         case 'retrait':
-          calculatedInvestedCapital -= amount;
+          calculatedInvestedCapital -= amt;
           break;
         case 'bonus':
-          calculatedInvestedCapital += amount;
+          calculatedInvestedCapital += amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance
-          calculatedInvestedCapital += amount;
+          // Interest transactions credit gains to cash balance; subtract from P&L to avoid double-counting with positions
+          calculatedInvestedCapital += amt;
+          calculatedProfitLoss -= amt;
+          break;
+        case 'frais':
+        case 'perte':
+          calculatedProfitLoss -= amt;
           break;
         case 'achat':
-          calculatedTradingPortfolio += amount;
+          calculatedTradingPortfolio += amt;
           break;
         case 'vente':
-          calculatedTradingPortfolio -= amount;
+          calculatedTradingPortfolio -= amt;
           break;
         case 'transfert': {
-          const transferTo = transaction?.to || transaction?.to_field || transaction?.transfer_to || null;
-          const hasProductId = Boolean(transaction?.productId);
+          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
+          const hasProductId = transaction.productId || null;
           if (transferTo && transferTo !== 'balance') {
-            // balance -> product
-            calculatedTradingPortfolio += amount;
+            calculatedTradingPortfolio += amt;
           } else if (transferTo === 'balance') {
-            // product -> balance
-            calculatedTradingPortfolio -= amount;
+            calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
-            // Fallback: assume subscription (balance -> product)
-            calculatedTradingPortfolio += amount;
+            calculatedTradingPortfolio += amt;
           }
           break;
         }
         default:
           break;
       }
-    }
+    });
 
     return {
       investedCapital: calculatedInvestedCapital,
       tradingPortfolio: Math.max(0, calculatedTradingPortfolio),
+      profitLoss: calculatedProfitLoss,
       hasCompletedTransactions: completedTransactions.length > 0,
     };
   }, [allTransactions]);
@@ -261,12 +290,11 @@ export function PlatformDashboard() {
 
   const profitLoss = React.useMemo(() => {
     // Profit/Loss basé sur:
-    // 1. Les transactions (interets, frais, perte) - pas de calculatedValues ici car pas de transactions chargées
+    // 1. Les transactions (interets, frais, perte) - même logique que PlatformPortfolio
     // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
     
-    // Commencer avec 0 (pas de calculatedValues dans Dashboard)
-    let total = 0;
-    
+    let total = calculatedValues.hasCompletedTransactions ? calculatedValues.profitLoss : 0;
+
     // Créer un map des actifs pour accès rapide
     const assetsMap = new Map<string, any>();
     for (const a of assets || []) {
@@ -361,13 +389,13 @@ export function PlatformDashboard() {
       total += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
     return total;
-  }, [positions, assets]);
+  }, [positions, assets, calculatedValues]);
 
   const availableFunds = React.useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = React.useMemo(() => {
-    const completedTransactions = (allTransactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (allTransactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
     const productTypeById = (productId: any): string | null => {
       if (!productId) return null;

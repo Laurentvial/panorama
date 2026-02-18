@@ -430,7 +430,7 @@ export function ViewTransactionModal({
                       {(() => {
                         const fromField = transaction.transfer_from || transaction.from_field || 'balance';
                         if (fromField === 'balance') {
-                          return 'Balance Cash';
+                          return 'Solde';
                         }
                         const fromProduct = products.find((p: any) => p.id === fromField);
                         if (fromProduct) {
@@ -446,7 +446,7 @@ export function ViewTransactionModal({
                       {(() => {
                         const toField = transaction.transfer_to || transaction.to_field || 'balance';
                         if (toField === 'balance') {
-                          return 'Balance Cash';
+                          return 'Solde';
                         }
                         if (toField === 'trading') {
                           return 'Trading';

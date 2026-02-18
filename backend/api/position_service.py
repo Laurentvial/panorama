@@ -2765,12 +2765,12 @@ def calculate_withdrawal_recalculation_metadata(
 def _extract_product_from_description(description: str) -> Product | None:
     """
     Best-effort inference used when admin edits a transaction but transfer_to/product
-    isn't set. Matches frontend format: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (REF)".
+    isn't set. Matches frontend format: "Transfert de [from] vers [to]." or "Transfert de Solde vers Nom (REF)".
     Supports both old and new simplified formats.
     """
     if not description:
         return None
-    # Pattern matches: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (REF)"
+    # Pattern matches: "Transfert de [from] vers [to]." or "Transfert de Solde vers Nom (REF)"
     # Use .*? (non-greedy) instead of [^v]+? to handle product names containing 'v' (e.g., "Volkswagen")
     m = re.search(r"Transfert de\s+(.*?)\s+vers\s+([^(]+?)(?:\s*\(([^)]+)\))?", description, flags=re.IGNORECASE)
     if not m:
@@ -3069,13 +3069,13 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     # These have transfer_to=product.id and transfer_from='balance' but represent a withdrawal
     # For withdrawals, we need to subtract the withdrawal amount from the capital
     # IMPORTANT: We need to distinguish between:
-    # - Normal investment: transfer_from='balance' (or None), transfer_to=product.id, description doesn't contain "vers Balance Cash"
-    # - Withdrawal temp: transfer_from='balance', transfer_to=product.id, AND (_is_withdrawal_temp=True OR description contains "vers Balance Cash")
+    # - Normal investment: transfer_from='balance' (or None), transfer_to=product.id, description doesn't contain "vers Solde"
+    # - Withdrawal temp: transfer_from='balance', transfer_to=product.id, AND (_is_withdrawal_temp=True OR description contains "vers Solde")
     is_withdrawal_temp_transaction = (
         getattr(txn, '_is_withdrawal_temp', False) or
         (txn.transfer_from == 'balance' and 
          txn.transfer_to == product.id and
-         ('vers Balance Cash' in (txn.description or '') or 
+         ('vers Solde' in (txn.description or '') or 
           'vers balance' in (txn.description or '').lower()))
     )
     

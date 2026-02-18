@@ -524,7 +524,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                   <p className="mt-1">{client.annualNetIncome || client.annual_net_income || '-'}</p>
                 </div>
                 <div>
-                  <Label className="text-slate-600">Total des liquidités</Label>
+                  <Label className="text-slate-600">Solde</Label>
                   <p className="mt-1">{client.totalLiquidities || client.total_liquidities || '-'}</p>
                 </div>
               </div>

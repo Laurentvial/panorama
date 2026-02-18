@@ -46,7 +46,7 @@ export const getTypeColors = (type: string): { bg: string; text: string } => {
 export const extractAssetInfo = (description: string): { name: string; reference: string | null; displayText: string } => {
   if (!description) return { name: '-', reference: null, displayText: '-' };
   
-  // Pattern for transfert: "Transfert de [from] vers [to]." or "Transfert de Balance Cash vers Nom (Référence)"
+  // Pattern for transfert: "Transfert de [from] vers [to]." or "Transfert de Solde vers Nom (Référence)"
   // Support both old and new formats
   // Use .*? (non-greedy) instead of [^v]+? to handle product names containing 'v' (e.g., "Volkswagen")
   const transfertPattern = /Transfert de\s+(.*?)\s+vers\s+([^(]+?)(?:\s*\(([^)]+)\))?/i;

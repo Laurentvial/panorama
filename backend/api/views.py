@@ -7594,7 +7594,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
             
             # Create a temporary transaction object for rate generation
             # This simulates an investment transaction on the source product
-            # We mark it as a withdrawal by keeping the original description which contains "vers Balance Cash"
+            # We mark it as a withdrawal by keeping the original description which contains "vers Solde"
             temp_transaction = Transaction(
                 id=transaction.id,
                 client_id=transaction.client_id,

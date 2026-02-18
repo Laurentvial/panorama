@@ -67,6 +67,58 @@ export function EditTransactionModal({
   const [transferProduct, setTransferProduct] = useState<any>(null);
   const [loadingTransferProduct, setLoadingTransferProduct] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
+  const [dateDisplay, setDateDisplay] = useState('');
+  const [timeDisplay, setTimeDisplay] = useState('');
+
+  // Format internal YYYY-MM-DDTHH:mm -> DD/MM/YYYY and HH:mm for display
+  const formatDisplayDate = (iso: string): string => {
+    if (!iso || !iso.includes('T')) return '';
+    const [datePart] = iso.split('T');
+    const [y, m, d] = datePart.split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const formatDisplayTime = (iso: string): string => {
+    if (!iso || !iso.includes('T')) return '';
+    const timePart = iso.split('T')[1] || '00:00';
+    return timePart.slice(0, 5);
+  };
+
+  // Parse DD/MM/YYYY -> valid or null; validates real calendar dates (e.g. rejects Feb 31)
+  const parseDate = (s: string): { y: number; m: number; d: number } | null => {
+    const t = s.trim();
+    const match = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    // Ensure day is valid for the month (reject e.g. Feb 31, Apr 31)
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    return { y: year, m: month, d: day };
+  };
+  const parseTime = (s: string): { h: number; min: number } | null => {
+    const t = s.trim();
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+    return { h, min };
+  };
+
+  // Build YYYY-MM-DDTHH:mm from separate date and time display strings
+  const buildDatetimeFromDisplay = (dateStr: string, timeStr: string): string | null => {
+    const date = parseDate(dateStr);
+    const time = parseTime(timeStr);
+    if (!date) return null;
+    const monthStr = String(date.m).padStart(2, '0');
+    const dayStr = String(date.d).padStart(2, '0');
+    const hours = time ? time.h : 0;
+    const minutes = time ? time.min : 0;
+    const hoursStr = String(hours).padStart(2, '0');
+    const minutesStr = String(minutes).padStart(2, '0');
+    return `${date.y}-${monthStr}-${dayStr}T${hoursStr}:${minutesStr}`;
+  };
 
   const bustTransactionsCache = (cid: string) => {
     // apiCall caches GET requests; after a successful edit we must bust list caches
@@ -133,6 +185,8 @@ export function EditTransactionModal({
         }
       }
       
+      setDateDisplay(formatDisplayDate(datetimeLocal));
+      setTimeDisplay(formatDisplayTime(datetimeLocal));
       setTransactionForm({
         type: transaction.type,
         amount: transaction.amount?.toString() || '',
@@ -266,6 +320,8 @@ export function EditTransactionModal({
   };
 
   const handleClose = () => {
+    setDateDisplay('');
+    setTimeDisplay('');
     setTransactionForm({
       type: 'depot',
       amount: '',
@@ -303,20 +359,23 @@ export function EditTransactionModal({
     };
   };
 
-  const buildUpdatePayload = (statusValue: string, skipPositionGeneration: boolean) => {
+  const buildUpdatePayload = (
+    statusValue: string,
+    skipPositionGeneration: boolean,
+    overrides?: { datetime?: string }
+  ) => {
+    const datetimeSource = overrides?.datetime ?? transactionForm.datetime;
     // Don't convert to UTC - keep the local datetime as-is
-    // transactionForm.datetime is in format YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss (local time)
-    // We need to send it as ISO but preserve the local time
+    // datetimeSource is in format YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss (local time)
     let datetimeISO = '';
-    if (transactionForm.datetime) {
-      const timePart = transactionForm.datetime.split('T')[1] ?? '';
+    if (datetimeSource) {
+      const timePart = datetimeSource.split('T')[1] ?? '';
       const hasSeconds = timePart.split(':').length >= 3;
-      // Add seconds only when not already present (avoid "14:30:45" -> "14:30:45:00")
       datetimeISO = hasSeconds
-        ? transactionForm.datetime
-        : transactionForm.datetime.includes(':')
-          ? `${transactionForm.datetime}:00`
-          : transactionForm.datetime;
+        ? datetimeSource
+        : datetimeSource.includes(':')
+          ? `${datetimeSource}:00`
+          : datetimeSource;
     }
     
     return {
@@ -342,8 +401,17 @@ export function EditTransactionModal({
     
     if (!transaction) return;
     
-    if (!transactionForm.datetime) {
-      toast.error('La date et l\'heure sont requises');
+    if (!dateDisplay.trim()) {
+      toast.error('La date est requise');
+      return;
+    }
+    if (!timeDisplay.trim()) {
+      toast.error('L\'heure est requise');
+      return;
+    }
+    const submittedDatetime = buildDatetimeFromDisplay(dateDisplay, timeDisplay);
+    if (!submittedDatetime) {
+      toast.error('Format de date invalide. Utilisez JJ/MM/AAAA pour la date et HH:mm pour l\'heure.');
       return;
     }
 
@@ -407,10 +475,10 @@ export function EditTransactionModal({
         // has external asset allocations configured.
         const hasAllocations = await productHasAllocations(finalProductId);
         if (hasAllocations) {
-          // Persist edited details before opening generation modal so backend uses latest interest period.
+          // Persist edited details before opening generation modal so backend uses latest interest period and status.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(transaction.status || 'en_cours', true))
+            body: JSON.stringify(buildUpdatePayload(transactionForm.status, true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for investment');
           setIsWithdrawalTransaction(false);
@@ -423,10 +491,10 @@ export function EditTransactionModal({
         const relevantProductId = transferFrom && transferFrom !== 'balance' ? transferFrom : null;
         const hasAllocations = await productHasAllocations(relevantProductId);
         if (hasAllocations) {
-          // Persist edited details before opening generation modal so backend uses latest interest period.
+          // Persist edited details before opening generation modal so backend uses latest interest period and status.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(transaction.status || 'en_cours', true))
+            body: JSON.stringify(buildUpdatePayload(transactionForm.status, true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for withdrawal');
           setIsWithdrawalTransaction(true);
@@ -450,7 +518,7 @@ export function EditTransactionModal({
       
       const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
         method: 'PUT',
-        body: JSON.stringify(buildUpdatePayload(transactionForm.status, wasAlreadyTermine))
+        body: JSON.stringify(buildUpdatePayload(transactionForm.status, wasAlreadyTermine, { datetime: submittedDatetime }))
       });
       bustTransactionsCache(clientId);
       
@@ -566,8 +634,8 @@ export function EditTransactionModal({
                       const nextTo = transactionForm.to_field || 'balance';
                       const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
 
-                      let fromName = 'Balance Cash';
-                      let toName = 'Balance Cash';
+                      let fromName = 'Solde';
+                      let toName = 'Solde';
                       if (nextFrom !== 'balance') {
                         const fromProduct = products.find((p: any) => p.id === nextFrom);
                         if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
@@ -589,7 +657,7 @@ export function EditTransactionModal({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="balance">Balance Cash</SelectItem>
+                      <SelectItem value="balance">Solde</SelectItem>
                       {products.map((p: any) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name}{p.reference ? ` (${p.reference})` : ''}
@@ -608,8 +676,8 @@ export function EditTransactionModal({
                       const nextFrom = transactionForm.from_field || 'balance';
                       const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
 
-                      let fromName = 'Balance Cash';
-                      let toName = 'Balance Cash';
+                      let fromName = 'Solde';
+                      let toName = 'Solde';
                       if (nextFrom !== 'balance') {
                         const fromProduct = products.find((p: any) => p.id === nextFrom);
                         if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
@@ -631,7 +699,7 @@ export function EditTransactionModal({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="balance">Balance Cash</SelectItem>
+                      <SelectItem value="balance">Solde</SelectItem>
                       {products.map((p: any) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name}{p.reference ? ` (${p.reference})` : ''}
@@ -674,11 +742,32 @@ export function EditTransactionModal({
               </div>
             )}
             <div className="modal-form-field">
-              <Label>Date et heure</Label>
+              <Label>Date</Label>
               <Input
-                type="datetime-local"
-                value={transactionForm.datetime}
-                onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
+                type="text"
+                value={dateDisplay}
+                placeholder="JJ/MM/AAAA"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDateDisplay(v);
+                  const parsed = buildDatetimeFromDisplay(v, timeDisplay);
+                  if (parsed) setTransactionForm((prev) => ({ ...prev, datetime: parsed }));
+                }}
+                required
+              />
+            </div>
+            <div className="modal-form-field">
+              <Label>Heure</Label>
+              <Input
+                type="text"
+                value={timeDisplay}
+                placeholder="HH:mm"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setTimeDisplay(v);
+                  const parsed = buildDatetimeFromDisplay(dateDisplay, v);
+                  if (parsed) setTransactionForm((prev) => ({ ...prev, datetime: parsed }));
+                }}
                 required
               />
             </div>
