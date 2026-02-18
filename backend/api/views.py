@@ -7268,11 +7268,65 @@ def client_transaction_update(request, client_id, transaction_id):
     if 'status' in request.data:
         transaction.status = request.data.get('status')
     if 'datetime' in request.data:
+        import logging
         from django.utils.dateparse import parse_datetime
+        from django.utils import timezone as dj_timezone
+        from datetime import datetime
+        
+        logger = logging.getLogger(__name__)
         datetime_str = request.data.get('datetime')
-        transaction_datetime = parse_datetime(datetime_str)
-        if transaction_datetime:
-            transaction.datetime = transaction_datetime
+        
+        if datetime_str:
+            # Try Django's parse_datetime first (handles ISO 8601 format: YYYY-MM-DDTHH:MM:SS)
+            transaction_datetime = parse_datetime(datetime_str)
+            
+            # If parse_datetime returns a naive datetime, make it aware in local timezone
+            if transaction_datetime and dj_timezone.is_naive(transaction_datetime):
+                transaction_datetime = dj_timezone.make_aware(transaction_datetime, dj_timezone.get_current_timezone())
+                logger.info(f"Made naive datetime timezone-aware: {transaction_datetime}")
+            
+            # If that fails, try common European date formats
+            if not transaction_datetime:
+                # List of common European datetime formats
+                european_formats = [
+                    '%d/%m/%Y %H:%M:%S',  # DD/MM/YYYY HH:MM:SS
+                    '%d/%m/%Y %H:%M',     # DD/MM/YYYY HH:MM
+                    '%d-%m-%Y %H:%M:%S',  # DD-MM-YYYY HH:MM:SS
+                    '%d-%m-%Y %H:%M',     # DD-MM-YYYY HH:MM
+                    '%d.%m.%Y %H:%M:%S',  # DD.MM.YYYY HH:MM:SS
+                    '%d.%m.%Y %H:%M',     # DD.MM.YYYY HH:MM
+                ]
+                
+                for fmt in european_formats:
+                    try:
+                        naive_dt = datetime.strptime(datetime_str, fmt)
+                        # Make it timezone-aware
+                        transaction_datetime = dj_timezone.make_aware(naive_dt, dj_timezone.get_current_timezone())
+                        logger.info(f"Parsed datetime using format {fmt}: {transaction_datetime}")
+                        break
+                    except ValueError:
+                        continue
+            
+            # If still not parsed, try parsing as timestamp
+            if not transaction_datetime:
+                try:
+                    # Try parsing as float/int timestamp (milliseconds)
+                    if isinstance(datetime_str, (int, float)) or (isinstance(datetime_str, str) and datetime_str.replace('.', '', 1).isdigit()):
+                        timestamp = float(datetime_str)
+                        # If timestamp is in milliseconds (> year 2100 in seconds), convert to seconds
+                        if timestamp > 4102444800:  # Jan 1, 2100 in seconds
+                            timestamp = timestamp / 1000
+                        transaction_datetime = datetime.fromtimestamp(timestamp, tz=dj_timezone.utc)
+                        logger.info(f"Parsed datetime as timestamp: {transaction_datetime}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse datetime as timestamp '{datetime_str}': {str(e)}")
+            
+            if transaction_datetime:
+                transaction.datetime = transaction_datetime
+                logger.info(f"Updated transaction {transaction.id} datetime to {transaction_datetime} (ISO: {transaction_datetime.isoformat()})")
+            else:
+                # Log if we received a datetime but couldn't parse it
+                logger.error(f"Unable to parse datetime value: {datetime_str}")
 
     # Allow explicit admin update of subscription details (including interest period) from edit modal.
     if 'subscription_details' in request.data:
@@ -7464,6 +7518,8 @@ def client_transaction_update(request, client_id, transaction_id):
             client_id=client
         )
     
+    # Refresh transaction from database to ensure we return the latest saved values
+    transaction.refresh_from_db()
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data)
 

@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { DateTimePicker } from './ui/datetime-picker';
 import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
@@ -95,13 +96,43 @@ export function EditTransactionModal({
   // Initialize form when transaction changes
   useEffect(() => {
     if (isOpen && transaction) {
-      const transactionDate = new Date(transaction.datetime || transaction.createdAt);
-      const year = transactionDate.getFullYear();
-      const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
-      const day = String(transactionDate.getDate()).padStart(2, '0');
-      const hours = String(transactionDate.getHours()).padStart(2, '0');
-      const minutes = String(transactionDate.getMinutes()).padStart(2, '0');
-      const datetimeLocal = `${year}-${month}-${day}T${hours}:${minutes}`;
+      // Parse datetime ensuring correct format for datetime-local input
+      let datetimeLocal = '';
+      const datetimeValue = transaction.datetime || transaction.createdAt;
+      
+      if (datetimeValue) {
+        // For ISO strings, extract the date/time part directly without timezone conversion
+        if (typeof datetimeValue === 'string' && datetimeValue.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)) {
+          // ISO format: 2024-01-15T14:30:00 or 2024-01-15T14:30:00.000Z
+          // Extract just the date and time part (ignore timezone and seconds)
+          const match = datetimeValue.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+          if (match) {
+            // Rebuild in datetime format: YYYY-MM-DDTHH:mm
+            datetimeLocal = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
+          }
+        }
+        
+        // If we couldn't parse it as ISO string, try as Date object
+        // But treat it as a local datetime string by removing timezone indicators
+        if (!datetimeLocal && datetimeValue) {
+          try {
+            // Remove timezone indicators (Z, +00:00, -02:00, etc.) to treat as local time
+            const cleanDateStr = String(datetimeValue).replace(/Z|[+-]\d{2}:\d{2}$/, '');
+            const transactionDate = new Date(cleanDateStr);
+            
+            if (!isNaN(transactionDate.getTime())) {
+              const year = transactionDate.getFullYear();
+              const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
+              const day = String(transactionDate.getDate()).padStart(2, '0');
+              const hours = String(transactionDate.getHours()).padStart(2, '0');
+              const minutes = String(transactionDate.getMinutes()).padStart(2, '0');
+              datetimeLocal = `${year}-${month}-${day}T${hours}:${minutes}`;
+            }
+          } catch (e) {
+            console.error('EditTransactionModal - Failed to parse datetime:', e);
+          }
+        }
+      }
       
       setTransactionForm({
         type: transaction.type,
@@ -274,7 +305,21 @@ export function EditTransactionModal({
   };
 
   const buildUpdatePayload = (statusValue: string, skipPositionGeneration: boolean) => {
-    const datetimeISO = new Date(transactionForm.datetime).toISOString();
+    // Don't convert to UTC - keep the local datetime as-is
+    // transactionForm.datetime is in format YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss (local time)
+    // We need to send it as ISO but preserve the local time
+    let datetimeISO = '';
+    if (transactionForm.datetime) {
+      const timePart = transactionForm.datetime.split('T')[1] ?? '';
+      const hasSeconds = timePart.split(':').length >= 3;
+      // Add seconds only when not already present (avoid "14:30:45" -> "14:30:45:00")
+      datetimeISO = hasSeconds
+        ? transactionForm.datetime
+        : transactionForm.datetime.includes(':')
+          ? `${transactionForm.datetime}:00`
+          : transactionForm.datetime;
+    }
+    
     return {
       type: transactionForm.type,
       amount: parseFloat(transactionForm.amount),
@@ -631,10 +676,10 @@ export function EditTransactionModal({
             )}
             <div className="modal-form-field">
               <Label>Date et heure</Label>
-              <Input
-                type="datetime-local"
+              <DateTimePicker
                 value={transactionForm.datetime}
-                onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
+                onChange={(value) => setTransactionForm({ ...transactionForm, datetime: value })}
+                placeholder="Sélectionner une date et heure"
                 required
               />
             </div>

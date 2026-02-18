@@ -387,8 +387,16 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     }
     
     try {
-      // Convert datetime-local format to ISO string
-      const datetimeISO = new Date(transactionForm.datetime).toISOString();
+      // Keep datetime in local format, don't convert to UTC
+      // transactionForm.datetime is already in YYYY-MM-DDTHH:mm format (local time)
+      let datetimeISO = transactionForm.datetime;
+      if (datetimeISO && !datetimeISO.includes(':')) {
+        // Add seconds if not present
+        datetimeISO = `${datetimeISO}:00`;
+      } else if (datetimeISO && datetimeISO.split(':').length === 2) {
+        // Has HH:mm but no seconds, add them
+        datetimeISO = `${datetimeISO}:00`;
+      }
       
       // Check if this is a transfert transaction with status "valide"
       const isTransfert = transactionForm.type === 'transfert';
@@ -1310,7 +1318,33 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             // Update transaction status to "valide" after position generation completes
             if (transactionForPositionGeneration) {
               try {
-                const datetimeISO = new Date(transactionForPositionGeneration.datetime || new Date()).toISOString();
+                // Keep datetime in local format, don't convert to UTC
+                let datetimeISO = transactionForPositionGeneration.datetime;
+                if (datetimeISO && typeof datetimeISO === 'string') {
+                  // If it's already in ISO format, keep it
+                  if (!datetimeISO.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                    // Otherwise format it properly
+                    const dt = new Date(datetimeISO);
+                    const year = dt.getFullYear();
+                    const month = String(dt.getMonth() + 1).padStart(2, '0');
+                    const day = String(dt.getDate()).padStart(2, '0');
+                    const hours = String(dt.getHours()).padStart(2, '0');
+                    const minutes = String(dt.getMinutes()).padStart(2, '0');
+                    const seconds = String(dt.getSeconds()).padStart(2, '0');
+                    datetimeISO = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+                  }
+                } else {
+                  // Fallback to current datetime if missing
+                  const now = new Date();
+                  const year = now.getFullYear();
+                  const month = String(now.getMonth() + 1).padStart(2, '0');
+                  const day = String(now.getDate()).padStart(2, '0');
+                  const hours = String(now.getHours()).padStart(2, '0');
+                  const minutes = String(now.getMinutes()).padStart(2, '0');
+                  const seconds = String(now.getSeconds()).padStart(2, '0');
+                  datetimeISO = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+                }
+                
                 await apiCall(`/api/clients/${clientId}/transactions/${transactionForPositionGeneration.id}/`, {
                   method: 'PUT',
                   body: JSON.stringify({

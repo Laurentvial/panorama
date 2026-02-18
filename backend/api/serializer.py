@@ -917,6 +917,17 @@ class TransactionSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
+        # Ensure datetime is in ISO 8601 format in local timezone (not UTC)
+        if instance.datetime:
+            # Convert to local timezone before formatting
+            from django.utils import timezone as dj_timezone
+            local_dt = instance.datetime
+            # If datetime is timezone-aware and not in local timezone, convert it
+            if dj_timezone.is_aware(local_dt):
+                local_tz = dj_timezone.get_current_timezone()
+                local_dt = local_dt.astimezone(local_tz)
+            # Format without timezone info to avoid confusion
+            ret['datetime'] = local_dt.strftime('%Y-%m-%dT%H:%M:%S')
         ret['from'] = instance.transfer_from
         ret['to'] = instance.transfer_to
         if instance.product:

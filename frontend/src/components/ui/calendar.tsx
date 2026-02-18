@@ -16,21 +16,21 @@ function Calendar({
   const calendarId = React.useId().replace(/:/g, '-');
   
   return (
-    <div id={`calendar-wrapper-${calendarId}`} style={{ minWidth: '600px', width: '100%' }}>
+    <div id={`calendar-wrapper-${calendarId}`} style={{ minWidth: '420px', width: '100%' }}>
       <style>{`
         #calendar-wrapper-${calendarId} {
-          min-width: 600px !important;
+          min-width: 420px !important;
           width: 100% !important;
         }
         
         #calendar-wrapper-${calendarId} .rdp {
-          min-width: 600px !important;
+          min-width: 420px !important;
           width: 100% !important;
         }
         
         #calendar-wrapper-${calendarId} .rdp-table {
           width: 100% !important;
-          min-width: 600px !important;
+          min-width: 420px !important;
           border-collapse: separate !important;
           border-spacing: 0 !important;
           display: table !important;
@@ -46,18 +46,18 @@ function Calendar({
         #calendar-wrapper-${calendarId} .rdp-head_row th {
           display: table-cell !important;
           width: calc(100% / 7) !important;
-          min-width: 80px !important;
+          min-width: 60px !important;
           max-width: calc(100% / 7) !important;
           text-align: center !important;
           font-size: 0.875rem !important;
           font-weight: 500 !important;
           color: #6b7280 !important;
-          padding: 0.75rem 0.75rem !important;
+          padding: 0.75rem 0.5rem !important;
           box-sizing: border-box !important;
           vertical-align: middle !important;
           overflow: visible !important;
           text-overflow: clip !important;
-          white-space: normal !important;
+          white-space: nowrap !important;
           word-break: keep-all !important;
         }
         
@@ -70,19 +70,19 @@ function Calendar({
         #calendar-wrapper-${calendarId} .rdp-row td {
           display: table-cell !important;
           width: calc(100% / 7) !important;
-          min-width: 80px !important;
+          min-width: 60px !important;
           max-width: calc(100% / 7) !important;
           position: relative !important;
           text-align: center !important;
-          padding: 0.5rem !important;
+          padding: 0.25rem !important;
           box-sizing: border-box !important;
           vertical-align: middle !important;
         }
         
         #calendar-wrapper-${calendarId} .rdp-day {
-          width: 100% !important;
-          min-width: 50px !important;
-          height: 50px !important;
+          width: 40px !important;
+          height: 40px !important;
+          min-width: 40px !important;
           display: inline-flex !important;
           align-items: center !important;
           justify-content: center !important;
@@ -153,7 +153,7 @@ function Calendar({
         /* Very specific targeting to override any conflicting styles */
         #calendar-wrapper-${calendarId} table.rdp-table {
           width: 100% !important;
-          min-width: 600px !important;
+          min-width: 420px !important;
           display: table !important;
           table-layout: fixed !important;
         }
@@ -175,7 +175,7 @@ function Calendar({
         #calendar-wrapper-${calendarId} table.rdp-table tbody tr td {
           display: table-cell !important;
           width: calc(100% / 7) !important;
-          min-width: 80px !important;
+          min-width: 60px !important;
           max-width: calc(100% / 7) !important;
           box-sizing: border-box !important;
         }
