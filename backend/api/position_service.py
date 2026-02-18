@@ -1216,6 +1216,46 @@ def _create_trade_positions_compounding(
     return created
 
 
+def _distribute_positions_across_days(
+    total_positions: int,
+    num_days: int,
+    rng: random.Random
+) -> list[int]:
+    """
+    Distribute total_positions across num_days.
+    Returns a list of counts per day.
+    
+    Allows multiple positions per day (0 to total_positions).
+    Uses random distribution with some variation.
+    """
+    if num_days <= 0 or total_positions <= 0:
+        return []
+    
+    if num_days == 1:
+        return [total_positions]
+    
+    # Random distribution
+    counts = []
+    remaining = total_positions
+    
+    for i in range(num_days - 1):
+        if remaining == 0:
+            counts.append(0)
+            continue
+        
+        # Random count for this day (0 to remaining)
+        # Limit to avoid putting all positions on one day
+        max_for_day = min(remaining, max(1, total_positions // 2))
+        count = rng.randint(0, max_for_day)
+        counts.append(count)
+        remaining -= count
+    
+    # Last day gets remainder
+    counts.append(remaining)
+    
+    return counts
+
+
 def _create_period_positions_simple(
     *,
     txn: Transaction,
@@ -1253,6 +1293,8 @@ def _create_period_positions_simple(
     subscription_details = getattr(txn, 'subscription_details', None) or {}
     positions_per_month_min = None
     positions_per_month_max = None
+    avoid_losses = True  # Default: avoid losses
+    
     if isinstance(subscription_details, dict):
         try:
             min_val = subscription_details.get('positionsPerMonthMin')
@@ -1266,6 +1308,21 @@ def _create_period_positions_simple(
                 positions_per_month_max = int(max_val)
         except (ValueError, TypeError):
             pass
+        # Check if "avoid losses" option is enabled
+        avoid_losses_val = subscription_details.get('avoidLosses')
+        if avoid_losses_val is not None:
+            avoid_losses = avoid_losses_val in (True, 'true', '1', 1)
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"Position generation settings for txn {txn.id}: "
+            f"avoidLosses (raw)={avoid_losses_val}, "
+            f"avoidLosses (computed)={avoid_losses}, "
+            f"positionsPerMonthMin={positions_per_month_min}, "
+            f"positionsPerMonthMax={positions_per_month_max}"
+        )
     
     # Prepare weighted asset selection (if allocations exist)
     assets_weighted: list[tuple[object, Decimal]] = []
@@ -1353,85 +1410,315 @@ def _create_period_positions_simple(
             # If period is daily: creates 5-20 positions for the day (distributed if needed)
             num_positions_for_period = rng.randint(positions_per_month_min, positions_per_month_max)
         
+        # Apply ±0.2% variability to profit target for realism
+        # This ensures totals are close but not exact
+        variability_rng = random.Random(f"{txn.id}:{period_idx}:variability")
+        variability_factor = Decimal(str(variability_rng.uniform(0.998, 1.002)))  # ±0.2%
+        profit_with_variability = (profit_remaining * variability_factor).quantize(Decimal('0.01'))
+        
         # Create position(s) for this period if profit_remaining > 0
-        if profit_remaining > Decimal('0') and num_positions_for_period > 0:
-            # Distribute capital and profit across multiple positions
-            capital_per_position = (capital_base / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
-            profit_per_position = (profit_remaining / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
-            
-            # Adjust last position to account for rounding
-            capital_remainder = capital_base - (capital_per_position * (num_positions_for_period - 1))
-            profit_remainder = profit_remaining - (profit_per_position * (num_positions_for_period - 1))
+        if profit_with_variability > Decimal('0') and num_positions_for_period > 0:
+            # Generate random invested amounts for each position
+            # Each position gets a random percentage, then we normalize to total = capital_base
+            invested_amounts: list[Decimal] = []
+            raw_amounts: list[Decimal] = []
             
             for pos_idx in range(num_positions_for_period):
-                # Use remainder for last position to ensure exact total
-                pos_capital = capital_remainder if pos_idx == num_positions_for_period - 1 else capital_per_position
-                pos_profit = profit_remainder if pos_idx == num_positions_for_period - 1 else profit_per_position
+                amt_rng = random.Random(f"{txn.id}:{period_idx}:{pos_idx}:amt")
+                pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
+                amt = (capital_base * pct).quantize(Decimal('0.01'))
+                if amt < Decimal('50.00'):
+                    amt = Decimal('50.00')
+                raw_amounts.append(amt)
+            
+            # Normalize amounts so they total exactly capital_base
+            # This ensures invested amounts vary but sum to the correct total
+            raw_total = sum(raw_amounts)
+            if raw_total > 0:
+                for amt in raw_amounts:
+                    normalized = (amt * capital_base / raw_total).quantize(Decimal('0.01'))
+                    invested_amounts.append(normalized)
                 
-                # Select asset (if allocations exist)
-                asset_obj = None
-                if assets_weighted:
-                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{pos_idx}:asset")
-                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
-                
-                # Simple timing: start of period to end of period
-                # For multiple positions: space them out across the period
-                if num_positions_for_period > 1 and len(period_days) > 1:
-                    # Space positions across the period
-                    day_offset = int((len(period_days) - 1) * pos_idx / max(1, num_positions_for_period - 1))
-                    pos_day = period_days[min(day_offset, len(period_days) - 1)]
+                # Adjust last amount for rounding to ensure exact total
+                actual_total = sum(invested_amounts[:-1]) if len(invested_amounts) > 1 else Decimal('0')
+                invested_amounts[-1] = (capital_base - actual_total).quantize(Decimal('0.01'))
+            else:
+                # Fallback: equal distribution
+                equal_amt = (capital_base / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
+                invested_amounts = [equal_amt] * num_positions_for_period
+                # Adjust last for rounding
+                invested_amounts[-1] = (capital_base - equal_amt * (num_positions_for_period - 1)).quantize(Decimal('0.01'))
+            
+            # Distribute profit proportionally to invested amounts
+            # If avoid_losses is False, introduce random gains/losses while respecting total
+            profit_parts: list[Decimal] = []
+            total_invested = sum(invested_amounts)
+            
+            # Debug logging for P&L distribution mode
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Period {period_idx} P&L distribution: "
+                f"avoid_losses={avoid_losses}, "
+                f"profit_with_variability={profit_with_variability}, "
+                f"num_positions={num_positions_for_period}"
+            )
+            
+            if total_invested > 0:
+                if avoid_losses:
+                    # All positions are profitable, distributed proportionally
+                    for i, inv_amt in enumerate(invested_amounts[:-1]):
+                        # Proportional profit for this position
+                        profit_for_pos = (profit_with_variability * inv_amt / total_invested).quantize(Decimal('0.01'))
+                        profit_parts.append(profit_for_pos)
+                    
+                    # Last position gets remainder to ensure exact total
+                    profit_parts.append((profit_with_variability - sum(profit_parts)).quantize(Decimal('0.01')))
                 else:
-                    # Single position or single day: use first day
-                    pos_day = period_days[0]
+                    # Allow random gains AND losses for each position
+                    # Some positions can have negative P&L, but total must equal profit_with_variability
+                    logger.info(f"Using RANDOM P&L distribution (allow losses) for period {period_idx}")
+                    for i, inv_amt in enumerate(invested_amounts[:-1]):
+                        pnl_rng = random.Random(f"{txn.id}:{period_idx}:{i}:pnl")
+                        # Random P&L between -15% and +30% of invested amount
+                        pnl_pct = Decimal(str(pnl_rng.uniform(-0.15, 0.30)))
+                        pos_pnl = (inv_amt * pnl_pct).quantize(Decimal('0.01'))
+                        profit_parts.append(pos_pnl)
+                        logger.info(f"  Position {i}: invested={inv_amt}, pnl_pct={pnl_pct}, pnl={pos_pnl}")
+                    
+                    # Last position adjusts to hit the exact total
+                    last_pnl = (profit_with_variability - sum(profit_parts)).quantize(Decimal('0.01'))
+                    profit_parts.append(last_pnl)
+                    logger.info(f"  Position {len(profit_parts)-1} (last): pnl={last_pnl} (adjusted to total)")
+            else:
+                # Fallback: equal distribution
+                equal_profit = (profit_with_variability / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
+                profit_parts = [equal_profit] * num_positions_for_period
+                profit_parts[-1] = (profit_with_variability - equal_profit * (num_positions_for_period - 1)).quantize(Decimal('0.01'))
+            
+            # Distribute positions across days of the period
+            positions_per_day = _distribute_positions_across_days(
+                num_positions_for_period,
+                len(period_days),
+                rng
+            )
+            
+            # Create positions with realistic market hours timing
+            for day_idx, day in enumerate(period_days):
+                count_for_day = positions_per_day[day_idx]
+                if count_for_day == 0:
+                    continue
                 
-                opened_at = timezone.make_aware(
-                    datetime.combine(pos_day, datetime.min.time()),
-                    tz
+                # Collect positions for this day with their data
+                day_positions_data = []
+                
+                for _ in range(count_for_day):
+                    # Select asset for this position
+                    asset_obj = None
+                    if assets_weighted:
+                        asset_rng = random.Random(f"{txn.id}:{period_idx}:{day_idx}:{len(day_positions_data)}:asset")
+                        asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+                    
+                    # Get the next invested amount and profit for this position
+                    pos_idx = sum(positions_per_day[:day_idx]) + len(day_positions_data)
+                    if pos_idx >= len(invested_amounts):
+                        break
+                    
+                    pos_invested = invested_amounts[pos_idx]
+                    pos_profit = profit_parts[pos_idx]
+                    
+                    day_positions_data.append({
+                        'asset': asset_obj,
+                        'invested': pos_invested,
+                        'profit': pos_profit,
+                    })
+                
+                # Get market hours for the first asset (or default)
+                sample_asset = day_positions_data[0]['asset'] if day_positions_data else None
+                market_open, market_close = _get_market_hours_for_asset(
+                    sample_asset,
+                    reference_date=day
                 )
-                closed_at = timezone.make_aware(
-                    datetime.combine(period_days[-1], datetime.max.time()),
-                    tz
+                
+                # Get tradable window for this day
+                day_window = _day_market_window(
+                    day=day,
+                    start_dt=timezone.make_aware(datetime.combine(period_days[0], datetime.min.time()), tz),
+                    end_dt=timezone.make_aware(datetime.combine(period_days[-1], datetime.max.time()), tz),
+                    market_open=market_open,
+                    market_close=market_close,
+                    tz=tz
                 )
                 
-                # FX conversion (for non-EUR assets)
-                fx_rate = None
-                invested_amount_asset_currency = None
-                now = timezone.now()
-                is_future = opened_at > now
-                if asset_obj is not None and not is_future:
-                    asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
-                    fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
-                    if fx_rate is not None:
-                        try:
-                            invested_amount_asset_currency = (
-                                Decimal(str(pos_capital)) * fx_rate
-                            ).quantize(Decimal('0.00000001'))
-                        except Exception:
-                            invested_amount_asset_currency = None
+                if day_window is None:
+                    # No valid trading window for this day, skip
+                    continue
                 
-                position_id = uuid.uuid4().hex[:12]
-                while Position.objects.filter(id=position_id).exists():
-                    position_id = uuid.uuid4().hex[:12]
+                day_open, day_close = day_window
                 
-                created.append(
-                    Position.objects.create(
-                        id=position_id,
-                        client_id=ctx.client_id,
-                        product_id=ctx.product_id,
-                        transaction_id=txn.id,
-                        asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                        opened_at=opened_at,
-                        closed_at=closed_at,
-                        invested_amount=pos_capital,  # Distributed capital
-                        fx_rate_eur_to_asset=fx_rate,
-                        invested_amount_asset_currency=invested_amount_asset_currency,
-                        profit_loss=pos_profit,  # Distributed profit
-                        period_index=next_idx,
-                        period_date=pos_day,
-                        status='pending',
+                # Schedule trade windows with realistic timing
+                trade_rng = random.Random(f"{txn.id}:{period_idx}:{day_idx}:trades")
+                windows = _schedule_trades_for_day(
+                    day_open=day_open,
+                    day_close=day_close,
+                    count=len(day_positions_data),
+                    rng=trade_rng
+                )
+                
+                # CRITICAL: Handle case where fewer windows were scheduled than positions requested
+                # This can happen if there's insufficient time in the trading day
+                if len(windows) < len(day_positions_data):
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(
+                        f"Only {len(windows)} trade windows scheduled for {len(day_positions_data)} positions "
+                        f"on day {day} (period {period_idx}). Redistributing skipped positions to other days."
                     )
-                )
-                next_idx += 1
+                    
+                    # Collect the skipped positions to redistribute
+                    skipped_positions = day_positions_data[len(windows):]
+                    day_positions_data = day_positions_data[:len(windows)]
+                    
+                    # Find other days in this period that could accommodate more positions
+                    for other_day_idx in range(len(period_days)):
+                        if other_day_idx == day_idx or not skipped_positions:
+                            continue
+                        
+                        # Try to add skipped positions to the next available day
+                        other_day = period_days[other_day_idx]
+                        
+                        # Get market hours for sample asset
+                        sample_asset = skipped_positions[0]['asset'] if skipped_positions else None
+                        other_market_open, other_market_close = _get_market_hours_for_asset(
+                            sample_asset,
+                            reference_date=other_day
+                        )
+                        
+                        other_day_window = _day_market_window(
+                            day=other_day,
+                            start_dt=timezone.make_aware(datetime.combine(period_days[0], datetime.min.time()), tz),
+                            end_dt=timezone.make_aware(datetime.combine(period_days[-1], datetime.max.time()), tz),
+                            market_open=other_market_open,
+                            market_close=other_market_close,
+                            tz=tz
+                        )
+                        
+                        if other_day_window is None:
+                            continue
+                        
+                        other_day_open, other_day_close = other_day_window
+                        
+                        # Schedule windows for skipped positions on this day
+                        retry_rng = random.Random(f"{txn.id}:{period_idx}:{other_day_idx}:retry")
+                        retry_windows = _schedule_trades_for_day(
+                            day_open=other_day_open,
+                            day_close=other_day_close,
+                            count=len(skipped_positions),
+                            rng=retry_rng
+                        )
+                        
+                        # Create positions for whatever windows we could schedule
+                        for pos_data, (retry_opened_at, retry_closed_at) in zip(skipped_positions, retry_windows):
+                            asset_obj = pos_data['asset']
+                            pos_invested = pos_data['invested']
+                            pos_profit = pos_data['profit']
+                            
+                            # FX conversion
+                            fx_rate = None
+                            invested_amount_asset_currency = None
+                            now = timezone.now()
+                            is_future = retry_opened_at > now
+                            if asset_obj is not None and not is_future:
+                                asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
+                                fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
+                                if fx_rate is not None:
+                                    try:
+                                        invested_amount_asset_currency = (
+                                            Decimal(str(pos_invested)) * fx_rate
+                                        ).quantize(Decimal('0.00000001'))
+                                    except Exception:
+                                        invested_amount_asset_currency = None
+                            
+                            position_id = uuid.uuid4().hex[:12]
+                            while Position.objects.filter(id=position_id).exists():
+                                position_id = uuid.uuid4().hex[:12]
+                            
+                            created.append(
+                                Position.objects.create(
+                                    id=position_id,
+                                    client_id=ctx.client_id,
+                                    product_id=ctx.product_id,
+                                    transaction_id=txn.id,
+                                    asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                                    opened_at=retry_opened_at,
+                                    closed_at=retry_closed_at,
+                                    invested_amount=pos_invested,
+                                    fx_rate_eur_to_asset=fx_rate,
+                                    invested_amount_asset_currency=invested_amount_asset_currency,
+                                    profit_loss=pos_profit,
+                                    period_index=next_idx,
+                                    period_date=other_day,
+                                    status='pending',
+                                )
+                            )
+                            next_idx += 1
+                        
+                        # Remove successfully scheduled positions from skipped list
+                        skipped_positions = skipped_positions[len(retry_windows):]
+                    
+                    # Log if any positions remain unscheduled
+                    if skipped_positions:
+                        logger.error(
+                            f"Failed to schedule {len(skipped_positions)} positions for period {period_idx}. "
+                            f"Total lost: invested={sum(p['invested'] for p in skipped_positions)}, "
+                            f"profit={sum(p['profit'] for p in skipped_positions)}"
+                        )
+                
+                # Create positions with scheduled windows
+                for pos_data, (opened_at, closed_at) in zip(day_positions_data, windows):
+                    asset_obj = pos_data['asset']
+                    pos_invested = pos_data['invested']
+                    pos_profit = pos_data['profit']
+                    
+                    # FX conversion (for non-EUR assets)
+                    fx_rate = None
+                    invested_amount_asset_currency = None
+                    now = timezone.now()
+                    is_future = opened_at > now
+                    if asset_obj is not None and not is_future:
+                        asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
+                        fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
+                        if fx_rate is not None:
+                            try:
+                                invested_amount_asset_currency = (
+                                    Decimal(str(pos_invested)) * fx_rate
+                                ).quantize(Decimal('0.00000001'))
+                            except Exception:
+                                invested_amount_asset_currency = None
+                    
+                    position_id = uuid.uuid4().hex[:12]
+                    while Position.objects.filter(id=position_id).exists():
+                        position_id = uuid.uuid4().hex[:12]
+                    
+                    created.append(
+                        Position.objects.create(
+                            id=position_id,
+                            client_id=ctx.client_id,
+                            product_id=ctx.product_id,
+                            transaction_id=txn.id,
+                            asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                            opened_at=opened_at,
+                            closed_at=closed_at,
+                            invested_amount=pos_invested,
+                            fx_rate_eur_to_asset=fx_rate,
+                            invested_amount_asset_currency=invested_amount_asset_currency,
+                            profit_loss=pos_profit,
+                            period_index=next_idx,
+                            period_date=day,
+                            status='pending',
+                        )
+                    )
+                    next_idx += 1
         
         # Compound profits
         if does_compound:
@@ -1450,8 +1737,8 @@ def _create_period_positions_simple(
             "capitalBase": str(capital_base.quantize(Decimal("0.01"))),
             "targetProfit": str(target_profit),
             "existingProfit": str(existing_profit.quantize(Decimal("0.01"))),
-            "createdProfit": str(profit_remaining if profit_remaining > Decimal('0') else Decimal('0')),
-            "createdCount": num_positions_for_period if profit_remaining > Decimal('0') else 0,
+            "createdProfit": str(profit_with_variability if profit_with_variability > Decimal('0') else Decimal('0')),
+            "createdCount": num_positions_for_period if profit_with_variability > Decimal('0') else 0,
         })
         
         cursor_dt = period_end_dt

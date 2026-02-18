@@ -54,7 +54,11 @@ export function ClientOtpLoginPage() {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
-  const codeDigitsOnly = useMemo(() => code.replace(/\D/g, '').slice(0, 6), [code]);
+  const expectedCodeLength = channel === 'sms' ? 4 : 6;
+  const codeDigitsOnly = useMemo(
+    () => code.replace(/\D/g, '').slice(0, expectedCodeLength),
+    [code, expectedCodeLength]
+  );
 
   async function handleRequest(e: React.FormEvent) {
     e.preventDefault();
@@ -109,8 +113,12 @@ export function ClientOtpLoginPage() {
       return;
     }
     const len = codeDigitsOnly.length;
-    if (len !== 4 && len !== 6) {
-      setError('Veuillez saisir le code à 4 chiffres (SMS) ou 6 chiffres (email).');
+    if (len !== expectedCodeLength) {
+      setError(
+        channel === 'sms'
+          ? 'Veuillez saisir le code à 4 chiffres envoyé par SMS.'
+          : 'Veuillez saisir le code à 6 chiffres envoyé par email.'
+      );
       return;
     }
     setLoading(true);
@@ -282,7 +290,7 @@ export function ClientOtpLoginPage() {
                     placeholder={channel === 'sms' ? '••••' : '••••••'}
                     value={codeDigitsOnly}
                     onChange={(e) => setCode(e.target.value)}
-                    maxLength={6}
+                    maxLength={expectedCodeLength}
                     className="login-floating-input"
                     style={{
                       width: '220px',
@@ -290,7 +298,7 @@ export function ClientOtpLoginPage() {
                       letterSpacing: '10px',
                       fontSize: '18px',
                     }}
-                    aria-label="Code à 4 ou 6 chiffres"
+                    aria-label={channel === 'sms' ? 'Code à 4 chiffres' : 'Code à 6 chiffres'}
                   />
                 </div>
 

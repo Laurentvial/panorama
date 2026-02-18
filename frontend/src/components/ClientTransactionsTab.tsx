@@ -79,6 +79,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
+  const [isCreatingTransaction, setIsCreatingTransaction] = useState(false);
   const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
   const [isEditTransactionModalOpen, setIsEditTransactionModalOpen] = useState(false);
   const [isPositionGenerationModalOpen, setIsPositionGenerationModalOpen] = useState(false);
@@ -366,14 +367,18 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
   async function handleCreateTransaction(e: React.FormEvent) {
     e.preventDefault();
-    
+    if (isCreatingTransaction) return;
+    setIsCreatingTransaction(true);
+
     if (!transactionForm.datetime) {
       toast.error('La date et l\'heure sont requises');
+      setIsCreatingTransaction(false);
       return;
     }
 
     if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
       toast.error('Le montant doit être supérieur à 0');
+      setIsCreatingTransaction(false);
       return;
     }
 
@@ -383,9 +388,10 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         (transactionForm.to_field && transactionForm.to_field !== 'balance'));
     if (isTransferWithProduct && !String(transactionForm.interestPeriod || '').trim()) {
       toast.error("La période d'intérêt est obligatoire pour un transfert impliquant un produit.");
+      setIsCreatingTransaction(false);
       return;
     }
-    
+
     try {
       // Keep datetime in local format, don't convert to UTC
       // transactionForm.datetime is already in YYYY-MM-DDTHH:mm format (local time)
@@ -578,6 +584,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     } catch (error: any) {
       console.error('Error creating transaction:', error);
       toast.error(error.message || 'Erreur lors de la création de la transaction');
+    } finally {
+      setIsCreatingTransaction(false);
     }
   }
 
@@ -881,7 +889,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 className="modal-close"
                 onClick={() => {
                   setIsTransactionDialogOpen(false);
-                  // Reset form when closing
+                  setIsCreatingTransaction(false);
                   setTransactionForm({
                     type: 'depot',
                     amount: '',
@@ -1106,9 +1114,9 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 </Select>
               </div>
               <div className="modal-form-actions">
-                <Button type="button" variant="outline" onClick={() => {
+                <Button type="button" variant="outline" disabled={isCreatingTransaction} onClick={() => {
                   setIsTransactionDialogOpen(false);
-                  // Reset form when closing
+                  setIsCreatingTransaction(false);
                   setTransactionForm({
                     type: 'depot',
                     amount: '',
@@ -1124,7 +1132,9 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 }}>
                   Annuler
                 </Button>
-                <Button type="submit">Créer</Button>
+                <Button type="submit" disabled={isCreatingTransaction}>
+                  {isCreatingTransaction ? 'Création...' : 'Créer'}
+                </Button>
               </div>
             </form>
           </div>
