@@ -548,7 +548,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Durée</Label>
                       <p className="text-slate-900 mt-1">
-                        {productDuration}
+                        {productDuration !== 'N/A' ? `${productDuration} Jours` : productDuration}
                       </p>
                     </div>
                     <div>

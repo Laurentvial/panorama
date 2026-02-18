@@ -371,7 +371,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                               {(product.availableFunds ?? product.available_funds) ? 'Oui' : 'Non'}
                             </td>
                             <td className="py-3 px-4">
-                              {product.duration ? `${String(product.duration)} Mois` : '-'}
+                              {product.duration ? `${String(product.duration)} Jours` : '-'}
                             </td>
                             <td className="py-3 px-4">
                               <Button

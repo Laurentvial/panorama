@@ -1169,7 +1169,7 @@ export function EditProduct() {
               {!formData.noProfitability && (
                 <div className="space-y-4 pl-4 border-l-2 border-slate-200">
                   <div className="space-y-2">
-                    <Label htmlFor="product-duration-profitability">Durée (en mois) *</Label>
+                    <Label htmlFor="product-duration-profitability">Durée (en jours) *</Label>
                     <Input
                       id="product-duration-profitability"
                       type="number"
@@ -1183,7 +1183,7 @@ export function EditProduct() {
                         })
                       }
                       required
-                      placeholder="Ex: 12"
+                      placeholder="Ex: 365"
                     />
                   </div>
 

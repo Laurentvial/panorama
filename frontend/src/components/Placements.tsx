@@ -266,12 +266,12 @@ export function Placements({ user }: PlacementsProps) {
                     </div>
                     
                     <div className="modal-form-field">
-                      <Label htmlFor="product-duration">Durée</Label>
+                      <Label htmlFor="product-duration">Durée (en jours)</Label>
                       <Input
                         id="product-duration"
                         value={productForm.duration}
                         onChange={(e) => setProductForm({ ...productForm, duration: e.target.value })}
-                        placeholder="Ex: 12 mois"
+                        placeholder="Ex: 365"
                       />
                     </div>
                   </div>
@@ -334,7 +334,7 @@ export function Placements({ user }: PlacementsProps) {
                             </td>
                             <td className="py-3 px-4">{product.price?.toLocaleString('fr-FR')} €</td>
                             <td className="py-3 px-4 text-green-600">{product.profitability}%</td>
-                            <td className="py-3 px-4">{product.duration || '-'}</td>
+                            <td className="py-3 px-4">{product.duration ? `${product.duration} Jours` : '-'}</td>
                             <td className="py-3 px-4">
                               <Button
                                 variant="ghost"

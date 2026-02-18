@@ -22,7 +22,8 @@ class InvestmentContext:
     product_id: str
     transaction_id: str
     start_date: date
-    duration_months: int
+    duration_days: int
+    duration_months_approx: int  # max(1, duration_days // 30) for period/heuristic logic
     invested_amount: Decimal
     total_expected_profit: Decimal | None
     total_expected_amount: Decimal | None
@@ -486,7 +487,7 @@ def _choose_trade_count(total_amount: Decimal, days: int, window_minutes: int) -
     return random.randint(low, high)
 
 
-def _choose_trade_count_for_duration(total_amount: Decimal, duration_months: int) -> int:
+def _choose_trade_count_for_duration(total_amount: Decimal, duration_days: int) -> int:
     """
     Choose a total number of trade-like positions across an investment duration.
 
@@ -496,8 +497,8 @@ def _choose_trade_count_for_duration(total_amount: Decimal, duration_months: int
     - Still bounded to avoid huge DB writes
     """
     total_amount = (total_amount or Decimal("0")).quantize(Decimal("0.01"))
-    months = int(duration_months or 0) if duration_months else 0
-    if total_amount <= 0 or months <= 0:
+    months_approx = max(1, (duration_days or 0) // 30)
+    if total_amount <= 0 or duration_days <= 0:
         return 0
 
     # Rough heuristic: trades per month based on ticket size.
@@ -509,7 +510,7 @@ def _choose_trade_count_for_duration(total_amount: Decimal, duration_months: int
         tpm_low, tpm_high = 6, 14
 
     trades_per_month = random.randint(tpm_low, tpm_high)
-    desired_total = trades_per_month * months
+    desired_total = trades_per_month * months_approx
     return max(1, min(250, desired_total))
 
 
@@ -547,7 +548,7 @@ def _existing_trade_counts(txn_id: str) -> tuple[dict[date, int], int]:
 def _choose_total_trades_with_min_per_day(
     *,
     total_amount: Decimal,
-    duration_months: int,
+    duration_days: int,
     trading_days_count: int,
     max_per_day: int = 3,
     override_trades_per_month_min: int | None = None,
@@ -566,13 +567,14 @@ def _choose_total_trades_with_min_per_day(
     """
     if trading_days_count <= 0:
         return 0
+
+    duration_months_approx = max(1, (duration_days or 0) // 30)
     
     # Calculate maximum theoretical trades per month based on trading days
-    # Approximate: trading_days_count / duration_months gives average days per month
+    # Approximate: trading_days_count / duration_months_approx gives average days per month
     # Max trades per month = (days_per_month) * max_per_day
-    # Use ceiling to be conservative (round up)
-    if duration_months > 0:
-        avg_days_per_month = trading_days_count / duration_months
+    if duration_months_approx > 0:
+        avg_days_per_month = trading_days_count / duration_months_approx
         max_theoretical_per_month = int((avg_days_per_month * max_per_day) + 0.5)  # Round to nearest
     else:
         avg_days_per_month = 0.0  # Initialize to avoid NameError in error message
@@ -592,8 +594,7 @@ def _choose_total_trades_with_min_per_day(
             # Explicitly continue to default behavior below (no return here)
         elif override_trades_per_month_min > max_theoretical_per_month:
             # Even minimum exceeds theoretical maximum - raise error
-            # Build error message safely (handle case where duration_months <= 0)
-            if duration_months > 0:
+            if duration_months_approx > 0:
                 error_msg = (
                     f"La fourchette demandée ({override_trades_per_month_min}-{override_trades_per_month_max} positions/mois) "
                     f"est trop élevée. Le maximum théorique pour cette durée est d'environ {max_theoretical_per_month} positions/mois "
@@ -608,18 +609,16 @@ def _choose_total_trades_with_min_per_day(
         else:
             # Valid override: pick a deterministic value in the range
             if rng is None:
-                # Fallback to default RNG if not provided
                 rng = random.Random()
             trades_per_month = rng.randint(override_trades_per_month_min, override_trades_per_month_max)
-            desired_total = trades_per_month * duration_months
+            desired_total = trades_per_month * duration_months_approx
             # Still apply caps
             total = min(desired_total, trading_days_count * max_per_day)
             total = min(total, 5000)
             return total
     
     # Default behavior: use heuristic based on amount
-    # (This is also reached when override is invalid or not provided)
-    base = _choose_trade_count_for_duration(total_amount, duration_months)
+    base = _choose_trade_count_for_duration(total_amount, duration_days)
     # Don't force minimum of trading_days_count - allows fewer trades than days
     total = base
     total = min(total, trading_days_count * max_per_day)
@@ -904,7 +903,7 @@ def _log_positions_generation(
             "validatedAt": getattr(txn, "validated_at", None).isoformat() if getattr(txn, "validated_at", None) else None,
             "startDt": start_dt.isoformat() if start_dt else None,
             "endDt": end_dt.isoformat() if end_dt else None,
-            "durationMonths": ctx.duration_months,
+            "durationDays": ctx.duration_days,
             "profitabilityPeriod": getattr(product, "profitability_period", None) if product else None,
             "interestPeriod": _resolve_interest_period_for_txn(txn, product),
             "existingPositionsBefore": int(existing_count_before or 0),
@@ -956,7 +955,7 @@ def _create_trade_positions_compounding(
     start_dt = getattr(txn, 'validated_at', None) or txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
-    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+    end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
     if not trading_days:
@@ -990,7 +989,7 @@ def _create_trade_positions_compounding(
     try:
         desired_total = _choose_total_trades_with_min_per_day(
             total_amount=invested_total,
-            duration_months=ctx.duration_months,
+            duration_days=ctx.duration_days,
             trading_days_count=len(trading_days),
             max_per_day=max_per_day,
             override_trades_per_month_min=override_min,
@@ -1011,7 +1010,7 @@ def _create_trade_positions_compounding(
     # Position generation cadence follows product profitability period.
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
-    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
+    profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _txn_compounds_interests(txn, product)
 
     assets_weighted: list[tuple[object, Decimal]] = []
@@ -1024,7 +1023,7 @@ def _create_trade_positions_compounding(
     created: list[Position] = []
     period_summaries: list[dict] = []
     capital = invested_total.quantize(Decimal('0.01'))
-    remaining_months = ctx.duration_months
+    remaining_months = ctx.duration_months_approx
     cursor_dt = start_dt
     period_idx = 0
 
@@ -1279,7 +1278,7 @@ def _create_period_positions_simple(
     start_dt = getattr(txn, 'validated_at', None) or txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
-    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+    end_dt = start_dt + timedelta(days=ctx.duration_days)
     
     trading_days = _trading_days_between(start_dt, end_dt)
     if not trading_days:
@@ -1344,13 +1343,13 @@ def _create_period_positions_simple(
     pm = _period_months_from_profitability_period(
         getattr(product, 'profitability_period', None) if product else None
     )
-    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
+    profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _txn_compounds_interests(txn, product)
     
     created: list[Position] = []
     period_summaries: list[dict] = []
     capital = invested_total.quantize(Decimal('0.01'))
-    remaining_months = ctx.duration_months
+    remaining_months = ctx.duration_months_approx
     cursor_dt = start_dt
     period_idx = 0
     
@@ -1793,13 +1792,13 @@ def generate_rates_for_investment(
     start_dt = txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
-    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+    end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
     if not trading_days:
         import logging
         logger = logging.getLogger(__name__)
-        logger.warning(f"No trading days found for transaction {txn.id}: start_dt={start_dt}, end_dt={end_dt}, duration_months={ctx.duration_months}")
+        logger.warning(f"No trading days found for transaction {txn.id}: start_dt={start_dt}, end_dt={end_dt}, duration_days={ctx.duration_days}")
         return []
 
     invested_total = ctx.invested_amount
@@ -1812,11 +1811,11 @@ def generate_rates_for_investment(
     # Debug logging - CRITICAL: Check if trading_days extends beyond contract duration
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Generating rates for transaction {txn.id}: invested_amount={invested_total}, duration_months={ctx.duration_months}, start_dt={start_dt.date()}, end_dt={end_dt.date()}, trading_days_count={len(trading_days)}, first_day={trading_days[0] if trading_days else None}, last_day={trading_days[-1] if trading_days else None}")
+    logger.info(f"Generating rates for transaction {txn.id}: invested_amount={invested_total}, duration_days={ctx.duration_days}, start_dt={start_dt.date()}, end_dt={end_dt.date()}, trading_days_count={len(trading_days)}, first_day={trading_days[0] if trading_days else None}, last_day={trading_days[-1] if trading_days else None}")
 
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
-    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
+    profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _txn_compounds_interests(txn, product)
 
     capital = invested_total.quantize(Decimal('0.01'))
@@ -1833,7 +1832,7 @@ def generate_rates_for_investment(
         capital = (capital + existing_profits).quantize(Decimal('0.01'))
 
     period_summaries: list[dict] = []
-    remaining_months = ctx.duration_months
+    remaining_months = ctx.duration_months_approx
     cursor_dt = start_dt
     period_idx = 0
 
@@ -1955,7 +1954,7 @@ def generate_positions_with_rates(
     start_dt = txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
-    end_dt = _add_months_dt(start_dt, ctx.duration_months)
+    end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
     if not trading_days:
@@ -1999,7 +1998,7 @@ def generate_positions_with_rates(
     try:
         desired_total = _choose_total_trades_with_min_per_day(
             total_amount=invested_total,
-            duration_months=ctx.duration_months,
+            duration_days=ctx.duration_days,
             trading_days_count=len(trading_days),
             max_per_day=max_per_day,
             override_trades_per_month_min=override_min,
@@ -2018,7 +2017,7 @@ def generate_positions_with_rates(
 
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
-    profit_period_months = ctx.duration_months if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
+    profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
     does_compound = _txn_compounds_interests(txn, product)
 
     # Market hours will be determined per asset in the loop
@@ -2051,7 +2050,7 @@ def generate_positions_with_rates(
         capital = (capital + existing_profits).quantize(Decimal('0.01'))
 
     created: list[Position | dict] = []
-    remaining_months = ctx.duration_months
+    remaining_months = ctx.duration_months_approx
     cursor_dt = start_dt
     period_idx = 0
 
@@ -2331,7 +2330,8 @@ def save_generated_positions(
             product_id=ctx.product_id,
             transaction_id=txn.id,  # Force use of the correct transaction ID
             start_date=ctx.start_date,
-            duration_months=ctx.duration_months,
+            duration_days=ctx.duration_days,
+            duration_months_approx=ctx.duration_months_approx,
             invested_amount=ctx.invested_amount,
             total_expected_profit=ctx.total_expected_profit,
             total_expected_amount=ctx.total_expected_amount,
@@ -3156,7 +3156,8 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
             product_id=ctx.product_id,
             transaction_id=txn.id,  # Force use of the correct transaction ID
             start_date=ctx.start_date,
-            duration_months=ctx.duration_months,
+            duration_days=ctx.duration_days,
+            duration_months_approx=ctx.duration_months_approx,
             invested_amount=ctx.invested_amount,
             total_expected_profit=ctx.total_expected_profit,
             total_expected_amount=ctx.total_expected_amount,
@@ -3197,17 +3198,28 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
     )
 
 
-def _parse_months(duration: str | None) -> int:
+def _parse_days(duration: str | None) -> int:
+    """
+    Parse duration string to number of days.
+    For backward compatibility: if the extracted integer is in the typical month range (1-24),
+    treat as months and return v * 30 (days). Otherwise treat as days (e.g. 30, 90, 365).
+    Using 24 as the upper bound avoids interpreting "30" (new default for 30 days) as 30 months.
+    """
     if not duration:
-        return 1
+        return 30  # default ~1 month in days
     m = _DURATION_RE.search(str(duration))
     if not m:
-        return 1
+        return 30
     try:
-        months = int(m.group(1))
-        return months if months > 0 else 1
+        v = int(m.group(1))
+        if v <= 0:
+            return 30
+        if v <= 24:
+            # Legacy: value was in months (e.g. "12" = 12 months; typical contracts 1-24 months)
+            return v * 30
+        return v  # already in days (30, 90, 365, etc.)
     except Exception:
-        return 1
+        return 30
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -3332,20 +3344,21 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
             f"Using product.duration={product.duration} as source of truth."
         )
 
-    months = _parse_months(duration_str)
+    duration_days = _parse_days(duration_str)
     
     # Log duration resolution for debugging
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Duration resolution for transaction {txn.id}: "
-                f"product.duration={product.duration}, months={months}, "
+                f"product.duration={product.duration}, duration_days={duration_days}, "
                 f"subscription_details.duration={txn.subscription_details.get('duration') if isinstance(txn.subscription_details, dict) else 'N/A'}, "
                 f"subscription_duration={getattr(txn, 'subscription_duration', 'N/A')}")
     
-    # Ensure we have a valid duration (at least 1 month)
-    if months <= 0:
-        logger.warning(f"Invalid duration ({months} months) for transaction {txn.id}. Using default of 1 month.")
-        months = 1
+    # Ensure we have a valid duration (at least 30 days)
+    if duration_days <= 0:
+        logger.warning(f"Invalid duration ({duration_days} days) for transaction {txn.id}. Using default of 30 days.")
+        duration_days = 30
+    duration_months_approx = max(1, duration_days // 30)
 
     # Calculate real invested capital: sum of all completed transfers to/from this product
     # This takes into account all previous transactions (deposits and withdrawals)
@@ -3533,7 +3546,8 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
         product_id=product.id,
         transaction_id=txn.id,
         start_date=start,
-        duration_months=months,
+        duration_days=duration_days,
+        duration_months_approx=duration_months_approx,
         invested_amount=invested_amount,
         total_expected_profit=total_profit,
         total_expected_amount=total_amount,
@@ -3573,7 +3587,8 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
             product_id=ctx.product_id,
             transaction_id=txn.id,  # Force use of the correct transaction ID
             start_date=ctx.start_date,
-            duration_months=ctx.duration_months,
+            duration_days=ctx.duration_days,
+            duration_months_approx=ctx.duration_months_approx,
             invested_amount=ctx.invested_amount,
             total_expected_profit=ctx.total_expected_profit,
             total_expected_amount=ctx.total_expected_amount,

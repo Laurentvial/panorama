@@ -440,18 +440,21 @@ export function ProductDetail() {
     return sim.totalProfit;
   };
 
-  const parseDurationMonths = (duration: any): number => {
+  const parseDurationDays = (duration: any): number => {
     if (!duration) return 0;
     const m = String(duration).match(/(\d+)/);
     const v = m ? parseInt(m[1], 10) : 0;
-    return Number.isFinite(v) && v > 0 ? v : 0;
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    // Backward compat: typical month values (1-24) → months * 30; 25+ (e.g. 30, 90, 365) → days
+    if (v <= 24) return v * 30;
+    return v;
   };
 
-  const profitabilityPeriodMonths = (period: any, durationMonths: number): number => {
+  const profitabilityPeriodMonths = (period: any, durationDays: number): number => {
     const p = String(period || '').trim().toLowerCase();
     if (!p) return 1;
     if (p.includes('fin') && (p.includes('contrat') || p.includes('matur'))) {
-      return Math.max(1, durationMonths || 1);
+      return Math.max(1, Math.ceil((durationDays || 30) / 30));
     }
     if (p.includes('mens')) return 1;
     if (p.includes('trim')) return 3;
@@ -488,7 +491,7 @@ export function ProductDetail() {
     principal: number,
     opts: { rateMode: 'min' | 'avg' | 'max' | 'custom'; customRatePct: string; interestPeriod?: string }
   ): {
-    durationMonths: number;
+    durationDays: number;
     periodMonths: number;
     compound: boolean;
     pickedRatePct: number;
@@ -504,8 +507,9 @@ export function ProductDetail() {
     endCapital: number;
     annualizedPct: number | null;
   } => {
-    const durationMonths = parseDurationMonths(product?.duration);
-    const periodMonths = profitabilityPeriodMonths(product?.profitabilityPeriod, durationMonths);
+    const durationDays = parseDurationDays(product?.duration);
+    const periodMonths = profitabilityPeriodMonths(product?.profitabilityPeriod, durationDays);
+    const durationMonthsApprox = Math.max(1, Math.floor(durationDays / 30));
     const selectedInterestPeriod =
       String(opts.interestPeriod || '').trim() ||
       String(product?.interestPeriod || product?.interest_period || '').split(',')[0].trim();
@@ -522,11 +526,11 @@ export function ProductDetail() {
 
     const rows: Array<{ index: number; months: number; base: number; ratePct: number; profit: number; end: number }> = [];
     const safePrincipal = Number.isFinite(principal) ? Math.max(0, principal) : 0;
-    if (!product || safePrincipal <= 0 || durationMonths <= 0 || pickedRatePct <= 0) {
-      return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
+    if (!product || safePrincipal <= 0 || durationDays <= 0 || pickedRatePct <= 0) {
+      return { durationDays, periodMonths, compound, pickedRatePct, rows, totalProfit: 0, endCapital: safePrincipal, annualizedPct: null };
     }
 
-    let remaining = durationMonths;
+    let remaining = durationMonthsApprox;
     let capital = safePrincipal;
     let totalProfit = 0;
     let idx = 1;
@@ -554,11 +558,11 @@ export function ProductDetail() {
 
     const endCapital = capital;
     const annualizedPct =
-      durationMonths > 0 && endCapital > 0
-        ? (Math.pow(endCapital / safePrincipal, 12 / durationMonths) - 1) * 100
+      durationDays > 0 && endCapital > 0
+        ? (Math.pow(endCapital / safePrincipal, 365 / durationDays) - 1) * 100
         : null;
 
-    return { durationMonths, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
+    return { durationDays, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
   };
 
   // Initialize signature canvas
@@ -909,8 +913,8 @@ export function ProductDetail() {
     const investorCity = subscriptionData.city || currentUser.city || '';
 
     const amount = parseFloat(subscriptionData.amount) || parseFinancialValue(productData.minEntryValue) || 10000;
-    const duration = productData.duration || '1 mois';
-    const durationMonths = parseInt(duration.match(/(\d+)/)?.[1] || '1');
+    const duration = productData.duration || '30';
+    const durationDays = parseDurationDays(duration);
     
     // Calculate profitability
     let profitabilityText = '';
@@ -925,10 +929,10 @@ export function ProductDetail() {
       profitabilityText = `${profit.toFixed(2)}% NET ${period}`;
     }
 
-    // Calculate contract end date (using today as start date)
+    // Calculate contract end date (using today as start date, duration in days)
     const contractStartDate = new Date();
     const contractEndDate = new Date(contractStartDate);
-    contractEndDate.setMonth(contractEndDate.getMonth() + durationMonths);
+    contractEndDate.setDate(contractEndDate.getDate() + durationDays);
     const contractEndDateStr = formatDateToFrench(contractEndDate.toISOString().split('T')[0]);
 
     // Calculate interest (use the same logic as the profitability simulator)
@@ -972,7 +976,7 @@ export function ProductDetail() {
       productName: productData.name || '',
       amount,
       duration,
-      durationMonths,
+      durationDays,
       profitabilityText,
       contractEndDateStr,
       interestAmount,
@@ -1149,7 +1153,7 @@ export function ProductDetail() {
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Durée</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {product.duration ? `${product.duration} Mois` : 'N/A'}
+                      {product.duration ? `${product.duration} Jours` : 'N/A'}
                     </div>
                   </div>
                   
@@ -1305,7 +1309,7 @@ export function ProductDetail() {
                       borderRadius: '6px',
                     }}>
                       <span style={{ fontSize: '14px', color: '#374151', fontWeight: '500' }}>Durée</span>
-                      <span style={{ fontSize: '14px', color: '#6b7280' }}>{product.duration ? `${product.duration} Mois` : 'N/A'}</span>
+                      <span style={{ fontSize: '14px', color: '#6b7280' }}>{product.duration ? `${product.duration} Jours` : 'N/A'}</span>
                     </div>
                     
                     {/* Rentabilité */}

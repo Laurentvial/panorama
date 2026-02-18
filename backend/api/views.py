@@ -169,22 +169,33 @@ def _recompute_client_account_verified(client: Client) -> list[str]:
 _DURATION_RE = re.compile(r"(\d+)")
 
 
-def _parse_months_from_duration(duration_str: str | None) -> int:
+def _parse_days_from_duration(duration_str: str | None) -> int:
+    """
+    Parse duration string to number of days.
+    For backward compatibility: if the extracted integer is in the typical month range (1-24),
+    treat as months and return v * 30 (days). Otherwise treat as days (e.g. 30, 90, 365).
+    Using 24 as the upper bound avoids interpreting "30" (new default for 30 days) as 30 months.
+    """
     if not duration_str:
-        return 1
+        return 30  # default ~1 month in days
     m = _DURATION_RE.search(str(duration_str))
     if not m:
-        return 1
+        return 30
     try:
         v = int(m.group(1))
-        return v if v > 0 else 1
+        if v <= 0:
+            return 30
+        if v <= 24:
+            # Legacy: value was in months (e.g. "12" = 12 months; typical contracts 1-24 months)
+            return v * 30
+        return v  # already in days (30, 90, 365, etc.)
     except Exception:
-        return 1
+        return 30
 
 
 def _normalize_duration_value(raw_duration) -> str:
     """
-    Normalize duration to a positive integer (as string, months).
+    Normalize duration to a positive integer (as string, days).
     Raises ValueError when value is invalid.
     """
     if raw_duration is None:
@@ -193,11 +204,11 @@ def _normalize_duration_value(raw_duration) -> str:
     if duration == '':
         return ''
     if not duration.isdigit():
-        raise ValueError("La durée doit être un nombre entier (en mois).")
-    months = int(duration)
-    if months <= 0:
+        raise ValueError("La durée doit être un nombre entier (en jours).")
+    days = int(duration)
+    if days <= 0:
         raise ValueError("La durée doit être supérieure à 0.")
-    return str(months)
+    return str(days)
 
 
 def _add_months_keep_day(d: date, months: int) -> date:
@@ -251,11 +262,11 @@ def _build_subscription_details_defaults(
 ) -> dict:
     admin_ip = get_client_ip(request)
     duration_str = product.duration or ''
-    duration_months = _parse_months_from_duration(duration_str)
+    duration_days = _parse_days_from_duration(duration_str)
 
-    # Profit estimation (best effort, consistent with current frontend calc: annual rate prorated by months/12)
+    # Profit estimation (best effort: annual rate prorated by days/365)
     rate = _profitability_rate_for_calc(product)
-    profits = (amount * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))).quantize(Decimal('0.01'))
+    profits = (amount * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))).quantize(Decimal('0.01'))
     total = (amount + profits).quantize(Decimal('0.01'))
 
     try:
@@ -265,7 +276,7 @@ def _build_subscription_details_defaults(
 
     # Contract end
     try:
-        end_date = _add_months_keep_day(transaction_datetime.date(), duration_months)
+        end_date = transaction_datetime.date() + timedelta(days=duration_days)
         contract_end = end_date.strftime('%d/%m/%Y')
     except Exception:
         contract_end = ''
@@ -6699,8 +6710,8 @@ def client_transaction_create(request, client_id):
             
             # Product data
             product_name = product.name or ''
-            duration = subscription_details_data.get('duration', '') if subscription_details_data else (product.duration or '1 mois')
-            duration_months = _parse_months_from_duration(duration)
+            duration = subscription_details_data.get('duration', '') if subscription_details_data else (product.duration or '30')
+            duration_days = _parse_days_from_duration(duration)
             
             # Amount
             amount = float(transaction.amount)
@@ -6721,12 +6732,12 @@ def client_transaction_create(request, client_id):
             
             # Calculate contract dates
             contract_start_date = transaction_datetime.date()
-            contract_end_date = _add_months_keep_day(contract_start_date, duration_months)
+            contract_end_date = contract_start_date + timedelta(days=duration_days)
             contract_end_date_str = contract_end_date.strftime('%d/%m/%Y')
             
             # Calculate interest
             rate = _profitability_rate_for_calc(product)
-            interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))
+            interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
             interest_amount = float(interest_amount.quantize(Decimal('0.01')))
             profitability_rate = float(rate)
             
@@ -6975,7 +6986,7 @@ def client_transaction_create(request, client_id):
             
             # Duration
             story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
-            story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_months} {'mois' if duration_months > 1 else 'mois'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
+            story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_days} {'jours' if duration_days > 1 else 'jour'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
             story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
             story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
             story.append(Spacer(1, 5*mm))
@@ -6987,16 +6998,14 @@ def client_transaction_create(request, client_id):
             story.append(Spacer(1, 5*mm))
             
             # Summary box
-            # Format duration to add "Mois" if it's just a number
+            # Format duration to add "Jours" if it's just a number
             duration_display = duration
             if duration and duration.strip().isdigit():
-                duration_display = f"{duration.strip()} Mois"
+                duration_display = f"{duration.strip()} Jours"
             elif duration and not any(word.lower() in duration.lower() for word in ['mois', 'jour', 'an', 'année', 'semaine']):
-                # If duration doesn't contain time unit, try to extract number and add "Mois"
-                import re
                 match = re.search(r'(\d+)', duration)
                 if match:
-                    duration_display = f"{match.group(1)} Mois"
+                    duration_display = f"{match.group(1)} Jours"
             
             summary_data = [
                 ['TITRE', product_name],
@@ -9074,8 +9083,8 @@ def product_contract_pdf(request, product_id):
     
     # Product data
     product_name = product.name or ''
-    duration = product.duration or '1 mois'
-    duration_months = _parse_months_from_duration(duration)
+    duration = product.duration or '30'
+    duration_days = _parse_days_from_duration(duration)
     
     # Amount
     try:
@@ -9099,12 +9108,12 @@ def product_contract_pdf(request, product_id):
     
     # Calculate contract dates
     contract_start_date = date.today()
-    contract_end_date = _add_months_keep_day(contract_start_date, duration_months)
+    contract_end_date = contract_start_date + timedelta(days=duration_days)
     contract_end_date_str = contract_end_date.strftime('%d/%m/%Y')
     
     # Calculate interest
     rate = _profitability_rate_for_calc(product)
-    interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_months) / Decimal('12'))
+    interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
     interest_amount = float(interest_amount.quantize(Decimal('0.01')))
     profitability_rate = float(rate)
     
@@ -9356,7 +9365,7 @@ def product_contract_pdf(request, product_id):
     
     # Duration
     story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
-    story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_months} {'mois' if duration_months > 1 else 'mois'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
+    story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_days} {'jours' if duration_days > 1 else 'jour'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
     story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
     story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
     story.append(Spacer(1, 5*mm))
@@ -9368,16 +9377,14 @@ def product_contract_pdf(request, product_id):
     story.append(Spacer(1, 5*mm))
     
     # Summary box
-    # Format duration to add "Mois" if it's just a number
+    # Format duration to add "Jours" if it's just a number
     duration_display = duration
     if duration and duration.strip().isdigit():
-        duration_display = f"{duration.strip()} Mois"
+        duration_display = f"{duration.strip()} Jours"
     elif duration and not any(word.lower() in duration.lower() for word in ['mois', 'jour', 'an', 'année', 'semaine']):
-        # If duration doesn't contain time unit, try to extract number and add "Mois"
-        import re
         match = re.search(r'(\d+)', duration)
         if match:
-            duration_display = f"{match.group(1)} Mois"
+            duration_display = f"{match.group(1)} Jours"
     
     summary_data = [
         ['TITRE', product_name],
