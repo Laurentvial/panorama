@@ -4,7 +4,6 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { DateTimePicker } from './ui/datetime-picker';
 import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
@@ -676,10 +675,10 @@ export function EditTransactionModal({
             )}
             <div className="modal-form-field">
               <Label>Date et heure</Label>
-              <DateTimePicker
+              <Input
+                type="datetime-local"
                 value={transactionForm.datetime}
-                onChange={(value) => setTransactionForm({ ...transactionForm, datetime: value })}
-                placeholder="Sélectionner une date et heure"
+                onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
                 required
               />
             </div>
