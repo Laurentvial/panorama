@@ -70,10 +70,15 @@ def _get_prelude_base_url() -> str:
 def create_prelude_verification(*, to_phone: str, locale: str | None = None) -> dict[str, Any]:
     """
     Start or retry an OTP verification through Prelude Verify API.
+
+    Env vars:
+    - PRELUDE_VERIFY_TEMPLATE_ID / PRELUDE_TEMPLATE_ID (optional)
+    - PRELUDE_SENDER / INFOBIP_SENDER (optional): sender ID for SMS; must be whitelisted by Prelude.
     """
     base_url = _get_prelude_base_url()
     normalized_phone = _normalize_phone_e164(to_phone)
     verify_template_id = (os.getenv("PRELUDE_VERIFY_TEMPLATE_ID") or os.getenv("PRELUDE_TEMPLATE_ID") or "").strip()
+    sender_id = (os.getenv("PRELUDE_SENDER") or os.getenv("INFOBIP_SENDER") or "").strip()
 
     options: dict[str, Any] = {
         "method": "message",
@@ -83,6 +88,8 @@ def create_prelude_verification(*, to_phone: str, locale: str | None = None) -> 
         options["template_id"] = verify_template_id
     if locale:
         options["locale"] = locale
+    if sender_id:
+        options["sender_id"] = sender_id
 
     payload: dict[str, Any] = {
         "target": {"type": "phone_number", "value": normalized_phone},

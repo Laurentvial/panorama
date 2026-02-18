@@ -144,11 +144,13 @@
 
 .customization-delete-button {
   color: var(--destructive);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .customization-delete-button:hover {
   color: var(--destructive);
-  background-color: rgba(var(--destructive-rgb), 0.1);
+  background-color: transparent;
 }
 
 .customization-color-text-input-flex {

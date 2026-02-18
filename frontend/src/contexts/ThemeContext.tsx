@@ -13,6 +13,8 @@ interface AppSettings {
   primary_color: string;
   secondary_color?: string;
   accent_color?: string;
+  otp_email_enabled?: boolean;
+  otp_sms_enabled?: boolean;
 }
 
 interface ThemeContextType {

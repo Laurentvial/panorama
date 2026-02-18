@@ -1776,6 +1776,16 @@ def client_login_otp_request(request):
     if channel not in ('email', 'sms'):
         return Response({'error': 'channel invalide (email|sms)'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Check if this auth method is enabled in app settings
+    try:
+        app_settings = AppSettings.objects.get(id='settings001')
+        if channel == 'email' and not getattr(app_settings, 'otp_email_enabled', True):
+            return Response({'error': 'Connexion par code email est désactivée.'}, status=status.HTTP_400_BAD_REQUEST)
+        if channel == 'sms' and not getattr(app_settings, 'otp_sms_enabled', True):
+            return Response({'error': 'Connexion par code SMS est désactivée.'}, status=status.HTTP_400_BAD_REQUEST)
+    except AppSettings.DoesNotExist:
+        pass  # defaults: both enabled
+
     email = (request.data.get('email') or '').strip().lower()
     phone = (request.data.get('phone') or '').strip()
 
@@ -10282,6 +10292,7 @@ Génère le document complet:"""
 @api_view(['GET', 'POST', 'PUT'])
 @authentication_classes([])  # Disable authentication - avoid 401 on non-JWT Bearer tokens (e.g. client tokens)
 @permission_classes([AllowAny])  # Allow public access, we'll check auth manually for POST/PUT
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def app_settings(request):
     """Get or update app settings (logo and colors)"""
     # Require authentication for POST/PUT, but allow GET without authentication
@@ -10319,7 +10330,9 @@ def app_settings(request):
                 'email': '',
                 'primary_color': '#030213',
                 'secondary_color': '',
-                'accent_color': ''
+                'accent_color': '',
+                'otp_email_enabled': True,
+                'otp_sms_enabled': True,
             }
         )
         
@@ -10349,6 +10362,8 @@ def app_settings(request):
                     'primary_color': settings_obj.primary_color or '#030213',
                     'secondary_color': settings_obj.secondary_color or '',
                     'accent_color': settings_obj.accent_color or '',
+                    'otp_email_enabled': getattr(settings_obj, 'otp_email_enabled', True),
+                    'otp_sms_enabled': getattr(settings_obj, 'otp_sms_enabled', True),
                     'created_at': settings_obj.created_at,
                     'updated_at': settings_obj.updated_at,
                     'error': f'Error loading logo: {str(e)}'
@@ -10520,6 +10535,14 @@ def app_settings(request):
             if 'accent_color' in data:
                 settings_obj.accent_color = data.get('accent_color', '')
                 update_fields.append('accent_color')
+            if 'otp_email_enabled' in data:
+                val = data.get('otp_email_enabled')
+                settings_obj.otp_email_enabled = val in (True, 'true', '1', 1)
+                update_fields.append('otp_email_enabled')
+            if 'otp_sms_enabled' in data:
+                val = data.get('otp_sms_enabled')
+                settings_obj.otp_sms_enabled = val in (True, 'true', '1', 1)
+                update_fields.append('otp_sms_enabled')
             
             # Save the model
             # If file fields were uploaded, save without update_fields to ensure file fields are properly persisted

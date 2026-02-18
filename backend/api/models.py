@@ -669,6 +669,8 @@ class AppSettings(models.Model):
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
     secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)
     accent_color = models.CharField(max_length=7, default='', blank=True)  # Couleur d'accent (hex)
+    otp_email_enabled = models.BooleanField(default=True)
+    otp_sms_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { HiOutlineUpload, HiOutlineTrash, HiOutlineSave, HiOutlineRefresh } from 'react-icons/hi';
+import { HiOutlineUpload, HiOutlineSave, HiOutlineRefresh } from 'react-icons/hi';
+import { CheckCircle, XCircle } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import '../styles/Customization.css';
+import '../styles/Clients.css';
 
 export function Customization() {
   const { settings, loadSettings, updateSettings, loading: themeLoading } = useTheme();
@@ -30,6 +32,10 @@ export function Customization() {
     secondary: '',
     accent: ''
   });
+  const [otpEmailEnabled, setOtpEmailEnabled] = useState(true);
+  const [otpSmsEnabled, setOtpSmsEnabled] = useState(true);
+  const [otpSaving, setOtpSaving] = useState(false);
+  const hasSyncedOtpFromSettings = useRef(false);
 
   useEffect(() => {
     if (settings) {
@@ -51,8 +57,29 @@ export function Customization() {
       if (settings.login_background_image_url) {
         setBgPreview(settings.login_background_image_url);
       }
+      if (!hasSyncedOtpFromSettings.current) {
+        hasSyncedOtpFromSettings.current = true;
+        setOtpEmailEnabled(settings.otp_email_enabled !== false);
+        setOtpSmsEnabled(settings.otp_sms_enabled !== false);
+      }
     }
   }, [settings]);
+
+  const saveOtpSettings = async (emailEnabled: boolean, smsEnabled: boolean) => {
+    try {
+      setOtpSaving(true);
+      const formData = new FormData();
+      formData.append('otp_email_enabled', emailEnabled ? 'true' : 'false');
+      formData.append('otp_sms_enabled', smsEnabled ? 'true' : 'false');
+      await apiCall('/api/settings/', { method: 'PUT', body: formData });
+      toast.success('Méthodes d\'authentification mises à jour');
+      await loadSettings();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur lors de la mise à jour');
+    } finally {
+      setOtpSaving(false);
+    }
+  };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -193,6 +220,8 @@ export function Customization() {
       if (colors.accent) {
         formData.append('accent_color', colors.accent);
       }
+      formData.append('otp_email_enabled', otpEmailEnabled ? 'true' : 'false');
+      formData.append('otp_sms_enabled', otpSmsEnabled ? 'true' : 'false');
 
       await apiCall('/api/settings/', {
         method: 'PUT',
@@ -243,6 +272,9 @@ export function Customization() {
     } else {
       setBgPreview(null);
     }
+    setOtpEmailEnabled(settings?.otp_email_enabled !== false);
+    setOtpSmsEnabled(settings?.otp_sms_enabled !== false);
+    hasSyncedOtpFromSettings.current = false;
   };
 
   if (themeLoading) {
@@ -351,11 +383,10 @@ export function Customization() {
                   {logoPreview && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="link"
                       onClick={handleRemoveLogo}
-                      className="customization-delete-button"
+                      className="customization-delete-button p-0 h-auto"
                     >
-                      <HiOutlineTrash className="h-4 w-4 mr-2" />
                       Supprimer
                     </Button>
                   )}
@@ -399,11 +430,10 @@ export function Customization() {
                   {faviconPreview && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="link"
                       onClick={handleRemoveFavicon}
-                      className="customization-delete-button"
+                      className="customization-delete-button p-0 h-auto"
                     >
-                      <HiOutlineTrash className="h-4 w-4 mr-2" />
                       Supprimer
                     </Button>
                   )}
@@ -458,11 +488,10 @@ export function Customization() {
                 {bgPreview && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="link"
                     onClick={handleRemoveBg}
-                    className="customization-delete-button"
+                    className="customization-delete-button p-0 h-auto"
                   >
-                    <HiOutlineTrash className="h-4 w-4 mr-2" />
                     Supprimer
                   </Button>
                 )}
@@ -471,6 +500,80 @@ export function Customization() {
                 Formats acceptés: PNG, JPG, WEBP (max 8MB). Recommandé: 1920×1080.
               </p>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Auth methods */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Méthodes d'authentification</CardTitle>
+          <CardDescription>
+            Activez ou désactivez la connexion par code (OTP) par email et par SMS pour les clients.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between rounded-lg border p-4 gap-4">
+            <div className="space-y-0.5 flex-1">
+              <Label>Connexion par code (email)</Label>
+              <p className="text-sm text-muted-foreground">
+                Les clients peuvent demander un code à 6 chiffres envoyé par email.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={otpSaving}
+              onClick={() => {
+                const next = !otpEmailEnabled;
+                setOtpEmailEnabled(next);
+                saveOtpSettings(next, otpSmsEnabled);
+              }}
+              className={otpEmailEnabled ? 'client-action-button-deactivate' : 'client-action-button-activate'}
+            >
+              {otpEmailEnabled ? (
+                <>
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Désactiver
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Activer
+                </>
+              )}
+            </Button>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4 gap-4">
+            <div className="space-y-0.5 flex-1">
+              <Label>Connexion par code (SMS)</Label>
+              <p className="text-sm text-muted-foreground">
+                Les clients peuvent demander un code envoyé par SMS (Prelude / opérateur).
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={otpSaving}
+              onClick={() => {
+                const next = !otpSmsEnabled;
+                setOtpSmsEnabled(next);
+                saveOtpSettings(otpEmailEnabled, next);
+              }}
+              className={otpSmsEnabled ? 'client-action-button-deactivate' : 'client-action-button-activate'}
+            >
+              {otpSmsEnabled ? (
+                <>
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Désactiver
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Activer
+                </>
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>

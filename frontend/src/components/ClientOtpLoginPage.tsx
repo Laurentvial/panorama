@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useTheme } from '../contexts/ThemeContext';
@@ -20,6 +20,11 @@ export function ClientOtpLoginPage() {
   const { refreshUser } = useUser();
   const { settings, loading: settingsLoading } = useTheme();
 
+  const emailOtpEnabled = settings?.otp_email_enabled !== false;
+  const smsOtpEnabled = settings?.otp_sms_enabled !== false;
+  const bothOtpDisabled = !settingsLoading && !emailOtpEnabled && !smsOtpEnabled;
+  const showChannelToggle = !settingsLoading && emailOtpEnabled && smsOtpEnabled;
+
   const [step, setStep] = useState<Step>('email');
   const [channel, setChannel] = useState<Channel>('email');
   const [identifier, setIdentifier] = useState('');
@@ -28,6 +33,12 @@ export function ClientOtpLoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+
+  useEffect(() => {
+    if (settingsLoading) return;
+    if (!emailOtpEnabled && smsOtpEnabled) setChannel('sms');
+    else if (emailOtpEnabled && !smsOtpEnabled) setChannel('email');
+  }, [settingsLoading, emailOtpEnabled, smsOtpEnabled]);
 
   const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
@@ -97,8 +108,9 @@ export function ClientOtpLoginPage() {
       setStep('email');
       return;
     }
-    if (codeDigitsOnly.length !== 6) {
-      setError('Veuillez saisir le code à 6 chiffres.');
+    const len = codeDigitsOnly.length;
+    if (len !== 4 && len !== 6) {
+      setError('Veuillez saisir le code à 4 chiffres (SMS) ou 6 chiffres (email).');
       return;
     }
     setLoading(true);
@@ -111,6 +123,35 @@ export function ClientOtpLoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (bothOtpDisabled) {
+    return (
+      <div className="login-page-container login-page-container--client" style={containerStyle}>
+        <header className="login-banner">
+          {hasLogo ? (
+            <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
+          ) : (
+            <div className="login-banner-title">{platformName}</div>
+          )}
+        </header>
+        <div className="login-content">
+          <Card className="login-card">
+            <CardHeader className="login-card-header">
+              <CardDescription>Connexion par code</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p style={{ marginBottom: '1rem', color: '#64748b' }}>
+                La connexion par code (email ou SMS) est actuellement désactivée.
+              </p>
+              <Button type="button" className="login-button" onClick={() => navigate('/login')}>
+                Retour à la connexion
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -143,6 +184,7 @@ export function ClientOtpLoginPage() {
                     {error}
                   </div>
                 )}
+                {showChannelToggle && (
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
                   <button
                     type="button"
@@ -187,6 +229,7 @@ export function ClientOtpLoginPage() {
                     SMS
                   </button>
                 </div>
+                )}
                 <div className="login-form-field">
                   <Input
                     id="identifier"
@@ -236,7 +279,7 @@ export function ClientOtpLoginPage() {
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    placeholder="••••••"
+                    placeholder={channel === 'sms' ? '••••' : '••••••'}
                     value={codeDigitsOnly}
                     onChange={(e) => setCode(e.target.value)}
                     maxLength={6}
@@ -247,7 +290,7 @@ export function ClientOtpLoginPage() {
                       letterSpacing: '10px',
                       fontSize: '18px',
                     }}
-                    aria-label="Code a 6 chiffres"
+                    aria-label="Code à 4 ou 6 chiffres"
                   />
                 </div>
 

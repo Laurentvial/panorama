@@ -222,6 +222,7 @@ export function LoginPage() {
                 </Button>
               </div>
 
+              {!settingsLoading && ((settings?.otp_email_enabled !== false) || (settings?.otp_sms_enabled !== false)) && (
               <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem', justifyItems: 'center' }}>
                 <div style={{ color: 'rgba(2, 6, 23, 0.55)', fontSize: '0.95rem' }}>ou</div>
                 <Button
@@ -232,6 +233,7 @@ export function LoginPage() {
                   Connexion sans mot de passe
                 </Button>
               </div>
+              )}
             </form>
           </CardContent>
         </Card>

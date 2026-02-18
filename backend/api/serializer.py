@@ -1230,6 +1230,8 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             'primary_color',
             'secondary_color',
             'accent_color',
+            'otp_email_enabled',
+            'otp_sms_enabled',
             'created_at',
             'updated_at',
         ]

@@ -1225,12 +1225,13 @@ def _create_period_positions_simple(
     trigger: str | None = None,
 ) -> list[Position]:
     """
-    Create ONE position per profitability period with exact calculated values.
+    Create position(s) per profitability period with exact calculated values.
     
-    Unlike _create_trade_positions_compounding which creates multiple random trades,
-    this creates a single position per period with:
-    - invested_amount = capital base of the period
-    - profit_loss = exact target profit
+    By default creates ONE position per period, but respects positionsPerMonthMin/Max
+    if specified in subscription_details to create multiple positions per period.
+    
+    - invested_amount = capital base distributed across positions
+    - profit_loss = profit target distributed across positions
     - Simple timing (period start to period end, no random market hours)
     """
     tz = timezone.get_current_timezone()
@@ -1247,6 +1248,24 @@ def _create_period_positions_simple(
     invested_total = ctx.invested_amount
     if invested_total <= 0:
         return []
+    
+    # Extract positions per period configuration from subscription_details
+    subscription_details = getattr(txn, 'subscription_details', None) or {}
+    positions_per_month_min = None
+    positions_per_month_max = None
+    if isinstance(subscription_details, dict):
+        try:
+            min_val = subscription_details.get('positionsPerMonthMin')
+            if min_val is not None:
+                positions_per_month_min = int(min_val)
+        except (ValueError, TypeError):
+            pass
+        try:
+            max_val = subscription_details.get('positionsPerMonthMax')
+            if max_val is not None:
+                positions_per_month_max = int(max_val)
+        except (ValueError, TypeError):
+            pass
     
     # Prepare weighted asset selection (if allocations exist)
     assets_weighted: list[tuple[object, Decimal]] = []
@@ -1324,63 +1343,95 @@ def _create_period_positions_simple(
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
         profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
         
-        # Create ONE position for the entire period if profit_remaining > 0
-        if profit_remaining > Decimal('0'):
-            # Select asset (if allocations exist)
-            asset_obj = None
-            if assets_weighted:
-                asset_rng = random.Random(f"{txn.id}:{period_idx}:asset")
-                asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+        # Determine how many positions to create for this period
+        # positionsPerMonthMin/Max: number of positions to create per period
+        # Applies directly to the current period regardless of its length
+        num_positions_for_period = 1
+        if positions_per_month_min is not None and positions_per_month_max is not None:
+            # Use the configured range directly for this period
+            # If period is monthly: creates 5-20 positions for the month
+            # If period is daily: creates 5-20 positions for the day (distributed if needed)
+            num_positions_for_period = rng.randint(positions_per_month_min, positions_per_month_max)
+        
+        # Create position(s) for this period if profit_remaining > 0
+        if profit_remaining > Decimal('0') and num_positions_for_period > 0:
+            # Distribute capital and profit across multiple positions
+            capital_per_position = (capital_base / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
+            profit_per_position = (profit_remaining / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
             
-            # Simple timing: start of period to end of period
-            opened_at = timezone.make_aware(
-                datetime.combine(period_days[0], datetime.min.time()),
-                tz
-            )
-            closed_at = timezone.make_aware(
-                datetime.combine(period_days[-1], datetime.max.time()),
-                tz
-            )
+            # Adjust last position to account for rounding
+            capital_remainder = capital_base - (capital_per_position * (num_positions_for_period - 1))
+            profit_remainder = profit_remaining - (profit_per_position * (num_positions_for_period - 1))
             
-            # FX conversion (for non-EUR assets)
-            fx_rate = None
-            invested_amount_asset_currency = None
-            now = timezone.now()
-            is_future = opened_at > now
-            if asset_obj is not None and not is_future:
-                asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
-                fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
-                if fx_rate is not None:
-                    try:
-                        invested_amount_asset_currency = (
-                            Decimal(str(capital_base)) * fx_rate
-                        ).quantize(Decimal('0.00000001'))
-                    except Exception:
-                        invested_amount_asset_currency = None
-            
-            position_id = uuid.uuid4().hex[:12]
-            while Position.objects.filter(id=position_id).exists():
-                position_id = uuid.uuid4().hex[:12]
-            
-            created.append(
-                Position.objects.create(
-                    id=position_id,
-                    client_id=ctx.client_id,
-                    product_id=ctx.product_id,
-                    transaction_id=txn.id,
-                    asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                    opened_at=opened_at,
-                    closed_at=closed_at,
-                    invested_amount=capital_base,  # Use full capital base
-                    fx_rate_eur_to_asset=fx_rate,
-                    invested_amount_asset_currency=invested_amount_asset_currency,
-                    profit_loss=profit_remaining,  # Use exact profit remaining
-                    period_index=next_idx,
-                    period_date=period_days[0],
-                    status='pending',
+            for pos_idx in range(num_positions_for_period):
+                # Use remainder for last position to ensure exact total
+                pos_capital = capital_remainder if pos_idx == num_positions_for_period - 1 else capital_per_position
+                pos_profit = profit_remainder if pos_idx == num_positions_for_period - 1 else profit_per_position
+                
+                # Select asset (if allocations exist)
+                asset_obj = None
+                if assets_weighted:
+                    asset_rng = random.Random(f"{txn.id}:{period_idx}:{pos_idx}:asset")
+                    asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
+                
+                # Simple timing: start of period to end of period
+                # For multiple positions: space them out across the period
+                if num_positions_for_period > 1 and len(period_days) > 1:
+                    # Space positions across the period
+                    day_offset = int((len(period_days) - 1) * pos_idx / max(1, num_positions_for_period - 1))
+                    pos_day = period_days[min(day_offset, len(period_days) - 1)]
+                else:
+                    # Single position or single day: use first day
+                    pos_day = period_days[0]
+                
+                opened_at = timezone.make_aware(
+                    datetime.combine(pos_day, datetime.min.time()),
+                    tz
                 )
-            )
-            next_idx += 1
+                closed_at = timezone.make_aware(
+                    datetime.combine(period_days[-1], datetime.max.time()),
+                    tz
+                )
+                
+                # FX conversion (for non-EUR assets)
+                fx_rate = None
+                invested_amount_asset_currency = None
+                now = timezone.now()
+                is_future = opened_at > now
+                if asset_obj is not None and not is_future:
+                    asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
+                    fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
+                    if fx_rate is not None:
+                        try:
+                            invested_amount_asset_currency = (
+                                Decimal(str(pos_capital)) * fx_rate
+                            ).quantize(Decimal('0.00000001'))
+                        except Exception:
+                            invested_amount_asset_currency = None
+                
+                position_id = uuid.uuid4().hex[:12]
+                while Position.objects.filter(id=position_id).exists():
+                    position_id = uuid.uuid4().hex[:12]
+                
+                created.append(
+                    Position.objects.create(
+                        id=position_id,
+                        client_id=ctx.client_id,
+                        product_id=ctx.product_id,
+                        transaction_id=txn.id,
+                        asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                        opened_at=opened_at,
+                        closed_at=closed_at,
+                        invested_amount=pos_capital,  # Distributed capital
+                        fx_rate_eur_to_asset=fx_rate,
+                        invested_amount_asset_currency=invested_amount_asset_currency,
+                        profit_loss=pos_profit,  # Distributed profit
+                        period_index=next_idx,
+                        period_date=pos_day,
+                        status='pending',
+                    )
+                )
+                next_idx += 1
         
         # Compound profits
         if does_compound:
@@ -1400,7 +1451,7 @@ def _create_period_positions_simple(
             "targetProfit": str(target_profit),
             "existingProfit": str(existing_profit.quantize(Decimal("0.01"))),
             "createdProfit": str(profit_remaining if profit_remaining > Decimal('0') else Decimal('0')),
-            "createdCount": 1 if profit_remaining > Decimal('0') else 0,
+            "createdCount": num_positions_for_period if profit_remaining > Decimal('0') else 0,
         })
         
         cursor_dt = period_end_dt
