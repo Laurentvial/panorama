@@ -26,6 +26,10 @@ urlpatterns = [
     # Users endpoints
     path('user/current/', api_views.get_current_user, name='get-current-user'),
     path('user/profile/', api_views.update_own_profile, name='update-own-profile'),
+    # Notifications (CRM user)
+    path('notifications/', api_views.notification_list, name='notification-list'),
+    path('notifications/read-all/', api_views.notification_mark_all_read, name='notification-mark-all-read'),
+    path('notifications/<str:notification_id>/read/', api_views.notification_mark_read, name='notification-mark-read'),
     # Client authentication endpoints
     path('client/login/', api_views.client_login, name='client-login'),
     # Client password reset (client platform only)
@@ -36,6 +40,10 @@ urlpatterns = [
     path('client/login/otp/verify/', api_views.client_login_otp_verify, name='client-login-otp-verify'),
     path('client/current/', api_views.get_current_client, name='get-current-client'),
     path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
+    # Client notifications
+    path('client/notifications/', api_views.client_notification_list, name='client-notification-list'),
+    path('client/notifications/read-all/', api_views.client_notification_mark_all_read, name='client-notification-mark-all-read'),
+    path('client/notifications/<str:notification_id>/read/', api_views.client_notification_mark_read, name='client-notification-mark-read'),
     # Client chat (client <-> manager)
     path('clients/<str:client_id>/chat/', api_views.client_chat, name='client-chat'),
     # Client conversations (threaded messaging)

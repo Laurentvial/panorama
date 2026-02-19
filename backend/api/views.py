@@ -32,13 +32,15 @@ from .models import AppSettings
 from .models import NewsPost
 from .models import ClientVerificationConfig
 from .models import ClientDocument
+from .models import AppNotification
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
-    ClientHistoryLogSerializer, ClientPlatformLogSerializer
+    ClientHistoryLogSerializer, ClientPlatformLogSerializer,
+    AppNotificationSerializer,
 )
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
@@ -559,6 +561,46 @@ def create_platform_log(client_id, action_type, action_details, request):
         import traceback
         logger.error(traceback.format_exc())
         # Don't re-raise - allow the main operation to succeed even if logging fails
+
+
+def create_app_notification(
+    recipient_type,
+    notification_type,
+    recipient_user=None,
+    recipient_client=None,
+    title=None,
+    message=None,
+    payload=None,
+):
+    """Create an in-app notification. Does not raise; logs errors."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        if recipient_type == AppNotification.RECIPIENT_CRM_USER and not recipient_user:
+            return
+        if recipient_type == AppNotification.RECIPIENT_CLIENT and not recipient_client:
+            return
+        nid = uuid.uuid4().hex[:12]
+        while AppNotification.objects.filter(id=nid).exists():
+            nid = uuid.uuid4().hex[:12]
+        AppNotification.objects.create(
+            id=nid,
+            recipient_type=recipient_type,
+            recipient_user=recipient_user,
+            recipient_client=recipient_client,
+            notification_type=notification_type,
+            title=title or "",
+            message=message or "",
+            payload=payload or {},
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to create app notification: recipient_type=%s, type=%s, error=%s",
+            recipient_type,
+            notification_type,
+            str(e),
+        )
+        logger.exception(e)
 
 
 class UserCreateView(generics.CreateAPIView):
@@ -1622,6 +1664,18 @@ def client_login(request):
         # Log the error but don't fail the login
         logger.error(f"Failed to create platform log for login {client.id}: {str(log_error)}")
 
+    manager_user = _resolve_client_manager_user(client)
+    if manager_user:
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_CLIENT_LOGIN,
+            title="Client connecté",
+            message=f"{client_name} s'est connecté à la plateforme.",
+            payload={"client_id": client.id},
+        )
+
     # Ensure account_verified is consistent with required fields
     changed_fields = _recompute_client_account_verified(client)
     if changed_fields:
@@ -2013,6 +2067,18 @@ def client_login_otp_verify(request):
     except Exception:
         pass
 
+    manager_user = _resolve_client_manager_user(client)
+    if manager_user:
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_CLIENT_LOGIN,
+            title="Client connecté",
+            message=f"{client_name} s'est connecté à la plateforme.",
+            payload={"client_id": client.id},
+        )
+
     changed_fields = _recompute_client_account_verified(client)
     if changed_fields:
         client.save(update_fields=changed_fields)
@@ -2066,6 +2132,16 @@ def get_current_client(request):
                 },
                 request
             )
+            manager_user = _resolve_client_manager_user(client)
+            if manager_user:
+                create_app_notification(
+                    recipient_type=AppNotification.RECIPIENT_CRM_USER,
+                    recipient_user=manager_user,
+                    notification_type=AppNotification.TYPE_CLIENT_LOGIN,
+                    title="Client connecté",
+                    message=f"{client_display_name} s'est connecté (impersonation).",
+                    payload={"client_id": client.id},
+                )
 
         serializer = ClientSerializer(client, context={'request': request})
         return Response({
@@ -2074,6 +2150,106 @@ def get_current_client(request):
         })
     except Client.DoesNotExist:
         return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_notification_list(request):
+    """List notifications for the current client (token)."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '20')
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 20
+        if limit > 100:
+            limit = 100
+    except (ValueError, TypeError):
+        page = 1
+        limit = 20
+    qs = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CLIENT,
+        recipient_client=client,
+    ).order_by('-created_at')
+    total = qs.count()
+    offset = (page - 1) * limit
+    items = qs[offset:offset + limit]
+    serializer = AppNotificationSerializer(items, many=True)
+    return Response({
+        'notifications': serializer.data,
+        'unreadCount': qs.filter(read=False).count(),
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'totalPages': (total + limit - 1) // limit if limit > 0 else 1,
+        },
+    })
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_notification_mark_all_read(request):
+    """Mark all notifications as read for the current client."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    updated = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CLIENT,
+        recipient_client=client,
+        read=False,
+    ).update(read=True)
+    return Response({'ok': True, 'updated': updated})
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_notification_mark_read(request, notification_id):
+    """Mark a notification as read (client)."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+    notification = get_object_or_404(
+        AppNotification,
+        id=notification_id,
+        recipient_type=AppNotification.RECIPIENT_CLIENT,
+        recipient_client=client,
+    )
+    notification.read = True
+    notification.save(update_fields=['read'])
+    return Response({'ok': True})
 
 
 @api_view(['PATCH'])
@@ -2360,6 +2536,72 @@ def get_current_user(request):
             {'error': f'Error retrieving user: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def notification_list(request):
+    """List notifications for the current CRM user (paginated)."""
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '20')
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 20
+        if limit > 100:
+            limit = 100
+    except (ValueError, TypeError):
+        page = 1
+        limit = 20
+    qs = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CRM_USER,
+        recipient_user=request.user,
+    ).order_by('-created_at')
+    total = qs.count()
+    offset = (page - 1) * limit
+    items = qs[offset:offset + limit]
+    serializer = AppNotificationSerializer(items, many=True)
+    return Response({
+        'notifications': serializer.data,
+        'unreadCount': qs.filter(read=False).count(),
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'totalPages': (total + limit - 1) // limit if limit > 0 else 1,
+        },
+    })
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def notification_mark_all_read(request):
+    """Mark all notifications as read for the current CRM user."""
+    updated = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CRM_USER,
+        recipient_user=request.user,
+        read=False,
+    ).update(read=True)
+    return Response({'ok': True, 'updated': updated})
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def notification_mark_read(request, notification_id):
+    """Mark a notification as read (CRM user)."""
+    notification = get_object_or_404(
+        AppNotification,
+        id=notification_id,
+        recipient_type=AppNotification.RECIPIENT_CRM_USER,
+        recipient_user=request.user,
+    )
+    notification.read = True
+    notification.save(update_fields=['read'])
+    return Response({'ok': True})
+
 
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
@@ -5841,6 +6083,26 @@ def client_chat(request, client_id):
         read_by_manager=(sender == 'manager'),
     )
 
+    if sender == 'client' and manager_user:
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_CLIENT,
+            title="Nouveau message",
+            message=f"{client_name} vous a envoyé un message.",
+            payload={"client_id": client.id, "message_id": msg.id},
+        )
+    elif sender == 'manager':
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CLIENT,
+            recipient_client=client,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_MANAGER,
+            title="Nouveau message",
+            message="Votre gestionnaire vous a envoyé un message.",
+            payload={"message_id": msg.id},
+        )
+
     return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
 
 
@@ -6021,6 +6283,26 @@ def client_conversations(request, client_id):
         read_by_manager=(sender == 'manager'),
     )
 
+    if sender == 'client' and manager_user:
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_CLIENT,
+            title="Nouveau message",
+            message=f"{client_name} vous a envoyé un message.",
+            payload={"client_id": client.id, "message_id": msg.id, "conversation_id": conversation.id},
+        )
+    elif sender == 'manager':
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CLIENT,
+            recipient_client=client,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_MANAGER,
+            title="Nouveau message",
+            message="Votre gestionnaire vous a envoyé un message.",
+            payload={"message_id": msg.id, "conversation_id": conversation.id},
+        )
+
     return Response(
         {
             'conversation': ClientConversationSerializer(conversation).data,
@@ -6116,6 +6398,33 @@ def client_conversation_messages(request, client_id, conversation_id):
     if conversation:
         conversation.updated_at = timezone.now()
         conversation.save(update_fields=['updated_at'])
+
+    if sender == 'client' and manager_user:
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_CLIENT,
+            title="Nouveau message",
+            message=f"{client_name} vous a envoyé un message.",
+            payload={
+                "client_id": client.id,
+                "message_id": msg.id,
+                "conversation_id": conversation.id if conversation else None,
+            },
+        )
+    elif sender == 'manager':
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CLIENT,
+            recipient_client=client,
+            notification_type=AppNotification.TYPE_MESSAGE_FROM_MANAGER,
+            title="Nouveau message",
+            message="Votre gestionnaire vous a envoyé un message.",
+            payload={
+                "message_id": msg.id,
+                "conversation_id": conversation.id if conversation else None,
+            },
+        )
 
     return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
 
@@ -6652,6 +6961,22 @@ def client_transaction_create(request, client_id):
         and product is not None
         and transfer_to != 'balance'
     )
+    if is_subscription_transfert:
+        manager_user = _resolve_client_manager_user(client)
+        if manager_user:
+            client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+            create_app_notification(
+                recipient_type=AppNotification.RECIPIENT_CRM_USER,
+                recipient_user=manager_user,
+                notification_type=AppNotification.TYPE_CLIENT_SUBSCRIPTION,
+                title="Nouvelle souscription",
+                message=f"{client_name} a effectué une souscription.",
+                payload={
+                    "client_id": client.id,
+                    "transaction_id": transaction_id,
+                    "product_id": str(product.id) if product else None,
+                },
+            )
     # Use the same detailed contract generation logic as product_contract_pdf
     if is_subscription_transfert:
         import logging

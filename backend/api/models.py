@@ -228,6 +228,50 @@ class Notification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+class AppNotification(models.Model):
+    """In-app notifications for CRM users and platform clients."""
+    RECIPIENT_CRM_USER = 'crm_user'
+    RECIPIENT_CLIENT = 'client'
+    RECIPIENT_CHOICES = [
+        (RECIPIENT_CRM_USER, 'CRM User'),
+        (RECIPIENT_CLIENT, 'Client'),
+    ]
+    TYPE_MESSAGE_FROM_CLIENT = 'message_from_client'
+    TYPE_CLIENT_SUBSCRIPTION = 'client_subscription'
+    TYPE_CLIENT_LOGIN = 'client_login'
+    TYPE_MESSAGE_FROM_MANAGER = 'message_from_manager'
+
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    recipient_type = models.CharField(max_length=20, choices=RECIPIENT_CHOICES, default=RECIPIENT_CRM_USER)
+    recipient_user = models.ForeignKey(
+        DjangoUser,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='app_notifications',
+    )
+    recipient_client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='app_notifications',
+    )
+    notification_type = models.CharField(max_length=50, default="")
+    read = models.BooleanField(default=False)
+    title = models.CharField(max_length=200, default="", blank=True)
+    message = models.TextField(default="", blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"AppNotification {self.id} - {self.notification_type} - {self.created_at}"
+
+
 class Role(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     name = models.CharField(max_length=50, default="")

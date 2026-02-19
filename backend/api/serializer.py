@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument
+from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -1483,3 +1483,14 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         if document_type is not None:
             instance.document_type = document_type
         return super().update(instance, validated_data)
+
+
+class AppNotificationSerializer(serializers.ModelSerializer):
+    """Serializer for in-app notifications (CRM and client)."""
+    notificationType = serializers.CharField(source='notification_type', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+
+    class Meta:
+        model = AppNotification
+        fields = ['id', 'notificationType', 'title', 'message', 'read', 'payload', 'createdAt']
+        read_only_fields = ['id', 'notificationType', 'title', 'message', 'payload', 'createdAt']

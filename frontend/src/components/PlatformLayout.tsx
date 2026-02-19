@@ -5,9 +5,17 @@ import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
 import { apiCall } from '../utils/api';
-import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp } from '../utils/iconMapping';
+import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { CookieBanner } from './CookieBanner';
 import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
@@ -16,6 +24,7 @@ import { logPlatformAction } from '../utils/platformLogger';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformButtons.css';
 import '../styles/PlatformInputs.css';
+import '../styles/PlatformNotifications.css';
 
 interface PlatformLayoutProps {
   children: React.ReactNode;
@@ -48,6 +57,18 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const [assetsIndexLoading, setAssetsIndexLoading] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
   const [headerHeight, setHeaderHeight] = useState(60); // Default header height
+  const [clientNotifications, setClientNotifications] = useState<Array<{
+    id: string;
+    notificationType: string;
+    title: string;
+    message: string;
+    read: boolean;
+    payload: Record<string, unknown>;
+    createdAt: string;
+  }>>([]);
+  const [clientUnreadCount, setClientUnreadCount] = useState(0);
+  const [clientNotificationsLoading, setClientNotificationsLoading] = useState(false);
+  const [clientNotificationsOpen, setClientNotificationsOpen] = useState(false);
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);
@@ -164,6 +185,55 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       cancelled = true;
     };
   }, [currentUser?.id]);
+
+  const fetchClientNotifications = React.useCallback(async (markAllReadOnOpen = false) => {
+    if (!currentUser?.id) return;
+    setClientNotificationsLoading(true);
+    try {
+      const data = await apiCall('/api/client/notifications/?limit=20') as {
+        notifications?: typeof clientNotifications;
+        unreadCount?: number;
+      };
+      setClientNotifications(data?.notifications || []);
+      setClientUnreadCount(data?.unreadCount ?? 0);
+      if (markAllReadOnOpen) {
+        try {
+          await apiCall('/api/client/notifications/read-all/', { method: 'PATCH' });
+          setClientNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+          setClientUnreadCount(0);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      setClientNotifications([]);
+      setClientUnreadCount(0);
+    } finally {
+      setClientNotificationsLoading(false);
+    }
+  }, [currentUser?.id]);
+
+  React.useEffect(() => {
+    if (!clientNotificationsOpen) return;
+    fetchClientNotifications(true);
+  }, [clientNotificationsOpen, fetchClientNotifications]);
+
+  React.useEffect(() => {
+    const t = setInterval(() => fetchClientNotifications(false), 60000);
+    return () => clearInterval(t);
+  }, [fetchClientNotifications]);
+
+  const handleClientNotificationMarkRead = async (id: string) => {
+    try {
+      await apiCall(`/api/client/notifications/${id}/read/`, { method: 'PATCH' });
+      setClientNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+      );
+      setClientUnreadCount((c) => Math.max(0, c - 1));
+    } catch {
+      // ignore
+    }
+  };
 
   const handleLogout = async () => {
     await clientSignOut();
@@ -449,6 +519,96 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           gap: isMobile ? '8px' : '15px',
           flexShrink: 0,
         }}>
+          <DropdownMenu open={clientNotificationsOpen} onOpenChange={setClientNotificationsOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Notifications"
+                style={{
+                  position: 'relative',
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
+                  background: 'transparent',
+                  color: 'var(--accent-foreground)',
+                }}
+              >
+                <Bell size={20} />
+                {clientUnreadCount > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: -4,
+                      right: -4,
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 9999,
+                      background: 'var(--destructive, #dc2626)',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 4px',
+                    }}
+                  >
+                    {clientUnreadCount > 99 ? '99+' : clientUnreadCount}
+                  </span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="platform-notification-dropdown"
+              sideOffset={8}
+            >
+              <DropdownMenuLabel className="platform-notification-label">
+                Notifications
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator className="platform-notification-separator" />
+              {clientNotificationsLoading ? (
+                <div className="platform-notification-loading">
+                  <span>Chargement...</span>
+                </div>
+              ) : clientNotifications.length === 0 ? (
+                <div className="platform-notification-empty">
+                  <div className="platform-notification-empty-icon">
+                    <Bell size={24} />
+                  </div>
+                  Aucune notification
+                </div>
+              ) : (
+                <div className="platform-notification-list">
+                  {clientNotifications.map((n) => (
+                    <DropdownMenuItem
+                      key={n.id}
+                      className={`platform-notification-item ${n.read ? '' : 'platform-notification-item-unread'}`}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        if (!n.read) handleClientNotificationMarkRead(n.id);
+                      }}
+                    >
+                      <span className="platform-notification-item-title">{n.title}</span>
+                      <span className="platform-notification-item-message">{n.message}</span>
+                      <span className="platform-notification-item-date">
+                        {n.createdAt
+                          ? new Date(n.createdAt).toLocaleDateString('fr-FR', {
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

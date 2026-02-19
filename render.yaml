@@ -2,9 +2,13 @@
 #
 # Docs: https://render.com/docs/blueprint-spec
 #
-# Notes:
-# - The backend requires Cloudinary credentials at runtime (see env vars below).
-# - The frontend reads the backend URL from Vite env vars at build time.
+# IMPORTANT - Add secrets BEFORE deploying:
+# 1. In Render Dashboard: Account → Environment Groups → Create Environment Group
+# 2. Name it: panorama-secrets
+# 3. Add at minimum: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+#    (Optional: GEMINI_API_KEY, ALPHA_VANTAGE_API_KEY, FINNHUB_API_KEY, NEWS_API_KEY,
+#     RESEND_API_KEY, RESEND_FROM_EMAIL, PRELUDE_API_KEY, PRELUDE_TEMPLATE_ID, PRELUDE_SENDER)
+# 4. Deploy this Blueprint - the backend will pull vars from that group.
 
 databases:
   - name: db
@@ -36,37 +40,11 @@ services:
       - key: DB_CONN_MAX_AGE
         value: "0"
 
-      # Required for media storage (backend will fail-fast if missing)
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
-        sync: false
-
-      # Optional integrations
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: ALPHA_VANTAGE_API_KEY
-        sync: false
-      - key: FINNHUB_API_KEY
-        sync: false
-      - key: NEWS_API_KEY
-        sync: false
-      # Email (client platform)
-      - key: RESEND_API_KEY
-        sync: false
-      - key: RESEND_FROM_EMAIL
-        sync: false
-      # SMS OTP (client platform, Prelude)
+      # Secrets from env group (create "panorama-secrets" in Dashboard BEFORE deploying)
+      - fromGroup: panorama-secrets
+      # SMS OTP base URL (no secret)
       - key: PRELUDE_BASE_URL
         value: https://api.prelude.dev
-      - key: PRELUDE_API_KEY
-        sync: false
-      - key: PRELUDE_TEMPLATE_ID
-        sync: false
-      - key: PRELUDE_SENDER
-        sync: false
       - key: FRONTEND_PUBLIC_URL
         fromService:
           type: web

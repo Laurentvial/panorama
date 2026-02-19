@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { 
@@ -9,10 +10,20 @@ import {
   DropdownMenuTrigger 
 } from './ui/dropdown-menu';
 import { HiOutlineBell, HiOutlineLogout, HiOutlineUser } from 'react-icons/hi';
-import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import { apiCall } from '../utils/api';
 import '../styles/Header.css';
+
+type AppNotification = {
+  id: string;
+  notificationType: string;
+  title: string;
+  message: string;
+  read: boolean;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
 
 interface HeaderProps {
   user: any;
@@ -22,6 +33,69 @@ export function Header({ user }: HeaderProps) {
   const navigate = useNavigate();
   const { settings, loading: settingsLoading } = useTheme();
   const platformName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const fetchNotifications = useCallback(async (markAllReadOnOpen = false) => {
+    setNotificationsLoading(true);
+    try {
+      const data = await apiCall('/api/notifications/?limit=20') as {
+        notifications?: AppNotification[];
+        unreadCount?: number;
+      };
+      setNotifications(data?.notifications || []);
+      setUnreadCount(data?.unreadCount ?? 0);
+      if (markAllReadOnOpen) {
+        try {
+          await apiCall('/api/notifications/read-all/', { method: 'PATCH' });
+          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+          setUnreadCount(0);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      setNotifications([]);
+      setUnreadCount(0);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    fetchNotifications(true);
+  }, [notificationsOpen, fetchNotifications]);
+
+  useEffect(() => {
+    const interval = setInterval(() => fetchNotifications(false), 60000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const handleMarkRead = async (id: string) => {
+    try {
+      await apiCall(`/api/notifications/${id}/read/`, { method: 'PATCH' });
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+      );
+      setUnreadCount((c) => Math.max(0, c - 1));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleNotificationClick = (n: AppNotification) => {
+    if (!n.read) {
+      handleMarkRead(n.id);
+    }
+    const clientId = n.payload?.client_id as string | undefined;
+    if (clientId) {
+      setNotificationsOpen(false);
+      navigate(`/admin/clients/${clientId}`);
+    }
+  };
 
   // Returns full name only if both firstName and lastName exist and are non-empty (after trimming)
   function getFullName() {
@@ -86,19 +160,53 @@ export function Header({ user }: HeaderProps) {
           
           <div className="header-actions">
             {/* Notifications */}
-            <DropdownMenu>
+            <DropdownMenu open={notificationsOpen} onOpenChange={setNotificationsOpen}>
               <DropdownMenuTrigger asChild>
-                <Button className="header-button header-button-notifications">
+                <Button className="header-button header-button-notifications" aria-label="Notifications">
                   <HiOutlineBell />
-                  {/* Notifications badge logic could go here */}
+                  {unreadCount > 0 && (
+                    <span className="header-notification-badge" aria-hidden>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="header-dropdown" align="end">
+              <DropdownMenuContent className="header-dropdown header-notification-content" align="end">
                 <DropdownMenuLabel>Notifications</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <div className="header-notification-empty">
-                  Aucune notification
-                </div>
+                {notificationsLoading ? (
+                  <div className="header-notification-empty">Chargement...</div>
+                ) : notifications.length === 0 ? (
+                  <div className="header-notification-empty">Aucune notification</div>
+                ) : (
+                  <div className="header-notification-list">
+                    {notifications.map((n) => (
+                      <DropdownMenuItem
+                        key={n.id}
+                        className={n.read ? 'header-notification-item' : 'header-notification-item header-notification-item-unread'}
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          handleNotificationClick(n);
+                        }}
+                      >
+                        <div className="header-notification-item-inner">
+                          <span className="header-notification-item-title">{n.title}</span>
+                          <span className="header-notification-item-message">{n.message}</span>
+                          <span className="header-notification-item-date">
+                            {n.createdAt
+                              ? new Date(n.createdAt).toLocaleDateString('fr-FR', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : ''}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
