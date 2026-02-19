@@ -3,35 +3,33 @@ from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 
-# Import storage - Cloudinary is REQUIRED (no local storage fallback)
+# Import storage - Cloudinary for media; deferred storage when not yet configured (Render bootstrap)
 try:
-    from api.storage import CloudinaryMediaStorage
-    # Check if Cloudinary credentials are configured
+    from api.storage import CloudinaryMediaStorage, CloudinaryDeferredStorage
     cloudinary_config = getattr(settings, 'CLOUDINARY_STORAGE', {})
     cloudinary_configured = (
-        cloudinary_config.get('CLOUD_NAME') and 
-        cloudinary_config.get('API_KEY') and 
+        cloudinary_config.get('CLOUD_NAME') and
+        cloudinary_config.get('API_KEY') and
         cloudinary_config.get('API_SECRET')
     )
-    # Cloudinary is REQUIRED - raise error if not configured
-    if not cloudinary_configured:
+    is_render = getattr(settings, 'IS_RENDER', __import__('os').environ.get('RENDER', '').lower() == 'true')
+    # Use real Cloudinary when configured; deferred (raises on first upload) when not (e.g. Render first deploy)
+    _media_storage = CloudinaryMediaStorage if cloudinary_configured else CloudinaryDeferredStorage
+    if not cloudinary_configured and not is_render:
         raise ValueError(
             "Cloudinary credentials are REQUIRED. "
-            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
-            "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET."
         )
-    # All image fields MUST use Cloudinary storage
-    product_storage = CloudinaryMediaStorage
-    app_settings_storage = CloudinaryMediaStorage
-    useful_link_storage = CloudinaryMediaStorage
-    client_profile_storage = CloudinaryMediaStorage
-    user_profile_storage = CloudinaryMediaStorage
-except ImportError:
-    # CloudinaryMediaStorage must be available
+    product_storage = _media_storage
+    app_settings_storage = _media_storage
+    useful_link_storage = _media_storage
+    client_profile_storage = _media_storage
+    user_profile_storage = _media_storage
+except ImportError as e:
     raise ImportError(
-        "CloudinaryMediaStorage is required but not available. "
+        "Cloudinary storage is required. "
         "Please install django-cloudinary-storage: pip install django-cloudinary-storage"
-    )
+    ) from e
 
 # Create your models here.
 class Client(models.Model):

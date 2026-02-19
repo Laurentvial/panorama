@@ -1,10 +1,41 @@
 """
 Cloudinary storage backend for media files
 """
-from cloudinary_storage.storage import MediaCloudinaryStorage
+from django.core.files.storage import Storage
 from django.conf import settings
 import cloudinary
 import cloudinary.uploader
+from cloudinary_storage.storage import MediaCloudinaryStorage
+
+
+class CloudinaryDeferredStorage(Storage):
+    """
+    Placeholder storage when Cloudinary is not yet configured (e.g. Render first deploy).
+    Raises a clear error on first upload attempt. Used so Django can start without Cloudinary.
+    """
+    def _check_configured(self):
+        from django.conf import settings
+        c = getattr(settings, 'CLOUDINARY_STORAGE', {})
+        if not (c.get('CLOUD_NAME') and c.get('API_KEY') and c.get('API_SECRET')):
+            raise ValueError(
+                "Cloudinary not configured. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, "
+                "and CLOUDINARY_API_SECRET in Render Dashboard → backend → Environment, then redeploy."
+            )
+
+    def save(self, name, content, max_length=None):
+        self._check_configured()
+        return CloudinaryMediaStorage().save(name, content, max_length)
+
+    def delete(self, name):
+        self._check_configured()
+        return CloudinaryMediaStorage().delete(name)
+
+    def exists(self, name):
+        return False
+
+    def url(self, name):
+        self._check_configured()
+        return CloudinaryMediaStorage().url(name)
 
 
 class CloudinaryMediaStorage(MediaCloudinaryStorage):

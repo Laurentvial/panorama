@@ -212,29 +212,43 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv('CLOUDINARY_API_SECRET', ''),
 }
 
-# Validate Cloudinary credentials - REQUIRED (no local storage fallback)
-if not CLOUDINARY_STORAGE['CLOUD_NAME'] or not CLOUDINARY_STORAGE['API_KEY'] or not CLOUDINARY_STORAGE['API_SECRET']:
-    raise ValueError(
-        "Cloudinary credentials are REQUIRED. "
-        "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
-        "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+CLOUDINARY_CONFIGURED = bool(
+    CLOUDINARY_STORAGE['CLOUD_NAME'] and
+    CLOUDINARY_STORAGE['API_KEY'] and
+    CLOUDINARY_STORAGE['API_SECRET']
+)
+IS_RENDER = os.getenv('RENDER', '').lower() == 'true'
+
+# Validate Cloudinary: required locally; on Render allow startup without it (add secrets after first deploy)
+if not CLOUDINARY_CONFIGURED:
+    if IS_RENDER:
+        # Render: allow startup so user can add CLOUDINARY_* in Dashboard and redeploy
+        pass
+    else:
+        raise ValueError(
+            "Cloudinary credentials are REQUIRED. "
+            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
+            "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+        )
+
+# Configure Cloudinary globally when credentials are present
+if CLOUDINARY_CONFIGURED:
+    import cloudinary
+    cloudinary.config(
+        cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
+        api_key=CLOUDINARY_STORAGE['API_KEY'],
+        api_secret=CLOUDINARY_STORAGE['API_SECRET'],
     )
 
-# Configure Cloudinary globally to avoid "untrusted customer" errors
-import cloudinary
-cloudinary.config(
-    cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
-    api_key=CLOUDINARY_STORAGE['API_KEY'],
-    api_secret=CLOUDINARY_STORAGE['API_SECRET'],
-)
-
 # Use Cloudinary storage for ALL media files - no local storage fallback
+# On Render without Cloudinary: use deferred storage that raises clear error on first upload
 # Django 4.2+ storage config (required for Django 5+).
-# - Media is stored in Cloudinary
-# - Static assets are served by WhiteNoise (admin UI, etc.)
 STORAGES = {
     'default': {
-        'BACKEND': 'api.storage.CloudinaryMediaStorage',
+        'BACKEND': (
+            'api.storage.CloudinaryMediaStorage' if CLOUDINARY_CONFIGURED
+            else 'api.storage.CloudinaryDeferredStorage'
+        ),
     },
     'staticfiles': {
         'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',

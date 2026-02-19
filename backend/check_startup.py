@@ -10,7 +10,8 @@ def check_environment():
     """Check that all required environment variables are set."""
     errors = []
     warnings = []
-    
+    is_render = os.getenv('RENDER', '').lower() == 'true'
+
     # Required variables (always required)
     required_vars = {
         'SECRET_KEY': 'Django secret key',
@@ -18,11 +19,18 @@ def check_environment():
         'CLOUDINARY_API_KEY': 'Cloudinary API key',
         'CLOUDINARY_API_SECRET': 'Cloudinary API secret',
     }
-    
+
     for var, description in required_vars.items():
         value = os.getenv(var)
         if not value:
-            errors.append(f"Missing required environment variable: {var} ({description})")
+            # On Render: allow startup without Cloudinary so user can add secrets after first deploy
+            if is_render and var.startswith('CLOUDINARY_'):
+                warnings.append(
+                    f"Missing {var} - add it in Render Dashboard and redeploy. "
+                    "Media uploads will fail until configured."
+                )
+            else:
+                errors.append(f"Missing required environment variable: {var} ({description})")
         elif var == 'SECRET_KEY' and value.startswith('django-insecure-'):
             warnings.append(f"WARNING: {var} appears to be the default insecure key. Generate a new one for production.")
     
