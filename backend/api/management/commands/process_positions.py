@@ -78,7 +78,7 @@ class Command(BaseCommand):
         IMPORTANT: This now groups calculation periods by payment period to avoid
         creating dozens of interest transactions for daily/weekly profitability.
         """
-        from .position_service import _group_calculation_periods_by_payment_period, generate_rates_for_investment
+        from api.position_service import _group_calculation_periods_by_payment_period, generate_rates_for_investment
         
         # Get the actual closed positions (after the update)
         closed_positions = Position.objects.filter(
@@ -175,7 +175,7 @@ class Command(BaseCommand):
         IMPORTANT: This now respects the interest_period (payment frequency) to avoid
         creating dozens of interest transactions when using daily/weekly profitability.
         """
-        from .position_service import _group_calculation_periods_by_payment_period
+        from api.position_service import _group_calculation_periods_by_payment_period
         
         candidates = (
             Transaction.objects
