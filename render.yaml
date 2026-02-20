@@ -19,7 +19,7 @@ services:
     name: backend
     runtime: python
     plan: starter
-    region: oregon
+    region: frankfurt
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     preDeployCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput
@@ -75,6 +75,7 @@ services:
   - type: web
     name: frontend
     runtime: static
+    region: frankfurt
     rootDir: frontend
     buildCommand: npm install --legacy-peer-deps && npm run build
     staticPublishPath: dist
@@ -94,9 +95,9 @@ services:
   - type: cron
     name: refresh-prices
     runtime: python
-    region: oregon
+    region: frankfurt
     rootDir: backend
-    schedule: "*/10 * * * *"
+    schedule: "0 * * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
     envVars:
@@ -155,6 +156,102 @@ services:
           name: backend
           envVarKey: NEWS_API_KEY
       # Email (not used by cron, but keep env parity)
+      - key: RESEND_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: RESEND_API_KEY
+      - key: RESEND_FROM_EMAIL
+        fromService:
+          type: web
+          name: backend
+          envVarKey: RESEND_FROM_EMAIL
+      - key: FRONTEND_PUBLIC_URL
+        fromService:
+          type: web
+          name: backend
+          envVarKey: FRONTEND_PUBLIC_URL
+      - key: PRELUDE_BASE_URL
+        fromService:
+          type: web
+          name: backend
+          envVarKey: PRELUDE_BASE_URL
+      - key: PRELUDE_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: PRELUDE_API_KEY
+      - key: PRELUDE_TEMPLATE_ID
+        fromService:
+          type: web
+          name: backend
+          envVarKey: PRELUDE_TEMPLATE_ID
+      - key: PRELUDE_SENDER
+        fromService:
+          type: web
+          name: backend
+          envVarKey: PRELUDE_SENDER
+
+  # Process positions: open/close scheduled positions, create interest transactions
+  - type: cron
+    name: process-positions
+    runtime: python
+    region: frankfurt
+    rootDir: backend
+    schedule: "0 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py process_positions
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: db
+          property: connectionString
+
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: SECRET_KEY
+
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          type: web
+          name: backend
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          type: web
+          name: backend
+          envVarKey: CLOUDINARY_API_SECRET
+      - key: GEMINI_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: GEMINI_API_KEY
+      - key: ALPHA_VANTAGE_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: ALPHA_VANTAGE_API_KEY
+      - key: FINNHUB_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: FINNHUB_API_KEY
+      - key: NEWS_API_KEY
+        fromService:
+          type: web
+          name: backend
+          envVarKey: NEWS_API_KEY
       - key: RESEND_API_KEY
         fromService:
           type: web
