@@ -15,7 +15,7 @@ interface EditPatrimonialInfoModalProps {
   onClose: () => void;
   client: any;
   clientId: string;
-  onUpdate: (updatedClient: any) => void;
+  onUpdate: (updatedClient?: any) => void | Promise<void>;
 }
 
 export function EditPatrimonialInfoModal({
@@ -174,9 +174,9 @@ export function EditPatrimonialInfoModal({
       });
 
       if (response?.client) {
-        onUpdate(response.client);
-        onClose();
         toast.success('Fiche patrimoniale mise à jour avec succès');
+        await onUpdate?.(response.client);
+        onClose();
       }
     } catch (error: any) {
       console.error('Error updating patrimonial info:', error);

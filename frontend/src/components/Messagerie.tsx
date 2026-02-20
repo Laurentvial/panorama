@@ -57,15 +57,8 @@ export function Messagerie() {
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  const isAdmin = (currentUser?.role || '').toLowerCase() === 'admin';
-
-  const visibleClients = useMemo(() => {
-    if (isAdmin) return clients;
-    const myUserDetailsId = currentUser?.id;
-    if (!myUserDetailsId) return clients;
-    return clients.filter((c) => c.managerUserDetailsId === myUserDetailsId);
-  }, [clients, currentUser?.id, isAdmin]);
-
+  // Backend /api/clients/ already filters by permissions (admin/teamleader/gestionnaire)
+  const visibleClients = useMemo(() => clients, [clients]);
   const visibleClientIdsKey = useMemo(() => visibleClients.map((c) => c.id).join(','), [visibleClients]);
 
   const selectedRequest = useMemo(

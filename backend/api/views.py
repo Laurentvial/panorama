@@ -681,19 +681,100 @@ class NoteDeleteView(generics.DestroyAPIView):
         user = self.request.user
         return Note.objects.filter(userId=user)
 
+def _get_client_ids_user_has_access_to(request):
+    """
+    Returns set of client IDs the user can access, or None if access to all.
+    - admin: None (all)
+    - teamleader: same as gestionnaire + clients of all team members (managed_by in team member user ids)
+    - gestionnaire: client IDs where client.managed_by == request.user.id
+    """
+    try:
+        user_details = UserDetails.objects.get(django_user=request.user)
+        role = (user_details.role or '').lower().strip()
+        if role == 'admin':
+            return None
+        if role == 'teamleader':
+            team_memberships = user_details.team_memberships.all()
+            team_ids = [tm.team_id for tm in team_memberships if tm.team_id]
+            if not team_ids:
+                # No team: same as gestionnaire (only own clients)
+                return set(Client.objects.filter(managed_by=str(request.user.id)).values_list('id', flat=True))
+            # Get all UserDetails in these teams (includes teamleader)
+            team_member_ids = UserDetails.objects.filter(
+                team_memberships__team_id__in=team_ids
+            ).values_list('django_user_id', flat=True).distinct()
+            manager_ids = [str(uid) for uid in team_member_ids if uid]
+            if not manager_ids:
+                return set(Client.objects.filter(managed_by=str(request.user.id)).values_list('id', flat=True))
+            return set(Client.objects.filter(managed_by__in=manager_ids).values_list('id', flat=True))
+        if role == 'gestionnaire':
+            return set(Client.objects.filter(managed_by=str(request.user.id)).values_list('id', flat=True))
+    except UserDetails.DoesNotExist:
+        pass  # No UserDetails, allow access (e.g. superuser)
+    return None
+
+
+def _check_gestionnaire_client_access(request, client):
+    """
+    If user has role 'gestionnaire', ensure they are assigned to this client.
+    If user has role 'teamleader', ensure client.managed_by is teamleader or a team member.
+    Returns Response (403) if access denied, None if allowed.
+    """
+    try:
+        user_details = UserDetails.objects.get(django_user=request.user)
+        role = (user_details.role or '').lower().strip()
+        if role == 'gestionnaire':
+            if not client.managed_by or str(client.managed_by) != str(request.user.id):
+                return Response(
+                    {'error': 'Accès refusé - client non assigné'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        elif role == 'teamleader':
+            team_memberships = user_details.team_memberships.all()
+            team_ids = [tm.team_id for tm in team_memberships if tm.team_id]
+            if not team_ids:
+                # No team: same as gestionnaire
+                if not client.managed_by or str(client.managed_by) != str(request.user.id):
+                    return Response(
+                        {'error': 'Accès refusé - client non assigné'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            else:
+                team_member_ids = UserDetails.objects.filter(
+                    team_memberships__team_id__in=team_ids
+                ).values_list('django_user_id', flat=True).distinct()
+                manager_ids = {str(uid) for uid in team_member_ids if uid}
+                if not client.managed_by or str(client.managed_by) not in manager_ids:
+                    return Response(
+                        {'error': 'Accès refusé - client non assigné à votre équipe'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+    except UserDetails.DoesNotExist:
+        pass  # No UserDetails, allow access (e.g. superuser)
+    return None
+
+
 class ClientView(generics.ListAPIView):
     from django.db.models import Prefetch
     from .models import Transaction
     
-    queryset = Client.objects.select_related('team').prefetch_related(
-        Prefetch(
-            'transactions',
-            queryset=Transaction.objects.filter(status__in=COMPLETED_TRANSACTION_STATUSES),
-            to_attr='completed_transactions'
-        )
-    )
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated]  # Explicitly set permission
+    
+    def get_queryset(self):
+        from django.db.models import Prefetch
+        from .models import Transaction
+        qs = Client.objects.select_related('team').prefetch_related(
+            Prefetch(
+                'transactions',
+                queryset=Transaction.objects.filter(status__in=COMPLETED_TRANSACTION_STATUSES),
+                to_attr='completed_transactions'
+            )
+        )
+        client_ids = _get_client_ids_user_has_access_to(self.request)
+        if client_ids is not None:
+            qs = qs.filter(id__in=client_ids)
+        return qs
     
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -986,6 +1067,9 @@ def client_create(request):
 @permission_classes([IsAuthenticated])
 def client_detail(request, client_id):
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     
     if request.method == 'GET':
         serializer = ClientSerializer(client, context={'request': request})
@@ -1346,6 +1430,9 @@ def client_detail(request, client_id):
 @permission_classes([IsAuthenticated])
 def client_toggle_active(request, client_id):
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     client.active = not client.active
     client.save()
     return Response({'active': client.active})
@@ -1354,6 +1441,9 @@ def client_toggle_active(request, client_id):
 @permission_classes([IsAuthenticated])
 def client_delete(request, client_id):
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     client.delete()
     return Response({'message': 'Client supprimé avec succès'}, status=status.HTTP_200_OK)
 
@@ -1400,6 +1490,12 @@ def client_verification_config(request, client_id):
     if request.method == 'PUT' and is_client_access:
         return Response({'error': 'Seuls les administrateurs peuvent modifier la configuration'}, status=status.HTTP_403_FORBIDDEN)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if is_admin_access:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     if request.method == 'GET':
         # Récupérer ou créer la config si elle n'existe pas
         config, created = ClientVerificationConfig.objects.get_or_create(
@@ -1445,6 +1541,9 @@ def client_verification_config(request, client_id):
 def client_history(request, client_id):
     """Get history of actions performed ON the client (admin/gestionnaire actions)"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     
     # Get logs related to this client
     logs = Log.objects.filter(client_id=client).order_by('-created_at')
@@ -1509,8 +1608,13 @@ def client_platform_logs(request, client_id):
             user = jwt_auth.get_user(validated_token)
             if not user.is_authenticated:
                 return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+            request.user = user
         except Exception:
             return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
         
         # Get platform logs for this client
         logs = ClientPlatformLog.objects.filter(client=client).order_by('-created_at')
@@ -2541,7 +2645,7 @@ def get_current_user(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def notification_list(request):
-    """List notifications for the current CRM user (paginated)."""
+    """List notifications for the current CRM user (paginated). Filter by client access."""
     page = request.GET.get('page', '1')
     limit = request.GET.get('limit', '20')
     try:
@@ -2560,13 +2664,26 @@ def notification_list(request):
         recipient_type=AppNotification.RECIPIENT_CRM_USER,
         recipient_user=request.user,
     ).order_by('-created_at')
-    total = qs.count()
-    offset = (page - 1) * limit
-    items = qs[offset:offset + limit]
+    client_ids = _get_client_ids_user_has_access_to(request)
+    if client_ids is not None:
+        filtered = []
+        for n in qs:
+            cid = (n.payload or {}).get('client_id') if isinstance(n.payload, dict) else None
+            if cid is None or cid in client_ids:
+                filtered.append(n)
+        total = len(filtered)
+        unread_count = sum(1 for n in filtered if not n.read)
+        offset = (page - 1) * limit
+        items = filtered[offset:offset + limit]
+    else:
+        total = qs.count()
+        unread_count = qs.filter(read=False).count()
+        offset = (page - 1) * limit
+        items = qs[offset:offset + limit]
     serializer = AppNotificationSerializer(items, many=True)
     return Response({
         'notifications': serializer.data,
-        'unreadCount': qs.filter(read=False).count(),
+        'unreadCount': unread_count,
         'pagination': {
             'page': page,
             'limit': limit,
@@ -3375,6 +3492,12 @@ def client_assets(request, client_id):
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not is_client_access:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     # Get all client assets
     client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
     
@@ -3395,6 +3518,9 @@ def client_assets(request, client_id):
 def client_asset_add(request, client_id):
     """Ajouter un asset à un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     asset_id = request.data.get('assetId')
     
     if not asset_id:
@@ -3429,6 +3555,9 @@ def client_asset_add(request, client_id):
 def client_asset_remove(request, client_id, asset_id):
     """Retirer un asset d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     asset = get_object_or_404(Asset, id=asset_id)
     
     try:
@@ -3443,6 +3572,9 @@ def client_asset_remove(request, client_id, asset_id):
 def client_asset_toggle_featured(request, client_id, asset_id):
     """Basculer le statut 'mis en avant' d'un asset pour un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     asset = get_object_or_404(Asset, id=asset_id)
     
     try:
@@ -3459,6 +3591,9 @@ def client_asset_toggle_featured(request, client_id, asset_id):
 def client_asset_update_availability(request, client_id, asset_id):
     """Mettre à jour les dates de disponibilité pour un actif d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     asset = get_object_or_404(Asset, id=asset_id)
     
     try:
@@ -3482,6 +3617,9 @@ def client_asset_update_availability(request, client_id, asset_id):
 def client_assets_reset(request, client_id):
     """Réinitialiser les assets d'un client : retirer ceux qui ne sont pas default=True, ajouter ceux qui sont default=True"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     
     # Get all current client assets (convert to list to avoid query issues after deletion)
     current_client_assets = list(ClientAsset.objects.filter(client=client).select_related('asset'))
@@ -3559,6 +3697,12 @@ def client_products(request, client_id):
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not is_client_access:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     from datetime import date
     today = date.today()
     
@@ -3594,6 +3738,9 @@ def client_products(request, client_id):
 def client_product_add(request, client_id):
     """Ajouter un produit à un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     product_id = request.data.get('productId')
     
     if not product_id:
@@ -3634,6 +3781,9 @@ def client_product_add(request, client_id):
 def client_product_remove(request, client_id, product_id):
     """Retirer un produit d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     product = get_object_or_404(Product, id=product_id)
     
     try:
@@ -3648,6 +3798,9 @@ def client_product_remove(request, client_id, product_id):
 def client_product_toggle_featured(request, client_id, product_id):
     """Basculer le statut 'mis en avant' d'un produit pour un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     product = get_object_or_404(Product, id=product_id)
     
     try:
@@ -3664,6 +3817,9 @@ def client_product_toggle_featured(request, client_id, product_id):
 def client_product_update_availability(request, client_id, product_id):
     """Mettre à jour les dates de disponibilité pour un produit d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     product = get_object_or_404(Product, id=product_id)
     
     try:
@@ -3687,6 +3843,9 @@ def client_product_update_availability(request, client_id, product_id):
 def client_products_reset(request, client_id):
     """Réinitialiser les produits d'un client : retirer ceux qui ne sont pas default=True, ajouter ceux qui sont default=True"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     
     # Get all current client products (convert to list to avoid query issues after deletion)
     # Filter out ClientProducts where the product has been deleted (product is None)
@@ -5304,6 +5463,12 @@ def client_ribs(request, client_id):
         except Exception:
             return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not token.startswith('client_'):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     client_ribs = ClientRIB.objects.filter(client=client).select_related('rib')
     serializer = ClientRIBSerializer(client_ribs, many=True)
     return Response({'ribs': serializer.data})
@@ -5313,6 +5478,9 @@ def client_ribs(request, client_id):
 def client_rib_add(request, client_id):
     """Ajouter un RIB à un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     rib_id = request.data.get('ribId')
     
     if not rib_id:
@@ -5347,6 +5515,9 @@ def client_rib_add(request, client_id):
 def client_rib_remove(request, client_id, rib_id):
     """Retirer un RIB d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     rib = get_object_or_404(RIB, id=rib_id)
     
     try:
@@ -5391,6 +5562,12 @@ def client_documents(request, client_id):
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not (token and token.startswith('client_')):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     # Filter documents
     documents = ClientDocument.objects.filter(client=client)
     
@@ -5408,6 +5585,9 @@ def client_documents(request, client_id):
 def client_document_create(request, client_id):
     """Créer un nouveau document pour un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     
     # Generate document ID
     document_id = uuid.uuid4().hex[:12]
@@ -5485,6 +5665,9 @@ def client_document_create(request, client_id):
 def client_document_delete(request, client_id, document_id):
     """Supprimer un document d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     document = get_object_or_404(ClientDocument, id=document_id, client=client)
     
     # Delete the file if it exists
@@ -5683,6 +5866,9 @@ def useful_link_delete(request, useful_link_id):
 def client_useful_links(request, client_id):
     """Liste les liens utiles d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     client_useful_links = ClientUsefulLink.objects.filter(client=client).select_related('useful_link')
     serializer = ClientUsefulLinkSerializer(client_useful_links, many=True, context={'request': request})
     return Response({'usefulLinks': serializer.data})
@@ -5692,6 +5878,9 @@ def client_useful_links(request, client_id):
 def client_useful_link_add(request, client_id):
     """Ajouter un lien utile à un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     useful_link_id = request.data.get('usefulLinkId')
     
     if not useful_link_id:
@@ -5726,6 +5915,9 @@ def client_useful_link_add(request, client_id):
 def client_useful_link_remove(request, client_id, useful_link_id):
     """Retirer un lien utile d'un client"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     useful_link = get_object_or_404(UsefulLink, id=useful_link_id)
     
     try:
@@ -5742,32 +5934,41 @@ def stats(request):
     """Retourne les statistiques pour le dashboard admin"""
     from django.db.models import Sum, Q
     
+    client_ids = _get_client_ids_user_has_access_to(request)
+    tx_filter = Q(type='depot') | Q(type='vente')
+    if client_ids is not None:
+        tx_filter &= Q(client_id__in=client_ids)
+    client_filter = {} if client_ids is None else {'id__in': client_ids}
+
     # Calculate total revenue (sum of all deposits and sales)
-    total_revenue = Transaction.objects.filter(
-        Q(type='depot') | Q(type='vente')
-    ).aggregate(total=Sum('amount'))['total'] or 0
-    
+    total_revenue = Transaction.objects.filter(tx_filter).aggregate(total=Sum('amount'))['total'] or 0
+
     # Calculate pending revenue (transactions with status 'en_attente_paiement' or 'en_cours')
     pending_revenue = Transaction.objects.filter(
-        Q(type='depot') | Q(type='vente'),
+        tx_filter,
         Q(status='en_attente_paiement') | Q(status='en_cours')
     ).aggregate(total=Sum('amount'))['total'] or 0
-    
+
     # Count total clients
-    total_clients = Client.objects.count()
+    total_clients = Client.objects.filter(**client_filter).count()
     
-    # Get recent transactions (last 10)
-    recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')[:10]
+    # Get recent transactions (last 10) - filter by client access
+    recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')
+    if client_ids is not None:
+        recent_transactions = recent_transactions.filter(client_id__in=client_ids)
+    recent_transactions = recent_transactions[:10]
     transaction_serializer = TransactionSerializer(recent_transactions, many=True)
 
-    # Get recent received messages for admin dashboard:
-    # received by managers means messages sent by clients.
+    # Get recent received messages for admin dashboard - filter by client access
     recent_messages_qs = (
         ClientChatMessage.objects
         .filter(sender='client')
         .select_related('conversation', 'client', 'manager_user')
-        .order_by('-created_at')[:5]
+        .order_by('-created_at')
     )
+    if client_ids is not None:
+        recent_messages_qs = recent_messages_qs.filter(client_id__in=client_ids)
+    recent_messages_qs = recent_messages_qs[:5]
     recent_messages = []
     for message in recent_messages_qs:
         client_name = f"{(message.client.fname or '').strip()} {(message.client.lname or '').strip()}".strip()
@@ -5808,7 +6009,11 @@ def stats(request):
 @permission_classes([IsAuthenticated])
 def all_transactions(request):
     """Liste toutes les transactions de tous les clients"""
-    transactions = Transaction.objects.all().order_by('-datetime', '-created_at')
+    transactions = Transaction.objects.all()
+    client_ids = _get_client_ids_user_has_access_to(request)
+    if client_ids is not None:
+        transactions = transactions.filter(client_id__in=client_ids)
+    transactions = transactions.order_by('-datetime', '-created_at')
     serializer = TransactionSerializer(transactions, many=True)
     return Response({'transactions': serializer.data})
 
@@ -5852,6 +6057,9 @@ def positions_list(request):
     """Liste toutes les positions (admin)"""
     status_param = request.GET.get('status')
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').all()
+    client_ids = _get_client_ids_user_has_access_to(request)
+    if client_ids is not None:
+        qs = qs.filter(client_id__in=client_ids)
 
     # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
     _sync_positions_statuses(qs)
@@ -5916,6 +6124,12 @@ def client_positions(request, client_id):
     else:
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if getattr(request.user, 'is_authenticated', False):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
 
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
 
@@ -6017,6 +6231,12 @@ def client_chat(request, client_id):
             return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     else:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if is_admin_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
 
     # Resolve manager user (from client.managed_by)
     manager_user = None
@@ -6188,6 +6408,11 @@ def client_conversations(request, client_id):
         return auth_res
     is_client_token, is_admin_token, _token = auth_res
 
+    if is_admin_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+
     manager_user = _resolve_client_manager_user(client)
     manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
 
@@ -6325,6 +6550,11 @@ def client_conversation_messages(request, client_id, conversation_id):
     if isinstance(auth_res, Response):
         return auth_res
     is_client_token, is_admin_token, _token = auth_res
+
+    if is_admin_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
 
     manager_user = _resolve_client_manager_user(client)
     manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
@@ -6465,6 +6695,12 @@ def client_transactions(request, client_id):
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if getattr(request.user, 'is_authenticated', False):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+    
     transactions = Transaction.objects.filter(client=client).order_by('-datetime', '-created_at')
     
     # Pagination support
@@ -6533,6 +6769,12 @@ def client_transaction_create(request, client_id):
     else:
         # No token provided
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not (token and token.startswith('client_')):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
     
     # Validate required fields
     if not request.data.get('type'):
@@ -7598,6 +7840,12 @@ def client_transaction_update(request, client_id, transaction_id):
     elif not request.user.is_authenticated:
         # No authentication: deny access
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Admin JWT: check gestionnaire can only access assigned clients
+    if not is_client_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
     
     # Store old values for logging
     old_transaction_data = get_transaction_data_for_log(transaction)
@@ -8770,6 +9018,9 @@ def transaction_save_positions(request, client_id, transaction_id):
 def client_transaction_delete(request, client_id, transaction_id):
     """Supprimer une transaction"""
     client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
     transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
     transaction.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)

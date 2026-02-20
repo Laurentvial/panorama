@@ -37,11 +37,14 @@ export function useUsers() {
       // La structure devrait être { users: [...] }
       const usersList = response?.users || response || [];
       
-      // Vérifier que chaque utilisateur a les champs nécessaires
+      // Vérifier que chaque utilisateur a les champs nécessaires et normaliser teamId
       const validUsers = (Array.isArray(usersList) ? usersList : []).filter(user => {
         const hasId = user && (user.id !== undefined && user.id !== null);
         return hasId;
-      });
+      }).map(user => ({
+        ...user,
+        teamId: user.teamId ?? user.team_id ?? null,
+      }));
       
       // Update cache
       usersCache = validUsers;

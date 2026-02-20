@@ -22,6 +22,7 @@ export function UsersTab() {
   async function handleDelete(userId: string) {
     try {
       await deleteUser(userId);
+      await refetch();
     } catch (error) {
       // Error already handled in the hook
     }
@@ -35,9 +36,9 @@ export function UsersTab() {
     }
   }
 
-  function handleUserCreated() {
+  async function handleUserCreated() {
+    await refetch();
     setIsUserModalOpen(false);
-    refetch();
   }
 
   function handleEditClick(user: User) {
@@ -45,10 +46,10 @@ export function UsersTab() {
     setIsEditModalOpen(true);
   }
 
-  function handleUserUpdated() {
+  async function handleUserUpdated() {
     setIsEditModalOpen(false);
     setSelectedUser(null);
-    refetch();
+    await refetch();
   }
 
   function handleResetPasswordClick(user: User) {
@@ -56,10 +57,10 @@ export function UsersTab() {
     setIsResetPasswordModalOpen(true);
   }
 
-  function handlePasswordReset() {
+  async function handlePasswordReset() {
     setIsResetPasswordModalOpen(false);
     setSelectedUser(null);
-    refetch();
+    await refetch();
   }
 
   return (
@@ -128,7 +129,8 @@ export function UsersTab() {
                 </thead>
                 <tbody>
                   {users.map((user) => {
-                    const userTeam = teams.find(t => t.id === user.teamId);
+                    const teamId = user.teamId ?? (user as any).team_id ?? null;
+                    const userTeam = teamId ? teams.find(t => String(t.id) === String(teamId)) : null;
                     
                     return (
                       <tr key={user.id}>

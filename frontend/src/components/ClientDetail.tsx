@@ -183,12 +183,12 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     setIsEditPersonalInfoOpen(true);
   }
 
-  function handlePersonalInfoUpdated(updatedClient: any) {
-    setClient(updatedClient);
+  async function handlePersonalInfoUpdated() {
+    await loadClientData();
   }
 
-  function handlePatrimonialInfoUpdated(updatedClient: any) {
-    setClient(updatedClient);
+  async function handlePatrimonialInfoUpdated() {
+    await loadClientData();
   }
 
 

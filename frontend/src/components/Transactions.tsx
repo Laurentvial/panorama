@@ -4,12 +4,12 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Filter } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner';
+import { ChevronDown } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -202,10 +202,7 @@ export function Transactions() {
       {/* Filters */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="w-5 h-5" />
-            Filtres
-          </CardTitle>
+          <CardTitle>Filtres</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -217,10 +214,10 @@ export function Transactions() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-full justify-between font-normal"
+                    className="h-9 w-full justify-between rounded-md border bg-input-background font-normal hover:bg-input-background/80"
                   >
                     {typeFilterLabel}
-                    <span className="ml-2 text-slate-500">▼</span>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-64" align="start">

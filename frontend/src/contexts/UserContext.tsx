@@ -49,6 +49,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const path =
       typeof window !== 'undefined' ? (window.location?.pathname || '') : '';
     const isAdminRoute = path.startsWith('/admin');
+    const isImpersonateRoute = path.startsWith('/platform/impersonate');
 
     const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
     const sessionUserType = sessionStorage.getItem('userType');
@@ -59,8 +60,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let token: string | null;
     let userType: string | null;
 
-    if (isAdminRoute) {
-      // Admin routes always use admin auth from localStorage.
+    // On /platform/impersonate: prefer client session if already set (impersonation in progress),
+    // otherwise use admin token for the initial role check.
+    if (isImpersonateRoute && isSessionClient) {
+      storage = sessionStorage;
+      token = sessionToken;
+      userType = 'client';
+    } else if (isAdminRoute || isImpersonateRoute) {
+      // Admin routes and impersonate (before client session is set) use admin auth from localStorage.
       storage = localStorage;
       token = storage.getItem(ACCESS_TOKEN);
       userType = storage.getItem('userType');

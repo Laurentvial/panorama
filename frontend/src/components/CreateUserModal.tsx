@@ -20,7 +20,7 @@ import "../styles/Modal.css";
 interface CreateUserModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUserCreated: () => void;
+  onUserCreated: () => void | Promise<void>;
 }
 
 export function CreateUserModal({
@@ -102,8 +102,8 @@ export function CreateUserModal({
       });
       setProfilePhoto(null);
       setProfilePhotoPreview(null);
+      await onUserCreated();
       onClose();
-      onUserCreated();
     } catch (err: any) {
       console.error("Create user error:", err);
       const data = err?.response?.data || {};

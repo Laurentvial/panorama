@@ -13,7 +13,7 @@ interface EditClientManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
   client: any;
-  onClientUpdated: () => void;
+  onClientUpdated: () => void | Promise<void>;
 }
 
 export function EditClientManagementModal({ 
@@ -68,8 +68,8 @@ export function EditClientManagementModal({
       });
 
       toast.success('Informations de gestion mises à jour avec succès');
+      await onClientUpdated();
       onClose();
-      onClientUpdated();
     } catch (err: any) {
       console.error('Edit client management error:', err);
       const message = err?.message || 'Une erreur est survenue lors de la mise à jour';

@@ -15,7 +15,7 @@ interface EditPersonalInfoModalProps {
   onClose: () => void;
   client: any;
   clientId: string;
-  onUpdate: (updatedClient: any) => void;
+  onUpdate: (updatedClient?: any) => void | Promise<void>;
 }
 
 export function EditPersonalInfoModal({
@@ -179,9 +179,9 @@ export function EditPersonalInfoModal({
       }
 
       if (response?.client) {
-        onUpdate(response.client);
-        onClose();
         toast.success('Informations personnelles mises à jour avec succès');
+        await onUpdate?.(response.client);
+        onClose();
       }
     } catch (error: any) {
       console.error('Error updating personal info:', error);

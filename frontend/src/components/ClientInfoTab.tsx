@@ -397,10 +397,10 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
         isOpen={isEditManagementOpen}
         onClose={() => setIsEditManagementOpen(false)}
         client={client}
-        onClientUpdated={() => {
+        onClientUpdated={async () => {
           setIsEditManagementOpen(false);
           if (onClientUpdated) {
-            onClientUpdated();
+            await onClientUpdated();
           }
         }}
       />

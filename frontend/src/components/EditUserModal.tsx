@@ -22,11 +22,11 @@ interface EditUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User | null;
-  onUserUpdated: () => void;
+  onUserUpdated: () => void | Promise<void>;
 }
 
 export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUserModalProps) {
-  const { teams = [] as Team[], loading: teamsLoading } = useTeams();
+  const { teams = [] as Team[], refetch: refetchTeams } = useTeams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
@@ -55,6 +55,12 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
     }
   }, [user, isOpen]);
 
+  useEffect(() => {
+    if (isOpen) {
+      refetchTeams();
+    }
+  }, [isOpen, refetchTeams]);
+
   if (!isOpen || !user) return null;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -82,8 +88,8 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
       });
 
       toast.success('Utilisateur mis à jour avec succès');
+      await onUserUpdated();
       onClose();
-      onUserUpdated();
     } catch (err: any) {
       console.error('Edit user error:', err);
       const data = err?.response?.data || {};
@@ -236,7 +242,11 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
           <div className="modal-form-field">
             <Label htmlFor="edit-teamId">Équipe (optionnel)</Label>
             <Select
-              value={formData.teamId || "none"}
+              value={
+                formData.teamId && teams.some((t) => t.id === formData.teamId)
+                  ? formData.teamId
+                  : "none"
+              }
               onValueChange={(value) =>
                 setFormData({
                   ...formData,
@@ -244,10 +254,10 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
                 })
               }
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-9 rounded-md border bg-input-background">
                 <SelectValue placeholder="Aucune équipe" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[10050]" style={{ zIndex: 10050 }}>
                 <SelectItem value="none">Aucune équipe</SelectItem>
                 {teams &&
                   teams.length > 0 &&

@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useNavigat
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
-import ProtectedRoute from './components/ProtectedRoute';
+import { AdminRoleProtectedRoute } from './components/RoleProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
@@ -42,6 +42,10 @@ const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => 
 const MonProfil = lazy(() => import('./components/MonProfil').then(m => ({ default: m.MonProfil })));
 const ClientImpersonate = lazy(() => import('./components/ClientImpersonate').then(m => ({ default: m.ClientImpersonate })));
 const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
+
+// Role constants for route protection (must match Sidebar menuItems)
+const ROLES_ALL = ['admin', 'teamleader', 'gestionnaire'] as const;
+const ROLES_ADMIN_ONLY = ['admin'] as const;
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -135,162 +139,162 @@ function App() {
                     
                     {/* Admin/CRM Routes - All under /admin */}
                     <Route path="/admin" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Dashboard />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/dashboard" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Dashboard />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/users" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <UsersAndTeams />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/profile" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <MonProfil />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/clients" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Clients onSelectClient={() => {}} />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/clients/add" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <AddClient />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/clients/:id" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <ClientDetailWrapper />
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/ribs" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageRibs />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/assets" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageAssets />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/useful-links" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageUsefulLinks />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/news" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageNews />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/transactions" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Transactions />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/messagerie" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Messagerie />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/positions" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Positions />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <PlacementsWrapper />
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements/add" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <AddProduct />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements/edit/:id" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <EditProduct />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/settings" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Settings />
                                 </Suspense>
                             </Layout>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     {/* Legacy route redirect */}
                     <Route path="/admin/placements" element={<Navigate to="/admin/produits-investissements" replace />} />
@@ -299,11 +303,11 @@ function App() {
                     
                     {/* Trading Platform Routes - For Clients */}
                     <Route path="/platform/impersonate/:id" element={
-                        <ProtectedRoute>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Suspense fallback={<LoadingFallback />}>
                                 <ClientImpersonate />
                             </Suspense>
-                        </ProtectedRoute>
+                        </AdminRoleProtectedRoute>
                     } />
                     <Route path="/platform" element={
                         <ClientProtectedRoute>
