@@ -75,7 +75,6 @@ services:
   - type: web
     name: frontend
     runtime: static
-    region: frankfurt
     rootDir: frontend
     buildCommand: npm install --legacy-peer-deps && npm run build
     staticPublishPath: dist
