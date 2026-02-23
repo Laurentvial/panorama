@@ -513,6 +513,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     username = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
     teamId = serializers.SerializerMethodField()
+    teamName = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
     mobile = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
@@ -524,7 +525,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         model = UserDetails
         fields = [
             'id', 'firstName', 'lastName', 'username', 'email',
-            'role', 'phone', 'mobile', 'teamId', 'active', 'createdAt', 'profilePhoto',
+            'role', 'phone', 'mobile', 'teamId', 'teamName', 'active', 'createdAt', 'profilePhoto',
             'status', 'availabilitySchedule'
         ]
         read_only_fields = ['id']
@@ -553,6 +554,11 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         team_member = obj.team_memberships.first()
         return team_member.team.id if team_member else None
 
+    def get_teamName(self, obj):
+        # Get team name from TeamMember relationship
+        team_member = obj.team_memberships.first()
+        return team_member.team.name if team_member else None
+
     def get_profilePhoto(self, obj):
         if not getattr(obj, 'profile_photo', None):
             return ''
@@ -568,9 +574,10 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['isLeader'] = instance.role == 'teamleader'
-        # Get teamId from TeamMember relationship
+        # Get teamId and teamName from TeamMember relationship
         team_member = instance.team_memberships.first()
         ret['teamId'] = team_member.team.id if team_member else None
+        ret['teamName'] = team_member.team.name if team_member else None
         ret['status'] = instance.status if instance.status else 'offline'
         ret['availabilitySchedule'] = instance.availability_schedule if instance.availability_schedule else {}
         return ret

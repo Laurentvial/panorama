@@ -30,7 +30,11 @@ export function TeamsTab() {
     
     try {
       await apiCall(`/api/teams/${teamId}/delete/`, { method: 'DELETE' });
-      refetchTeams();
+      if (selectedTeam?.team?.id === teamId) {
+        setIsTeamDetailOpen(false);
+        setSelectedTeam(null);
+      }
+      await refetchTeams();
     } catch (error) {
       console.error('Error deleting team:', error);
     }
@@ -48,9 +52,9 @@ export function TeamsTab() {
       <CreateTeamDialog
         isOpen={isCreateTeamModalOpen}
         onClose={() => setIsCreateTeamModalOpen(false)}
-        onTeamCreated={() => {
+        onTeamCreated={async () => {
           setIsCreateTeamModalOpen(false);
-          refetchTeams();
+          await refetchTeams();
         }}
       />
 
@@ -128,10 +132,10 @@ export function TeamsTab() {
         team={selectedTeam}
         isOpen={isTeamDetailOpen}
         onOpenChange={setIsTeamDetailOpen}
-        onTeamUpdated={() => {
-          refetchTeams();
+        onTeamUpdated={async () => {
+          await refetchTeams();
           if (selectedTeam?.team?.id) {
-            viewTeamDetails(selectedTeam.team.id);
+            await viewTeamDetails(selectedTeam.team.id);
           }
         }}
       />

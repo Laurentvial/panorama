@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { User } from '../types';
 
 // Shared loading state to prevent duplicate requests
@@ -37,13 +37,14 @@ export function useUsers() {
       // La structure devrait être { users: [...] }
       const usersList = response?.users || response || [];
       
-      // Vérifier que chaque utilisateur a les champs nécessaires et normaliser teamId
+      // Vérifier que chaque utilisateur a les champs nécessaires et normaliser teamId/teamName
       const validUsers = (Array.isArray(usersList) ? usersList : []).filter(user => {
         const hasId = user && (user.id !== undefined && user.id !== null);
         return hasId;
       }).map(user => ({
         ...user,
         teamId: user.teamId ?? user.team_id ?? null,
+        teamName: user.teamName ?? user.team_name ?? null,
       }));
       
       // Update cache
@@ -69,9 +70,10 @@ export function useUsers() {
     
     try {
       await apiCall(`/api/users/${userId}/`, { method: 'DELETE' });
-      // Invalidate cache and force refresh
+      // Invalidate caches and force refresh
       usersCache = [];
       usersCacheTime = 0;
+      clearApiCache('/api/users');
       await loadUsers(true);
     } catch (err) {
       throw err;
@@ -81,9 +83,10 @@ export function useUsers() {
   const toggleUserActive = useCallback(async (userId: string) => {
     try {
       await apiCall(`/api/users/${userId}/toggle-active/`, { method: 'POST' });
-      // Invalidate cache and force refresh
+      // Invalidate caches and force refresh
       usersCache = [];
       usersCacheTime = 0;
+      clearApiCache('/api/users');
       await loadUsers(true);
     } catch (err) {
       throw err;
@@ -93,6 +96,7 @@ export function useUsers() {
   const refetch = useCallback(() => {
     usersCache = [];
     usersCacheTime = 0;
+    clearApiCache('/api/users');
     return loadUsers(true);
   }, [loadUsers]);
 

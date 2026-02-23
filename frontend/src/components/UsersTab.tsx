@@ -47,9 +47,9 @@ export function UsersTab() {
   }
 
   async function handleUserUpdated() {
+    await refetch();
     setIsEditModalOpen(false);
     setSelectedUser(null);
-    await refetch();
   }
 
   function handleResetPasswordClick(user: User) {
@@ -130,7 +130,7 @@ export function UsersTab() {
                 <tbody>
                   {users.map((user) => {
                     const teamId = user.teamId ?? (user as any).team_id ?? null;
-                    const userTeam = teamId ? teams.find(t => String(t.id) === String(teamId)) : null;
+                    const teamName = user.teamName ?? (user as any).team_name ?? (teamId ? teams.find(t => String(t.id) === String(teamId))?.name : null) ?? null;
                     
                     return (
                       <tr key={user.id}>
@@ -171,7 +171,7 @@ export function UsersTab() {
                           <Badge variant="outline">{user.role}</Badge>
                         </td>
                         <td>
-                          {userTeam ? userTeam.name : '-'}
+                          {teamName || '-'}
                         </td>
                         <td>
                           <Button

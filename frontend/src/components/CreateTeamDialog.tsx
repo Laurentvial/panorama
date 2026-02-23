@@ -30,8 +30,8 @@ export function CreateTeamDialog({ isOpen, onClose, onTeamCreated }: CreateTeamD
       });
       toast.success('Équipe créée avec succès');
       setTeamFormData({ name: '' });
+      await onTeamCreated();
       onClose();
-      onTeamCreated();
     } catch (err: any) {
       console.error('Error creating team:', err);
       const data = err?.response || {};
