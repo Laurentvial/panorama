@@ -5,9 +5,10 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
 import { Plus, Pencil, Trash2, Folder, X, Copy } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
@@ -21,6 +22,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
   const navigate = useNavigate();
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [filterCategory, setFilterCategory] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [isEditCategoryDialogOpen, setIsEditCategoryDialogOpen] = useState(false);
@@ -68,7 +70,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
       toast.success('Catégorie créée avec succès');
       setIsCategoryDialogOpen(false);
       setCategoryForm({ title: '', url: '', subcategories: [] });
-      loadData();
+      clearApiCache('/api/categories');
+      await loadData();
     } catch (error: any) {
       console.error('Error creating category:', error);
       toast.error(error?.message || 'Erreur lors de la création de la catégorie');
@@ -100,7 +103,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
       setIsEditCategoryDialogOpen(false);
       setEditingCategoryId(null);
       setCategoryForm({ title: '', url: '', subcategories: [] });
-      loadData();
+      clearApiCache('/api/categories');
+      await loadData();
     } catch (error: any) {
       console.error('Error updating category:', error);
       toast.error(error?.message || 'Erreur lors de la mise à jour de la catégorie');
@@ -125,7 +129,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
     try {
       await apiCall(`/api/categories/${categoryId}/delete/`, { method: 'DELETE' });
       toast.success('Catégorie supprimée avec succès');
-      loadData();
+      clearApiCache('/api/categories');
+      await loadData();
     } catch (error: any) {
       console.error('Error deleting category:', error);
       toast.error(error?.message || 'Erreur lors de la suppression de la catégorie');
@@ -149,7 +154,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
     try {
       await apiCall(`/api/products/${productId}/duplicate/`, { method: 'POST' });
       toast.success('Produit dupliqué avec succès');
-      loadData();
+      clearApiCache('/api/products');
+      await loadData();
     } catch (error: any) {
       console.error('Error duplicating product:', error);
       toast.error(error?.message || 'Erreur lors de la duplication du produit');
@@ -175,6 +181,8 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
   }
 
   function parseSubcategories(rawSubcategory: any): string[] {
+    const cleanSpecialChars = (s: string) =>
+      s.replace(/[\[\]"'\n\r]/g, '').trim();
     const parseStringValue = (value: string): string[] => {
       const trimmed = value.trim();
       if (!trimmed) return [];
@@ -184,22 +192,22 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
         try {
           const parsed = JSON.parse(trimmed);
           if (Array.isArray(parsed)) {
-            return parsed.map((item) => String(item).trim()).filter(Boolean);
+            return parsed.map((item) => cleanSpecialChars(String(item))).filter(Boolean);
           }
         } catch {
           // Fallback below for python-style list strings.
         }
 
-        // Handle python-style serialized list strings, e.g. "['A', 'B']"
+        // Handle python-style: "['A', 'B']" or "['A'\n'B'\n'C']" (comma or newline separated)
         const inner = trimmed.slice(1, -1).trim();
         if (!inner) return [];
         return inner
-          .split(',')
-          .map((item) => item.trim().replace(/^['"]|['"]$/g, '').trim())
+          .split(/[,\n]+/)
+          .map((item) => cleanSpecialChars(item))
           .filter(Boolean);
       }
 
-      return [trimmed];
+      return [cleanSpecialChars(trimmed)];
     };
 
     const values = Array.isArray(rawSubcategory)
@@ -225,7 +233,26 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
 
         {/* Products Tab */}
         <TabsContent value="products" className="space-y-6">
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="filter-category">Catégorie</Label>
+                <Select value={filterCategory} onValueChange={setFilterCategory}>
+                  <SelectTrigger id="filter-category" className="w-[200px]">
+                    <SelectValue placeholder="Toutes les catégories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les catégories</SelectItem>
+                    <SelectItem value="none">Sans catégorie</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <Button onClick={() => navigate('/admin/produits-investissements/add')}>
               <Plus className="w-4 h-4 mr-2" />
               Créer un produit
@@ -234,7 +261,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
 
           <Card>
             <CardHeader>
-              <CardTitle>Liste des produits</CardTitle>
+              <CardTitle>Liste des produits ({filterCategory === 'all' ? products.length : filterCategory === 'none' ? products.filter(p => !p.categoryId).length : products.filter(p => p.categoryId === filterCategory).length})</CardTitle>
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -256,13 +283,13 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                         <th className="text-left py-3 px-4">Périodes de rentabilité disponibles</th>
                         <th className="text-left py-3 px-4">Période de rentabilité</th>
                         <th className="text-left py-3 px-4">Fonds disponible</th>
-                        <th className="text-left py-3 px-4">Durée</th>
+                        <th className="text-left py-3 px-4 min-w-[140px]">Durée</th>
                         <th className="text-left py-3 px-4">Statut</th>
                         <th className="text-right py-3 px-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {products.map((product) => {
+                      {(filterCategory === 'all' ? products : filterCategory === 'none' ? products.filter(p => !p.categoryId) : products.filter(p => p.categoryId === filterCategory)).map((product) => {
                         const category = categories.find(c => c.id === product.categoryId);
                         
                         return (
@@ -370,8 +397,13 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                             <td className="py-3 px-4">
                               {(product.availableFunds ?? product.available_funds) ? 'Oui' : 'Non'}
                             </td>
-                            <td className="py-3 px-4">
-                              {product.duration ? `${String(product.duration)} Jours` : '-'}
+                            <td className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                              {product.duration ? (() => {
+                                const days = parseInt(String(product.duration).replace(/\D/g, ''), 10) || 0;
+                                if (days <= 0) return '-';
+                                const months = Math.round(days / 30);
+                                return `${days} Jours (${months} mois)`;
+                              })() : '-'}
                             </td>
                             <td className="py-3 px-4">
                               <Button

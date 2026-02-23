@@ -51,6 +51,8 @@ export function ManageAssets() {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterExchange, setFilterExchange] = useState<string>('all');
+  const [filterIndex, setFilterIndex] = useState<string>('all');
   const [activeTypeTab, setActiveTypeTab] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
@@ -903,6 +905,14 @@ export function ManageAssets() {
       }
       // If we somehow have a selected tab but can't resolve it, fallback to showing all.
     }
+    // Apply exchange (bourse) filter - trim both sides for consistent matching
+    if (filterExchange !== 'all' && (asset.exchange || '').trim() !== (filterExchange || '').trim()) {
+      return false;
+    }
+    // Apply index (indice) filter - trim both sides for consistent matching
+    if (filterIndex !== 'all' && (asset.sourceIndex || '').trim() !== (filterIndex || '').trim()) {
+      return false;
+    }
     return (
       asset.name?.toLowerCase().includes(searchLower) ||
       asset.type?.toLowerCase().includes(searchLower) ||
@@ -970,18 +980,50 @@ export function ManageAssets() {
         </CardContent>
       </Card>
 
-      {/* Search */}
+      {/* Search and filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="relative">
-            {/* @ts-ignore - react-icons accepts className at runtime */}
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <Input
-              className="pl-10"
-              placeholder="Rechercher par nom, type, référence, catégorie..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="space-y-4">
+            <div className="relative">
+              {/* @ts-ignore - react-icons accepts className at runtime */}
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <Input
+                className="pl-10"
+                placeholder="Rechercher par nom, type, référence, catégorie..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="filter-exchange">Bourse</Label>
+                <Select value={filterExchange} onValueChange={setFilterExchange}>
+                  <SelectTrigger id="filter-exchange">
+                    <SelectValue placeholder="Toutes les bourses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les bourses</SelectItem>
+                    {(Array.from(new Set(assets.map((a: any) => (a.exchange || '').trim()).filter(Boolean))) as string[]).sort().map((exchange: string) => (
+                      <SelectItem key={exchange} value={exchange}>{exchange}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="filter-index">Indice</Label>
+                <Select value={filterIndex} onValueChange={setFilterIndex}>
+                  <SelectTrigger id="filter-index">
+                    <SelectValue placeholder="Tous les indices" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les indices</SelectItem>
+                    {(Array.from(new Set(assets.map((a: any) => (a.sourceIndex || '').trim()).filter(Boolean))) as string[]).sort().map((index: string) => (
+                      <SelectItem key={index} value={index}>{index}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

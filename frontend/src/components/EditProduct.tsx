@@ -8,7 +8,7 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
 import { ArrowLeft, Save, RefreshCw, Trash2, Plus, X } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
 import { DateInput } from './ui/date-input';
@@ -268,12 +268,21 @@ export function EditProduct() {
       // We'll use subcategory as a fallback for initial display, but save type separately
       const productTypeFromDB = (product.type || '').trim();
       const productSubcategory = product.subcategory;
-      // Convert subcategory to array if it's a string (backward compatibility)
+      // Convert subcategory to array - handle JSON array string from backend
       let subcategoryArray: string[] = [];
       if (Array.isArray(productSubcategory)) {
         subcategoryArray = productSubcategory;
       } else if (typeof productSubcategory === 'string' && productSubcategory.trim()) {
-        subcategoryArray = [productSubcategory.trim()];
+        try {
+          const parsed = JSON.parse(productSubcategory.trim());
+          subcategoryArray = Array.isArray(parsed)
+            ? parsed.map((s: any) => String(s).trim()).filter(Boolean)
+            : [productSubcategory.trim()];
+        } catch {
+          // Not valid JSON - treat as comma-separated or single value
+          const parts = productSubcategory.split(',').map((s: string) => s.trim()).filter(Boolean);
+          subcategoryArray = parts.length > 0 ? parts : [productSubcategory.trim()];
+        }
       }
       // For display: if type is empty but subcategory exists, use subcategory as fallback
       const displayType = productTypeFromDB || (subcategoryArray.length > 0 ? subcategoryArray[0] : '');
@@ -429,7 +438,15 @@ export function EditProduct() {
           name: formData.name,
           categoryId: formData.categoryId,
           minEntryValue: formData.minEntryValue,
-          profitability: profitabilityText
+          maxEntryValue: formData.maxEntryValue,
+          profitability: profitabilityText,
+          noProfitability: formData.noProfitability,
+          profitabilityPeriod: formData.profitabilityPeriod,
+          interestPeriod: Array.isArray(formData.interestPeriod) ? formData.interestPeriod : [],
+          duration: formData.duration,
+          availableFunds: formData.availableFunds,
+          availabilityStart: formData.availabilityStart,
+          availabilityEnd: formData.availabilityEnd
         })
       });
       return response?.description || response?.text || '';
@@ -746,9 +763,9 @@ export function EditProduct() {
                 }))
                 .filter((row) => row.assetId && !isNaN(row.proportion) && row.proportion > 0)
             : undefined,
-          // Gestion des prix
-          minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : undefined,
-          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : undefined
+          // Gestion des prix - envoyer null explicitement quand vide pour permettre la suppression
+          minEntryValue: formData.minEntryValue ? parseFloat(formData.minEntryValue) : null,
+          maxEntryValue: formData.maxEntryValue ? parseFloat(formData.maxEntryValue) : null
         };
         
         // Toujours inclure profitability si une valeur existe
@@ -768,6 +785,12 @@ export function EditProduct() {
       }
 
       toast.success('Produit mis à jour avec succès');
+      
+      // Clear products API cache so the list shows fresh data when navigating back
+      clearApiCache('/api/products');
+      if (id) {
+        clearApiCache(`/api/products/${id}`);
+      }
       
       // Reload the product data to get the updated image URL
       if (id) {
@@ -1748,6 +1771,7 @@ export function EditProduct() {
                             <SelectItem value="sp500">S&P 500</SelectItem>
                             <SelectItem value="dowjones">Dow Jones Industrial Average</SelectItem>
                             <SelectItem value="cac40">CAC 40</SelectItem>
+                            <SelectItem value="ibex35">IBEX 35</SelectItem>
                             <SelectItem value="dax">DAX</SelectItem>
                             <SelectItem value="ftse100">FTSE 100</SelectItem>
                             <SelectItem value="cacmid60">CAC Mid 60</SelectItem>

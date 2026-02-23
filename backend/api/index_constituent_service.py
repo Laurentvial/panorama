@@ -1,8 +1,12 @@
 """
 Index Constituent Service for fetching stock lists from market indices
 Supports US indices via Financial Modeling Prep API and European indices via pytickersymbols
+When FMP returns 403, falls back to free public CSV sources (S&P 500, NASDAQ-100)
 """
+import csv
+import io
 import os
+import re
 import logging
 import requests
 from typing import Dict, List, Optional
@@ -12,6 +16,46 @@ logger = logging.getLogger(__name__)
 # Get FMP API key from environment
 FMP_API_KEY = os.getenv('FMP_API_KEY', '')
 FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3'
+# Stable API (recommended since Aug 2025 - v3 legacy routes are auth-gated for free plans)
+FMP_STABLE_BASE_URL = 'https://financialmodelingprep.com/stable'
+# Map v3 endpoint names to stable endpoint paths (v3 uses underscore, stable uses hyphen)
+FMP_STABLE_ENDPOINT_MAP = {
+    'nasdaq_constituent': 'nasdaq-constituent',
+    'sp500_constituent': 'sp500-constituent',
+    'dowjones_constituent': 'dowjones-constituent',
+}
+
+# Static Euronext 100 constituents (main components, updated periodically)
+# Symbols: .PA=Paris, .AS=Amsterdam, .BR=Brussels, .LS=Lisbon, .IR=Dublin, .OL=Oslo
+EURONEXT_100_STATIC = [
+    ('ASML.AS', 'ASML Holding'), ('MC.PA', 'LVMH'), ('SHEL.AS', 'Shell'), ('AIR.PA', 'Airbus'),
+    ('PRX.AS', 'Prosus'), ('SU.PA', 'Schneider Electric'), ('EL.PA', 'EssilorLuxottica'),
+    ('SAF.PA', 'Safran'), ('TTE.PA', 'TotalEnergies'), ('AI.PA', 'Air Liquide'),
+    ('ABI.BR', 'AB InBev'), ('BNP.PA', 'BNP Paribas'), ('KER.PA', 'Kering'), ('SAN.PA', 'Sanofi'),
+    ('INGA.AS', 'ING Groep'), ('PHIA.AS', 'Philips'), ('OR.PA', "L'Oréal"), ('DSY.PA', 'Dassault Systèmes'),
+    ('VIV.PA', 'Vivendi'), ('BN.PA', 'Danone'), ('GLE.PA', 'Société Générale'), ('ACA.PA', 'Crédit Agricole'),
+    ('EN.PA', 'Bouygues'), ('ENGI.PA', 'Engie'), ('ORA.PA', 'Orange'), ('SGO.PA', 'Saint-Gobain'),
+    ('VIE.PA', 'Veolia'), ('RMS.PA', 'Hermès'), ('ML.PA', 'Michelin'), ('RI.PA', 'Pernod Ricard'),
+    ('CS.PA', 'AXA'), ('SW.PA', 'Sodexo'), ('CAP.PA', 'Capgemini'), ('WLN.PA', 'Worldline'),
+    ('ATO.PA', 'Atos'), ('ERF.PA', 'Eurofins'), ('DG.PA', 'Vinci'), ('ENR.PA', 'Siemens Energy'),
+    ('FP.PA', 'TotalEnergies'), ('HO.PA', 'Thales'), ('MT.AS', 'ArcelorMittal'), ('AD.AS', 'Ahold Delhaize'),
+    ('HEIA.AS', 'Heineken'), ('UNA.AS', 'Unilever'), ('ADYEN.AS', 'Adyen'), ('IMCD.AS', 'IMCD'),
+    ('WKL.AS', 'Wolters Kluwer'), ('RAND.AS', 'Randstad'), ('KPN.AS', 'KPN'), ('AKZA.AS', 'Akzo Nobel'),
+    ('ASM.AS', 'ASM International'), ('AGN.AS', 'Aegon'), ('NN.AS', 'NN Group'),
+    ('SOLB.BR', 'Solvay'), ('UCB.BR', 'UCB'), ('KBC.BR', 'KBC Group'), ('PROX.BR', 'Proximus'),
+    ('ELI.BR', 'Elia'), ('EDP.LS', 'EDP'), ('GALP.LS', 'Galp'), ('JMT.LS', 'Jerónimo Martins'),
+    ('NOS.LS', 'NOS'), ('BCP.LS', 'Millennium bcp'), ('EDPR.LS', 'EDP Renováveis'),
+    ('CRH.IR', 'CRH'), ('RYA.IR', 'Ryanair'), ('GL9.IR', 'Glanbia'),
+    ('YAR.OL', 'Yara'), ('NHY.OL', 'Norsk Hydro'), ('EQNR.OL', 'Equinor'), ('DNB.OL', 'DNB'),
+    ('TEL.OL', 'Telenor'), ('MOWI.OL', 'Mowi'), ('ORK.OL', 'Orkla'),
+]
+
+# Free fallback URLs when FMP returns 403 (no API key required)
+FALLBACK_CSV_URLS = {
+    'sp500_constituent': 'https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv',
+    'nasdaq_constituent': 'https://raw.githubusercontent.com/mhyavas/SP500-NASDAQ100/main/nasdaq100.csv',
+    # Dow Jones: no reliable free CSV found; will show clear error
+}
 
 # Import pytickersymbols with error handling
 try:
@@ -91,7 +135,18 @@ class IndexConstituentService:
             'source': 'pytickersymbols',
             'index_name': 'DAX',
             'name': 'DAX',
-            'region': 'Germany'
+            'region': 'Allemagne'
+        },
+        'ibex35': {
+            'source': 'pytickersymbols',
+            'index_name': 'IBEX 35',
+            'name': 'IBEX 35',
+            'region': 'Espagne'
+        },
+        'euronext100': {
+            'source': 'static',
+            'name': 'Euronext 100',
+            'region': 'Europe'
         },
         'ftse100': {
             'source': 'pytickersymbols',
@@ -156,64 +211,187 @@ class IndexConstituentService:
             return self._fetch_from_fmp(config['endpoint'])
         elif source == 'pytickersymbols':
             return self._fetch_from_pytickersymbols(config['index_name'])
+        elif source == 'static':
+            return self._fetch_from_static(index_name_lower)
         else:
             raise ValueError(f"Unknown source: {source}")
     
+    def _sanitize_fmp_error(self, msg: str) -> str:
+        """Remove API key from error messages to avoid exposure."""
+        return re.sub(r'apikey=[^&\s]+', 'apikey=[REDACTED]', str(msg))
+
     def _fetch_from_fmp(self, endpoint: str) -> List[Dict]:
         """
-        Fetch index constituents from Financial Modeling Prep API
-        
-        Args:
-            endpoint: FMP endpoint name (e.g., 'sp500_constituent')
-        
-        Returns:
-            List of stock dictionaries
+        Fetch index constituents from Financial Modeling Prep API.
+        Tries stable endpoint first (free plan), falls back to v3 (legacy), then free CSV when FMP returns 403.
+        For S&P 500 and NASDAQ-100, works without FMP_API_KEY using free public CSV.
         """
+        # When no FMP key and fallback exists, use free CSV directly
+        if not self.fmp_api_key and endpoint in FALLBACK_CSV_URLS:
+            logger.info(f"No FMP_API_KEY; using free CSV fallback for {endpoint}")
+            return self._fetch_from_fallback_csv(endpoint)
         if not self.fmp_api_key:
-            logger.error("FMP_API_KEY not configured")
-            raise ValueError("FMP_API_KEY is required for US indices")
+            raise ValueError(
+                "FMP_API_KEY is required for Dow Jones. For S&P 500 and NASDAQ, a free CSV fallback is used. "
+                "Get a key at https://site.financialmodelingprep.com/developer/docs"
+            )
         
-        url = f"{FMP_BASE_URL}/{endpoint}"
         params = {'apikey': self.fmp_api_key}
+        last_error = None
         
+        # Try stable endpoint first (available on free plan since Aug 2025)
+        stable_path = FMP_STABLE_ENDPOINT_MAP.get(endpoint)
+        if stable_path:
+            url = f"{FMP_STABLE_BASE_URL}/{stable_path}"
+            try:
+                logger.info(f"Fetching constituents from FMP stable: {stable_path}")
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                constituents = self._parse_fmp_constituents(data, endpoint)
+                if constituents:
+                    return constituents
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                logger.warning(f"FMP stable endpoint failed: {self._sanitize_fmp_error(str(e))}")
+            except ValueError as e:
+                last_error = e
+                logger.warning(f"FMP stable parse error: {e}")
+        
+        # Fall back to v3 legacy endpoint
+        url = f"{FMP_BASE_URL}/{endpoint}"
         try:
-            logger.info(f"Fetching constituents from FMP: {endpoint}")
+            logger.info(f"Fetching constituents from FMP v3: {endpoint}")
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
-            
-            # Check for API errors
-            if isinstance(data, dict) and 'Error Message' in data:
-                logger.error(f"FMP API error: {data['Error Message']}")
-                raise ValueError(f"FMP API error: {data['Error Message']}")
-            
-            # FMP returns a list of constituents
-            if not isinstance(data, list):
-                logger.error(f"Unexpected FMP response format: {type(data)}")
-                return []
-            
-            # Transform FMP response to standardized format
-            constituents = []
-            for item in data:
-                constituent = {
-                    'symbol': item.get('symbol', ''),
-                    'name': item.get('name', ''),
-                    'sector': item.get('sector', ''),
-                    'subSector': item.get('subSector', ''),
-                    'headQuarter': item.get('headQuarter', ''),
-                    'dateFirstAdded': item.get('dateFirstAdded', ''),
-                    'cik': item.get('cik', ''),
-                    'founded': item.get('founded', '')
-                }
-                constituents.append(constituent)
-            
-            logger.info(f"Successfully fetched {len(constituents)} constituents from FMP")
-            return constituents
-            
+            return self._parse_fmp_constituents(data, endpoint)
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching from FMP: {str(e)}")
-            raise ValueError(f"Error fetching from FMP: {str(e)}")
+            last_error = e
+        except ValueError as e:
+            last_error = e
+            logger.warning(f"FMP v3 parse error: {e}")
+        
+        # Try free CSV fallback when FMP returns 403 or error in response body (e.g. invalid API key)
+        can_fallback = endpoint in FALLBACK_CSV_URLS
+        is_403 = (
+            last_error is not None
+            and hasattr(last_error, 'response')
+            and last_error.response is not None
+            and last_error.response.status_code == 403
+        )
+        is_parse_error = isinstance(last_error, ValueError)
+        if last_error and can_fallback and (is_403 or is_parse_error):
+            try:
+                logger.info(f"FMP returned error, using free CSV fallback for {endpoint}")
+                return self._fetch_from_fallback_csv(endpoint)
+            except Exception as fallback_err:
+                logger.warning(f"Fallback CSV also failed: {fallback_err}")
+        
+        # Raise with helpful message (never expose API key)
+        err_msg = self._sanitize_fmp_error(str(last_error)) if last_error else "Unknown error"
+        logger.error(f"FMP fetch failed: {err_msg}")
+        if last_error and hasattr(last_error, 'response') and last_error.response is not None:
+            status = last_error.response.status_code
+            if status == 403:
+                if endpoint in FALLBACK_CSV_URLS:
+                    raise ValueError(
+                        "FMP API returned 403 and the free fallback also failed. "
+                        "For S&P 500 and NASDAQ-100, ensure GitHub is accessible. "
+                        "Or set a valid FMP_API_KEY: https://site.financialmodelingprep.com/developer/docs"
+                    )
+                raise ValueError(
+                    "FMP API returned 403 Forbidden. Dow Jones requires a valid FMP API key. "
+                    "Set FMP_API_KEY in your environment: https://site.financialmodelingprep.com/developer/docs"
+                )
+        raise ValueError(f"Error fetching from FMP: {err_msg}")
+
+    def _fetch_from_fallback_csv(self, endpoint: str) -> List[Dict]:
+        """Fetch index constituents from free public CSV when FMP returns 403."""
+        url = FALLBACK_CSV_URLS.get(endpoint)
+        if not url:
+            raise ValueError(f"No fallback available for {endpoint}")
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        content = response.text
+        reader = csv.DictReader(io.StringIO(content))
+        rows = list(reader)
+        constituents = []
+        if endpoint == 'sp500_constituent':
+            # datasets/s-and-p-500-companies: Symbol, Security, GICS Sector, GICS Sub-Industry, Headquarters Location, ...
+            for row in rows:
+                symbol = (row.get('Symbol') or '').strip()
+                if not symbol:
+                    continue
+                constituents.append({
+                    'symbol': symbol,
+                    'name': (row.get('Security') or '').strip(),
+                    'sector': (row.get('GICS Sector') or '').strip(),
+                    'subSector': (row.get('GICS Sub-Industry') or '').strip(),
+                    'headQuarter': (row.get('Headquarters Location') or '').strip(),
+                    'dateFirstAdded': (row.get('Date added') or '').strip(),
+                    'cik': (row.get('CIK') or '').strip(),
+                    'founded': (row.get('Founded') or '').strip(),
+                })
+        elif endpoint == 'nasdaq_constituent':
+            # mhyavas/SP500-NASDAQ100: Symbol, Description, GICS Sector, ...
+            for row in rows:
+                symbol = (row.get('Symbol') or '').strip().strip('"')
+                if not symbol:
+                    continue
+                name = (row.get('Description') or '').strip().strip('"')
+                sector = (row.get('GICS Sector') or row.get('GICS sector') or '').strip().strip('"')
+                constituents.append({
+                    'symbol': symbol,
+                    'name': name,
+                    'sector': sector,
+                    'subSector': '',
+                    'headQuarter': '',
+                    'dateFirstAdded': '',
+                    'cik': '',
+                    'founded': '',
+                })
+        logger.info(
+            f"Fetched {len(constituents)} constituents from free CSV fallback ({endpoint}). "
+            "Note: NASDAQ fallback uses NASDAQ-100 list."
+        )
+        return constituents
+
+    def _parse_fmp_constituents(self, data: any, endpoint: str) -> List[Dict]:
+        """Parse FMP API response into standardized constituent format."""
+        if isinstance(data, dict) and 'Error Message' in data:
+            raise ValueError(f"FMP API error: {data['Error Message']}")
+        if not isinstance(data, list):
+            logger.error(f"Unexpected FMP response format: {type(data)}")
+            return []
+        constituents = []
+        for item in data:
+            constituent = {
+                'symbol': item.get('symbol', ''),
+                'name': item.get('name', ''),
+                'sector': item.get('sector', ''),
+                'subSector': item.get('subSector', ''),
+                'headQuarter': item.get('headQuarter', ''),
+                'dateFirstAdded': item.get('dateFirstAdded', ''),
+                'cik': item.get('cik', ''),
+                'founded': item.get('founded', '')
+            }
+            constituents.append(constituent)
+        logger.info(f"Successfully fetched {len(constituents)} constituents from FMP ({endpoint})")
+        return constituents
     
+    def _fetch_from_static(self, index_id: str) -> List[Dict]:
+        """Fetch index constituents from static list (e.g. Euronext 100)."""
+        if index_id == 'euronext100':
+            constituents = [
+                {'symbol': sym, 'name': name, 'sector': '', 'subSector': '', 'headQuarter': '',
+                 'dateFirstAdded': '', 'cik': '', 'founded': ''}
+                for sym, name in EURONEXT_100_STATIC
+            ]
+            logger.info(f"Loaded {len(constituents)} constituents from static Euronext 100 list")
+            return constituents
+        raise ValueError(f"No static data for index: {index_id}")
+
     def _fetch_from_pytickersymbols(self, index_name: str) -> List[Dict]:
         """
         Fetch index constituents from pytickersymbols library
@@ -248,6 +426,8 @@ class IndexConstituentService:
                 exchange_suffix = '.PA'  # Paris
             elif 'DAX' in index_name:
                 exchange_suffix = '.DE'  # Frankfurt/Germany
+            elif 'IBEX' in index_name:
+                exchange_suffix = '.MC'  # Madrid/Spain
             elif 'FTSE' in index_name:
                 exchange_suffix = '.L'   # London
             

@@ -611,8 +611,8 @@ class Product(models.Model):
     no_profitability = models.BooleanField(default=True)  # Produit sans rentabilité (True = pas de rentabilité, False = avec rentabilité)
     is_variable_profitability = models.CharField(max_length=10, default='Non')  # Rentabilité variable (Oui/Non)
     variable_profitability = models.CharField(max_length=100, default="", blank=True)  # Taux maximum si variable, sinon vide
-    profitability_period = models.CharField(max_length=50, default="", blank=True)  # Période de rentabilité
-    interest_period = models.CharField(max_length=50, default="", blank=True)  # Période d'intérêt disponible
+    profitability_period = models.CharField(max_length=200, default="", blank=True)  # Période de rentabilité
+    interest_period = models.CharField(max_length=200, default="", blank=True)  # Période d'intérêt disponible (peut contenir plusieurs valeurs séparées par des virgules)
     
     # Gestion du produit
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité

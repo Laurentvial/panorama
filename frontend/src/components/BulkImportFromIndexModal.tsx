@@ -67,8 +67,8 @@ export function BulkImportFromIndexModal({
       }
     } catch (err: any) {
       console.error('Error fetching supported indices:', err);
-      setError(err.message || 'Failed to fetch supported indices');
-      toast.error('Failed to load supported indices');
+      setError(err.message || 'Échec du chargement des indices');
+      toast.error('Échec du chargement des indices');
     } finally {
       setLoadingIndices(false);
     }
@@ -76,7 +76,7 @@ export function BulkImportFromIndexModal({
 
   const handleImport = async () => {
     if (!selectedIndex) {
-      toast.error('Please select an index');
+      toast.error('Veuillez sélectionner un indice');
       return;
     }
 
@@ -99,17 +99,17 @@ export function BulkImportFromIndexModal({
       setStep('complete');
       
       if (response.imported > 0) {
-        toast.success(`Successfully imported ${response.imported} assets`);
+        toast.success(`${response.imported} actifs importés avec succès`);
         onSuccess();
       } else if (response.skipped === response.total) {
-        toast.info('All assets already exist in the system');
+        toast.info('Tous les actifs existent déjà dans le système');
       } else {
-        toast.warning('Import completed with errors');
+        toast.warning('Import terminé avec des erreurs');
       }
     } catch (err: any) {
       console.error('Error during bulk import:', err);
-      setError(err.message || 'Failed to import assets');
-      toast.error('Failed to import assets');
+      setError(err.message || 'Échec de l\'import des actifs');
+      toast.error('Échec de l\'import des actifs');
       setStep('select');
     } finally {
       setImporting(false);
@@ -139,9 +139,9 @@ export function BulkImportFromIndexModal({
       <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '100%' }}>
         <div className="modal-header">
           <h2 className="modal-title">
-            {step === 'select' && 'Bulk Import from Index'}
-            {step === 'importing' && 'Importing Assets...'}
-            {step === 'complete' && 'Import Complete'}
+            {step === 'select' && 'Import en masse depuis un indice'}
+            {step === 'importing' && 'Import des actifs en cours...'}
+            {step === 'complete' && 'Import terminé'}
           </h2>
           <Button
             type="button"
@@ -171,7 +171,7 @@ export function BulkImportFromIndexModal({
               )}
 
               <div>
-                <Label htmlFor="index-select">Select Market Index</Label>
+                <Label htmlFor="index-select">Sélectionner l'indice de marché</Label>
                 <select
                   id="index-select"
                   value={selectedIndex}
@@ -186,7 +186,7 @@ export function BulkImportFromIndexModal({
                     marginTop: '8px'
                   }}
                 >
-                  <option value="">-- Select an index --</option>
+                  <option value="">-- Sélectionner un indice --</option>
                   {indices.map((index) => (
                     <option key={index.id} value={index.id}>
                       {index.name} ({index.region})
@@ -195,13 +195,13 @@ export function BulkImportFromIndexModal({
                 </select>
                 {loadingIndices && (
                   <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                    Loading indices...
+                    Chargement des indices...
                   </p>
                 )}
               </div>
 
               <div>
-                <Label htmlFor="exchange-select">Exchange (Bourse)</Label>
+                <Label htmlFor="exchange-select">Bourse</Label>
                 <select
                   id="exchange-select"
                   value={selectedExchange}
@@ -217,16 +217,16 @@ export function BulkImportFromIndexModal({
                 >
                   <option value="">-- Sélectionner une bourse (optionnel) --</option>
                   <option value="NASDAQ">NASDAQ</option>
-                  <option value="NYSE">NYSE (New York Stock Exchange)</option>
-                  <option value="EURONEXT">EURONEXT (Paris, Amsterdam, Brussels)</option>
-                  <option value="LSE">LSE (London Stock Exchange)</option>
+                  <option value="NYSE">NYSE (Bourse de New York)</option>
+                  <option value="EURONEXT">EURONEXT (Paris, Amsterdam, Bruxelles)</option>
+                  <option value="LSE">LSE (Bourse de Londres)</option>
                   <option value="XETR">XETR (Deutsche Börse)</option>
-                  <option value="TSE">TSE (Tokyo Stock Exchange)</option>
+                  <option value="TSE">TSE (Bourse de Tokyo)</option>
                   <option value="HKEX">HKEX (Hong Kong)</option>
                   <option value="SSE">SSE (Shanghai)</option>
                   <option value="TSX">TSX (Toronto)</option>
-                  <option value="ASX">ASX (Australian Securities Exchange)</option>
-                  <option value="SWX">SWX (Swiss Exchange)</option>
+                  <option value="ASX">ASX (Bourse australienne)</option>
+                  <option value="SWX">SWX (Bourse suisse)</option>
                   <option value="BINANCE">BINANCE (Crypto)</option>
                 </select>
                 <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
@@ -235,7 +235,7 @@ export function BulkImportFromIndexModal({
               </div>
 
               <div>
-                <Label style={{ marginBottom: '12px', display: 'block' }}>Import Options</Label>
+                <Label style={{ marginBottom: '12px', display: 'block' }}>Options d'import</Label>
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                   <input
@@ -246,7 +246,7 @@ export function BulkImportFromIndexModal({
                     style={{ width: '18px', height: '18px' }}
                   />
                   <label htmlFor="fetch-details" style={{ fontSize: '14px', cursor: 'pointer' }}>
-                    Fetch full company details (slower but complete)
+                    Récupérer les détails complets des sociétés (plus lent mais complet)
                   </label>
                 </div>
 
@@ -259,7 +259,7 @@ export function BulkImportFromIndexModal({
                     style={{ width: '18px', height: '18px' }}
                   />
                   <label htmlFor="skip-duplicates" style={{ fontSize: '14px', cursor: 'pointer' }}>
-                    Skip existing assets
+                    Ignorer les actifs déjà existants
                   </label>
                 </div>
               </div>
@@ -272,8 +272,8 @@ export function BulkImportFromIndexModal({
                   borderRadius: '6px',
                   fontSize: '13px'
                 }}>
-                  <strong>Note:</strong> Fetching full details uses Alpha Vantage API which has rate limits 
-                  (5 requests/minute). Large indices may take significant time to import.
+                  <strong>Note :</strong> La récupération des détails utilise l'API Alpha Vantage qui a des limites 
+                  (5 requêtes/minute). Les grands indices peuvent prendre du temps à importer.
                 </div>
               )}
 
@@ -285,7 +285,7 @@ export function BulkImportFromIndexModal({
                   borderRadius: '6px',
                   fontSize: '13px'
                 }}>
-                  <strong>Selected:</strong> {getSelectedIndexName()}
+                  <strong>Sélectionné :</strong> {getSelectedIndexName()}
                 </div>
               )}
             </div>
@@ -303,10 +303,10 @@ export function BulkImportFromIndexModal({
               <Loader2 size={48} className="animate-spin" style={{ color: '#2196f3' }} />
               <div style={{ textAlign: 'center' }}>
                 <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>
-                  Importing assets from {getSelectedIndexName()}...
+                  Import des actifs depuis {getSelectedIndexName()}...
                 </p>
                 <p style={{ fontSize: '14px', color: '#666' }}>
-                  This may take several minutes depending on the index size and options selected.
+                  Cela peut prendre plusieurs minutes selon la taille de l'indice et les options sélectionnées.
                 </p>
               </div>
             </div>
@@ -342,7 +342,7 @@ export function BulkImportFromIndexModal({
                   <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e65100' }}>
                     {importResult.skipped}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Skipped</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>Ignorés</div>
                 </div>
 
                 <div style={{
@@ -363,7 +363,7 @@ export function BulkImportFromIndexModal({
                   }}>
                     {importResult.errors.length}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Errors</div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>Erreurs</div>
                 </div>
               </div>
 
@@ -375,14 +375,14 @@ export function BulkImportFromIndexModal({
                 textAlign: 'center',
                 fontSize: '14px'
               }}>
-                Total symbols processed: <strong>{importResult.total}</strong>
+                Symboles traités au total : <strong>{importResult.total}</strong>
               </div>
 
               {/* Errors List */}
               {importResult.errors.length > 0 && (
                 <div>
                   <Label style={{ marginBottom: '8px', display: 'block' }}>
-                    Errors ({importResult.errors.length})
+                    Erreurs ({importResult.errors.length})
                   </Label>
                   <div style={{
                     maxHeight: '200px',
@@ -418,7 +418,7 @@ export function BulkImportFromIndexModal({
                 onClick={handleClose}
                 disabled={importing}
               >
-                Cancel
+                Annuler
               </Button>
               <Button
                 onClick={handleImport}
@@ -427,10 +427,10 @@ export function BulkImportFromIndexModal({
                 {importing ? (
                   <>
                     <Loader2 size={16} className="animate-spin" style={{ marginRight: '8px' }} />
-                    Importing...
+                    Import en cours...
                   </>
                 ) : (
-                  'Start Import'
+                  'Démarrer l\'import'
                 )}
               </Button>
             </>
@@ -438,13 +438,13 @@ export function BulkImportFromIndexModal({
 
           {step === 'importing' && (
             <div style={{ width: '100%', textAlign: 'center', color: '#666', fontSize: '14px' }}>
-              Please wait while assets are being imported...
+              Veuillez patienter pendant l'import des actifs...
             </div>
           )}
 
           {step === 'complete' && (
             <Button onClick={handleClose}>
-              Close
+              Fermer
             </Button>
           )}
         </div>

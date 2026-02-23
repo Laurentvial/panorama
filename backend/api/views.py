@@ -9238,8 +9238,12 @@ def product_create(request):
     except ValueError as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
-    subcategory_value = request.data.get('subcategory', '') or request.data.get('type', '')
+    # Handle subcategory: use only what is explicitly provided, do not fallback to type
+    raw_sub = request.data.get('subcategory', '')
+    if isinstance(raw_sub, list):
+        subcategory_value = json.dumps(raw_sub) if raw_sub else ''
+    else:
+        subcategory_value = (raw_sub or '').strip() if raw_sub else ''
     
     # Handle default field - support both string and boolean
     default_value_raw = request.data.get('default', False)
@@ -10104,13 +10108,13 @@ def product_update(request, product_id):
         # Always update type, even if empty string
         product.type = request.data['type'] or ''
     
-    # Handle subcategory: use subcategory if provided, otherwise fallback to type for backward compatibility
+    # Handle subcategory: use only what is explicitly provided, do not fallback to type
     if 'subcategory' in request.data:
-        # Always update subcategory, even if empty string
-        product.subcategory = request.data['subcategory'] or ''
-    elif 'type' in request.data:
-        # Fallback: use type as subcategory if subcategory is not provided (backward compatibility)
-        product.subcategory = request.data['type'] or ''
+        raw = request.data['subcategory']
+        if isinstance(raw, list):
+            product.subcategory = json.dumps(raw) if raw else ''
+        else:
+            product.subcategory = (raw or '').strip() if raw else ''
     if 'status' in request.data:
         product.status = request.data['status']
     if 'categoryId' in request.data:
@@ -10627,7 +10631,19 @@ def product_generate_description(request):
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
         min_entry_value = request.data.get('minEntryValue', '')
+        max_entry_value = request.data.get('maxEntryValue', '')
         profitability = request.data.get('profitability', '')
+        no_profitability = request.data.get('noProfitability', True)
+        if isinstance(no_profitability, str):
+            no_profitability = no_profitability.lower() in ('oui', 'true', '1', 'yes')
+        duration = request.data.get('duration', '')
+        profitability_period = request.data.get('profitabilityPeriod', '')
+        interest_period = request.data.get('interestPeriod', [])
+        available_funds = request.data.get('availableFunds', False)
+        if isinstance(available_funds, str):
+            available_funds = available_funds.lower() in ('oui', 'true', '1', 'yes')
+        availability_start = request.data.get('availabilityStart', '')
+        availability_end = request.data.get('availabilityEnd', '')
         
         # Get category name if available
         category_name = ''
@@ -10638,11 +10654,34 @@ def product_generate_description(request):
             except ProductCategory.DoesNotExist:
                 pass
         
+        # Format interest period (périodes de rentabilité disponibles)
+        interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else '')
+        
+        # Format duration with months equivalent
+        duration_str = duration or 'Non spécifiée'
+        if duration and str(duration).isdigit():
+            days = int(duration)
+            months = round(days / 30)
+            duration_str = f"{days} jours ({months} mois)"
+        
+        rentability_str = "non applicable" if no_profitability else (profitability or "Non spécifiée")
+        max_invest_str = f"{max_entry_value}€" if max_entry_value else "sans plafond"
+        funds_str = "Oui" if available_funds else "Non"
+        availability_str = ""
+        if availability_start or availability_end:
+            availability_str = f"Disponible du {availability_start or 'N/A'} au {availability_end or 'N/A'}"
+        
         prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
 - Nom: {name or 'Non spécifié'}
 - Catégorie: {category_name or 'Non spécifiée'}
 - Investissement minimum: {min_entry_value or 'Non spécifié'}€
-- Rentabilité: {profitability or 'Non spécifiée'}%
+- Plafond de souscription: {max_invest_str}
+- Durée: {duration_str}
+- Rentabilité: {rentability_str}
+- Période de rentabilité: {profitability_period or 'Non spécifiée'}
+- Périodes d'intérêt disponibles: {interest_period_str or 'Non spécifiées'}
+- Fonds disponibles: {funds_str}
+{f'- Période de disponibilité: {availability_str}' if availability_str else ''}
 
 La description doit être:
 - Professionnelle et rassurante
@@ -10792,10 +10831,19 @@ def product_generate_cgv(request):
         max_entry_value = request.data.get('maxEntryValue', '').strip()
         duration = request.data.get('duration', '').strip()
         no_profitability = request.data.get('noProfitability', True)
+        if isinstance(no_profitability, str):
+            no_profitability = no_profitability.lower() in ('oui', 'true', '1', 'yes')
         profitability_rate = request.data.get('profitabilityRate', '').strip()
         profitability_min = request.data.get('profitabilityMin', '').strip()
         profitability_max = request.data.get('profitabilityMax', '').strip()
         is_variable_profitability = request.data.get('isVariableProfitability', 'Non').strip()
+        profitability_period = request.data.get('profitabilityPeriod', '').strip()
+        interest_period = request.data.get('interestPeriod', [])
+        available_funds = request.data.get('availableFunds', False)
+        if isinstance(available_funds, str):
+            available_funds = available_funds.lower() in ('oui', 'true', '1', 'yes')
+        availability_start = request.data.get('availabilityStart', '').strip()
+        availability_end = request.data.get('availabilityEnd', '').strip()
         
         # Construire le texte de rentabilité
         if no_profitability:
@@ -10807,14 +10855,33 @@ def product_generate_cgv(request):
         else:
             rentability_text = "à définir"
         
-        # Prompt simplifié
+        # Format duration with months
+        duration_str = duration or 'à définir'
+        if duration and str(duration).isdigit():
+            days = int(duration)
+            months = round(days / 30)
+            duration_str = f"{days} jours ({months} mois)"
+        
+        # Format interest period (périodes de rentabilité disponibles)
+        interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else 'à définir')
+        
+        funds_str = "Oui" if available_funds else "Non"
+        availability_str = ""
+        if availability_start or availability_end:
+            availability_str = f"Du {availability_start or 'N/A'} au {availability_end or 'N/A'}"
+        
+        # Prompt avec toutes les informations
         prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
 
-Informations:
+Informations du produit:
 - Investissement minimum: {min_entry_value or 'à définir'}€
-- Investissement maximum: {max_entry_value or 'à définir'}€
-- Durée: {duration or 'à définir'}
+- Plafond de souscription (investissement maximum): {max_entry_value or 'à définir'}€ (ou "sans plafond" si vide)
+- Durée du contrat: {duration_str}
 - Rentabilité: {rentability_text}
+- Période de rentabilité: {profitability_period or 'à définir'}
+- Périodes d'intérêt disponibles (versement des intérêts): {interest_period_str}
+- Fonds disponibles: {funds_str}
+{f'- Période de disponibilité du produit: {availability_str}' if availability_str else ''}
 
 Structure (14 sections obligatoires, toutes complètes):
 1. Objet
@@ -10833,6 +10900,10 @@ Structure (14 sections obligatoires, toutes complètes):
 14. Réclamations (14.1 Procédure, 14.2 Médiation)
 
 Règles:
+- Utiliser EXACTEMENT les valeurs fournies ci-dessus (durée, rentabilité, périodes, fonds disponibles, plafond) dans les sections concernées
+- Section 3 Durée: mentionner la durée en jours et mois
+- Section 4 Rémunération: intégrer la période de rentabilité et les périodes d'intérêt disponibles
+- Mentionner si les fonds sont disponibles ou non selon l'information fournie
 - Chaque sous-section: 2-3 phrases minimum
 - Pas de placeholders [ ], pas de symboles #, *, -
 - Texte professionnel et juridique français

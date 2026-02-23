@@ -205,8 +205,6 @@ export function AddProduct() {
 
   async function generateAIDescription(): Promise<string> {
     try {
-      // Appel à l'API pour générer une description avec l'IA
-      // Pour l'instant, on simule une réponse. Vous pouvez remplacer par un vrai appel API
       const profitabilityText = formData.isVariableProfitability === 'Non' 
         ? formData.profitabilityRate 
         : `${formData.profitabilityMin}% - ${formData.profitabilityMax}%`;
@@ -217,7 +215,15 @@ export function AddProduct() {
           name: formData.name,
           categoryId: formData.categoryId,
           minEntryValue: formData.minEntryValue,
-          profitability: profitabilityText
+          maxEntryValue: formData.maxEntryValue,
+          profitability: profitabilityText,
+          noProfitability: formData.noProfitability,
+          profitabilityPeriod: formData.profitabilityPeriod,
+          interestPeriod: Array.isArray(formData.interestPeriod) ? formData.interestPeriod : [],
+          duration: formData.duration,
+          availableFunds: formData.availableFunds,
+          availabilityStart: formData.availabilityStart,
+          availabilityEnd: formData.availabilityEnd
         })
       });
       return response?.description || response?.text || '';
@@ -415,8 +421,8 @@ export function AddProduct() {
         if (formData.categoryId) formDataToSend.append('categoryId', formData.categoryId);
         if (Array.isArray(formData.subcategory) && formData.subcategory.length > 0) {
           formDataToSend.append('subcategory', JSON.stringify(formData.subcategory));
-        } else if (formData.type) {
-          formDataToSend.append('subcategory', formData.type);
+        } else {
+          formDataToSend.append('subcategory', '');
         }
         formDataToSend.append('status', formData.status);
         // Price = minEntryValue if maxEntryValue is empty, otherwise use minEntryValue as base
@@ -467,10 +473,9 @@ export function AddProduct() {
             profitability: profitabilityValue,
             duration: !formData.noProfitability ? formData.duration : undefined,
             categoryId: formData.categoryId || undefined,
-            // Use subcategory array or type as fallback (for Smart Portfolio and other types)
             subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
               ? formData.subcategory 
-              : formData.type || undefined,
+              : [],
             status: formData.status,
             cgv: formData.cgv || undefined,
             // active field removed - using status instead
@@ -1355,6 +1360,7 @@ export function AddProduct() {
                             <SelectItem value="sp500">S&P 500</SelectItem>
                             <SelectItem value="dowjones">Dow Jones Industrial Average</SelectItem>
                             <SelectItem value="cac40">CAC 40</SelectItem>
+                            <SelectItem value="ibex35">IBEX 35</SelectItem>
                             <SelectItem value="dax">DAX</SelectItem>
                             <SelectItem value="ftse100">FTSE 100</SelectItem>
                             <SelectItem value="cacmid60">CAC Mid 60</SelectItem>
