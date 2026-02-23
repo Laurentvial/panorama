@@ -132,6 +132,22 @@ export function StockChart({
   // Use useMemo to recalculate filtered data when timeframe or allChartData changes
   const chartData = useMemo(() => getFilteredData(), [allChartData, timeframe]);
 
+  // Y-axis domain: 10% below min, 5% above max for the selected period
+  const yDomain = useMemo(() => {
+    if (!chartData || chartData.length === 0) return undefined;
+    const values = chartData.flatMap((p) => [
+      p.low,
+      p.high,
+      p.open,
+      p.close,
+    ].filter((v) => typeof v === 'number' && Number.isFinite(v)));
+    if (values.length === 0) return undefined;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || min * 0.01 || 1;
+    return [min - 0.1 * range, max + 0.05 * range] as [number, number];
+  }, [chartData]);
+
   // Compute timeframe performance from the displayed series.
   useEffect(() => {
     if (!onPerformanceChange) return;
@@ -359,6 +375,7 @@ export function StockChart({
               style={{ fontSize: '12px' }}
             />
             <YAxis
+              domain={yDomain}
               tickFormatter={(value) => formatPrice(value)}
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
@@ -386,6 +403,7 @@ export function StockChart({
               style={{ fontSize: '12px' }}
             />
             <YAxis
+              domain={yDomain}
               tickFormatter={(value) => formatPrice(value)}
               stroke="#6b7280"
               style={{ fontSize: '12px' }}

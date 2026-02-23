@@ -117,6 +117,13 @@ export function ProductDetail() {
     setIsDescriptionExpanded(false);
   }, [id, dataType]);
 
+  // When viewing an asset, only overview tab is available - reset if on analysis/news
+  useEffect(() => {
+    if (dataType === 'asset' && (activeTab === 'analysis' || activeTab === 'news')) {
+      setActiveTab('overview');
+    }
+  }, [dataType, activeTab]);
+
   // Keep a stable currency value for hooks (never behind conditional returns)
   const tradeAssetCurrency =
     dataType === 'asset' ? (String(data?.currency || 'USD').trim().toUpperCase() || 'USD') : 'EUR';
@@ -2539,8 +2546,10 @@ export function ProductDetail() {
       }}>
         {[
           { id: 'overview', label: 'Vue d\'ensemble', icon: BarChart3 },
-          { id: 'analysis', label: 'Analyse', icon: FileText },
-          { id: 'news', label: 'Actualités', icon: Newspaper },
+          ...(dataType === 'product' ? [
+            { id: 'analysis', label: 'Analyse', icon: FileText },
+            { id: 'news', label: 'Actualités', icon: Newspaper },
+          ] : []),
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

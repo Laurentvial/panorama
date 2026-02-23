@@ -19,7 +19,7 @@ class CloudinaryDeferredStorage(Storage):
         if not (c.get('CLOUD_NAME') and c.get('API_KEY') and c.get('API_SECRET')):
             raise ValueError(
                 "Cloudinary not configured. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, "
-                "and CLOUDINARY_API_SECRET in Render Dashboard → backend → Environment, then redeploy."
+                "and CLOUDINARY_API_SECRET to the panorama-secrets environment group (or backend Environment), then redeploy."
             )
 
     def save(self, name, content, max_length=None):

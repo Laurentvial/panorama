@@ -1071,8 +1071,8 @@ export function PlatformDashboard() {
                         {post.imageUrl ? (
                           <div
                             style={{
-                              width: isMobile ? '100%' : 140,
-                              height: isMobile ? 160 : 96,
+                              width: isMobile ? '100%' : 300,
+                              height: isMobile ? 220 : '100%',
                               borderRadius: 14,
                               overflow: 'hidden',
                               background: 'rgba(2, 6, 23, 0.06)',
@@ -1093,7 +1093,7 @@ export function PlatformDashboard() {
                           </div>
                         ) : null}
 
-                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0, maxWidth: isMobile ? undefined : 380, display: 'flex', flexDirection: 'column', gap: 10 }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
                               {post.category ? (

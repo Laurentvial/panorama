@@ -44,7 +44,7 @@ export function PlatformDiscover() {
   const [positions, setPositions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('smart_portfolio');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const featuredSliderRef = useRef<HTMLDivElement | null>(null);
 
@@ -254,10 +254,6 @@ export function PlatformDiscover() {
     const matchesCategory = selectedCategory === 'all' || asset.category === selectedCategory;
     
     // Filter by type filter (tabs)
-    if (selectedTypeFilter === 'all') {
-      return matchesCategory;
-    }
-    
     const assetProductType = getAssetProductType(asset);
     const matchesType = assetProductType === selectedTypeFilter;
     
@@ -333,10 +329,7 @@ export function PlatformDiscover() {
 
   // Filter Smart Portfolios by selected type filter
   const smartPortfolios = allSmartPortfolios.filter((product: any) => {
-    if (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') {
-      return true;
-    }
-    return false;
+    return selectedTypeFilter === 'smart_portfolio';
   });
 
   const sortedSmartPortfolios = useMemo(() => {
@@ -363,13 +356,9 @@ export function PlatformDiscover() {
 
   // Filter other internal products by selected type filter
   const otherInternalProducts = allOtherInternalProducts.filter((product: any) => {
-    if (selectedTypeFilter === 'all') {
-      return true;
-    }
     if (selectedTypeFilter === 'smart_portfolio') {
       return false; // Smart portfolios are shown separately
     }
-    
     const productTypeCategory = getProductType(product);
     return productTypeCategory === selectedTypeFilter;
   });
@@ -431,7 +420,6 @@ export function PlatformDiscover() {
 
   // Available tabs with their labels
   const allTabs = [
-    { value: 'all', label: 'Tous' },
     { value: 'smart_portfolio', label: 'Smart Portfolios' },
     { value: 'actions', label: 'Actions' },
     { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
@@ -444,36 +432,20 @@ export function PlatformDiscover() {
   ];
 
   // Filter tabs to only show those with visible items
-  const visibleTabs = allTabs.filter((tab) => {
-    if (tab.value === 'all') {
-      // Always show 'Tous' if there are any visible items at all
-      return getItemCountByType('all') > 0;
-    }
-    return getItemCountByType(tab.value) > 0;
-  });
+  const visibleTabs = allTabs.filter((tab) => getItemCountByType(tab.value) > 0);
 
-  // If selected filter has no items, switch to 'all' if available, or first available tab
+  // If selected filter has no items, switch to first available tab
   useEffect(() => {
     if (visibleTabs.length > 0 && getItemCountByType(selectedTypeFilter) === 0) {
-      const allTab = visibleTabs.find(t => t.value === 'all');
-      if (allTab && getItemCountByType('all') > 0) {
-        setSelectedTypeFilter('all');
-      } else if (visibleTabs.length > 0) {
-        setSelectedTypeFilter(visibleTabs[0].value);
-      }
+      setSelectedTypeFilter(visibleTabs[0].value);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assets.length, products.length]);
 
-  // If selected filter has no items, switch to 'all' if available, or first available tab
+  // If selected filter has no items, switch to first available tab
   useEffect(() => {
     if (getItemCountByType(selectedTypeFilter) === 0 && visibleTabs.length > 0) {
-      const allTab = visibleTabs.find(t => t.value === 'all');
-      if (allTab && getItemCountByType('all') > 0) {
-        setSelectedTypeFilter('all');
-      } else if (visibleTabs.length > 0) {
-        setSelectedTypeFilter(visibleTabs[0].value);
-      }
+      setSelectedTypeFilter(visibleTabs[0].value);
     }
   }, [visibleTabs.length, assets.length, products.length]);
 
@@ -631,7 +603,7 @@ export function PlatformDiscover() {
   const visibleSmartPortfolios = sortedSmartPortfolios.filter((product: any) => !parseFeatured(product?.isFeatured));
   const visibleOtherInternalProducts = sortedOtherInternalProducts.filter((product: any) => !parseFeatured(product?.isFeatured));
 
-  const featuredAssets = (assets || [])
+  const allFeaturedAssets = (assets || [])
     .filter((asset: any) => parseFeatured(asset?.isFeatured))
     .map((asset: any) => ({
       key: `asset-${asset.id}`,
@@ -639,13 +611,24 @@ export function PlatformDiscover() {
       data: asset,
     }));
 
-  const featuredProducts = (products || [])
+  const allFeaturedProducts = (products || [])
     .filter((product: any) => parseFeatured(product?.isFeatured))
     .map((product: any) => ({
       key: `product-${product.id}`,
       kind: 'product' as const,
       data: product,
     }));
+
+  // Filter featured items by the active tab (selectedTypeFilter)
+  const featuredAssets = allFeaturedAssets.filter((item) => {
+    const assetProductType = getAssetProductType(item.data);
+    return assetProductType === selectedTypeFilter;
+  });
+
+  const featuredProducts = allFeaturedProducts.filter((item) => {
+    const productTypeCategory = getProductType(item.data);
+    return productTypeCategory === selectedTypeFilter;
+  });
 
   const featuredSliderItems = [...featuredAssets, ...featuredProducts].sort((a, b) =>
     String(a?.data?.name || '').localeCompare(String(b?.data?.name || ''), 'fr', { sensitivity: 'base' })
@@ -1143,8 +1126,8 @@ export function PlatformDiscover() {
             </div>
           )}
 
-          {/* Smart Portfolios Section - Only visible when 'all' or 'smart_portfolio' tab is selected */}
-          {visibleSmartPortfolios.length > 0 && (selectedTypeFilter === 'all' || selectedTypeFilter === 'smart_portfolio') && (
+          {/* Smart Portfolios Section - Only visible when 'smart_portfolio' tab is selected */}
+          {visibleSmartPortfolios.length > 0 && selectedTypeFilter === 'smart_portfolio' && (
             <div style={{ marginBottom: '50px' }}>
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>

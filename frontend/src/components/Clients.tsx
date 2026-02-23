@@ -4,13 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Search, Eye, Calendar, FileText, LogIn, Trash2, MoreVertical, Users, UserCheck, X } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
+import { Plus, Search, Eye, LogIn, Trash2, Users, UserCheck, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
@@ -204,16 +198,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
       console.error('Error deleting clients:', error);
       alert('Erreur lors de la suppression des clients');
     }
-  }
-
-  function handlePlaceAppointment(clientId: string) {
-    // TODO: Implémenter la fonctionnalité de placement de RDV
-    console.log('Placer RDV pour client:', clientId);
-  }
-
-  function handleAddNote(clientId: string) {
-    // TODO: Implémenter la fonctionnalité d'ajout de note
-    console.log('Ajouter note pour client:', clientId);
   }
 
   function handlePlatformAccess(clientId: string) {
@@ -501,34 +485,23 @@ export function Clients({ onSelectClient }: ClientsProps) {
                       </td>
                       <td>
                         <div className="clients-actions">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handlePlaceAppointment(client.id)}>
-                                <Calendar className="w-4 h-4 mr-2" />
-                                Placer RDV
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleAddNote(client.id)}>
-                                <FileText className="w-4 h-4 mr-2" />
-                                Ajouter une note
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handlePlatformAccess(client.id)}>
-                                <LogIn className="w-4 h-4 mr-2" />
-                                Connexion à la plateforme client
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => handleDeleteClient(client.id)}
-                                className="text-red-600"
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Supprimer
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handlePlatformAccess(client.id)}
+                            title="Connexion à la plateforme client"
+                          >
+                            <LogIn className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteClient(client.id)}
+                            title="Supprimer"
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </td>
                     </tr>
