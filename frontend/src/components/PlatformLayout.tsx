@@ -703,13 +703,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     alt="Logo" 
                     style={location.pathname.startsWith('/platform/product/') 
                       ? { 
-                          width: isMobile ? '64px' : '160px', 
-                          height: isMobile ? '64px' : '80px', 
+                          width: isPhone ? '96px' : isMobile ? '64px' : '160px', 
+                          height: isPhone ? '96px' : isMobile ? '64px' : '80px', 
                           objectFit: 'contain' 
                         }
                       : { 
-                          maxHeight: isMobile ? '32px' : '48px', 
-                          maxWidth: isMobile ? '120px' : '160px', 
+                          maxHeight: isPhone ? '48px' : isMobile ? '32px' : '48px', 
+                          maxWidth: isPhone ? '160px' : isMobile ? '120px' : '160px', 
                           objectFit: 'contain' 
                         }
                     } 

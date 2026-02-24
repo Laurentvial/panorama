@@ -1521,8 +1521,8 @@ export function ProductDetail() {
             position: 'sticky',
             top: isMobile ? '76px' : '88px',
             alignSelf: 'flex-start',
-            maxHeight: isMobile ? 'calc(100vh - 96px)' : 'calc(100% - 108px)',
-            overflowY: 'auto',
+            maxHeight: isMobile ? 'none' : 'calc(100% - 108px)',
+            overflowY: isMobile ? 'visible' : 'auto',
             minWidth: 0,
             overflowX: 'hidden',
           }}>

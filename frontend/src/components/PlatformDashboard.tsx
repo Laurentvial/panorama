@@ -731,7 +731,7 @@ export function PlatformDashboard() {
   };
 
   return (
-    <div style={{ padding: isPhone ? '12px' : isMobile ? '16px' : '20px 20px' }}>
+    <div style={{ padding: isPhone ? 0 : isMobile ? '16px' : '20px 20px' }}>
 
       {loading ? (
         <div>Chargement...</div>
@@ -741,6 +741,7 @@ export function PlatformDashboard() {
           {hasIncompleteEnabledSteps && (
             <Card
               style={{
+                marginTop: isPhone ? '-12px' : undefined,
                 marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
                 borderRadius: 16,
                 overflow: 'hidden',
