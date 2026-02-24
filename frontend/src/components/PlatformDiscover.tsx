@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { MdPadding } from 'react-icons/md';
 import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
+import { formatSubcategoryForDisplay } from './transactionUtils';
 
 // Component for asset logo with fallback
 function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }: any) {
@@ -987,7 +988,7 @@ export function PlatformDiscover() {
                                     <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
                                   )}
                                   <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
-                                    {product.subcategory}
+                                    {formatSubcategoryForDisplay(product.subcategory)}
                                   </div>
                                 </>
                               )}
@@ -1104,7 +1105,7 @@ export function PlatformDiscover() {
                                   <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
                                 )}
                                 <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
-                                  {product.subcategory}
+                                  {formatSubcategoryForDisplay(product.subcategory)}
                                 </div>
                               </>
                             )}
@@ -1248,7 +1249,7 @@ export function PlatformDiscover() {
                                     fontWeight: '500',
                                     color: '#6b7280',
                                   }}>
-                                    {portfolio.subcategory}
+                                    {formatSubcategoryForDisplay(portfolio.subcategory)}
                                   </div>
                                 </>
                               )}
@@ -1673,7 +1674,7 @@ export function PlatformDiscover() {
                                 fontWeight: '500',
                                 color: '#6b7280',
                               }}>
-                                {asset.subcategory}
+                                {formatSubcategoryForDisplay(asset.subcategory)}
                               </div>
                             </>
                           )}
@@ -1860,7 +1861,7 @@ export function PlatformDiscover() {
                                   fontWeight: '500',
                                   color: '#6b7280',
                                 }}>
-                                  {product.subcategory}
+                                  {formatSubcategoryForDisplay(product.subcategory)}
                                 </div>
                               </>
                             )}
@@ -1987,7 +1988,7 @@ export function PlatformDiscover() {
                                 <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>
                               )}
                               <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>
-                                {product.subcategory}
+                                {formatSubcategoryForDisplay(product.subcategory)}
                               </div>
                             </>
                           )}

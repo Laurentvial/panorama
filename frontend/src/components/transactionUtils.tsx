@@ -1,5 +1,37 @@
 // Shared transaction utilities and constants
 
+/** Sanitize and format product subcategory for display. Handles JSON arrays and malformed strings. */
+export const formatSubcategoryForDisplay = (subcategory: any): string => {
+  if (subcategory == null || subcategory === '') return '';
+  const raw = String(subcategory).trim();
+  if (!raw) return '';
+
+  const cleanValue = (s: string): string => {
+    return String(s ?? '')
+      .replace(/^['"\[\]]+|['"\[\]\n\r]+$/g, '')
+      .trim();
+  };
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const cleaned = parsed.map((s: any) => cleanValue(String(s ?? ''))).filter(Boolean);
+      return cleaned.join(', ');
+    }
+  } catch {
+    // Not valid JSON, try to extract from malformed array-like string
+  }
+
+  // Handle python-style or malformed: ["'A'","'B'"] or ['A','B']
+  if (raw.startsWith('[') && raw.includes(']')) {
+    const inner = raw.slice(1, raw.lastIndexOf(']')).trim();
+    const parts = inner.split(/,\s*/).map((p) => cleanValue(p)).filter(Boolean);
+    if (parts.length > 0) return parts.join(', ');
+  }
+
+  return cleanValue(raw);
+};
+
 export const getTypeLabel = (type: string): string => {
   const typeMap: { [key: string]: string } = {
     'depot': 'Dépôt',
@@ -30,7 +62,10 @@ export const getStatusLabel = (status: string, transactionType?: string): string
     'conteste': 'Contesté',
     'annule': 'Annulé',
   };
-  return statusMap[normalizedStatus] || status;
+  const mapped = statusMap[normalizedStatus];
+  if (mapped) return mapped;
+  // Fallback for empty/null/undefined or unrecognized: show '-' when no meaningful value
+  return (status != null && String(status).trim()) ? status : '-';
 };
 
 /** Returns background and text colors for status badges. Validé=green, En attente=orange. */

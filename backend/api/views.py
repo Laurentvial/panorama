@@ -230,6 +230,39 @@ def _normalize_duration_value(raw_duration) -> str:
     return str(days)
 
 
+def _sanitize_product_subcategory(raw_sub) -> str:
+    """
+    Sanitize product subcategory: parse JSON array, remove invalid characters
+    (brackets, stray quotes, newlines), return clean JSON string for storage.
+    """
+    def _clean_item(s):
+        s = str(s or '').strip()
+        # Remove surrounding quotes and brackets
+        s = re.sub(r'^[\'"\[\]]+|[\'"\[\]\n\r]+$', '', s).strip()
+        # Remove any remaining control chars
+        s = re.sub(r'[\n\r]', '', s)
+        return s
+
+    if raw_sub is None:
+        return ''
+    if isinstance(raw_sub, list):
+        cleaned = [_clean_item(x) for x in raw_sub if _clean_item(x)]
+        return json.dumps(cleaned) if cleaned else ''
+    raw_str = str(raw_sub).strip()
+    if not raw_str:
+        return ''
+    try:
+        parsed = json.loads(raw_str)
+        if isinstance(parsed, list):
+            cleaned = [_clean_item(x) for x in parsed if _clean_item(x)]
+            return json.dumps(cleaned) if cleaned else ''
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Single string - sanitize and return as single-element array for consistency
+    s = _clean_item(raw_str)
+    return json.dumps([s]) if s else ''
+
+
 def _add_months_keep_day(d: date, months: int) -> date:
     year = d.year + (d.month - 1 + months) // 12
     month = (d.month - 1 + months) % 12 + 1
@@ -7544,7 +7577,8 @@ def client_transaction_create(request, client_id):
             story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
             story.append(Spacer(1, 5*mm))
             
-            # Payment
+            # Payment - start on new page to avoid heading isolated at bottom of previous page
+            story.append(PageBreak())
             story.append(Paragraph("3/ MODALITÉS DE PAIEMENT", heading_style))
             story.append(Paragraph("a. LA SOCIÉTÉ reconnaîtra la validité du versement comptant et en consentira quittance régulière dès réception du versement.", normal_style))
             story.append(Paragraph(f"b. L'INVESTISSEUR percevra ses intérêts en « <b>{interest_period}</b> ».", normal_style))
@@ -9224,12 +9258,9 @@ def product_create(request):
     except ValueError as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Handle subcategory: use only what is explicitly provided, do not fallback to type
+    # Handle subcategory: sanitize to remove invalid characters
     raw_sub = request.data.get('subcategory', '')
-    if isinstance(raw_sub, list):
-        subcategory_value = json.dumps(raw_sub) if raw_sub else ''
-    else:
-        subcategory_value = (raw_sub or '').strip() if raw_sub else ''
+    subcategory_value = _sanitize_product_subcategory(raw_sub)
     
     # Handle default field - support both string and boolean
     default_value_raw = request.data.get('default', False)
@@ -9936,7 +9967,8 @@ def product_contract_pdf(request, product_id):
     story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
     story.append(Spacer(1, 5*mm))
     
-    # Payment
+    # Payment - start on new page to avoid heading isolated at bottom of previous page
+    story.append(PageBreak())
     story.append(Paragraph("3/ MODALITÉS DE PAIEMENT", heading_style))
     story.append(Paragraph("a. LA SOCIÉTÉ reconnaîtra la validité du versement comptant et en consentira quittance régulière dès réception du versement.", normal_style))
     story.append(Paragraph(f"b. L'INVESTISSEUR percevra ses intérêts en « <b>{interest_period}</b> ».", normal_style))
@@ -10094,13 +10126,9 @@ def product_update(request, product_id):
         # Always update type, even if empty string
         product.type = request.data['type'] or ''
     
-    # Handle subcategory: use only what is explicitly provided, do not fallback to type
+    # Handle subcategory: sanitize to remove invalid characters
     if 'subcategory' in request.data:
-        raw = request.data['subcategory']
-        if isinstance(raw, list):
-            product.subcategory = json.dumps(raw) if raw else ''
-        else:
-            product.subcategory = (raw or '').strip() if raw else ''
+        product.subcategory = _sanitize_product_subcategory(request.data['subcategory'])
     if 'status' in request.data:
         product.status = request.data['status']
     if 'categoryId' in request.data:

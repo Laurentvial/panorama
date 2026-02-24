@@ -722,8 +722,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                             objectFit: 'contain' 
                           }
                         : { 
-                            maxHeight: isPhone ? '48px' : isMobile ? '32px' : '48px', 
-                            maxWidth: isPhone ? '160px' : isMobile ? '120px' : '160px', 
+                            maxHeight: isPhone ? '64px' : isMobile ? '48px' : '64px', 
+                            maxWidth: isPhone ? '200px' : isMobile ? '180px' : '220px', 
                             objectFit: 'contain' 
                           }
                       } 

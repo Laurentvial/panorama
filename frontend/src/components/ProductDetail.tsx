@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
+import { formatSubcategoryForDisplay } from './transactionUtils';
 import { StockChart } from './StockChart';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
@@ -1086,7 +1087,7 @@ export function ProductDetail() {
           {product.subcategory && (
             <>
               {' > '}
-              <span>{product.subcategory}</span>
+              <span>{formatSubcategoryForDisplay(product.subcategory)}</span>
             </>
           )}
           {' > '}

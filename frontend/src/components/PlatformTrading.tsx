@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
-import { getStatusColors } from './transactionUtils';
+import { getStatusColors, getStatusLabel } from './transactionUtils';
 
 export function PlatformTrading() {
   const { currentUser } = useUser();
@@ -178,12 +178,14 @@ export function PlatformTrading() {
     }
   };
 
+  // Same calculation logic as PlatformPortfolio (Solde block) for consistency
   const calculatedFunds = useMemo(() => {
     let investedCapital = 0;
     let tradingPortfolio = 0;
     let bonus = 0;
 
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
+    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
     completedTransactions.forEach((transaction: any) => {
       const amountNum = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
@@ -198,6 +200,10 @@ export function PlatformTrading() {
           break;
         case 'bonus':
           bonus += amt;
+          investedCapital += amt;
+          break;
+        case 'interets':
+          // Interest transactions credit gains to cash balance (same as PlatformPortfolio)
           investedCapital += amt;
           break;
         case 'achat':
@@ -480,15 +486,6 @@ export function PlatformTrading() {
   const fundsTransactions = useMemo(() => {
     return (transactions || []).filter((t: any) => t?.type === 'depot' || t?.type === 'retrait');
   }, [transactions]);
-
-  const statusLabel = (s: string, transactionType?: string) => {
-    const type = String(transactionType || '').toLowerCase();
-    if (s === 'valide') return 'Validé';
-    if (s === 'en_cours' && ['bonus', 'transfert', 'interets'].includes(type)) return 'En attente';
-    if (s === 'en_cours') return 'En cours';
-    if (s === 'en_attente_paiement') return 'En attente';
-    return s || '-';
-  };
 
   return (
     <div>
@@ -1071,7 +1068,7 @@ export function PlatformTrading() {
                             <td style={{ padding: '10px 8px' }}>
                               {(() => {
                                 const { text } = getStatusColors(t.status, t.type);
-                                return <span style={{ color: text, fontWeight: 600 }}>{statusLabel(t.status, t.type)}</span>;
+                                return <span style={{ color: text, fontWeight: 600 }}>{getStatusLabel(t.status, t.type)}</span>;
                               })()}
                             </td>
                           </tr>
