@@ -32,6 +32,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [bulkTeamId, setBulkTeamId] = useState('');
   const [bulkManagerId, setBulkManagerId] = useState('');
+  const [onlineClientIds, setOnlineClientIds] = useState<Set<string>>(new Set());
   
   const isGestionnaire = currentUser?.role === 'gestionnaire';
 
@@ -60,12 +61,29 @@ export function Clients({ onSelectClient }: ClientsProps) {
       
       setClients(clientsData.clients || []);
       setTeams(teamsData.teams || []);
+      const ids = clientsData.onlineClientIds || [];
+      setOnlineClientIds(new Set(ids));
     } catch (error) {
       console.error('Error loading clients:', error);
     } finally {
       setLoading(false);
     }
   }
+
+  // Poll online status every 30 seconds
+  useEffect(() => {
+    async function fetchOnlineIds() {
+      try {
+        const data = await apiCall('/api/clients/online-ids/');
+        const ids = data?.onlineClientIds || [];
+        setOnlineClientIds(new Set(ids));
+      } catch {
+        // Silently ignore polling errors
+      }
+    }
+    const intervalId = setInterval(fetchOnlineIds, 30000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   async function handleToggleActive(clientId: string) {
     try {
@@ -415,6 +433,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                     <th>Statut</th>
                     <th>Équipe</th>
                     <th>Actif</th>
+                    <th>En ligne</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -482,6 +501,13 @@ export function Clients({ onSelectClient }: ClientsProps) {
                         >
                           {client.active ? 'Désactiver' : 'Activer'}
                         </Button>
+                      </td>
+                      <td>
+                        <span
+                          className={`clients-online-indicator ${onlineClientIds.has(client.id) ? 'clients-online' : 'clients-offline'}`}
+                          title={onlineClientIds.has(client.id) ? 'Connecté' : 'Déconnecté'}
+                          aria-label={onlineClientIds.has(client.id) ? 'Connecté' : 'Déconnecté'}
+                        />
                       </td>
                       <td>
                         <div className="clients-actions">

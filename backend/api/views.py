@@ -766,6 +766,27 @@ def _get_client_ids_user_has_access_to(request):
     return None
 
 
+ONLINE_ACTIVITY_MINUTES = 5
+ONLINE_ACTION_TYPES = ('login', 'page_view', 'click')
+
+
+def _get_online_client_ids(request):
+    """
+    Returns list of client IDs that have recent platform activity (login, page_view, click)
+    within ONLINE_ACTIVITY_MINUTES. Respects user access (gestionnaire/teamleader).
+    """
+    cutoff = timezone.now() - timedelta(minutes=ONLINE_ACTIVITY_MINUTES)
+    qs = ClientPlatformLog.objects.filter(
+        created_at__gte=cutoff,
+        action_type__in=ONLINE_ACTION_TYPES,
+    ).values_list('client_id', flat=True).distinct()
+    online_ids = list(qs)
+    allowed_ids = _get_client_ids_user_has_access_to(request)
+    if allowed_ids is not None:
+        online_ids = [cid for cid in online_ids if cid in allowed_ids]
+    return online_ids
+
+
 def _check_gestionnaire_client_access(request, client):
     """
     If user has role 'gestionnaire', ensure they are assigned to this client.
@@ -830,7 +851,20 @@ class ClientView(generics.ListAPIView):
     
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
-        return Response({'clients': response.data})
+        online_client_ids = _get_online_client_ids(request)
+        return Response({
+            'clients': response.data,
+            'onlineClientIds': online_client_ids,
+        })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def client_online_ids(request):
+    """Lightweight endpoint returning IDs of clients with recent platform activity (for polling)."""
+    online_ids = _get_online_client_ids(request)
+    return Response({'onlineClientIds': online_ids})
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
