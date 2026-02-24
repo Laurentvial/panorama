@@ -9,6 +9,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework.response import Response
 from .models import Client
+from .models import ClientSuccessor
 from .models import ClientConversation
 from .models import ClientChatMessage
 from .models import Note
@@ -39,6 +40,7 @@ from .serializer import (
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
+    ClientSuccessorSerializer,
     ClientHistoryLogSerializer, ClientPlatformLogSerializer,
     AppNotificationSerializer,
 )
@@ -2457,6 +2459,26 @@ def client_update_identity(request):
         client.postal_code = request.data.get('postalCode', '') or ''
     if 'city' in request.data:
         client.city = request.data.get('city', '') or ''
+    if 'email' in request.data:
+        new_email = (request.data.get('email', '') or '').strip().lower()
+        if new_email:
+            # Check if email is already used by another client (excluding current)
+            existing = Client.objects.filter(email__iexact=new_email).exclude(id=client.id).first()
+            if existing:
+                return Response({'error': 'Un client avec cet e-mail existe déjà'}, status=status.HTTP_400_BAD_REQUEST)
+            client.email = new_email
+    if 'phone' in request.data:
+        client.phone = request.data.get('phone', '') or ''
+    if 'mobile' in request.data:
+        client.mobile = request.data.get('mobile', '') or ''
+    if 'civility' in request.data:
+        client.civility = request.data.get('civility', '') or ''
+    if 'birthPlace' in request.data:
+        client.birth_place = request.data.get('birthPlace', '') or ''
+    if 'nationality' in request.data:
+        client.nationality = request.data.get('nationality', '') or ''
+    if 'successor' in request.data:
+        client.successor = request.data.get('successor', '') or ''
     if 'preferences' in request.data:
         prefs = request.data.get('preferences')
         # Accept array, or JSON-encoded string
@@ -2587,6 +2609,22 @@ def client_update_identity(request):
             logger = logging.getLogger(__name__)
             logger.error(f"Error uploading selfie photo: {str(e)}")
 
+    # Handle profile photo upload (client self-service)
+    if 'profilePhoto' in request.FILES:
+        profile_photo_file = request.FILES['profilePhoto']
+        try:
+            original_filename = profile_photo_file.name
+            _, ext = os.path.splitext(original_filename)
+            custom_filename = f'{client_id}_profile{ext}'
+            if client.profile_photo:
+                client.profile_photo.delete(save=False)
+            client.profile_photo.save(custom_filename, profile_photo_file, save=False)
+            update_fields_list.append('profile_photo')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading profile photo: {str(e)}")
+
     # Update KYC status when documents are submitted
     if 'kycStatus' in request.data:
         client.kyc_status = request.data.get('kycStatus', 'pending') or 'pending'
@@ -2633,7 +2671,8 @@ def client_update_identity(request):
     # Build update fields list
     base_update_fields = [
         'fname', 'middle_name', 'lname', 'legal_name', 'sex', 'birth_date',
-        'address', 'postal_code', 'city',
+        'address', 'postal_code', 'city', 'email',
+        'phone', 'mobile', 'civility', 'birth_place', 'nationality', 'successor',
         'preferences',
         'trading_objective', 'planned_investment_12m', 'risk_reward_profile',
         'compliance_family_flags', 'funds_sources',
@@ -2646,6 +2685,126 @@ def client_update_identity(request):
     client.save(update_fields=all_update_fields)
     serializer = ClientSerializer(client, context={'request': request})
     return Response({'client': serializer.data, 'userType': 'client'})
+
+
+def _get_client_from_token(request):
+    """Extract and return client from client_ token. Returns (client, error_response) or (client, None)."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return None, Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return None, Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return None, Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    return client, None
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def client_successors_list(request):
+    """List or create successors for the current client (client_ token)."""
+    client, err = _get_client_from_token(request)
+    if err:
+        return err
+    if request.method == 'POST':
+        data = request.data
+        successor_id = uuid.uuid4().hex[:12]
+        while ClientSuccessor.objects.filter(id=successor_id).exists():
+            successor_id = uuid.uuid4().hex[:12]
+        order = ClientSuccessor.objects.filter(client=client).count()
+        share_val = data.get('sharePercentage')
+        try:
+            share_pct = int(share_val) if share_val is not None and str(share_val).strip() != '' else 0
+        except (ValueError, TypeError):
+            return Response({'error': 'Le pourcentage des parts doit être un nombre entre 0 et 100'}, status=status.HTTP_400_BAD_REQUEST)
+        successor = ClientSuccessor.objects.create(
+            id=successor_id,
+            client=client,
+            first_name=(data.get('firstName') or '').strip(),
+            last_name=(data.get('lastName') or '').strip(),
+            email=(data.get('email') or '').strip(),
+            phone=(data.get('phone') or '').strip(),
+            address=(data.get('address') or '').strip(),
+            postal_code=(data.get('postalCode') or '').strip(),
+            city=(data.get('city') or '').strip(),
+            country=(data.get('country') or '').strip(),
+            share_percentage=min(100, max(0, share_pct)),
+            order=order,
+        )
+        if 'identityDocument' in request.FILES:
+            try:
+                f = request.FILES['identityDocument']
+                _, ext = os.path.splitext(f.name)
+                successor.identity_document.save(f'{successor_id}_identity{ext}', f, save=True)
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error uploading successor identity document: {str(e)}")
+        serializer = ClientSuccessorSerializer(successor, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    successors = ClientSuccessor.objects.filter(client=client).order_by('order', 'created_at')
+    serializer = ClientSuccessorSerializer(successors, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def client_successor_detail(request, successor_id):
+    """Update or delete a successor for the current client (client_ token)."""
+    client, err = _get_client_from_token(request)
+    if err:
+        return err
+    try:
+        successor = ClientSuccessor.objects.get(id=successor_id, client=client)
+    except ClientSuccessor.DoesNotExist:
+        return Response({'error': 'Successeur non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'DELETE':
+        successor.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    data = request.data
+    if 'firstName' in data:
+        successor.first_name = data.get('firstName', '') or ''
+    if 'lastName' in data:
+        successor.last_name = data.get('lastName', '') or ''
+    if 'email' in data:
+        successor.email = data.get('email', '') or ''
+    if 'phone' in data:
+        successor.phone = data.get('phone', '') or ''
+    if 'address' in data:
+        successor.address = data.get('address', '') or ''
+    if 'postalCode' in data:
+        successor.postal_code = data.get('postalCode', '') or ''
+    if 'city' in data:
+        successor.city = data.get('city', '') or ''
+    if 'country' in data:
+        successor.country = data.get('country', '') or ''
+    if 'sharePercentage' in data:
+        val = data.get('sharePercentage')
+        try:
+            pct = int(val) if val is not None and val != '' else 0
+            successor.share_percentage = min(100, max(0, pct))
+        except (ValueError, TypeError):
+            return Response({'error': 'Le pourcentage des parts doit être un nombre entre 0 et 100'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'identityDocument' in request.FILES:
+        try:
+            f = request.FILES['identityDocument']
+            if successor.identity_document:
+                successor.identity_document.delete(save=False)
+            _, ext = os.path.splitext(f.name)
+            successor.identity_document.save(f'{successor.id}_identity{ext}', f, save=False)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error uploading successor identity document: {str(e)}")
+    successor.save()
+    serializer = ClientSuccessorSerializer(successor, context={'request': request})
+    return Response(serializer.data)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

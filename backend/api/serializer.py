@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from rest_framework import serializers
-from .models import Client, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
+from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 import uuid
 from urllib.parse import urlparse, unquote
 
@@ -439,6 +439,36 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['contractPreviewEnabled'] = bool(ret.get('contract_preview_enabled', True))
         
         return ret
+
+
+class ClientSuccessorSerializer(serializers.ModelSerializer):
+    firstName = serializers.CharField(source='first_name', required=False, allow_blank=True)
+    lastName = serializers.CharField(source='last_name', required=False, allow_blank=True)
+    postalCode = serializers.CharField(source='postal_code', required=False, allow_blank=True)
+    sharePercentage = serializers.IntegerField(source='share_percentage', required=False, allow_null=True)
+    identityDocument = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+
+    class Meta:
+        model = ClientSuccessor
+        fields = [
+            'id', 'firstName', 'lastName', 'email', 'phone',
+            'address', 'postalCode', 'city', 'country',
+            'sharePercentage', 'identityDocument', 'order',
+            'createdAt', 'updatedAt',
+        ]
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+
+    def get_identityDocument(self, obj):
+        if obj.identity_document:
+            url = obj.identity_document.url
+            if url and not url.startswith('http'):
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(url)
+            return url
+        return None
 
 
 class ClientChatMessageSerializer(serializers.ModelSerializer):

@@ -36,6 +36,8 @@ const PlatformDashboard = lazy(() => import('./components/PlatformDashboard').th
 const PlatformPortfolio = lazy(() => import('./components/PlatformPortfolio').then(m => ({ default: m.PlatformPortfolio })));
 const PlatformTrading = lazy(() => import('./components/PlatformTrading').then(m => ({ default: m.PlatformTrading })));
 const PlatformDiscover = lazy(() => import('./components/PlatformDiscover').then(m => ({ default: m.PlatformDiscover })));
+const PlatformProfilePage = lazy(() => import('./components/PlatformProfilePage').then(m => ({ default: m.PlatformProfilePage })));
+const PlatformTransfertProprietePage = lazy(() => import('./components/PlatformTransfertProprietePage').then(m => ({ default: m.PlatformTransfertProprietePage })));
 const PlatformAccountVerification = lazy(() => import('./components/PlatformAccountVerification').then(m => ({ default: m.PlatformAccountVerification })));
 const PlatformLayout = lazy(() => import('./components/PlatformLayout').then(m => ({ default: m.PlatformLayout })));
 const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => ({ default: m.ProductDetail })));
@@ -342,6 +344,32 @@ function App() {
                                     <PlatformLayout>
                                         <Suspense fallback={<LoadingFallback />}>
                                             <PlatformAccountVerification />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/profile" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformProfilePage />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/transfert-propriete" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformTransfertProprietePage />
                                         </Suspense>
                                     </PlatformLayout>
                                 </Suspense>

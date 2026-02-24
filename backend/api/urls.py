@@ -40,6 +40,8 @@ urlpatterns = [
     path('client/login/otp/verify/', api_views.client_login_otp_verify, name='client-login-otp-verify'),
     path('client/current/', api_views.get_current_client, name='get-current-client'),
     path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
+    path('client/successors/', api_views.client_successors_list, name='client-successors-list'),
+    path('client/successors/<str:successor_id>/', api_views.client_successor_detail, name='client-successor-detail'),
     # Client notifications
     path('client/notifications/', api_views.client_notification_list, name='client-notification-list'),
     path('client/notifications/read-all/', api_views.client_notification_mark_all_read, name='client-notification-mark-all-read'),

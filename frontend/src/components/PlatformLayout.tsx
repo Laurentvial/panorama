@@ -734,22 +734,40 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 </button>
               </div>
               
-              {/* User Profile */}
+              {/* User Profile - clickable to open Mon profil */}
               <div style={{ 
-                padding: isMobile ? '10px 14px' : '12px 16px', 
-                marginBottom: '20px', 
-                marginLeft: isMobile ? '12px' : '20px',
-                marginRight: isMobile ? '12px' : '20px',
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '12px',
-                borderRadius: '16px',
-                border: '1px solid color-mix(in srgb, var(--accent-foreground) 16%, transparent)',
-                backgroundColor: 'color-mix(in srgb, var(--accent-foreground) 10%, transparent)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                paddingLeft: isMobile ? '12px' : '20px',
+                paddingRight: isMobile ? '12px' : '20px',
+                marginBottom: '20px',
+                minWidth: 0,
               }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate('/platform/profile');
+                    if (showBottomNav) setSidebarOpen(false);
+                  }}
+                  style={{ 
+                    width: '100%',
+                    padding: isMobile ? '10px 14px' : '12px 16px', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '12px',
+                    borderRadius: '16px',
+                    border: `1px solid ${location.pathname === '/platform/profile' ? 'color-mix(in srgb, var(--accent-foreground) 40%, transparent)' : 'color-mix(in srgb, var(--accent-foreground) 16%, transparent)'}`,
+                    backgroundColor: location.pathname === '/platform/profile' ? 'color-mix(in srgb, var(--accent-foreground) 18%, transparent)' : 'color-mix(in srgb, var(--accent-foreground) 10%, transparent)',
+                    backdropFilter: 'blur(8px)',
+                    WebkitBackdropFilter: 'blur(8px)',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    minWidth: 0,
+                    overflow: 'hidden',
+                  }}
+                className="platform-hoverable"
+                aria-label="Ouvrir mon profil"
+                aria-current={location.pathname === '/platform/profile' ? 'page' : undefined}
+              >
                 {currentUser?.profilePhoto ? (
                   <img 
                     src={currentUser.profilePhoto} 
@@ -757,15 +775,19 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     style={{ 
                       width: isMobile ? '40px' : '50px', 
                       height: isMobile ? '40px' : '50px', 
+                      minWidth: isMobile ? 40 : 50,
                       borderRadius: '50%', 
                       objectFit: 'cover',
-                      border: '2px solid #e5e7eb'
+                      border: '2px solid #e5e7eb',
+                      flexShrink: 0,
                     }} 
                   />
                 ) : (
                   <div style={{
                     width: isMobile ? '40px' : '50px',
                     height: isMobile ? '40px' : '50px',
+                    minWidth: isMobile ? 40 : 50,
+                    flexShrink: 0,
                     borderRadius: '50%',
                     backgroundColor: '#e5e7eb',
                     display: 'flex',
@@ -799,6 +821,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     </div>
                   )}
                 </div>
+              </button>
               </div>
               
               <nav className="platform-sidebar-nav">
@@ -943,7 +966,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Main Content */}
         <main style={{ 
           flex: 1, 
-          paddingTop: stickyTopOffset,
+          paddingTop: `calc(${stickyTopOffset} - 12px)`,
           paddingRight: isPhone ? '12px' : isMobile ? '16px' : '30px',
           paddingLeft: isPhone ? '12px' : isMobile ? '16px' : '30px',
           paddingBottom: showBottomNav ? `${(isPhone ? 12 : 16) + MOBILE_BOTTOM_NAV_HEIGHT}px` : (isPhone ? '16px' : isMobile ? '20px' : '30px'),

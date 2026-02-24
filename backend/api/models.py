@@ -147,6 +147,32 @@ class Client(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+class ClientSuccessor(models.Model):
+    """Successor for property transfer - linked to a client."""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='successors')
+    first_name = models.CharField(max_length=100, default="", blank=True)
+    last_name = models.CharField(max_length=100, default="", blank=True)
+    email = models.EmailField(max_length=100, default="", blank=True)
+    phone = models.CharField(max_length=30, default="", blank=True)
+    address = models.CharField(max_length=200, default="", blank=True)
+    postal_code = models.CharField(max_length=20, default="", blank=True)
+    city = models.CharField(max_length=100, default="", blank=True)
+    country = models.CharField(max_length=100, default="", blank=True)
+    share_percentage = models.IntegerField(default=0, null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    identity_document = models.ImageField(upload_to='successors/identity/', storage=client_profile_storage, null=True, blank=True)
+    order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} ({self.client_id})"
+
+
 class ClientConversation(models.Model):
     """
     Conversation (thread) between a client and their manager.
