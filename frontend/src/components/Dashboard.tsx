@@ -16,7 +16,7 @@ import {
 } from 'react-icons/hi';
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
-import { getStatusLabel } from './transactionUtils';
+import { getStatusLabel, getStatusColors } from './transactionUtils';
 import { useUser } from '../contexts/UserContext';
 import '../styles/Dashboard.css';
 import '../styles/PageHeader.css';

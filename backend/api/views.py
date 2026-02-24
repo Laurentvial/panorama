@@ -59,6 +59,7 @@ from django.core import signing
 from django.db.models import Q
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
+from django.core.exceptions import ObjectDoesNotExist
 from urllib.parse import quote
 import secrets
 import logging
@@ -84,6 +85,22 @@ from .position_service import (
 )
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
+
+
+class SafeTokenRefreshView(TokenRefreshView):
+    """
+    Token refresh view that returns 401 instead of 500 when the user
+    referenced by the refresh token no longer exists (e.g. deleted user).
+    """
+
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except ObjectDoesNotExist:
+            return Response(
+                {"detail": "Token is invalid or expired."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
 
 def get_client_ip(request):
@@ -2226,6 +2243,8 @@ def get_current_client(request):
 
         # CRM impersonation path can bypass /api/client/login/.
         # When explicitly flagged by frontend, create a platform login log here.
+        # Do NOT create a client login notification - only manual logins from the
+        # login page should trigger notifications.
         if request.GET.get('source') == 'crm_impersonation':
             impersonation_mode = request.GET.get('mode', '')
             client_display_name = " ".join(
@@ -2241,16 +2260,6 @@ def get_current_client(request):
                 },
                 request
             )
-            manager_user = _resolve_client_manager_user(client)
-            if manager_user:
-                create_app_notification(
-                    recipient_type=AppNotification.RECIPIENT_CRM_USER,
-                    recipient_user=manager_user,
-                    notification_type=AppNotification.TYPE_CLIENT_LOGIN,
-                    title="Client connecté",
-                    message=f"{client_display_name} s'est connecté (impersonation).",
-                    payload={"client_id": client.id},
-                )
 
         serializer = ClientSerializer(client, context={'request': request})
         return Response({
@@ -7146,6 +7155,31 @@ def client_transaction_create(request, client_id):
         logger.error(f"Failed to create log entry for transaction {transaction_id}: {str(log_error)}")
         import traceback
         logger.error(traceback.format_exc())
+
+    # Create notification when depot or retrait is made from the funds page (client-initiated)
+    if token and token.startswith('client_') and transaction_type in ('depot', 'retrait'):
+        manager_user = _resolve_client_manager_user(client)
+        if manager_user:
+            client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+            amount_str = f"{transaction_amount:,.2f}".replace(',', ' ').replace('.', ',') + " €"
+            if transaction_type == 'depot':
+                create_app_notification(
+                    recipient_type=AppNotification.RECIPIENT_CRM_USER,
+                    recipient_user=manager_user,
+                    notification_type=AppNotification.TYPE_CLIENT_DEPOT,
+                    title="Dépôt de fonds",
+                    message=f"{client_name} a effectué un dépôt de {amount_str}.",
+                    payload={"client_id": client.id, "transaction_id": transaction_id, "amount": transaction_amount},
+                )
+            else:
+                create_app_notification(
+                    recipient_type=AppNotification.RECIPIENT_CRM_USER,
+                    recipient_user=manager_user,
+                    notification_type=AppNotification.TYPE_CLIENT_RETRAIT,
+                    title="Demande de retrait",
+                    message=f"{client_name} a effectué une demande de retrait de {amount_str}.",
+                    payload={"client_id": client.id, "transaction_id": transaction_id, "amount": transaction_amount},
+                )
     
     # Auto-create contract document for product subscriptions.
     # A client subscription may occasionally arrive without explicit transfer_to

@@ -2,8 +2,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from api.views import UserCreateView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from api.views import UserCreateView, SafeTokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 def health_check(request):
     """Health check endpoint for Choreo to verify the service is running."""
@@ -25,7 +25,7 @@ urlpatterns = [
     path('cors-test/', cors_test, name='cors_test'),
     path('admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='get_token'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='refresh'),
+    path('api/token/refresh/', SafeTokenRefreshView.as_view(), name='refresh'),
     path("api-auth/", include('rest_framework.urls')),
     path('api/', include('api.urls')),
 ]

@@ -240,6 +240,8 @@ class AppNotification(models.Model):
     TYPE_CLIENT_SUBSCRIPTION = 'client_subscription'
     TYPE_CLIENT_LOGIN = 'client_login'
     TYPE_MESSAGE_FROM_MANAGER = 'message_from_manager'
+    TYPE_CLIENT_DEPOT = 'client_depot'
+    TYPE_CLIENT_RETRAIT = 'client_retrait'
 
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     recipient_type = models.CharField(max_length=20, choices=RECIPIENT_CHOICES, default=RECIPIENT_CRM_USER)

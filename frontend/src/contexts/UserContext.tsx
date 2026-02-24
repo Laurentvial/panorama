@@ -115,8 +115,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     try {
       // Check if it's a client or admin user
-      // If userType is not set or is 'admin', treat as admin (Django JWT)
-      if (userType === 'client' || token.startsWith('client_')) {
+      // Token format is the source of truth: client_ tokens go to client API, JWTs go to admin API.
+      // userType in storage can be wrong (e.g. corrupted session), so we require token.startsWith('client_').
+      const isClientToken = token.startsWith('client_');
+      if (isClientToken) {
         // Client user
         const clientData = storage.getItem('clientData');
         if (clientData) {
