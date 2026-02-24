@@ -5,13 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { TrendingUp, TrendingDown, Check, PieChart, Shield } from 'lucide-react';
 import { apiCall } from '../utils/api';
-import { useIsMobile } from './ui/use-mobile';
+import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import '../styles/PlatformDashboardMovers.css';
 
 export function PlatformDashboard() {
   const { currentUser } = useUser();
   const isMobile = useIsMobile();
+  const isPhone = useIsPhone();
   const navigate = useNavigate();
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
@@ -730,7 +731,7 @@ export function PlatformDashboard() {
   };
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '20px 20px' }}>
+    <div style={{ padding: isPhone ? '12px' : isMobile ? '16px' : '20px 20px' }}>
 
       {loading ? (
         <div>Chargement...</div>
@@ -740,7 +741,7 @@ export function PlatformDashboard() {
           {hasIncompleteEnabledSteps && (
             <Card
               style={{
-                marginBottom: isMobile ? '20px' : '30px',
+                marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
                 borderRadius: 16,
                 overflow: 'hidden',
                 border: '1px solid rgba(229, 231, 235, 1)',
@@ -748,7 +749,7 @@ export function PlatformDashboard() {
                 boxShadow: '0 10px 30px rgba(2, 6, 23, 0.06)',
               }}
             >
-              <CardContent style={{ padding: isMobile ? '18px' : '24px' }}>
+              <CardContent style={{ padding: isPhone ? '14px' : isMobile ? '18px' : '24px' }}>
                 <div
                   style={{
                     display: 'flex',
@@ -922,8 +923,8 @@ export function PlatformDashboard() {
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: '1fr',
-            gap: isMobile ? '16px' : '20px',
-            marginBottom: isMobile ? '20px' : '30px' 
+            gap: isPhone ? '12px' : isMobile ? '16px' : '20px',
+            marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' 
           }}>
             <Card style={roundedCardStyle}>
               <CardHeader>
@@ -1004,7 +1005,7 @@ export function PlatformDashboard() {
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: isMobile ? '1fr' : (assets.length > 0 && (gainers.length > 0 || losers.length > 0) ? '2fr 1fr' : '1fr'), 
-            gap: isMobile ? '20px' : '30px' 
+            gap: isPhone ? '16px' : isMobile ? '20px' : '30px' 
           }}>
             {/* News Feed */}
             <Card style={roundedCardStyle}>
@@ -1041,12 +1042,12 @@ export function PlatformDashboard() {
                 ) : newsPosts.length === 0 ? (
                   <p style={{ fontSize: isMobile ? '14px' : '16px' }}>Aucune actualité disponible</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '12px' : isMobile ? '16px' : '20px' }}>
                     {newsPosts.slice(0, visibleNewsCount).map((post: any) => (
                       <div
                         key={post.id}
                         style={{
-                          padding: isMobile ? '14px' : '16px',
+                          padding: isPhone ? '12px' : isMobile ? '14px' : '16px',
                           border: '1px solid rgba(229, 231, 235, 1)',
                           borderRadius: 16,
                           backgroundColor: 'white',
@@ -1229,7 +1230,7 @@ export function PlatformDashboard() {
 
             {/* Gainers and Losers - only show when client has access to assets */}
             {assets.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '12px' : isMobile ? '16px' : '20px' }}>
                 {/* Plus fortes hausses - only show when there are gainers */}
                 {(gainers.length > 0 || losers.length > 0) && (
                   <>

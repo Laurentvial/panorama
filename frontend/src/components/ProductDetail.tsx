@@ -12,7 +12,7 @@ import '../styles/Modal.css';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
-import { useIsMobile } from './ui/use-mobile';
+import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import { StockChart } from './StockChart';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
@@ -94,6 +94,7 @@ export function ProductDetail() {
   });
   const [clientIP, setClientIP] = useState('');
   const isMobile = useIsMobile();
+  const isPhone = useIsPhone();
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 
   const updateSignatureFromCanvas = (canvas: HTMLCanvasElement | null) => {
@@ -1054,15 +1055,16 @@ export function ProductDetail() {
           width: '100%',
           maxWidth: 1280,
           margin: '0 auto',
-          padding: isMobile ? '16px' : '24px',
+          padding: isPhone ? '12px' : isMobile ? '16px' : '24px',
           overflowX: 'hidden',
           boxSizing: 'border-box',
+          minWidth: 0,
         }}
       >
         {/* Breadcrumb */}
         <div style={{ 
-          marginBottom: isMobile ? '16px' : '20px', 
-          fontSize: isMobile ? '12px' : '14px', 
+          marginBottom: isPhone ? '12px' : isMobile ? '16px' : '20px', 
+          fontSize: isPhone ? '11px' : isMobile ? '12px' : '14px', 
           color: '#6b7280',
           overflowX: 'auto',
           whiteSpace: 'nowrap',
@@ -1102,7 +1104,7 @@ export function ProductDetail() {
           flexWrap: 'wrap',
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h1 className="platform-page-title" style={{ marginBottom: '8px', wordBreak: 'break-word' }}>
+            <h1 className="platform-page-title" style={{ marginBottom: '8px', wordBreak: 'break-word', fontSize: isPhone ? '18px' : undefined }}>
               {product.name || 'N/A'}
             </h1>
             {product.reference && (
@@ -1118,11 +1120,12 @@ export function ProductDetail() {
         <div style={{ 
           display: 'grid', 
           gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', 
-          gap: isMobile ? '20px' : '30px', 
-          marginBottom: isMobile ? '20px' : '30px' 
+          gap: isPhone ? '16px' : isMobile ? '20px' : '30px', 
+          marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
+          minWidth: 0,
         }}>
           {/* Main Content */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
             {/* Product Image */}
             {product.imageUrl && (
               <div style={{ 
@@ -1136,8 +1139,8 @@ export function ProductDetail() {
                   alt={product.name}
                   style={{
                     width: '100%',
-                    height: isMobile ? 'auto' : '500px',
-                    maxHeight: isMobile ? '300px' : '500px',
+                    height: isPhone ? 'auto' : isMobile ? 'auto' : '500px',
+                    maxHeight: isPhone ? '200px' : isMobile ? '300px' : '500px',
                     borderRadius: '12px',
                     objectFit: 'cover',
                     display: 'block',
@@ -1234,10 +1237,12 @@ export function ProductDetail() {
                     display: 'flex', 
                     justifyContent: 'space-between', 
                     alignItems: 'center',
-                    padding: '8px 12px',
+                    padding: isPhone ? '8px 10px' : '8px 12px',
                     backgroundColor: 'white',
                     borderRadius: '6px',
                     border: '1px solid #e5e7eb',
+                    minWidth: 0,
+                    gap: 8,
                   }}>
                     <span style={{ fontSize: '14px', color: '#374151', fontWeight: '500' }}>Montant</span>
                     <Input
@@ -1420,8 +1425,8 @@ export function ProductDetail() {
                       <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 13, color: '#374151', fontWeight: 600 }}>
                         Détail par période
                       </div>
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+                      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', width: '100%', minWidth: 0 }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isPhone ? 320 : 720, fontSize: isPhone ? 11 : undefined }}>
                           <thead>
                             <tr style={{ backgroundColor: 'white', borderBottom: '1px solid #e5e7eb' }}>
                               <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: 12, color: '#6b7280' }}>Période</th>
@@ -1435,18 +1440,18 @@ export function ProductDetail() {
                           <tbody>
                             {sim.rows.map((r) => (
                               <tr key={r.index} style={{ borderBottom: '1px solid rgba(229,231,235,0.7)' }}>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#111827', fontWeight: 600 }}>#{r.index}</td>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>{r.months}</td>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#111827', fontWeight: 600 }}>#{r.index}</td>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>{r.months}</td>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>
                                   {r.base.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                                 </td>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#374151', textAlign: 'right' }}>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>
                                   {r.ratePct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                 </td>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#0f766e', textAlign: 'right', fontWeight: 700 }}>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#0f766e', textAlign: 'right', fontWeight: 700 }}>
                                   +{r.profit.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                                 </td>
-                                <td style={{ padding: '10px 12px', fontSize: 13, color: '#111827', textAlign: 'right', fontWeight: 800 }}>
+                                <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#111827', textAlign: 'right', fontWeight: 800 }}>
                                   {r.end.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                                 </td>
                               </tr>
@@ -1518,10 +1523,12 @@ export function ProductDetail() {
             alignSelf: 'flex-start',
             maxHeight: isMobile ? 'calc(100vh - 96px)' : 'calc(100% - 108px)',
             overflowY: 'auto',
+            minWidth: 0,
+            overflowX: 'hidden',
           }}>
             {/* Subscription Form Card */}
             {showSubscriptionForm && (
-              <Card style={{ marginBottom: '20px'}}>
+              <Card style={{ marginBottom: '20px', minWidth: 0, overflow: 'hidden' }}>
                 <CardHeader>
                   <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Formulaire de souscription</CardTitle>
                 </CardHeader>
@@ -1542,7 +1549,7 @@ export function ProductDetail() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '12px' : '16px', minHeight: '650px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '10px' : isMobile ? '12px' : '16px', minHeight: isPhone ? 'auto' : '650px' }}>
 
                     
                     <div>
@@ -1730,7 +1737,8 @@ export function ProductDetail() {
                               height={150}
                               style={{
                                 width: '100%',
-                                height: '150px',
+                                maxWidth: 600,
+                                height: isPhone ? '120px' : '150px',
                                 border: '1px solid #e5e7eb',
                                 borderRadius: '4px',
                                 backgroundColor: 'white',
@@ -1796,17 +1804,19 @@ export function ProductDetail() {
                       </div>
                     </div>
                     
-                    <div style={{ marginTop: '10px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Prévisualisation du contrat</div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={openContractPDF}
-                        style={{ width: '100%' }}
-                      >
-                        Voir le contrat
-                      </Button>
-                    </div>
+                    {currentUser?.contractPreviewEnabled !== false && (
+                      <div style={{ marginTop: '10px' }}>
+                        <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Prévisualisation du contrat</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={openContractPDF}
+                          style={{ width: '100%' }}
+                        >
+                          Voir le contrat
+                        </Button>
+                      </div>
+                    )}
                     
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -1873,7 +1883,7 @@ export function ProductDetail() {
         {/* CGV Modal */}
         {showCGVModal && (
           <div className="modal-overlay" onClick={() => setShowCGVModal(false)}>
-            <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: isMobile ? '95vw' : '800px' }}>
+            <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: isPhone ? '100%' : isMobile ? '95vw' : '800px', margin: isPhone ? '12px' : undefined }}>
               <div className="modal-header">
                 <h2 className="modal-title">Conditions Générales de Vente</h2>
                 <Button
@@ -2094,13 +2104,22 @@ export function ProductDetail() {
         width: '100%',
         maxWidth: 1280,
         margin: '0 auto',
-        padding: isMobile ? '16px' : '24px',
+        padding: isPhone ? '12px' : isMobile ? '16px' : '24px',
         overflowX: 'hidden',
         boxSizing: 'border-box',
+        minWidth: 0,
       }}
     >
       {/* Breadcrumb */}
-      <div style={{ marginBottom: '20px', fontSize: '14px', color: '#6b7280' }}>
+      <div style={{ 
+        marginBottom: isPhone ? '12px' : '20px', 
+        fontSize: isPhone ? '12px' : '14px', 
+        color: '#6b7280',
+        overflowX: 'auto',
+        whiteSpace: 'nowrap',
+        WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'thin',
+      }}>
         <span 
           onClick={() => navigate('/platform/discover')}
           style={{ cursor: 'pointer', textDecoration: 'underline' }}
@@ -2176,7 +2195,7 @@ export function ProductDetail() {
               flexWrap: 'wrap',
             }}>
               <h1 style={{ 
-                fontSize: isMobile ? '16px' : '20px', 
+                fontSize: isPhone ? '14px' : isMobile ? '16px' : '20px', 
                 fontWeight: 'bold', 
                 margin: 0,
                 wordBreak: 'break-word',
@@ -2254,7 +2273,7 @@ export function ProductDetail() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent style={isPhone ? { maxWidth: 'calc(100vw - 24px)', margin: 12 } : undefined}>
           <DialogHeader>
             <DialogTitle>
               {tradeOrderSuccess ? 'Ordre placé' : `Trader ${asset?.reference || asset?.name || ''}`}
@@ -2320,7 +2339,7 @@ export function ProductDetail() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -2409,7 +2428,7 @@ export function ProductDetail() {
                 : "Si le marché est fermé, l’opération sera exécutée à la prochaine ouverture."}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
               <Button
                 variant="outline"
                 disabled={isPlacingTradeOrder}
@@ -2527,8 +2546,8 @@ export function ProductDetail() {
       {/* Tabs */}
       <div style={{ 
         display: 'flex', 
-        gap: isMobile ? '4px' : '8px', 
-        marginBottom: isMobile ? '20px' : '30px',
+        gap: isPhone ? '2px' : isMobile ? '4px' : '8px', 
+        marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
         borderBottom: '1px solid #e5e7eb',
         overflowX: 'auto',
         WebkitOverflowScrolling: 'touch',
@@ -2548,7 +2567,7 @@ export function ProductDetail() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               style={{
-                padding: isMobile ? '10px 16px' : '12px 20px',
+                padding: isPhone ? '8px 12px' : isMobile ? '10px 16px' : '12px 20px',
                 border: 'none',
                 backgroundColor: 'transparent',
                 borderBottom: isActive ? '2px solid var(--platform-button-bg)' : '2px solid transparent',
@@ -2557,8 +2576,8 @@ export function ProductDetail() {
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: isMobile ? '6px' : '8px',
-                fontSize: isMobile ? '12px' : '14px',
+                gap: isPhone ? '4px' : isMobile ? '6px' : '8px',
+                fontSize: isPhone ? '11px' : isMobile ? '12px' : '14px',
                 whiteSpace: 'nowrap',
                 flexShrink: 0,
               }}
@@ -2574,7 +2593,8 @@ export function ProductDetail() {
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', 
-        gap: isMobile ? '20px' : '30px' 
+        gap: isPhone ? '16px' : isMobile ? '20px' : '30px',
+        minWidth: 0,
       }}>
         {/* Main Content */}
         <div>
@@ -2635,7 +2655,7 @@ export function ProductDetail() {
                       assetId={String(asset.id)}
                       assetName={asset.name || asset.reference}
                       width="100%"
-                      height={isMobile ? 400 : 500}
+                      height={isPhone ? 260 : isMobile ? 400 : 500}
                       chartType="area"
                       showVolume={false}
                       timeframe={selectedTimeframe}
@@ -2700,6 +2720,8 @@ export function ProductDetail() {
             alignSelf: 'flex-start',
             maxHeight: isMobile ? 'none' : 'calc(100vh - 80px)',
             overflowY: 'visible',
+            minWidth: 0,
+            overflowX: 'hidden',
           }}
         >
           {/* Additional Info Cards */}

@@ -1399,6 +1399,11 @@ def client_detail(request, client_id):
         if 'bannerMessage' in request.data:
             client.banner_message = request.data.get('bannerMessage', '') or ''
         
+        # Update contract preview enabled if provided
+        if 'contractPreviewEnabled' in request.data:
+            v = request.data.get('contractPreviewEnabled')
+            client.contract_preview_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+        
         # Create log entry for client update
         try:
             # Get list of changed fields
@@ -6873,56 +6878,7 @@ def client_transaction_create(request, client_id):
         )
         subscription_details_data = _merge_missing_fields(subscription_details_data, defaults)
     
-    # Check if it's an investment (transfer_to is a product ID, not 'balance')
-    if transaction_type == 'transfert' and transfer_to and transfer_to != 'balance':
-        # Calculate available balance from completed transactions
-        completed_transactions = Transaction.objects.filter(
-            client=client,
-            status__in=COMPLETED_TRANSACTION_STATUSES
-        )
-        
-        calculated_invested_capital = 0
-        calculated_trading_portfolio = 0
-        calculated_bonus = 0
-        
-        for txn in completed_transactions:
-            amount = float(txn.amount)
-            if txn.type == 'depot':
-                calculated_invested_capital += amount
-            elif txn.type == 'retrait':
-                calculated_invested_capital -= amount
-            elif txn.type == 'bonus':
-                calculated_bonus += amount
-                calculated_invested_capital += amount
-            elif txn.type == 'interets':
-                # Interest transactions credit gains to cash balance
-                calculated_invested_capital += amount
-            elif txn.type == 'achat':
-                calculated_trading_portfolio += amount
-            elif txn.type == 'vente':
-                calculated_trading_portfolio -= amount
-            elif txn.type == 'transfert':
-                txn_to = txn.transfer_to
-                if txn_to and txn_to != 'balance':
-                    # Investment: balance → product (transfer_to is product ID)
-                    calculated_trading_portfolio += amount
-                elif txn_to == 'balance':
-                    # Withdrawal: product → balance
-                    calculated_trading_portfolio -= amount
-        
-        # Always use calculated values from transactions (not client object values)
-        # This ensures we get fresh data even if client.invested_capital/trading_portfolio are stale
-        invested_capital = calculated_invested_capital
-        trading_portfolio = calculated_trading_portfolio
-        bonus = calculated_bonus
-        
-        # Available funds = invested_capital - trading_portfolio (bonus is included in invested_capital and available)
-        available_funds = invested_capital - trading_portfolio
-        
-        if transaction_amount > available_funds:
-            return Response({
-                'error': f'Fonds insuffisants. Solde disponible: {available_funds:.2f} EUR, montant demandé: {transaction_amount:.2f} EUR'
-            }, status=status.HTTP_400_BAD_REQUEST)
+    # Transfer transactions can be created even when balance is insufficient (e.g. pending deposits).
     
     # Check if this is an investment transaction that will be created with status 'valide'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
@@ -11220,552 +11176,201 @@ def app_settings(request):
         )
 
 
-# Custom Token Refresh Serializer that handles missing users gracefully
-class CustomTokenRefreshSerializer(TokenRefreshSerializer):
-    """
-    Custom token refresh serializer that handles cases where the user referenced
-    in the token no longer exists in the database.
-    """
-    def validate(self, attrs):
-        try:
-            return super().validate(attrs)
-        except TokenError:
-            # Re-raise TokenError as-is (invalid/expired token)
-            raise
-        except DjangoUser.DoesNotExist:
-            # User referenced in token doesn't exist - raise TokenError to return 401
-            raise TokenError('User no longer exists')
-        except Exception as e:
-            # Check if it's a DoesNotExist exception by checking the error message or type
-            error_str = str(e)
-            error_type = type(e).__name__
-            if 'DoesNotExist' in error_type or 'DoesNotExist' in error_str or 'matching query does not exist' in error_str:
-                raise TokenError('User no longer exists')
-            # Re-raise other exceptions
-            raise
-
-
-# Custom Token Refresh View that uses the custom serializer
-class CustomTokenRefreshView(TokenRefreshView):
-    """
-    Custom token refresh view that handles cases where the user referenced
-    in the token no longer exists in the database.
-    """
-    serializer_class = CustomTokenRefreshSerializer
-
-
-@api_view(['GET', 'HEAD', 'OPTIONS'])
-@authentication_classes([])  # Disable authentication - media files should be publicly accessible
-@permission_classes([AllowAny])
-def media_proxy(request, file_path):
-    """
-    Proxy endpoint to serve media files from Cloudinary with proper CORS headers.
-    Note: Cloudinary URLs are public by default, but this proxy ensures CORS headers are set.
-    """
-    from .storage import CloudinaryMediaStorage
-    import requests
-    from django.http import HttpResponse
-    from django.core.exceptions import SuspiciousOperation
-
-    # Handle OPTIONS request for CORS preflight
-    if request.method == 'OPTIONS':
-        response = Response()
-        response['Access-Control-Allow-Origin'] = '*'
-        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-        response['Access-Control-Allow-Headers'] = '*'
-        return response
-
-    try:
-        # Strip trailing slash if present
-        file_path = file_path.rstrip('/')
-        
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Media proxy requested for file: {file_path[:200]}...")
-        
-        # Decode URL if it's encoded (from serializer)
-        from urllib.parse import unquote
-        decoded_path = unquote(file_path)
-        
-        # Check if decoded_path is already a full Cloudinary URL
-        if decoded_path.startswith('http://') or decoded_path.startswith('https://'):
-            # Already a full URL, use it directly
-            file_url = decoded_path
-            logger.info(f"Using provided Cloudinary URL directly: {file_url[:150]}...")
-        else:
-            # Create storage instance
-            storage = CloudinaryMediaStorage()
-
-            # Generate the actual URL for the file
-            # Use decoded_path instead of file_path - storage backends expect unencoded paths
-            try:
-                file_url = storage.url(decoded_path)
-                logger.info(f"Generated storage URL: {file_url[:150] if file_url else 'None'}...")
-            except Exception as url_error:
-                logger.error(f"Error generating storage URL for {decoded_path}: {str(url_error)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return Response(
-                    {'error': f'Failed to generate storage URL: {str(url_error)}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-
-            if not file_url:
-                logger.warning(f"Storage returned empty URL for file: {file_path}")
-                return Response(
-                    {'error': 'File not found'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-        
-        # Cloudinary URLs are already complete and public, no need to modify them
-
-        # Fetch the file from Cloudinary (HEAD for HEAD requests, GET otherwise)
-        # If the file was uploaded as 'image' instead of 'raw', try both URLs
-        response = None
-        fallback_url = None
-        
-        # Check if we're trying to access a PDF via /raw/upload/ but it might be stored as /image/upload/
-        if '/raw/upload/' in file_url and '.pdf' in file_url.lower():
-            # Try raw URL first
-            fallback_url = file_url.replace('/raw/upload/', '/image/upload/')
-        
-        try:
-            if request.method == 'HEAD':
-                response = requests.head(file_url, timeout=30)
-            else:
-                response = requests.get(file_url, timeout=30)
-        except Exception as fetch_error:
-            logger.error(f"Error fetching file from {file_url[:150]}: {str(fetch_error)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
-
-        # If raw URL failed and we have a fallback, try the image URL
-        if response.status_code != 200 and fallback_url:
-            logger.info(f"Raw URL failed ({response.status_code}), trying fallback image URL: {fallback_url[:150]}...")
-            try:
-                if request.method == 'HEAD':
-                    response = requests.head(fallback_url, timeout=30)
-                else:
-                    response = requests.get(fallback_url, timeout=30)
-                if response.status_code == 200:
-                    file_url = fallback_url  # Update file_url for logging
-                    logger.info(f"Successfully fetched file using fallback image URL")
-            except Exception as fallback_error:
-                logger.error(f"Fallback URL also failed: {str(fallback_error)}")
-
-        if response.status_code != 200:
-            return Response(
-                {'error': 'Failed to fetch file from storage'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Create Django response
-        content_type = response.headers.get('content-type', 'application/octet-stream')
-        
-        # Detect file type from URL path (decoded) or file_path
-        # Check both decoded_path (full URL) and file_path (path only)
-        is_pdf = False
-        url_lower = decoded_path.lower()
-        path_lower = file_path.lower()
-        file_url_lower = file_url.lower() if file_url else ''
-        
-        # Check if it's a PDF - look for .pdf in the URL, path, or file_url
-        if '.pdf' in url_lower or path_lower.endswith('.pdf') or '.pdf' in file_url_lower:
-            content_type = 'application/pdf'
-            is_pdf = True
-        elif url_lower.endswith(('.jpg', '.jpeg')) or path_lower.endswith(('.jpg', '.jpeg')) or file_url_lower.endswith(('.jpg', '.jpeg')):
-            content_type = 'image/jpeg'
-        elif url_lower.endswith('.png') or path_lower.endswith('.png') or file_url_lower.endswith('.png'):
-            content_type = 'image/png'
-        elif url_lower.endswith('.gif') or path_lower.endswith('.gif') or file_url_lower.endswith('.gif'):
-            content_type = 'image/gif'
-        elif url_lower.endswith('.webp') or path_lower.endswith('.webp') or file_url_lower.endswith('.webp'):
-            content_type = 'image/webp'
-        
-        if request.method == 'HEAD':
-            # HEAD request - return headers only, no body
-            django_response = HttpResponse()
-            django_response['Content-Type'] = content_type
-            if is_pdf:
-                django_response['Content-Disposition'] = 'inline'
-        else:
-            # GET request - return file content
-            django_response = HttpResponse(
-                response.content,
-                content_type=content_type
-            )
-
-        # Add CORS headers to allow the frontend to access the file
-        django_response['Access-Control-Allow-Origin'] = '*'
-        django_response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-        django_response['Access-Control-Allow-Headers'] = '*'
-
-        # For PDFs, set Content-Disposition to 'inline' to allow preview in browser
-        # Override any attachment disposition from Cloudinary
-        if is_pdf:
-            # Extract filename from URL for Content-Disposition header
-            filename = None
-            if '/' in decoded_path:
-                filename = decoded_path.split('/')[-1]
-            elif '/' in file_path:
-                filename = file_path.split('/')[-1]
-            
-            if filename:
-                # Use inline with filename to allow browser preview
-                django_response['Content-Disposition'] = f'inline; filename="{filename}"'
-            else:
-                django_response['Content-Disposition'] = 'inline'
-        elif 'content-disposition' in response.headers:
-            django_response['Content-Disposition'] = response.headers['content-disposition']
-        
-        # Copy other relevant headers
-        if 'cache-control' in response.headers:
-            django_response['Cache-Control'] = response.headers['cache-control']
-        if 'etag' in response.headers:
-            django_response['ETag'] = response.headers['etag']
-
-        return django_response
-
-    except requests.exceptions.Timeout:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Timeout fetching media file: {file_path}")
-        return Response(
-            {'error': 'Request timeout'},
-            status=status.HTTP_408_REQUEST_TIMEOUT
-        )
-    except requests.exceptions.RequestException as e:
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f"Request exception fetching media file {file_path}: {str(e)}")
-        logger.error(traceback.format_exc())
-        return Response(
-            {'error': f'Failed to fetch media: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-    except Exception as e:
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f"Unexpected error in media_proxy for {file_path}: {str(e)}")
-        logger.error(traceback.format_exc())
-        return Response(
-            {'error': f'Unexpected error: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-# News Posts endpoints
+# News endpoints
 @api_view(['GET'])
-@authentication_classes([])  # Disable authentication - don't validate tokens
-@permission_classes([AllowAny])  # Allow clients to view published news
+@authentication_classes([])
+@permission_classes([AllowAny])
 def news_list(request):
-    """Liste toutes les actualités publiées"""
-    news_posts = NewsPost.objects.filter(published=True).order_by('-created_at')
-    serializer = NewsPostSerializer(news_posts, many=True, context={'request': request})
+    """List published news posts (public endpoint for platform dashboard)"""
+    posts = NewsPost.objects.filter(published=True).order_by('-created_at')
+    serializer = NewsPostSerializer(posts, many=True, context={'request': request})
     return Response({'news': serializer.data})
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def news_list_all(request):
-    """Liste toutes les actualités (admin seulement)"""
-    news_posts = NewsPost.objects.all().order_by('-created_at')
-    serializer = NewsPostSerializer(news_posts, many=True, context={'request': request})
+    """List all news posts (admin - includes unpublished)"""
+    posts = NewsPost.objects.all().order_by('-created_at')
+    serializer = NewsPostSerializer(posts, many=True, context={'request': request})
     return Response({'news': serializer.data})
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def news_create(request):
-    """Créer une nouvelle actualité"""
-    # Generate ID
-    max_id = 0
-    for id_val in NewsPost.objects.values_list('id', flat=True):
-        try:
-            int_id = int(id_val)
-            if int_id > max_id:
-                max_id = int_id
-        except (ValueError, TypeError):
-            continue
-    
-    new_id = max_id + 1
-    news_id = str(new_id)
-    
-    if len(news_id) > 12:
-        import uuid
-        while True:
-            news_id = uuid.uuid4().hex[:12]
-            if not NewsPost.objects.filter(id=news_id).exists():
-                break
-    
-    # Create news post
-    serializer = NewsPostSerializer(data=request.data, context={'request': request})
-    if serializer.is_valid():
-        news_post = serializer.save(id=news_id, author=request.user)
-        return Response(NewsPostSerializer(news_post, context={'request': request}).data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    """Create a new news post"""
+    news_id = uuid.uuid4().hex[:12]
+    while NewsPost.objects.filter(id=news_id).exists():
+        news_id = uuid.uuid4().hex[:12]
 
-@api_view(['PUT'])
-@permission_classes([IsAuthenticated])
-def news_update(request, news_id):
-    """Mettre à jour une actualité"""
-    try:
-        news_post = NewsPost.objects.get(id=news_id)
-    except NewsPost.DoesNotExist:
-        return Response({'error': 'News post not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    serializer = NewsPostSerializer(news_post, data=request.data, partial=True, context={'request': request})
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    data = request.data
+    if hasattr(data, 'get'):
+        title = (data.get('title') or '').strip()
+        content = (data.get('content') or '').strip()
+        source_name = (data.get('sourceName') or data.get('source_name') or '').strip()
+        article_url = (data.get('articleUrl') or data.get('article_url') or '').strip()
+        published = data.get('published', True)
+        if isinstance(published, str):
+            published = published.lower() in ('true', '1', 'yes')
+    else:
+        title = content = source_name = article_url = ''
+        published = True
 
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def news_delete(request, news_id):
-    """Supprimer une actualité"""
-    try:
-        news_post = NewsPost.objects.get(id=news_id)
-    except NewsPost.DoesNotExist:
-        return Response({'error': 'News post not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    news_post.delete()
-    return Response(status=status.HTTP_204_NO_CONTENT)
+    post = NewsPost.objects.create(
+        id=news_id,
+        title=title or 'Sans titre',
+        content=content,
+        source_name=source_name,
+        article_url=article_url,
+        author=request.user if request.user.is_authenticated else None,
+        published=published,
+    )
+    if 'image' in request.FILES:
+        post.image = request.FILES['image']
+        post.save()
+    serializer = NewsPostSerializer(post, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def news_fetch_from_api(request):
-    """Récupérer les actualités financières depuis NewsAPI"""
-    import requests
-    import os
-    from datetime import datetime, timedelta
-    
-    news_api_key = os.getenv('NEWS_API_KEY', '')
-    if not news_api_key:
-        return Response({'error': 'NewsAPI key not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    try:
-        # Fetch finance/investing-focused news and reduce noise.
-        # Strategy:
-        # - Use a finance-oriented query (FR + EN keywords)
-        # - Restrict to reputable business/finance domains
-        # - Search in title/description only (less spammy than full content)
-        # - Limit to recent articles
-        url = 'https://newsapi.org/v2/everything'
-        from_date = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+    """Fetch news articles from external API (stub - returns empty; configure API key to enable)"""
+    articles = []
+    return Response({'articles': articles})
 
-        # You can override domains and query via query params if needed (admin use).
-        domains = request.GET.get('domains', '') or (
-            'lesechos.fr,latribune.fr,boursorama.com,capital.fr,challenges.fr,investir.lesechos.fr,zonebourse.com,'
-            'reuters.com,bloomberg.com,ft.com,wsj.com,institutional-investor.com,cointelegraph.com,cointribune.com'
-        )
-
-        q = request.GET.get('q', '') or (
-            '('
-            'bourse OR marchés OR actions OR obligations OR taux OR inflation OR '
-            'banque OR \"banque centrale\" OR \"politique monétaire\" OR '
-            'investissement OR \"gestion de patrimoine\" OR portefeuille OR '
-            'ETF OR dividende OR résultats OR \"marchés financiers\" OR '
-            'crypto OR bitcoin OR ethereum OR '
-            'finance OR financial OR investment OR \"stock market\" OR trading OR banking'
-            ')'
-            ' AND NOT (sport OR football OR tennis OR recette OR cuisine OR people OR cinéma OR série OR météo)'
-        )
-
-        params = {
-            'q': q,
-            'language': 'fr',
-            'searchIn': 'title,description',
-            'domains': domains,
-            'from': from_date,
-            'sortBy': 'publishedAt',
-            'pageSize': int(request.GET.get('pageSize', 30)),
-            'apiKey': news_api_key
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        articles = data.get('articles', [])
-        return Response({'articles': articles})
-    except requests.exceptions.RequestException as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error fetching news from NewsAPI: {str(e)}")
-        return Response({'error': f'Failed to fetch news: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Unexpected error fetching news: {str(e)}")
-        return Response({'error': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def news_import_from_api(request):
-    """Importer une actualité depuis NewsAPI dans la base de données"""
-    article_data = request.data.get('article')
-    if not article_data:
-        return Response({'error': 'Article data is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        # Generate ID
-        max_id = 0
-        for id_val in NewsPost.objects.values_list('id', flat=True):
-            try:
-                int_id = int(id_val)
-                if int_id > max_id:
-                    max_id = int_id
-            except (ValueError, TypeError):
-                continue
-        
-        new_id = max_id + 1
-        news_id = str(new_id)
-        
-        if len(news_id) > 12:
-            import uuid
-            while True:
-                news_id = uuid.uuid4().hex[:12]
-                if not NewsPost.objects.filter(id=news_id).exists():
-                    break
-        
-        # Create news post from article data
-        title = article_data.get('title', '')[:200]
-        content = article_data.get('description', '') or article_data.get('content', '')
-        image_url = article_data.get('urlToImage', '')
-        source_name = ''
-        try:
-            source_name = (article_data.get('source') or {}).get('name', '') or ''
-        except Exception:
-            source_name = ''
-        article_url = article_data.get('url', '') or ''
-        
-        # Create news post
-        news_post = NewsPost.objects.create(
-            id=news_id,
-            title=title,
-            content=content,
-            source_name=source_name[:200],
-            article_url=article_url[:500],
-            author=request.user,
-            published=True
-        )
-        
-        # Download and save image if available
-        if image_url:
-            try:
-                import requests
-                from io import BytesIO
-                from django.core.files.base import ContentFile
-                from django.core.files.images import ImageFile
-                
-                img_response = requests.get(image_url, timeout=10)
-                if img_response.status_code == 200:
-                    img_content = ContentFile(img_response.content)
-                    news_post.image.save(
-                        f'news_{news_id}.jpg',
-                        img_content,
-                        save=True
-                    )
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Could not download image for news post {news_id}: {str(e)}")
-        
-        serializer = NewsPostSerializer(news_post, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error importing news from API: {str(e)}")
-        return Response({'error': f'Failed to import news: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    """Import a single article from external API into NewsPost"""
+    article = request.data.get('article') or request.data
+    if not article:
+        return Response({'error': 'Article data required'}, status=status.HTTP_400_BAD_REQUEST)
+    news_id = uuid.uuid4().hex[:12]
+    while NewsPost.objects.filter(id=news_id).exists():
+        news_id = uuid.uuid4().hex[:12]
+    title = (article.get('title') or article.get('headline') or 'Sans titre')[:200]
+    content = (article.get('content') or article.get('description') or article.get('summary') or '')[:10000]
+    source_name = (article.get('source') or article.get('source_name') or article.get('author') or '')[:200]
+    article_url = (article.get('url') or article.get('article_url') or article.get('link') or '')[:500]
+    post = NewsPost.objects.create(
+        id=news_id,
+        title=title,
+        content=content,
+        source_name=source_name,
+        article_url=article_url,
+        author=request.user if request.user.is_authenticated else None,
+        published=True,
+    )
+    serializer = NewsPostSerializer(post, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def news_bulk_import_from_api(request):
-    """Importer plusieurs actualités depuis NewsAPI dans la base de données"""
-    articles_data = request.data.get('articles', [])
-    if not articles_data or not isinstance(articles_data, list):
-        return Response({'error': 'Articles array is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    imported_posts = []
-    errors = []
-    
-    # Get max ID once at the start
-    max_id = 0
-    for id_val in NewsPost.objects.values_list('id', flat=True):
+    """Bulk import articles from external API into NewsPost"""
+    articles = request.data.get('articles') or []
+    success_count = 0
+    error_count = 0
+    for article in articles:
         try:
-            int_id = int(id_val)
-            if int_id > max_id:
-                max_id = int_id
-        except (ValueError, TypeError):
-            continue
-    
-    for idx, article_data in enumerate(articles_data):
-        try:
-            # Generate ID
-            new_id = max_id + 1 + idx
-            news_id = str(new_id)
-            
-            if len(news_id) > 12:
-                import uuid
-                while True:
-                    news_id = uuid.uuid4().hex[:12]
-                    if not NewsPost.objects.filter(id=news_id).exists():
-                        break
-            
-            # Create news post from article data
-            title = article_data.get('title', '')[:200]
-            content = article_data.get('description', '') or article_data.get('content', '')
-            image_url = article_data.get('urlToImage', '')
-            source_name = ''
-            try:
-                source_name = (article_data.get('source') or {}).get('name', '') or ''
-            except Exception:
-                source_name = ''
-            article_url = article_data.get('url', '') or ''
-            
-            # Create news post
-            news_post = NewsPost.objects.create(
+            news_id = uuid.uuid4().hex[:12]
+            while NewsPost.objects.filter(id=news_id).exists():
+                news_id = uuid.uuid4().hex[:12]
+            title = (article.get('title') or article.get('headline') or 'Sans titre')[:200]
+            content = (article.get('content') or article.get('description') or article.get('summary') or '')[:10000]
+            source_name = (article.get('source') or article.get('source_name') or article.get('author') or '')[:200]
+            article_url = (article.get('url') or article.get('article_url') or article.get('link') or '')[:500]
+            NewsPost.objects.create(
                 id=news_id,
                 title=title,
                 content=content,
-                source_name=source_name[:200],
-                article_url=article_url[:500],
-                author=request.user,
-                published=True
+                source_name=source_name,
+                article_url=article_url,
+                author=request.user if request.user.is_authenticated else None,
+                published=True,
             )
-            
-            # Download and save image if available
-            if image_url:
-                try:
-                    import requests
-                    from django.core.files.base import ContentFile
-                    
-                    img_response = requests.get(image_url, timeout=10)
-                    if img_response.status_code == 200:
-                        img_content = ContentFile(img_response.content)
-                        news_post.image.save(
-                            f'news_{news_id}.jpg',
-                            img_content,
-                            save=True
-                        )
-                except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Could not download image for news post {news_id}: {str(e)}")
-            
-            serializer = NewsPostSerializer(news_post, context={'request': request})
-            imported_posts.append(serializer.data)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error importing article {idx} from API: {str(e)}")
-            errors.append({'index': idx, 'error': str(e)})
-    
-    return Response({
-        'imported': imported_posts,
-        'errors': errors,
-        'success_count': len(imported_posts),
-        'error_count': len(errors)
-    }, status=status.HTTP_201_CREATED)
+            success_count += 1
+        except Exception:
+            error_count += 1
+    return Response({'success_count': success_count, 'error_count': error_count})
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def news_update(request, news_id):
+    """Update a news post"""
+    post = get_object_or_404(NewsPost, id=news_id)
+    data = request.data
+    if hasattr(data, 'get'):
+        if 'title' in data:
+            post.title = (data.get('title') or '').strip()[:200] or 'Sans titre'
+        if 'content' in data:
+            post.content = (data.get('content') or '').strip()
+        if 'sourceName' in data or 'source_name' in data:
+            post.source_name = (data.get('sourceName') or data.get('source_name') or '').strip()[:200]
+        if 'articleUrl' in data or 'article_url' in data:
+            post.article_url = (data.get('articleUrl') or data.get('article_url') or '').strip()[:500]
+        if 'published' in data:
+            val = data.get('published')
+            post.published = val in (True, 'true', '1', 1) if not isinstance(val, bool) else val
+    if data.get('removeImage') in ('true', True, '1', 1) or data.get('remove_image') in ('true', True, '1', 1):
+        if post.image:
+            post.image.delete(save=False)
+        post.image = None
+    if 'image' in request.FILES:
+        if post.image:
+            post.image.delete(save=False)
+        post.image = request.FILES['image']
+    post.save()
+    serializer = NewsPostSerializer(post, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def news_delete(request, news_id):
+    """Delete a news post"""
+    post = get_object_or_404(NewsPost, id=news_id)
+    post.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def media_proxy(request, file_path):
+    """Proxy media files (Cloudinary URLs or local paths) with proper Content-Type and Content-Disposition for CORS/preview"""
+    from django.http import HttpResponse
+    from urllib.parse import unquote
+
+    decoded_path = unquote(file_path)
+    try:
+        if decoded_path.startswith('http://') or decoded_path.startswith('https://'):
+            import requests
+            resp = requests.get(decoded_path, timeout=30, stream=True)
+            resp.raise_for_status()
+            content_type = resp.headers.get('Content-Type', 'application/octet-stream')
+            content_disposition = resp.headers.get('Content-Disposition', 'inline')
+            if 'application/pdf' in content_type or decoded_path.lower().endswith('.pdf'):
+                content_type = 'application/pdf'
+                content_disposition = 'inline'
+            response = HttpResponse(resp.content, content_type=content_type)
+            response['Content-Disposition'] = content_disposition
+            response['Access-Control-Allow-Origin'] = '*'
+            return response
+        else:
+            from django.conf import settings
+            from django.views.static import serve
+            return serve(request, decoded_path, document_root=settings.MEDIA_ROOT)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"media_proxy error for {file_path[:100]}: {e}")
+        return HttpResponse(status=404)
+
+
+# Custom Token Refresh Serializer that handles missing users

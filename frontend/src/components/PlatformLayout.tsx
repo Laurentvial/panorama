@@ -19,7 +19,7 @@ import {
 import { CookieBanner } from './CookieBanner';
 import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
-import { useIsMobile } from './ui/use-mobile';
+import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformButtons.css';
@@ -48,6 +48,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
+  const isPhone = useIsPhone();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showBottomNav, setShowBottomNav] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -928,11 +929,12 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         <main style={{ 
           flex: 1, 
           paddingTop: stickyTopOffset,
-          paddingRight: isMobile ? '16px' : '30px',
-          paddingLeft: isMobile ? '16px' : '30px',
-          paddingBottom: showBottomNav ? `${16 + MOBILE_BOTTOM_NAV_HEIGHT}px` : '30px',
+          paddingRight: isPhone ? '12px' : isMobile ? '16px' : '30px',
+          paddingLeft: isPhone ? '12px' : isMobile ? '16px' : '30px',
+          paddingBottom: showBottomNav ? `${(isPhone ? 12 : 16) + MOBILE_BOTTOM_NAV_HEIGHT}px` : (isPhone ? '16px' : isMobile ? '20px' : '30px'),
           width: isMobile ? '100%' : 'auto',
           minWidth: 0,
+          overflowX: 'hidden',
           scrollMarginTop: `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`, // Account for sticky header height
         }}>
           {children}

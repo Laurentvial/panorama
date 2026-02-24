@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
 import { Textarea } from './ui/textarea';
-import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet, MessageSquare } from 'lucide-react';
+import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet, MessageSquare, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
@@ -53,6 +53,15 @@ export function ClientMiscTab({
       setTradingEnabled(client.tradingEnabled);
     } else {
       setTradingEnabled(true); // Default to true
+    }
+  }, [client]);
+
+  // Initialize contract preview enabled from client data
+  useEffect(() => {
+    if (client?.contractPreviewEnabled !== undefined) {
+      setContractPreviewEnabled(client.contractPreviewEnabled);
+    } else {
+      setContractPreviewEnabled(true); // Default to true
     }
   }, [client]);
 
@@ -114,6 +123,27 @@ export function ClientMiscTab({
       }
     } finally {
       setSavingTradingEnabled(false);
+    }
+  }
+
+  async function handleSaveContractPreviewEnabled() {
+    setSavingContractPreviewEnabled(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ contractPreviewEnabled: contractPreviewEnabled }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Paramètre de prévisualisation du contrat mis à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving contract preview enabled:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour du paramètre');
+      if (client?.contractPreviewEnabled !== undefined) {
+        setContractPreviewEnabled(client.contractPreviewEnabled);
+      }
+    } finally {
+      setSavingContractPreviewEnabled(false);
     }
   }
 
@@ -236,6 +266,45 @@ export function ClientMiscTab({
                 size="sm"
               >
                 {savingTradingEnabled ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Parametres du produit Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Parametres du produit
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Paramètres liés aux produits et à la souscription pour ce client.
+            </p>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="contractPreviewEnabled"
+                checked={contractPreviewEnabled}
+                onCheckedChange={(checked) => setContractPreviewEnabled(checked === true)}
+              />
+              <Label htmlFor="contractPreviewEnabled" className="font-normal cursor-pointer">
+                Prévisualisation du contrat
+              </Label>
+            </div>
+            <p className="text-xs text-slate-500">
+              Si désactivé, le client ne verra pas le bouton "Voir le contrat" lors de la souscription à un produit.
+            </p>
+            <div className="pt-2">
+              <Button
+                onClick={handleSaveContractPreviewEnabled}
+                disabled={savingContractPreviewEnabled}
+                size="sm"
+              >
+                {savingContractPreviewEnabled ? 'Enregistrement...' : 'Enregistrer'}
               </Button>
             </div>
           </div>
