@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
-import { Sparkles, List, ListOrdered, CornerDownLeft } from 'lucide-react';
+import { Sparkles, List, ListOrdered, CornerDownLeft, Eraser } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface RichTextEditorProps {
@@ -60,6 +60,15 @@ export function RichTextEditor({
     const indent = currentLine.match(/^\s*/)?.[0] || '';
     
     insertAtCursor(`${indent}• `);
+  }
+
+  function removeEmptyLines() {
+    const lines = value.split('\n');
+    const cleaned = lines.filter((line) => line.trim() !== '');
+    onChange(cleaned.join('\n'));
+    if (lines.length !== cleaned.length) {
+      toast.success(`${lines.length - cleaned.length} ligne(s) vide(s) supprimée(s)`);
+    }
   }
 
   function insertNumberedList() {
@@ -146,6 +155,16 @@ export function RichTextEditor({
             className="h-8 w-8 p-0"
           >
             <ListOrdered className="w-4 h-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={removeEmptyLines}
+            title="Supprimer les lignes vides"
+            className="h-8 w-8 p-0"
+          >
+            <Eraser className="w-4 h-4" />
           </Button>
           {onGenerateAI && (
             <Button
