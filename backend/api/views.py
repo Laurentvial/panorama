@@ -5607,17 +5607,13 @@ def client_document_create(request, client_id):
     if not file:
         return Response({'error': 'Le fichier est requis'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Validate transaction relationship for contracts
+    # Transaction is optional - documents are not necessarily linked to a transaction
     transaction = None
     if transaction_id:
         try:
             transaction = Transaction.objects.get(id=transaction_id, client=client)
         except Transaction.DoesNotExist:
             return Response({'error': 'Transaction introuvable ou n\'appartient pas au client'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # If document type is contract, transaction is required
-    if document_type == 'contract' and not transaction:
-        return Response({'error': 'Un contrat doit être lié à une transaction'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Create document
     document = ClientDocument.objects.create(

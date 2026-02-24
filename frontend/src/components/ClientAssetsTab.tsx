@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Checkbox } from './ui/checkbox';
 import { TrendingUp, Plus, Trash2, X, Star, Calendar } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -32,14 +33,113 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [filterSubcategory, setFilterSubcategory] = useState<string>('all');
   const [localClientAssets, setLocalClientAssets] = useState<any[]>(clientAssets || []);
   const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLocalClientAssets(clientAssets || []);
+    setSelectedAssetIds(new Set());
   }, [clientAssets]);
 
   useEffect(() => {
     setLocalClientProducts(clientProducts || []);
+    setSelectedProductIds(new Set());
   }, [clientProducts]);
+
+  // Selection handlers for assets
+  function handleSelectAsset(assetId: string) {
+    setSelectedAssetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }
+
+  function handleSelectAllAssets(filteredAssets: any[]) {
+    const visibleIds = filteredAssets.map((ca: any) => ca.asset?.id).filter(Boolean) as string[];
+    if (selectedAssetIds.size === visibleIds.length) {
+      setSelectedAssetIds(new Set());
+    } else {
+      setSelectedAssetIds(new Set(visibleIds));
+    }
+  }
+
+  function handleClearAssetSelection() {
+    setSelectedAssetIds(new Set());
+  }
+
+  // Selection handlers for products
+  function handleSelectProduct(productId: string) {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  function handleSelectAllProducts() {
+    const visibleIds = localClientProducts
+      .map((cp: any) => cp.product?.id)
+      .filter(Boolean) as string[];
+    if (selectedProductIds.size === visibleIds.length) {
+      setSelectedProductIds(new Set());
+    } else {
+      setSelectedProductIds(new Set(visibleIds));
+    }
+  }
+
+  function handleClearProductSelection() {
+    setSelectedProductIds(new Set());
+  }
+
+  // Bulk delete handlers
+  async function handleBulkRemoveAssets() {
+    const count = selectedAssetIds.size;
+    if (!confirm(`Retirer ${count} actif(s) sélectionné(s) du client ?`)) return;
+    const previous = localClientAssets;
+    const idsToRemove = new Set(selectedAssetIds);
+    setLocalClientAssets((prev) => prev.filter((ca: any) => !idsToRemove.has(ca.asset?.id)));
+    handleClearAssetSelection();
+    try {
+      await Promise.all(
+        Array.from(selectedAssetIds).map((assetId) =>
+          apiCall(`/api/clients/${clientId}/assets/${assetId}/`, { method: 'DELETE' })
+        )
+      );
+      toast.success(`${count} actif(s) retiré(s) avec succès`);
+      onRefresh();
+    } catch (error) {
+      setLocalClientAssets(previous);
+      setSelectedAssetIds(idsToRemove);
+      console.error('Error bulk removing assets:', error);
+      toast.error('Erreur lors du retrait des actifs');
+    }
+  }
+
+  async function handleBulkRemoveProducts() {
+    const count = selectedProductIds.size;
+    if (!confirm(`Retirer ${count} produit(s) sélectionné(s) du client ?`)) return;
+    const previous = localClientProducts;
+    const idsToRemove = new Set(selectedProductIds);
+    setLocalClientProducts((prev) => prev.filter((cp: any) => !idsToRemove.has(cp.product?.id)));
+    handleClearProductSelection();
+    try {
+      await Promise.all(
+        Array.from(selectedProductIds).map((productId) =>
+          apiCall(`/api/clients/${clientId}/products/${productId}/`, { method: 'DELETE' })
+        )
+      );
+      toast.success(`${count} produit(s) retiré(s) avec succès`);
+      onRefresh();
+    } catch (error) {
+      setLocalClientProducts(previous);
+      setSelectedProductIds(idsToRemove);
+      console.error('Error bulk removing products:', error);
+      toast.error('Erreur lors du retrait des produits');
+    }
+  }
 
   // Format date from YYYY-MM-DD to DD/MM/YYYY
   const formatDate = (dateStr: string | undefined): string => {
@@ -63,6 +163,12 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   };
 
   async function handleAddAsset(assetId: string) {
+    const asset = availableAssets.find((a: any) => a.id === assetId);
+    const tempId = `pending-${assetId}-${Date.now()}`;
+    if (asset) {
+      setLocalClientAssets((prev) => [...prev, { id: tempId, asset, featured: false }]);
+    }
+    setIsAddAssetDialogOpen(false);
     try {
       await apiCall(`/api/clients/${clientId}/assets/add/`, {
         method: 'POST',
@@ -70,15 +176,23 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success('Actif ajouté avec succès');
-      setIsAddAssetDialogOpen(false);
       onRefresh();
     } catch (error: any) {
+      if (asset) {
+        setLocalClientAssets((prev) => prev.filter((ca: any) => ca.id !== tempId));
+      }
       console.error('Error adding asset:', error);
       toast.error(error.message || 'Erreur lors de l\'ajout de l\'actif');
     }
   }
 
   async function handleAddProduct(productId: string) {
+    const product = availableProducts.find((p: any) => p.id === productId);
+    const tempId = `pending-${productId}-${Date.now()}`;
+    if (product) {
+      setLocalClientProducts((prev) => [...prev, { id: tempId, product, featured: false }]);
+    }
+    setIsAddProductDialogOpen(false);
     try {
       await apiCall(`/api/clients/${clientId}/products/add/`, {
         method: 'POST',
@@ -86,9 +200,11 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
         headers: { 'Content-Type': 'application/json' }
       });
       toast.success('Produit ajouté avec succès');
-      setIsAddProductDialogOpen(false);
       onRefresh();
     } catch (error: any) {
+      if (product) {
+        setLocalClientProducts((prev) => prev.filter((cp: any) => cp.id !== tempId));
+      }
       console.error('Error adding product:', error);
       toast.error(error.message || 'Erreur lors de l\'ajout du produit');
     }
@@ -96,12 +212,14 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
   async function handleRemoveAsset(assetId: string) {
     if (!confirm('Retirer cet actif du client ?')) return;
-    
+    const previous = localClientAssets;
+    setLocalClientAssets((prev) => prev.filter((ca: any) => ca.asset?.id !== assetId));
     try {
       await apiCall(`/api/clients/${clientId}/assets/${assetId}/`, { method: 'DELETE' });
       toast.success('Actif retiré avec succès');
       onRefresh();
     } catch (error) {
+      setLocalClientAssets(previous);
       console.error('Error removing asset:', error);
       toast.error('Erreur lors du retrait de l\'actif');
     }
@@ -109,12 +227,14 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
   async function handleRemoveProduct(productId: string) {
     if (!confirm('Retirer ce produit du client ?')) return;
-    
+    const previous = localClientProducts;
+    setLocalClientProducts((prev) => prev.filter((cp: any) => cp.product?.id !== productId));
     try {
       await apiCall(`/api/clients/${clientId}/products/${productId}/`, { method: 'DELETE' });
       toast.success('Produit retiré avec succès');
       onRefresh();
     } catch (error) {
+      setLocalClientProducts(previous);
       console.error('Error removing product:', error);
       toast.error('Erreur lors du retrait du produit');
     }
@@ -233,6 +353,16 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
               
               {/* Actions */}
               <div className="flex gap-2">
+                {selectedAssetIds.size > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={handleBulkRemoveAssets}
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Retirer la sélection ({selectedAssetIds.size})
+                  </Button>
+                )}
                 <Button 
                   variant="outline"
                   onClick={async () => {
@@ -285,7 +415,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         </SelectTrigger>
                         <SelectContent>
                           {availableAssets
-                            .filter((asset: any) => !clientAssets.some((ca: any) => ca.asset?.id === asset.id))
+                            .filter((asset: any) => !localClientAssets.some((ca: any) => ca.asset?.id === asset.id))
                             .map((asset: any) => (
                               <SelectItem key={asset.id} value={asset.id}>
                                 {asset.name} ({asset.type}) - {asset.reference || 'N/A'}
@@ -325,6 +455,19 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-slate-200">
+                            <th className="w-10 py-2 px-3 pr-0">
+                              <Checkbox
+                                checked={
+                                  selectedAssetIds.size === 0
+                                    ? false
+                                    : selectedAssetIds.size === filteredAssets.length
+                                    ? true
+                                    : 'indeterminate'
+                                }
+                                onCheckedChange={() => handleSelectAllAssets(filteredAssets)}
+                                aria-label="Tout sélectionner"
+                              />
+                            </th>
                             <th className="text-left py-2 px-3">Type</th>
                             <th className="text-left py-2 px-3">Nom</th>
                             <th className="text-left py-2 px-3">Référence</th>
@@ -342,6 +485,13 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                             const isFeatured = clientAsset.featured || false;
                             return (
                               <tr key={clientAsset.id} className="border-b border-slate-100">
+                                <td className="w-10 py-2 px-3 pr-0">
+                                  <Checkbox
+                                    checked={selectedAssetIds.has(asset.id)}
+                                    onCheckedChange={() => handleSelectAsset(asset.id)}
+                                    aria-label={`Sélectionner ${asset.name}`}
+                                  />
+                                </td>
                                 <td className="py-2 px-3">{asset.type || '-'}</td>
                                 <td className="py-2 px-3">{asset.name || '-'}</td>
                                 <td className="py-2 px-3">{asset.reference || '-'}</td>
@@ -427,6 +577,16 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
             <div className="flex justify-between items-center gap-4 flex-wrap">
               {/* Actions */}
               <div className="flex gap-2">
+                {selectedProductIds.size > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={handleBulkRemoveProducts}
+                    className="text-red-600 border-red-200 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Retirer la sélection ({selectedProductIds.size})
+                  </Button>
+                )}
                 <Button 
                   variant="outline"
                   onClick={async () => {
@@ -508,6 +668,19 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-slate-200">
+                          <th className="w-10 py-2 px-3 pr-0">
+                            <Checkbox
+                              checked={
+                                selectedProductIds.size === 0
+                                  ? false
+                                  : selectedProductIds.size === localClientProducts.filter((cp: any) => cp.product).length
+                                  ? true
+                                  : 'indeterminate'
+                              }
+                              onCheckedChange={handleSelectAllProducts}
+                              aria-label="Tout sélectionner"
+                            />
+                          </th>
                           <th className="text-left py-2 px-3">Type</th>
                           <th className="text-left py-2 px-3">Nom</th>
                           <th className="text-left py-2 px-3">Référence</th>
@@ -524,6 +697,13 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           const isFeatured = clientProduct.featured || false;
                           return (
                             <tr key={clientProduct.id} className="border-b border-slate-100">
+                              <td className="w-10 py-2 px-3 pr-0">
+                                <Checkbox
+                                  checked={selectedProductIds.has(product.id)}
+                                  onCheckedChange={() => handleSelectProduct(product.id)}
+                                  aria-label={`Sélectionner ${product.name}`}
+                                />
+                              </td>
                               <td className="py-2 px-3">{product.type || '-'}</td>
                               <td className="py-2 px-3">{product.name || '-'}</td>
                               <td className="py-2 px-3">{product.reference || '-'}</td>

@@ -128,12 +128,6 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
       return;
     }
 
-    // Validate: contracts must be linked to a transaction
-    if (formData.documentType === 'contract' && !formData.transactionId) {
-      toast.error('Un contrat doit être lié à une transaction');
-      return;
-    }
-
     setUploading(true);
     try {
       const formDataToSend = new FormData();
@@ -145,16 +139,17 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
       }
       formDataToSend.append('file', formData.file);
 
-      await apiCall(`/api/clients/${clientId}/documents/create/`, {
+      const created = await apiCall(`/api/clients/${clientId}/documents/create/`, {
         method: 'POST',
         body: formDataToSend,
         // Don't set Content-Type header - browser will set it with boundary for FormData
-      });
+      }) as any;
 
       toast.success('Document ajouté avec succès');
       setIsAddDialogOpen(false);
       setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
-      loadDocuments();
+      // Refresh list to show the newly added document
+      setDocuments((prev) => [created, ...prev]);
       onRefresh();
     } catch (error: any) {
       console.error('Error creating document:', error);
@@ -383,7 +378,7 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
                 className="modal-close"
                 onClick={() => {
                   setIsAddDialogOpen(false);
-                  setFormData({ name: '', documentType: 'other', description: '', file: null });
+                  setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
                 }}
               >
                 <X className="planning-icon-md" />
@@ -434,25 +429,13 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
               
               {formData.documentType === 'contract' && (
                 <div className="modal-form-field">
-                  <Label htmlFor="document-transaction">Transaction *</Label>
+                  <Label htmlFor="document-transaction">Transaction (optionnel)</Label>
                   {(() => {
                     const transferTransactions = transactions.filter((t: any) => t.type === 'transfert');
-                    if (transferTransactions.length === 0) {
-                      return (
-                        <div>
-                          <p className="text-sm text-slate-500 mb-2">
-                            Aucune transaction de type "transfert" disponible pour ce client.
-                          </p>
-                          <p className="text-xs text-slate-400">
-                            Les contrats doivent être liés à une transaction de type "transfert".
-                          </p>
-                        </div>
-                      );
-                    }
                     return (
                       <Select
-                        value={formData.transactionId}
-                        onValueChange={(value) => setFormData({ ...formData, transactionId: value })}
+                        value={formData.transactionId || 'none'}
+                        onValueChange={(value) => setFormData({ ...formData, transactionId: value === 'none' ? '' : value })}
                       >
                         <SelectTrigger 
                           id="document-transaction"
@@ -464,6 +447,7 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
                           className="z-[1001]"
                           style={{ zIndex: 1001 }}
                         >
+                          <SelectItem value="none">Aucune</SelectItem>
                           {transferTransactions.map((transaction) => (
                             <SelectItem key={transaction.id} value={transaction.id}>
                               {formatTransactionLabel(transaction)}
@@ -474,7 +458,7 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
                     );
                   })()}
                   <p className="mt-1 text-xs text-slate-500">
-                    Les contrats doivent être liés à une transaction de type "transfert"
+                    Optionnel : lier à une transaction de type "transfert"
                   </p>
                 </div>
               )}

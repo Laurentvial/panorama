@@ -1615,16 +1615,6 @@ export function ProductDetail() {
                     </div>
                     
                     <div>
-                      <Label htmlFor="ip">IP de la transaction</Label>
-                      <Input
-                        id="ip"
-                        value={clientIP}
-                        disabled
-                        style={{ backgroundColor: '#f9fafb', color: '#6b7280' }}
-                      />
-                    </div>
-                    
-                    <div>
                       <Label htmlFor="transactionDate">Fait le (Date)</Label>
                       <Input
                         id="transactionDate"

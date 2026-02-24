@@ -76,6 +76,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [contractDocumentsByTransaction, setContractDocumentsByTransaction] = useState<Record<string, any[]>>({});
+  const [unlinkedContractDocuments, setUnlinkedContractDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
@@ -114,11 +115,14 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     try {
       const data = await apiCall(`/api/clients/${clientId}/documents/`);
       const documents = (data as any).documents || [];
-      const contracts = documents.filter(
+      const contractsWithTx = documents.filter(
         (doc: any) => doc?.documentType === 'contract' && doc?.transactionId
       );
+      const unlinked = documents.filter(
+        (doc: any) => doc?.documentType === 'contract' && !doc?.transactionId
+      );
 
-      const groupedByTransaction = contracts.reduce((acc: Record<string, any[]>, doc: any) => {
+      const groupedByTransaction = contractsWithTx.reduce((acc: Record<string, any[]>, doc: any) => {
         const txId = String(doc.transactionId);
         if (!acc[txId]) {
           acc[txId] = [];
@@ -128,9 +132,11 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       }, {});
 
       setContractDocumentsByTransaction(groupedByTransaction);
+      setUnlinkedContractDocuments(unlinked);
     } catch (error) {
       console.error('Error loading contract documents:', error);
       setContractDocumentsByTransaction({});
+      setUnlinkedContractDocuments([]);
     }
   };
 
@@ -1175,6 +1181,32 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 }}
                 emptyMessage="Aucune transaction"
               />
+
+              {unlinkedContractDocuments.length > 0 && (
+                <div className="mt-6 pt-6 border-t border-slate-200">
+                  <div className="text-sm font-semibold text-slate-700 mb-3">
+                    Contrats non liés à une transaction
+                  </div>
+                  <ul className="list-none p-0 m-0 space-y-2">
+                    {unlinkedContractDocuments.map((doc: any) => (
+                      <li key={doc.id} className="flex items-center gap-2">
+                        <a
+                          href={doc?.fileUrl || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => { if (!doc?.fileUrl) e.preventDefault(); }}
+                          className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-sm"
+                        >
+                          {doc?.name || 'Contrat'}
+                        </a>
+                        {doc?.description && (
+                          <span className="text-slate-500 text-sm">— {doc.description}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               
               {/* Pagination Controls */}
               {pagination.total_pages > 1 && (

@@ -1003,7 +1003,7 @@ export function PlatformDashboard() {
           {/* News Feed and Market Movers */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', 
+            gridTemplateColumns: isMobile ? '1fr' : (assets.length > 0 && (gainers.length > 0 || losers.length > 0) ? '2fr 1fr' : '1fr'), 
             gap: isMobile ? '20px' : '30px' 
           }}>
             {/* News Feed */}
@@ -1073,19 +1073,24 @@ export function PlatformDashboard() {
                             style={{
                               width: isMobile ? '100%' : 300,
                               height: isMobile ? 220 : '100%',
+                              minHeight: isMobile ? 220 : 180,
                               borderRadius: 14,
                               overflow: 'hidden',
                               background: 'rgba(2, 6, 23, 0.06)',
                               flexShrink: 0,
+                              position: 'relative',
                             }}
                           >
                             <img
                               src={post.imageUrl}
                               alt={post.title}
                               style={{
+                                position: 'absolute',
+                                inset: 0,
                                 width: '100%',
                                 height: '100%',
                                 objectFit: 'cover',
+                                objectPosition: 'center',
                                 display: 'block',
                               }}
                               loading="lazy"
@@ -1093,7 +1098,7 @@ export function PlatformDashboard() {
                           </div>
                         ) : null}
 
-                        <div style={{ flex: 1, minWidth: 0, maxWidth: isMobile ? undefined : 380, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
                               {post.category ? (
@@ -1163,6 +1168,8 @@ export function PlatformDashboard() {
                                 color: '#6b7280',
                                 lineHeight: 1.55,
                                 whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'break-word',
                                 display: '-webkit-box',
                                 WebkitBoxOrient: 'vertical',
                                 WebkitLineClamp: isMobile ? 3 : 2,
@@ -1220,46 +1227,48 @@ export function PlatformDashboard() {
               </CardContent>
             </Card>
 
-            {/* Gainers and Losers */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
-              {/* Plus fortes hausses */}
-              <Card className="platform-moversCard">
-                <div className="platform-moversHeader">
-                  <TrendingUp className={`platform-moversIcon platform-moversIcon--up ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
-                  <div className="platform-moversTitle">PLUS FORTES HAUSSES</div>
-                </div>
-                <CardContent className="platform-moversContent">
-                  {gainers.length === 0 ? (
-                    <div className="platform-moversEmpty">Aucune donnée disponible</div>
-                  ) : (
-                    <div className="platform-moversList">
-                      {gainers.map((asset: any) => (
-                        <MarketMoverRow key={asset.id} asset={asset} direction="up" />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+            {/* Gainers and Losers - only show when client has access to assets */}
+            {assets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '16px' : '20px' }}>
+                {/* Plus fortes hausses - only show when there are gainers */}
+                {(gainers.length > 0 || losers.length > 0) && (
+                  <>
+                    {gainers.length > 0 && (
+                      <Card className="platform-moversCard">
+                        <div className="platform-moversHeader">
+                          <TrendingUp className={`platform-moversIcon platform-moversIcon--up ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
+                          <div className="platform-moversTitle">PLUS FORTES HAUSSES</div>
+                        </div>
+                        <CardContent className="platform-moversContent">
+                          <div className="platform-moversList">
+                            {gainers.map((asset: any) => (
+                              <MarketMoverRow key={asset.id} asset={asset} direction="up" />
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
-              {/* Plus fortes baisses */}
-              <Card className="platform-moversCard">
-                <div className="platform-moversHeader">
-                  <TrendingDown className={`platform-moversIcon platform-moversIcon--down ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
-                  <div className="platform-moversTitle">PLUS FORTES BAISSES</div>
-                </div>
-                <CardContent className="platform-moversContent">
-                  {losers.length === 0 ? (
-                    <div className="platform-moversEmpty">Aucune donnée disponible</div>
-                  ) : (
-                    <div className="platform-moversList">
-                      {losers.map((asset: any) => (
-                        <MarketMoverRow key={asset.id} asset={asset} direction="down" />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                    {/* Plus fortes baisses - only show when there are losers */}
+                    {losers.length > 0 && (
+                      <Card className="platform-moversCard">
+                        <div className="platform-moversHeader">
+                          <TrendingDown className={`platform-moversIcon platform-moversIcon--down ${isMobile ? 'h-4 w-4' : 'h-4 w-4'}`} />
+                          <div className="platform-moversTitle">PLUS FORTES BAISSES</div>
+                        </div>
+                        <CardContent className="platform-moversContent">
+                          <div className="platform-moversList">
+                            {losers.map((asset: any) => (
+                              <MarketMoverRow key={asset.id} asset={asset} direction="down" />
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

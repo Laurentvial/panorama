@@ -16,6 +16,7 @@ export function PlatformPortfolio() {
   const [positions, setPositions] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transactionDocuments, setTransactionDocuments] = useState<Record<string, any[]>>({});
+  const [unlinkedContractDocuments, setUnlinkedContractDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const ORDERS_PAGE_SIZE = 10;
   const TRANSACTIONS_PAGE_SIZE = 10;
@@ -124,10 +125,10 @@ export function PlatformPortfolio() {
         }
       }
       
-      const [transactionsResponse, clientAssetsResponse, clientProductsResponse] = await Promise.all([
+      const [transactionsResponse, assetsResponse, productsResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
-        apiCall(`/api/clients/${currentUser.id}/assets/`).catch(() => ({ assets: [] })),
-        apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
+        apiCall('/api/assets/').catch(() => ({ assets: [] })),
+        apiCall('/api/products/').catch(() => ({ products: [] })),
       ]);
       setPositions(allPositionsList);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
@@ -143,37 +144,35 @@ export function PlatformPortfolio() {
       });
       setTransactions(filteredTransactions);
       
-      // Load and index contract documents by transaction ID
+      // Load and index contract documents by transaction ID; also collect unlinked contracts
       const documentsMap: Record<string, any[]> = {};
+      const unlinked: any[] = [];
       try {
         const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
         const allDocuments = (documentsResponse as any)?.documents || [];
         allDocuments.forEach((doc: any) => {
-          if (doc?.documentType !== 'contract' || !doc?.transactionId) return;
-          const txId = String(doc.transactionId);
-          if (!documentsMap[txId]) {
-            documentsMap[txId] = [];
+          if (doc?.documentType !== 'contract') return;
+          if (doc?.transactionId) {
+            const txId = String(doc.transactionId);
+            if (!documentsMap[txId]) {
+              documentsMap[txId] = [];
+            }
+            documentsMap[txId].push(doc);
+          } else {
+            unlinked.push(doc);
           }
-          documentsMap[txId].push(doc);
         });
       } catch (error) {
         console.error('Error loading documents:', error);
       }
       setTransactionDocuments(documentsMap);
+      setUnlinkedContractDocuments(unlinked);
       
-      // Extract assets from ClientAsset objects
-      const clientAssets = (clientAssetsResponse as any)?.assets || [];
-      const assetsList = clientAssets.map((ca: any) => {
-        // Handle both structures: {asset: {...}} and direct asset object
-        return ca.asset || ca;
-      }).filter(Boolean);
+      // Use full assets/products lists for metadata lookup (not restricted to actifs visibles)
+      // so positions remain fully visible even when asset/product was removed from client's discover list
+      const assetsList = (assetsResponse as any)?.assets || [];
       setAssetsIndex(assetsList);
-      // Extract products from ClientProduct objects
-      const clientProducts = (clientProductsResponse as any)?.products || [];
-      const productsList = clientProducts.map((cp: any) => {
-        // Handle both structures: {product: {...}} and direct product object
-        return cp.product || cp;
-      }).filter(Boolean);
+      const productsList = (productsResponse as any)?.products || [];
       setProductsIndex(productsList);
     } catch (error) {
       console.error('Error loading portfolio data:', error);
@@ -1564,6 +1563,35 @@ export function PlatformPortfolio() {
                     </div>
                   )}
                 </>
+              )}
+
+              {unlinkedContractDocuments.length > 0 && (
+                <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#334155' }}>
+                    Contrats non liés à une transaction
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    {unlinkedContractDocuments.map((doc: any) => (
+                      <li key={doc.id} style={{ marginBottom: 8 }}>
+                        <a
+                          href={doc?.fileUrl || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => { if (!doc?.fileUrl) e.preventDefault(); }}
+                          className="platform-portfolioLink"
+                          style={{ fontSize: 13, fontWeight: 600 }}
+                        >
+                          {doc?.name || 'Contrat'}
+                        </a>
+                        {doc?.description && (
+                          <span style={{ marginLeft: 8, fontSize: 12, color: '#64748b' }}>
+                            — {doc.description}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </CardContent>
           </Card>
