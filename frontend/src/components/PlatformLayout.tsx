@@ -697,26 +697,41 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 alignItems: 'center', 
                 justifyContent: 'flex-start' 
               }}>
-                {settings?.logo_url ? (
-                  <img 
-                    src={settings.logo_url} 
-                    alt="Logo" 
-                    style={location.pathname.startsWith('/platform/product/') 
-                      ? { 
-                          width: isPhone ? '96px' : isMobile ? '64px' : '160px', 
-                          height: isPhone ? '96px' : isMobile ? '64px' : '80px', 
-                          objectFit: 'contain' 
-                        }
-                      : { 
-                          maxHeight: isPhone ? '48px' : isMobile ? '32px' : '48px', 
-                          maxWidth: isPhone ? '160px' : isMobile ? '120px' : '160px', 
-                          objectFit: 'contain' 
-                        }
-                    } 
-                  />
-                ) : (
-                  <h1 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: 'bold', margin: 0 }}>{platformName}</h1>
-                )}
+                <button
+                  type="button"
+                  onClick={() => navigate('/platform')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-start',
+                  }}
+                  aria-label="Retour au tableau de bord"
+                >
+                  {settings?.logo_url ? (
+                    <img 
+                      src={settings.logo_url} 
+                      alt="Logo" 
+                      style={location.pathname.startsWith('/platform/product/') 
+                        ? { 
+                            width: isPhone ? '96px' : isMobile ? '64px' : '160px', 
+                            height: isPhone ? '96px' : isMobile ? '64px' : '80px', 
+                            objectFit: 'contain' 
+                          }
+                        : { 
+                            maxHeight: isPhone ? '48px' : isMobile ? '32px' : '48px', 
+                            maxWidth: isPhone ? '160px' : isMobile ? '120px' : '160px', 
+                            objectFit: 'contain' 
+                          }
+                      } 
+                    />
+                  ) : (
+                    <h1 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: 'bold', margin: 0 }}>{platformName}</h1>
+                  )}
+                </button>
               </div>
               
               {/* User Profile */}
