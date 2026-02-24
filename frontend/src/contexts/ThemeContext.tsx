@@ -9,6 +9,8 @@ interface AppSettings {
   favicon_url?: string;
   login_background_image?: string;
   login_background_image_url?: string;
+  platform_banner_image?: string;
+  platform_banner_image_url?: string;
   platform_name?: string;
   primary_color: string;
   secondary_color?: string;

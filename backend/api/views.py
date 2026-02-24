@@ -10965,6 +10965,8 @@ def app_settings(request):
                     'favicon_url': None,
                     'login_background_image': None,
                     'login_background_image_url': None,
+                    'platform_banner_image': None,
+                    'platform_banner_image_url': None,
                     'primary_color': settings_obj.primary_color or '#030213',
                     'secondary_color': settings_obj.secondary_color or '',
                     'accent_color': settings_obj.accent_color or '',
@@ -11001,6 +11003,13 @@ def app_settings(request):
                 if settings_obj.login_background_image:
                     settings_obj.login_background_image.delete(save=False)
                 settings_obj.login_background_image = None
+                settings_obj.save()
+
+            # Handle platform banner image removal
+            if data.get('remove_platform_banner_image') == 'true':
+                if settings_obj.platform_banner_image:
+                    settings_obj.platform_banner_image.delete(save=False)
+                settings_obj.platform_banner_image = None
                 settings_obj.save()
             
             # Handle logo file upload
@@ -11116,6 +11125,32 @@ def app_settings(request):
                     import traceback
                     traceback.print_exc()
                     return Response({'error': f'Background upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Handle platform banner image upload
+            if 'platform_banner_image' in request.FILES:
+                try:
+                    banner_file = request.FILES['platform_banner_image']
+                    original_filename = banner_file.name
+                    _, ext = os.path.splitext(original_filename)
+                    custom_filename = f'platform_banner{ext}'
+
+                    if settings_obj.platform_banner_image:
+                        settings_obj.platform_banner_image.delete(save=False)
+
+                    from django.core.files.base import ContentFile
+                    try:
+                        banner_file.seek(0)
+                    except Exception:
+                        pass
+                    settings_obj.platform_banner_image.save(custom_filename, ContentFile(banner_file.read()), save=True)
+                    uploaded_file_fields.append('platform_banner_image')
+
+                    if not settings_obj.platform_banner_image:
+                        return Response({'error': 'Platform banner upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as upload_error:
+                    import traceback
+                    traceback.print_exc()
+                    return Response({'error': f'Platform banner upload failed: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Update platform info from request data
             update_fields = []

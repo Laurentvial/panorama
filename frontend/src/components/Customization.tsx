@@ -27,6 +27,9 @@ export function Customization() {
   const [bgFile, setBgFile] = useState<File | null>(null);
   const [bgPreview, setBgPreview] = useState<string | null>(null);
   const [shouldRemoveBg, setShouldRemoveBg] = useState(false);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
+  const [shouldRemoveBanner, setShouldRemoveBanner] = useState(false);
   const [colors, setColors] = useState({
     primary: '#030213',
     secondary: '',
@@ -56,6 +59,11 @@ export function Customization() {
       }
       if (settings.login_background_image_url) {
         setBgPreview(settings.login_background_image_url);
+      }
+      if (settings.platform_banner_image_url) {
+        setBannerPreview(settings.platform_banner_image_url);
+      } else {
+        setBannerPreview(null);
       }
       if (!hasSyncedOtpFromSettings.current) {
         hasSyncedOtpFromSettings.current = true;
@@ -177,6 +185,33 @@ export function Customization() {
     setShouldRemoveBg(true);
   };
 
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Veuillez sélectionner un fichier image');
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        toast.error('L\'image ne doit pas dépasser 8MB');
+        return;
+      }
+      setBannerFile(file);
+      setShouldRemoveBanner(false);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setBannerPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveBanner = () => {
+    setBannerFile(null);
+    setBannerPreview(null);
+    setShouldRemoveBanner(true);
+  };
+
   const handleSave = async () => {
     try {
       setLoading(true);
@@ -198,6 +233,10 @@ export function Customization() {
       if (bgFile) {
         formData.append('login_background_image', bgFile);
       }
+
+      if (bannerFile) {
+        formData.append('platform_banner_image', bannerFile);
+      }
       
       // If logo should be removed, send a flag
       if (shouldRemoveLogo && !logoFile) {
@@ -211,6 +250,10 @@ export function Customization() {
 
       if (shouldRemoveBg && !bgFile) {
         formData.append('remove_login_background_image', 'true');
+      }
+
+      if (shouldRemoveBanner && !bannerFile) {
+        formData.append('remove_platform_banner_image', 'true');
       }
       
       formData.append('primary_color', colors.primary);
@@ -232,6 +275,7 @@ export function Customization() {
       setShouldRemoveLogo(false);
       setShouldRemoveFavicon(false);
       setShouldRemoveBg(false);
+      setShouldRemoveBanner(false);
       await loadSettings(); // Reload settings to get updated logo URL
     } catch (error: any) {
       console.error('Error saving settings:', error);
@@ -257,6 +301,13 @@ export function Customization() {
     setShouldRemoveFavicon(false);
     setBgFile(null);
     setShouldRemoveBg(false);
+    setBannerFile(null);
+    setShouldRemoveBanner(false);
+    if (settings?.platform_banner_image_url) {
+      setBannerPreview(settings.platform_banner_image_url);
+    } else {
+      setBannerPreview(null);
+    }
     if (settings?.logo_url) {
       setLogoPreview(settings.logo_url);
     } else {
@@ -498,6 +549,63 @@ export function Customization() {
               </div>
               <p className="customization-logo-info">
                 Formats acceptés: PNG, JPG, WEBP (max 8MB). Recommandé: 1920×1080.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Platform Banner Image Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Bannière plateforme</CardTitle>
+          <CardDescription>
+            Image affichée au-dessus du bloc de vérification sur le tableau de bord de la plateforme client.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="customization-card-content">
+          <div className="customization-logo-section">
+            {bannerPreview && (
+              <div className="customization-logo-preview">
+                <img
+                  src={bannerPreview}
+                  alt="Banner preview"
+                  className="customization-logo-image"
+                  style={{ width: '100%', maxWidth: '400px', height: 'auto', maxHeight: '120px', objectFit: 'cover', borderRadius: '8px' }}
+                />
+              </div>
+            )}
+            <div className="customization-logo-controls">
+              <Label htmlFor="banner-upload">Image de bannière</Label>
+              <div className="customization-logo-upload-group">
+                <input
+                  id="banner-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBannerChange}
+                  className="customization-logo-upload-input"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById('banner-upload')?.click()}
+                >
+                  <HiOutlineUpload className="h-4 w-4 mr-2" />
+                  {bannerPreview ? "Changer l'image" : 'Télécharger une image'}
+                </Button>
+                {bannerPreview && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    onClick={handleRemoveBanner}
+                    className="customization-delete-button p-0 h-auto"
+                  >
+                    Supprimer
+                  </Button>
+                )}
+              </div>
+              <p className="customization-logo-info">
+                Formats acceptés: PNG, JPG, WEBP (max 8MB). Recommandé: format paysage (ex. 1200×300).
               </p>
             </div>
           </div>

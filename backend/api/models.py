@@ -709,6 +709,7 @@ class AppSettings(models.Model):
     logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     favicon = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     login_background_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
+    platform_banner_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     primary_color = models.CharField(max_length=7, default='#030213')  # Couleur primaire (hex)
     secondary_color = models.CharField(max_length=7, default='', blank=True)  # Couleur secondaire (hex)
     accent_color = models.CharField(max_length=7, default='', blank=True)  # Couleur d'accent (hex)

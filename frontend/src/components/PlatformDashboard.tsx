@@ -3,20 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { TrendingUp, TrendingDown, Check, PieChart, Shield } from 'lucide-react';
+import { TrendingUp, TrendingDown, Check, PieChart } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { useTheme } from '../contexts/ThemeContext';
 import '../styles/PlatformDashboardMovers.css';
 
 export function PlatformDashboard() {
   const { currentUser } = useUser();
+  const { settings } = useTheme();
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
   const navigate = useNavigate();
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
-  const [visibleNewsCount, setVisibleNewsCount] = useState(5);
+  const [visibleNewsCount, setVisibleNewsCount] = useState(3);
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
@@ -118,7 +120,7 @@ export function PlatformDashboard() {
       setNewsLoading(true);
       const newsResponse = await apiCall('/api/news/');
       setNewsPosts(newsResponse.news || []);
-      setVisibleNewsCount(5);
+      setVisibleNewsCount(3);
     } catch (error: any) {
       console.error('Error loading news posts:', error);
       // If it's a 401 and we're on a public endpoint, try without auth
@@ -135,7 +137,7 @@ export function PlatformDashboard() {
           if (response.ok) {
             const data = await response.json();
             setNewsPosts(data.news || []);
-            setVisibleNewsCount(5);
+            setVisibleNewsCount(3);
             return;
           }
         } catch (fallbackError) {
@@ -144,7 +146,7 @@ export function PlatformDashboard() {
       }
       // Set empty array on error
       setNewsPosts([]);
-      setVisibleNewsCount(5);
+      setVisibleNewsCount(3);
     } finally {
       setNewsLoading(false);
     }
@@ -747,12 +749,46 @@ export function PlatformDashboard() {
         <div>Chargement...</div>
       ) : (
         <>
-          {/* Account Verification Steps */}
+          {/* Photo banner above verification block (from app settings) */}
+          {hasIncompleteEnabledSteps && settings?.platform_banner_image_url && (
+            <div
+              style={{
+                marginTop: isPhone ? -32 : isMobile ? -20 : -24,
+                marginBottom: isPhone ? '24px' : isMobile ? '20px' : '24px',
+                borderRadius: 12,
+                overflow: 'hidden',
+                width: '100%',
+              }}
+            >
+              <img
+                src={settings.platform_banner_image_url}
+                alt=""
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: 320,
+                  objectFit: 'cover',
+                  display: 'block',
+                }}
+              />
+            </div>
+          )}
+          {/* Verification block + Valeur du portefeuille: side by side on desktop, stacked on mobile */}
+          <div
+            style={{
+              display: hasIncompleteEnabledSteps ? 'flex' : 'block',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: isPhone ? '12px' : isMobile ? '20px' : '24px',
+              marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
+              alignItems: 'stretch',
+            }}
+          >
           {hasIncompleteEnabledSteps && (
             <Card
               style={{
                 marginTop: isPhone ? '-12px' : undefined,
-                marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
+                flex: isMobile ? undefined : 1,
+                minWidth: isMobile ? undefined : 0,
                 borderRadius: 16,
                 overflow: 'hidden',
                 border: '1px solid rgba(229, 231, 235, 1)',
@@ -761,83 +797,11 @@ export function PlatformDashboard() {
               }}
             >
               <CardContent style={{ padding: isPhone ? '14px' : isMobile ? '18px' : '24px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: isMobile ? 'column' : 'row',
-                    alignItems: isMobile ? 'stretch' : 'center',
-                    justifyContent: 'space-between',
-                    gap: isMobile ? 16 : 24,
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                      <div
-                        aria-hidden="true"
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 12,
-                          background: 'color-mix(in srgb, #10b981 14%, transparent)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          border: '1px solid color-mix(in srgb, #10b981 22%, transparent)',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Shield className="h-4 w-4" style={{ color: '#10b981' }} />
-                      </div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        {verificationStepperSteps.filter((s) => s.completed).length}/{verificationStepperSteps.length} étapes complétées
-                      </div>
-                    </div>
-
-                    <h2
-                      style={{
-                        fontSize: isMobile ? '18px' : '20px',
-                        fontWeight: 800,
-                        marginBottom: 8,
-                        color: '#111827',
-                        letterSpacing: '-0.01em',
-                      }}
-                    >
-                      Vous êtes bientôt prêt
-                    </h2>
-
-                    <p
-                      style={{
-                        fontSize: 14,
-                        color: '#4b5563',
-                        marginBottom: 14,
-                        lineHeight: '1.55',
-                      }}
-                    >
-                      La vérification de votre identité aide à empêcher quelqu’un d’autre de créer un compte en votre nom.
-                    </p>
-
-                    <Button
-                      onClick={() => {
-                        navigate('/platform/verification');
-                      }}
-                      variant="platform"
-                      style={{
-                        width: isMobile ? '100%' : 'auto',
-                        ['--platform-button-bg' as any]: '#10b981',
-                      }}
-                    >
-                      Vérifier votre compte
-                    </Button>
-                  </div>
-
-                  {/* Stepper (hide when there is only 1 enabled step) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 16 : 20 }}>
+                  {/* Step timeline - above heading */}
                   {verificationStepperSteps.length > 1 && (
                     <div
-                      style={{
-                        flexShrink: 0,
-                        minWidth: isMobile ? '100%' : 320,
-                        maxWidth: isMobile ? '100%' : 360,
-                      }}
+                      style={{ flexShrink: 0, width: '100%' }}
                       aria-label="Progression de vérification du compte"
                     >
                       <div
@@ -925,19 +889,51 @@ export function PlatformDashboard() {
                       </div>
                     </div>
                   )}
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h2
+                      style={{
+                        fontSize: isMobile ? '18px' : '20px',
+                        fontWeight: 800,
+                        marginBottom: 8,
+                        color: '#111827',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      Vous êtes bientôt prêt
+                    </h2>
+
+                    <p
+                      style={{
+                        fontSize: 14,
+                        color: '#4b5563',
+                        marginBottom: 14,
+                        lineHeight: '1.55',
+                      }}
+                    >
+                      La vérification de votre identité aide à empêcher quelqu’un d’autre de créer un compte en votre nom.
+                    </p>
+
+                    <Button
+                      onClick={() => {
+                        navigate('/platform/verification');
+                      }}
+                      variant="platform"
+                      style={{
+                        width: isMobile ? '100%' : 'auto',
+                        ['--platform-button-bg' as any]: '#10b981',
+                      }}
+                    >
+                      Vérifier votre compte
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Summary Cards */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: '1fr',
-            gap: isPhone ? '12px' : isMobile ? '16px' : '20px',
-            marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' 
-          }}>
-            <Card style={roundedCardStyle}>
+            {/* Valeur du Portefeuille */}
+            <Card style={{ ...roundedCardStyle, flex: isMobile ? undefined : 1, minWidth: isMobile ? undefined : 0 }}>
               <CardHeader>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>
@@ -1012,118 +1008,18 @@ export function PlatformDashboard() {
             </Card>
           </div>
 
-          {/* Mes documents - above News and Market Movers */}
-          <Card style={{ ...roundedCardStyle, marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' }}>
-            <CardHeader>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <CardTitle
-                    style={{
-                      fontSize: isMobile ? '18px' : '20px',
-                      fontWeight: 800,
-                      color: '#111827',
-                      letterSpacing: '-0.01em',
-                      margin: 0,
-                    }}
-                  >
-                    Mes documents
-                  </CardTitle>
-                  <CardDescription style={{ fontSize: isMobile ? '12px' : '13px', marginTop: 2 }}>
-                    Vos documents personnels et contrats
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {documents.length === 0 ? (
-                <p style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>Aucun document</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '8px' : '10px' }}>
-                  {documents.slice(0, 10).map((doc: any) => {
-                    const typeLabels: Record<string, string> = {
-                      contract: 'Contrat',
-                      kyc: 'Document KYC',
-                      identity: "Pièce d'identité",
-                      address: 'Justificatif de domicile',
-                      financial: 'Document financier',
-                      other: 'Autre',
-                    };
-                    const typeLabel = typeLabels[doc.documentType] || doc.documentType || 'Document';
-                    return (
-                      <div
-                        key={doc.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          padding: isPhone ? '10px 12px' : '12px 14px',
-                          backgroundColor: '#f9fafb',
-                          borderRadius: 10,
-                          border: '1px solid #e5e7eb',
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: isMobile ? 14 : 15, color: '#111827' }}>
-                            {doc.name}
-                          </div>
-                          <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2 }}>
-                            {typeLabel}
-                            {doc.createdAt && (
-                              <span style={{ marginLeft: 8 }}>
-                                • {new Date(doc.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {doc.fileUrl && (
-                          <a
-                            href={doc.fileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="platform-hoverable"
-                            style={{
-                              flexShrink: 0,
-                              padding: '6px 12px',
-                              fontSize: isMobile ? 12 : 13,
-                              fontWeight: 600,
-                              color: 'var(--platform-button-bg, #030213)',
-                              textDecoration: 'none',
-                              borderRadius: 8,
-                              border: '1px solid currentColor',
-                            }}
-                          >
-                            Voir
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {documents.length > 10 && (
-                    <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
-                      + {documents.length - 10} autre{documents.length - 10 > 1 ? 's' : ''} document{documents.length - 10 > 1 ? 's' : ''}
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* News Feed and Market Movers */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: isMobile ? '1fr' : (assets.length > 0 && (gainers.length > 0 || losers.length > 0) ? '2fr 1fr' : '1fr'), 
-            gap: isPhone ? '16px' : isMobile ? '20px' : '30px' 
-          }}>
-            {/* News Feed */}
-            <Card style={roundedCardStyle}>
+          {/* Actualités | [Mes documents above Plus fortes hausses] on desktop; on phone: Actualités last */}
+          <div
+            style={{
+              display: isPhone ? 'flex' : 'grid',
+              flexDirection: isPhone ? 'column' : undefined,
+              gridTemplateColumns: isPhone ? undefined : '1fr 1fr',
+              gap: isPhone ? '16px' : isMobile ? '20px' : '30px',
+              marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
+            }}
+          >
+          {/* Actualités - left on desktop, last on phone */}
+            <Card style={{ ...roundedCardStyle, order: isPhone ? 1 : 0 }}>
               <CardHeader>
                 <div
                   style={{
@@ -1161,17 +1057,22 @@ export function PlatformDashboard() {
                     {newsPosts.slice(0, visibleNewsCount).map((post: any) => (
                       <div
                         key={post.id}
+                        role={post.articleUrl ? 'button' : undefined}
+                        tabIndex={post.articleUrl ? 0 : undefined}
+                        onClick={post.articleUrl ? () => window.open(post.articleUrl, '_blank', 'noopener,noreferrer') : undefined}
+                        onKeyDown={post.articleUrl ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open(post.articleUrl, '_blank', 'noopener,noreferrer'); } } : undefined}
                         style={{
-                          padding: isPhone ? '12px' : isMobile ? '14px' : '16px',
+                          padding: isPhone ? '10px' : isMobile ? '12px' : '14px',
                           border: '1px solid rgba(229, 231, 235, 1)',
                           borderRadius: 16,
                           backgroundColor: 'white',
                           display: 'flex',
                           flexDirection: isMobile ? 'column' : 'row',
                           alignItems: 'stretch',
-                          gap: isMobile ? 12 : 16,
+                          gap: isMobile ? 10 : 12,
                           boxShadow: '0 10px 26px rgba(2, 6, 23, 0.04)',
                           transition: 'transform 160ms ease, box-shadow 160ms ease',
+                          cursor: post.articleUrl ? 'pointer' : 'default',
                         }}
                         onMouseEnter={(e) => {
                           if (isMobile) return;
@@ -1187,14 +1088,15 @@ export function PlatformDashboard() {
                         {post.imageUrl ? (
                           <div
                             style={{
-                              width: isMobile ? '100%' : 300,
-                              height: isMobile ? 220 : '100%',
-                              minHeight: isMobile ? 220 : 180,
+                              width: isMobile ? '100%' : 200,
+                              height: isMobile ? 180 : '100%',
+                              minHeight: isMobile ? 180 : 140,
                               borderRadius: 14,
                               overflow: 'hidden',
                               background: 'rgba(2, 6, 23, 0.06)',
                               flexShrink: 0,
                               position: 'relative',
+                              alignSelf: isMobile ? undefined : 'stretch',
                             }}
                           >
                             <img
@@ -1214,61 +1116,19 @@ export function PlatformDashboard() {
                           </div>
                         ) : null}
 
-                        <div style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
-                              {post.category ? (
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    color: '#111827',
-                                    background: 'rgba(2, 6, 23, 0.06)',
-                                    border: '1px solid rgba(2, 6, 23, 0.10)',
-                                    padding: '4px 8px',
-                                    borderRadius: 9999,
-                                    lineHeight: 1,
-                                  }}
-                                >
-                                  {String(post.category).toUpperCase()}
-                                </span>
-                              ) : null}
-
-                              <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>
-                                {new Date(post.createdAt).toLocaleDateString('fr-FR', {
-                                  day: '2-digit',
-                                  month: 'long',
-                                  year: 'numeric',
-                                })}
-                              </span>
-                            </div>
-
-                            {post.articleUrl ? (
-                              <button
-                                type="button"
-                                className="platform-hoverable"
-                                onClick={() => window.open(post.articleUrl, '_blank', 'noopener,noreferrer')}
-                                style={{
-                                  border: 'none',
-                                  background: 'transparent',
-                                  padding: '6px 8px',
-                                  borderRadius: 12,
-                                  cursor: 'pointer',
-                                  color: '#111827',
-                                  fontSize: 12,
-                                  fontWeight: 700,
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                Lire
-                              </button>
-                            ) : null}
-                          </div>
+                        <div style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                            {new Date(post.createdAt).toLocaleDateString('fr-FR', {
+                              day: '2-digit',
+                              month: 'long',
+                              year: 'numeric',
+                            })}
+                          </span>
 
                           <h3
                             style={{
-                              fontSize: isMobile ? '16px' : '18px',
-                              fontWeight: 800,
+                              fontSize: isMobile ? '14px' : '15px',
+                              fontWeight: 600,
                               margin: 0,
                               color: '#111827',
                               letterSpacing: '-0.01em',
@@ -1282,7 +1142,7 @@ export function PlatformDashboard() {
                               {
                                 fontSize: 13,
                                 color: '#6b7280',
-                                lineHeight: 1.55,
+                                lineHeight: 1.45,
                                 whiteSpace: 'pre-wrap',
                                 wordBreak: 'break-word',
                                 overflowWrap: 'break-word',
@@ -1296,18 +1156,8 @@ export function PlatformDashboard() {
                             {post.content}
                           </div>
 
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: 10,
-                              marginTop: 'auto',
-                            }}
-                          >
-                            <div style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              Par {post.sourceName || getWebsiteNameFromUrl(post.articleUrl) || 'Admin'}
-                            </div>
+                          <div style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            Par {post.sourceName || getWebsiteNameFromUrl(post.articleUrl) || 'Admin'}
                           </div>
                         </div>
                       </div>
@@ -1343,11 +1193,120 @@ export function PlatformDashboard() {
               </CardContent>
             </Card>
 
-            {/* Gainers and Losers - only show when client has access to assets */}
-            {assets.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '12px' : isMobile ? '16px' : '20px' }}>
-                {/* Plus fortes hausses - only show when there are gainers */}
-                {(gainers.length > 0 || losers.length > 0) && (
+            {/* Right column: Mes documents above Plus fortes hausses - first on phone */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: isPhone ? '12px' : isMobile ? '16px' : '20px',
+              }}
+            >
+              {/* Mes documents - first */}
+              <Card style={roundedCardStyle}>
+              <CardHeader>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <CardTitle
+                      style={{
+                        fontSize: isMobile ? '18px' : '20px',
+                        fontWeight: 800,
+                        color: '#111827',
+                        letterSpacing: '-0.01em',
+                        margin: 0,
+                      }}
+                    >
+                      Mes documents
+                    </CardTitle>
+                    <CardDescription style={{ fontSize: isMobile ? '12px' : '13px', marginTop: 2 }}>
+                      Vos documents personnels et contrats
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {documents.length === 0 ? (
+                  <p style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>Aucun document</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '8px' : '10px' }}>
+                    {documents.slice(0, 10).map((doc: any) => {
+                      const typeLabels: Record<string, string> = {
+                        contract: 'Contrat',
+                        kyc: 'Document KYC',
+                        identity: "Pièce d'identité",
+                        address: 'Justificatif de domicile',
+                        financial: 'Document financier',
+                        other: 'Autre',
+                      };
+                      const typeLabel = typeLabels[doc.documentType] || doc.documentType || 'Document';
+                      return (
+                        <div
+                          key={doc.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            padding: isPhone ? '10px 12px' : '12px 14px',
+                            backgroundColor: '#f9fafb',
+                            borderRadius: 10,
+                            border: '1px solid #e5e7eb',
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: isMobile ? 14 : 15, color: '#111827' }}>
+                              {doc.name}
+                            </div>
+                            <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2 }}>
+                              {typeLabel}
+                              {doc.createdAt && (
+                                <span style={{ marginLeft: 8 }}>
+                                  • {new Date(doc.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {doc.fileUrl && (
+                            <a
+                              href={doc.fileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="platform-hoverable"
+                              style={{
+                                flexShrink: 0,
+                                padding: '6px 12px',
+                                fontSize: isMobile ? 12 : 13,
+                                fontWeight: 600,
+                                color: 'var(--platform-button-bg, #030213)',
+                                textDecoration: 'none',
+                                borderRadius: 8,
+                                border: '1px solid currentColor',
+                              }}
+                            >
+                              Voir
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {documents.length > 10 && (
+                      <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
+                        + {documents.length - 10} autre{documents.length - 10 > 1 ? 's' : ''} document{documents.length - 10 > 1 ? 's' : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+              {/* Plus fortes hausses / baisses - below Mes documents */}
+              {assets.length > 0 && (gainers.length > 0 || losers.length > 0) && (
                   <>
                     {gainers.length > 0 && (
                       <Card className="platform-moversCard">
@@ -1358,7 +1317,9 @@ export function PlatformDashboard() {
                         <CardContent className="platform-moversContent">
                           <div className="platform-moversList">
                             {gainers.map((asset: any) => (
-                              <MarketMoverRow key={asset.id} asset={asset} direction="up" />
+                              <React.Fragment key={asset.id}>
+                                <MarketMoverRow asset={asset} direction="up" />
+                              </React.Fragment>
                             ))}
                           </div>
                         </CardContent>
@@ -1375,7 +1336,9 @@ export function PlatformDashboard() {
                         <CardContent className="platform-moversContent">
                           <div className="platform-moversList">
                             {losers.map((asset: any) => (
-                              <MarketMoverRow key={asset.id} asset={asset} direction="down" />
+                              <React.Fragment key={asset.id}>
+                                <MarketMoverRow asset={asset} direction="down" />
+                              </React.Fragment>
                             ))}
                           </div>
                         </CardContent>
@@ -1383,8 +1346,7 @@ export function PlatformDashboard() {
                     )}
                   </>
                 )}
-              </div>
-            )}
+            </div>
           </div>
         </>
       )}

@@ -1218,6 +1218,7 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     favicon_url = serializers.SerializerMethodField()
     login_background_image_url = serializers.SerializerMethodField()
+    platform_banner_image_url = serializers.SerializerMethodField()
     
     class Meta:
         model = AppSettings
@@ -1231,10 +1232,12 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             'logo',
             'favicon',
             'login_background_image',
+            'platform_banner_image',
             # Read-only URL helpers for frontend consumption
             'logo_url',
             'favicon_url',
             'login_background_image_url',
+            'platform_banner_image_url',
             'primary_color',
             'secondary_color',
             'accent_color',
@@ -1305,6 +1308,23 @@ class AppSettingsSerializer(serializers.ModelSerializer):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"Error getting login background URL for app settings: {str(e)}")
+                return None
+        return None
+
+    def get_platform_banner_image_url(self, obj):
+        if obj.platform_banner_image:
+            try:
+                image_url = obj.platform_banner_image.url
+                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
+                    return image_url
+                request = self.context.get('request')
+                if request and image_url:
+                    return request.build_absolute_uri(image_url)
+                return image_url
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error getting platform banner URL for app settings: {str(e)}")
                 return None
         return None
 
