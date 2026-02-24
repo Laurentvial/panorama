@@ -16,6 +16,7 @@ import {
 } from 'react-icons/hi';
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
+import { getStatusLabel } from './transactionUtils';
 import { useUser } from '../contexts/UserContext';
 import '../styles/Dashboard.css';
 import '../styles/PageHeader.css';
@@ -302,9 +303,14 @@ export function Dashboard({ user: userProp }: DashboardProps) {
                       <td className="dashboard-table-type">{transaction.type}</td>
                       <td>{parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
                       <td>
-                        <span className="dashboard-table-badge">
-                          {transaction.status}
-                        </span>
+                        {(() => {
+                          const { bg, text } = getStatusColors(transaction.status, transaction.type);
+                          return (
+                            <span className="dashboard-table-badge" style={{ backgroundColor: bg, color: text }}>
+                              {getStatusLabel(transaction.status, transaction.type)}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}

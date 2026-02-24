@@ -148,8 +148,13 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
       toast.success('Document ajouté avec succès');
       setIsAddDialogOpen(false);
       setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
-      // Refresh list to show the newly added document
-      setDocuments((prev) => [created, ...prev]);
+      // Instantly refresh list with the newly added document (optimistic update)
+      const doc = (created as any)?.document ?? created;
+      if (doc?.id) {
+        setDocuments((prev) => [doc as Document, ...prev]);
+      } else {
+        loadDocuments();
+      }
       onRefresh();
     } catch (error: any) {
       console.error('Error creating document:', error);
@@ -161,15 +166,19 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
 
   async function handleDelete(documentId: string) {
     if (!confirm('Supprimer ce document ?')) return;
-    
+
+    // Optimistically remove from list for instant UI update
+    setDocuments((prev) => prev.filter((d) => d.id !== documentId));
+
     try {
       await apiCall(`/api/clients/${clientId}/documents/${documentId}/delete/`, { method: 'DELETE' });
       toast.success('Document supprimé avec succès');
-      loadDocuments();
       onRefresh();
     } catch (error: any) {
       console.error('Error deleting document:', error);
       toast.error(error?.message || 'Erreur lors de la suppression du document');
+      // Reload to restore correct state after error
+      loadDocuments();
     }
   }
 

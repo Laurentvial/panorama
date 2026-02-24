@@ -125,6 +125,12 @@
   font-size: 12px;
 }
 
+/* Validé status: green */
+.platform-portfolioStatus[data-status="valide"],
+.platform-portfolioStatus[data-status="validé"] {
+  color: #15803d !important;
+}
+
 .platform-portfolioEmpty {
   border: 1px dashed color-mix(in srgb, var(--accent-foreground) 18%, transparent);
   border-radius: 16px;

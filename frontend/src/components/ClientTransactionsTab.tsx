@@ -15,7 +15,7 @@ import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { PositionGenerationModal } from './PositionGenerationModal';
-import { TRANSACTION_TYPES, STATUS_LABELS, parseSubscriptionDetails } from './transactionUtils';
+import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';
 
@@ -1113,7 +1113,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   <SelectContent>
                     {getAvailableStatuses().map((status) => (
                       <SelectItem key={status} value={status}>
-                        {STATUS_LABELS[status]}
+                        {getStatusLabel(status, transactionForm.type)}
                       </SelectItem>
                     ))}
                   </SelectContent>

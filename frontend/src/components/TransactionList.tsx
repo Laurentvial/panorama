@@ -2,37 +2,9 @@ import React from 'react';
 import { Button } from './ui/button';
 import { ArrowLeftRight, Eye, Edit, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getStatusLabel, getTypeLabel, getTypeColors, getStatusColors, extractAssetInfo } from './transactionUtils';
 
 // Helper functions for French labels
-const getTypeLabel = (type: string): string => {
-  const typeMap: { [key: string]: string } = {
-    'depot': 'Dépôt',
-    'retrait': 'Retrait',
-    'bonus': 'Bonus',
-    'achat': 'Achat',
-    'vente': 'Vente',
-    'interets': 'Intérêts',
-    'frais': 'Frais',
-    'transfert': 'Transfert',
-    'perte': 'Perte',
-  };
-  return typeMap[type] || type;
-};
-
-const getStatusLabel = (status: string): string => {
-  const normalizedStatus = String(status || '').trim().toLowerCase();
-  const statusMap: { [key: string]: string } = {
-    'en_attente_paiement': 'En attente de paiement',
-    'en_cours': 'En cours',
-    'valide': 'Validé',
-    'validé': 'Validé',
-    'conteste': 'Contesté',
-    'annule': 'Annulé',
-  };
-  return statusMap[normalizedStatus] || status;
-};
-
-// Get type colors
 const getTypeColors = (type: string): { bg: string; text: string } => {
   const colorMap: { [key: string]: { bg: string; text: string } } = {
     'depot': { bg: '#dbeafe', text: '#1e40af' }, // blue
@@ -155,7 +127,6 @@ export function TransactionList({
         <tbody>
           {transactions.map((transaction) => {
             const client = clients.find(c => c.id === transaction.clientId);
-            const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
             const contractDocs = transactionDocuments[String(transaction.id)] || [];
             const hasContract = contractDocs.length > 0;
             
@@ -262,25 +233,17 @@ export function TransactionList({
                   )}
                 </td>
                 <td className="py-3 px-4">
-                  <span 
-                    className="px-2 py-1 rounded text-xs font-medium inline-block"
-                    style={{
-                      backgroundColor: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#dcfce7' :
-                                      normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#fed7aa' :
-                                      normalizedStatus === 'conteste' ? '#fee2e2' :
-                                      normalizedStatus === 'annule' ? '#e5e7eb' :
-                                      '#f1f5f9',
-                      color: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#15803d' :
-                             normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#c2410c' :
-                             normalizedStatus === 'conteste' ? '#991b1b' :
-                             normalizedStatus === 'annule' ? '#6b7280' :
-                             '#475569',
-                      zIndex: 1,
-                      position: 'relative'
-                    }}
-                  >
-                    {getStatusLabel(transaction.status)}
-                  </span>
+                  {(() => {
+                    const { bg, text } = getStatusColors(transaction.status, transaction.type);
+                    return (
+                      <span
+                        className="px-2 py-1 rounded text-xs font-medium inline-block"
+                        style={{ backgroundColor: bg, color: text, zIndex: 1, position: 'relative' }}
+                      >
+                        {getStatusLabel(transaction.status, transaction.type)}
+                      </span>
+                    );
+                  })()}
                 </td>
                 {showContractColumn && (
                   <td className="py-3 px-4">

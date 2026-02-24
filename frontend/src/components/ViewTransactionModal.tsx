@@ -9,6 +9,7 @@ import {
   getTypeLabel, 
   getStatusLabel, 
   getTypeColors, 
+  getStatusColors,
   extractAssetInfo, 
   parseSubscriptionDetails,
   TRANSACTION_TYPES,
@@ -201,7 +202,6 @@ export function ViewTransactionModal({
   const subscriptionDetails = parseSubscriptionDetails(transaction);
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
-  const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
   const transferTo = transaction.transfer_to || transaction.to_field || transaction.to || null;
   const hasTransferProductTarget = transferTo && transferTo !== 'balance' && transferTo !== 'trading';
   const hasSubscriptionProductId = Boolean(
@@ -373,25 +373,17 @@ export function ViewTransactionModal({
               <div>
                 <Label className="text-slate-600 font-semibold">Statut</Label>
                 <div className="mt-1">
-                  <span 
-                    className="px-2 py-1 rounded text-xs font-medium inline-block"
-                    style={{
-                      backgroundColor: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#dcfce7' :
-                                      normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#fed7aa' :
-                                      normalizedStatus === 'conteste' ? '#fee2e2' :
-                                      normalizedStatus === 'annule' ? '#e5e7eb' :
-                                      '#f1f5f9',
-                      color: normalizedStatus === 'valide' || normalizedStatus === 'validé' ? '#15803d' :
-                             normalizedStatus === 'en_attente_paiement' || normalizedStatus === 'en_cours' ? '#c2410c' :
-                             normalizedStatus === 'conteste' ? '#991b1b' :
-                             normalizedStatus === 'annule' ? '#6b7280' :
-                             '#475569',
-                      zIndex: 1,
-                      position: 'relative'
-                    }}
-                  >
-                    {getStatusLabel(transaction.status)}
-                  </span>
+                  {(() => {
+                    const { bg, text } = getStatusColors(transaction.status, transaction.type);
+                    return (
+                      <span
+                        className="px-2 py-1 rounded text-xs font-medium inline-block"
+                        style={{ backgroundColor: bg, color: text, zIndex: 1, position: 'relative' }}
+                      >
+                        {getStatusLabel(transaction.status, transaction.type)}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
               
@@ -620,7 +612,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Statut</Label>
                       <p className="text-slate-900 mt-1">
-                        {normalizedStatus === 'en_cours' ? 'En vérification' : getStatusLabel(transaction.status)}
+                        {getStatusLabel(transaction.status, transaction.type)}
                       </p>
                     </div>
                   </div>
@@ -869,13 +861,13 @@ export function ViewTransactionModal({
                                     <div className="flex items-center gap-1 flex-wrap min-w-0">
                                       <span className="text-red-600 line-through text-xs">
                                         {key === 'amount' ? `${parseFloat(oldVal || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` :
-                                         key === 'status' ? getStatusLabel(oldVal) :
+                                         key === 'status' ? getStatusLabel(oldVal, transaction?.type) :
                                          key === 'type' ? getTypeLabel(oldVal) :
                                          String(oldVal || '-')}
                                       </span>
                                       <span className="text-green-600 font-medium text-xs">
                                         → {key === 'amount' ? `${parseFloat(newVal || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` :
-                                            key === 'status' ? getStatusLabel(newVal) :
+                                            key === 'status' ? getStatusLabel(newVal, transaction?.type) :
                                             key === 'type' ? getTypeLabel(newVal) :
                                             String(newVal || '-')}
                                       </span>

@@ -23,6 +23,7 @@ export function PlatformDashboard() {
   const [loading, setLoading] = useState(true);
   const [newsLoading, setNewsLoading] = useState(true);
   const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
+  const [documents, setDocuments] = useState<any[]>([]);
 
 
   const loadDashboardData = async () => {
@@ -86,6 +87,15 @@ export function PlatformDashboard() {
         // Silently fail - config will default to all steps enabled
         console.log('Verification config not available, using defaults');
         setVerificationConfig({});
+      }
+
+      // Load client documents
+      try {
+        const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
+        setDocuments((documentsResponse as any)?.documents || []);
+      } catch (error: any) {
+        console.log('Documents not available', error);
+        setDocuments([]);
       }
     } catch (error: any) {
       // If it's a redirect error, don't log it - page is navigating away
@@ -1001,6 +1011,110 @@ export function PlatformDashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Mes documents - above News and Market Movers */}
+          <Card style={{ ...roundedCardStyle, marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' }}>
+            <CardHeader>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <CardTitle
+                    style={{
+                      fontSize: isMobile ? '18px' : '20px',
+                      fontWeight: 800,
+                      color: '#111827',
+                      letterSpacing: '-0.01em',
+                      margin: 0,
+                    }}
+                  >
+                    Mes documents
+                  </CardTitle>
+                  <CardDescription style={{ fontSize: isMobile ? '12px' : '13px', marginTop: 2 }}>
+                    Vos documents personnels et contrats
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {documents.length === 0 ? (
+                <p style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>Aucun document</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '8px' : '10px' }}>
+                  {documents.slice(0, 10).map((doc: any) => {
+                    const typeLabels: Record<string, string> = {
+                      contract: 'Contrat',
+                      kyc: 'Document KYC',
+                      identity: "Pièce d'identité",
+                      address: 'Justificatif de domicile',
+                      financial: 'Document financier',
+                      other: 'Autre',
+                    };
+                    const typeLabel = typeLabels[doc.documentType] || doc.documentType || 'Document';
+                    return (
+                      <div
+                        key={doc.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: isPhone ? '10px 12px' : '12px 14px',
+                          backgroundColor: '#f9fafb',
+                          borderRadius: 10,
+                          border: '1px solid #e5e7eb',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: isMobile ? 14 : 15, color: '#111827' }}>
+                            {doc.name}
+                          </div>
+                          <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2 }}>
+                            {typeLabel}
+                            {doc.createdAt && (
+                              <span style={{ marginLeft: 8 }}>
+                                • {new Date(doc.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {doc.fileUrl && (
+                          <a
+                            href={doc.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="platform-hoverable"
+                            style={{
+                              flexShrink: 0,
+                              padding: '6px 12px',
+                              fontSize: isMobile ? 12 : 13,
+                              fontWeight: 600,
+                              color: 'var(--platform-button-bg, #030213)',
+                              textDecoration: 'none',
+                              borderRadius: 8,
+                              border: '1px solid currentColor',
+                            }}
+                          >
+                            Voir
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {documents.length > 10 && (
+                    <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
+                      + {documents.length - 10} autre{documents.length - 10 > 1 ? 's' : ''} document{documents.length - 10 > 1 ? 's' : ''}
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* News Feed and Market Movers */}
           <div style={{ 

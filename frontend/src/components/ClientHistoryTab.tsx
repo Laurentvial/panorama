@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
+import { getStatusLabel } from './transactionUtils';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
@@ -93,7 +94,7 @@ export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
           details.push(`Montant: ${transactionData.amount} EUR`);
         }
         if (transactionData.status) {
-          details.push(`Statut: ${transactionData.status}`);
+          details.push(`Statut: ${getStatusLabel(transactionData.status, transactionData.type)}`);
         }
         if (details.length > 0) {
           return details.join(' | ');

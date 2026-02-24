@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useLocation } from 'react-router-dom';
 import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
+import { getStatusColors } from './transactionUtils';
 
 export function PlatformTrading() {
   const { currentUser } = useUser();
@@ -480,8 +481,14 @@ export function PlatformTrading() {
     return (transactions || []).filter((t: any) => t?.type === 'depot' || t?.type === 'retrait');
   }, [transactions]);
 
-  const statusLabel = (s: string) =>
-    s === 'valide' ? 'Validé' : s === 'en_cours' ? 'En cours' : s === 'en_attente_paiement' ? 'En attente' : s || '-';
+  const statusLabel = (s: string, transactionType?: string) => {
+    const type = String(transactionType || '').toLowerCase();
+    if (s === 'valide') return 'Validé';
+    if (s === 'en_cours' && ['bonus', 'transfert', 'interets'].includes(type)) return 'En attente';
+    if (s === 'en_cours') return 'En cours';
+    if (s === 'en_attente_paiement') return 'En attente';
+    return s || '-';
+  };
 
   return (
     <div>
@@ -1061,7 +1068,12 @@ export function PlatformTrading() {
                                 ? `${t.type === 'depot' ? '+' : '-'}${Math.abs(amt).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
                                 : '-'}
                             </td>
-                            <td style={{ padding: '10px 8px' }}>{statusLabel(t.status)}</td>
+                            <td style={{ padding: '10px 8px' }}>
+                              {(() => {
+                                const { text } = getStatusColors(t.status, t.type);
+                                return <span style={{ color: text, fontWeight: 600 }}>{statusLabel(t.status, t.type)}</span>;
+                              })()}
+                            </td>
                           </tr>
                         );
                       })}

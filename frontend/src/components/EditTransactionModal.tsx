@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
-import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
+import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel } from './transactionUtils';
 import { PositionGenerationModal } from './PositionGenerationModal';
 import '../styles/Modal.css';
 
@@ -799,7 +799,7 @@ export function EditTransactionModal({
                 <SelectContent>
                   {getAvailableStatuses().map((status) => (
                     <SelectItem key={status} value={status}>
-                      {STATUS_LABELS[status]}
+                      {getStatusLabel(status, transactionForm.type)}
                     </SelectItem>
                   ))}
                 </SelectContent>

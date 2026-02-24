@@ -208,11 +208,17 @@ export function PlatformPortfolio() {
     }).format(d);
   };
 
-  const formatTransactionStatus = (status: string | undefined | null) => {
+  const formatTransactionStatus = (status: string | undefined | null, transactionType?: string) => {
     if (!status) return '-';
-    const statusLower = String(status).toLowerCase();
+    const statusLower = String(status).trim().toLowerCase();
+    const type = String(transactionType || '').toLowerCase();
+    // For bonus, transfert, interets - show "En attente" instead of "En cours"
+    if (statusLower === 'en_cours' && ['bonus', 'transfert', 'interets'].includes(type)) {
+      return 'En attente';
+    }
     switch (statusLower) {
       case 'valide':
+      case 'validé':
         return 'Validé';
       case 'en_cours':
         return 'En cours';
@@ -229,16 +235,16 @@ export function PlatformPortfolio() {
 
   const getStatusColor = (status: string | undefined | null) => {
     if (!status) return '#6b7280';
-    const statusLower = String(status).toLowerCase();
+    const statusLower = String(status).trim().toLowerCase();
     switch (statusLower) {
       case 'valide':
-        return '#10b981'; // green
+      case 'validé':
+        return '#15803d'; // green
       case 'en_cours':
-        return '#3b82f6'; // blue
       case 'en_attente_paiement':
-        return '#f59e0b'; // amber
+        return '#c2410c'; // orange (En attente)
       case 'conteste':
-        return '#ef4444'; // red
+        return '#991b1b'; // red
       case 'annule':
         return '#6b7280'; // gray
       default:
@@ -1489,7 +1495,7 @@ export function PlatformPortfolio() {
                           t.assetName ||
                           t.productName ||
                           (isTradingTransfer ? (t.assetType || 'Trading') : '-');
-                        const statusLabel = formatTransactionStatus(t.status);
+                        const statusLabel = formatTransactionStatus(t.status, t.type);
                         const statusColor = getStatusColor(t.status);
                         
                         // Show contract action whenever a contract document exists for this transaction
@@ -1506,7 +1512,11 @@ export function PlatformPortfolio() {
                               {formatCurrency(t.amount)}
                             </td>
                             <td className="platform-portfolioTd">
-                              <span className="platform-portfolioStatus" style={{ color: statusColor }}>
+                              <span
+                                className="platform-portfolioStatus"
+                                style={{ color: statusColor }}
+                                data-status={String(t?.status || '').trim().toLowerCase()}
+                              >
                                 {statusLabel}
                               </span>
                             </td>

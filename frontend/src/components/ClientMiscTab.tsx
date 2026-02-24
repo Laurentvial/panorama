@@ -35,6 +35,8 @@ export function ClientMiscTab({
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
   const [tradingEnabled, setTradingEnabled] = useState<boolean>(true);
   const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
+  const [contractPreviewEnabled, setContractPreviewEnabled] = useState<boolean>(true);
+  const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string>('');
   const [savingBannerMessage, setSavingBannerMessage] = useState(false);
 
