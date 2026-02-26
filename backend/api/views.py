@@ -7583,17 +7583,19 @@ def client_transaction_create(request, client_id):
                                 img.save(logo_data_bytes, format='PNG')
                                 logo_data_bytes.seek(0)
                             
-                            # Calculate size to fit in header (max 25mm height)
-                            max_height_mm = 25
-                            aspect_ratio = img_width / img_height
-                            logo_height_mm = min(max_height_mm, img_height * (max_height_mm / img_height))
-                            logo_width_mm = logo_height_mm * aspect_ratio
+                            # Calculate size to fit in header (max 15mm height)
+                            # Convert pixels to mm at 72 DPI (1 inch = 25.4mm, 72 px = 1 inch)
+                            max_height_mm = 15
+                            px_to_mm = 25.4 / 72
+                            img_height_mm = img_height * px_to_mm
+                            logo_height_mm = min(img_height_mm, max_height_mm)
+                            logo_width_mm = logo_height_mm * (img_width / img_height)
                             logo_data_bytes.seek(0)  # Reset for use
                         except Exception as e:
                             logger.warning(f"Error processing logo image: {str(e)}")
                             # If PIL fails, use default size
-                            logo_width_mm = 50
-                            logo_height_mm = 25
+                            logo_width_mm = 30
+                            logo_height_mm = 15
                             logo_data_bytes.seek(0)
                 except Exception:
                     logo_data_bytes = None
@@ -9967,11 +9969,13 @@ def product_contract_pdf(request, product_id):
                         img.save(logo_data_bytes, format='PNG')
                         logo_data_bytes.seek(0)
                     
-                    # Calculate size to fit in header (max 25mm height)
-                    max_height_mm = 25
-                    aspect_ratio = img_width / img_height
-                    logo_height_mm = min(max_height_mm, img_height * (max_height_mm / img_height))
-                    logo_width_mm = logo_height_mm * aspect_ratio
+                    # Calculate size to fit in header (max 15mm height)
+                    # Convert pixels to mm at 72 DPI (1 inch = 25.4mm, 72 px = 1 inch)
+                    max_height_mm = 15
+                    px_to_mm = 25.4 / 72
+                    img_height_mm = img_height * px_to_mm
+                    logo_height_mm = min(img_height_mm, max_height_mm)
+                    logo_width_mm = logo_height_mm * (img_width / img_height)
                     logo_data_bytes.seek(0)  # Reset for use
                 except Exception as e:
                     # Log error but continue with default size
@@ -9979,8 +9983,8 @@ def product_contract_pdf(request, product_id):
                     logger = logging.getLogger(__name__)
                     logger.warning(f"Error processing logo image: {str(e)}")
                     # If PIL fails, use default size
-                    logo_width_mm = 50
-                    logo_height_mm = 25
+                    logo_width_mm = 30
+                    logo_height_mm = 15
                     logo_data_bytes.seek(0)
         except Exception:
             logo_data_bytes = None
@@ -10876,7 +10880,7 @@ def product_generate_description(request):
         funds_str = "Oui" if available_funds else "Non"
         availability_str = ""
         if availability_start or availability_end:
-            availability_str = f"Disponible du {availability_start or 'N/A'} au {availability_end or 'N/A'}"
+            availability_str = f"Disponible du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
         prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
 - Nom: {name or 'Non spécifié'}
@@ -11075,7 +11079,7 @@ def product_generate_cgv(request):
         funds_str = "Oui" if available_funds else "Non"
         availability_str = ""
         if availability_start or availability_end:
-            availability_str = f"Du {availability_start or 'N/A'} au {availability_end or 'N/A'}"
+            availability_str = f"Du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
         # Prompt avec toutes les informations
         prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".

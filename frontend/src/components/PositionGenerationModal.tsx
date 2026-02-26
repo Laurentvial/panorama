@@ -1045,7 +1045,7 @@ export function PositionGenerationModal({
                               <tr key={pos.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                                 <td style={{ padding: '6px', fontFamily: 'monospace', fontSize: '10px' }}>{pos.id}</td>
                                 <td style={{ padding: '6px', fontFamily: 'monospace', fontSize: '10px' }}>{pos.transaction_id}</td>
-                                <td style={{ padding: '6px' }}>{pos.asset_name || 'N/A'}</td>
+                                <td style={{ padding: '6px' }}>{pos.asset_name || 'Aucun'}</td>
                                 <td style={{ padding: '6px', textAlign: 'right' }}>{formatCurrency(pos.invested_amount)}</td>
                                 <td style={{ 
                                   padding: '6px', 
@@ -1055,7 +1055,7 @@ export function PositionGenerationModal({
                                   {formatCurrency(pos.profit_loss)}
                                 </td>
                                 <td style={{ padding: '6px', fontSize: '10px' }}>
-                                  {pos.opened_at ? formatDateTime(pos.opened_at) : 'N/A'}
+                                  {pos.opened_at ? formatDateTime(pos.opened_at) : 'Aucun'}
                                 </td>
                               </tr>
                             ))}

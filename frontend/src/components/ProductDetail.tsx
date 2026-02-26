@@ -58,8 +58,7 @@ export function ProductDetail() {
   // Profitability simulator state
   const [simulatorAmount, setSimulatorAmount] = useState<number>(10000);
   const [simulatorBasePrice, setSimulatorBasePrice] = useState<string>('10000');
-  const [simulatorRateMode, setSimulatorRateMode] = useState<'min' | 'avg' | 'max' | 'custom'>('avg');
-  const [simulatorCustomRate, setSimulatorCustomRate] = useState<string>('');
+  const [simulatorRateMode, setSimulatorRateMode] = useState<'min' | 'avg' | 'max'>('avg');
   
   // Helper function to format date to French format (jj/mm/aaaa) - declared before use
   const formatDateToFrench = (dateString: string): string => {
@@ -165,7 +164,7 @@ export function ProductDetail() {
     fetch('https://api.ipify.org?format=json')
       .then(res => res.json())
       .then(data => setClientIP(data.ip))
-      .catch(() => setClientIP('N/A'));
+      .catch(() => setClientIP('Aucun'));
     
     // Set current date in French format for initial display
     const today = new Date();
@@ -435,7 +434,7 @@ export function ProductDetail() {
       const period = product.profitabilityPeriod || 'Mensuel';
       return `${profit.toFixed(2)}% ${period}`;
     }
-    return 'N/A';
+    return 'Aucun';
   };
 
   const calculateGains = (product: any, amount: number, basePrice: number): number => {
@@ -443,7 +442,6 @@ export function ProductDetail() {
     // The simulator now uses per-period profitability and optional compounding.
     const sim = simulateProfitability(product, basePrice, {
       rateMode: simulatorRateMode,
-      customRatePct: simulatorCustomRate,
       interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     return sim.totalProfit;
@@ -498,7 +496,7 @@ export function ProductDetail() {
   const simulateProfitability = (
     product: any,
     principal: number,
-    opts: { rateMode: 'min' | 'avg' | 'max' | 'custom'; customRatePct: string; interestPeriod?: string }
+    opts: { rateMode: 'min' | 'avg' | 'max'; interestPeriod?: string }
   ): {
     durationDays: number;
     periodMonths: number;
@@ -528,10 +526,6 @@ export function ProductDetail() {
     let pickedRatePct = bounds.avg;
     if (opts.rateMode === 'min') pickedRatePct = bounds.min;
     if (opts.rateMode === 'max') pickedRatePct = bounds.max;
-    if (opts.rateMode === 'custom') {
-      const v = parseFinancialValue(opts.customRatePct);
-      if (Number.isFinite(v)) pickedRatePct = v;
-    }
 
     const rows: Array<{ index: number; months: number; base: number; ratePct: number; profit: number; end: number }> = [];
     const safePrincipal = Number.isFinite(principal) ? Math.max(0, principal) : 0;
@@ -735,14 +729,13 @@ export function ProductDetail() {
       // Calculate gains using the same simulator logic as the product page
       const sim = simulateProfitability(productData, amount, {
         rateMode: 'avg',
-        customRatePct: '',
         interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || productData.interest_period || '',
       });
       const gains = sim.totalProfit;
       const total = sim.endCapital;
       
       // Format profitability for display
-      let profitabilityDisplay = 'N/A';
+      let profitabilityDisplay = 'Aucun';
       if (productData.isVariableProfitability === 'Oui' && productData.variableProfitability) {
         const min = parseFinancialValue(productData.profitability);
         const max = parseFinancialValue(productData.variableProfitability);
@@ -753,7 +746,7 @@ export function ProductDetail() {
       }
       
       // Get category name
-      const categoryName = categories.find(c => c.id === productData.categoryId)?.title || productData.categoryName || 'N/A';
+      const categoryName = categories.find(c => c.id === productData.categoryId)?.title || productData.categoryName || 'Aucun';
       
       // Create subscription details object
       const subscriptionDetails = {
@@ -768,13 +761,13 @@ export function ProductDetail() {
         category: categoryName,
         country: 'FRANCE', // Default or from product
         subscriptionDate: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-        duration: productData.duration || 'N/A',
-        interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || 'N/A',
+        duration: productData.duration || 'Aucun',
+        interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || 'Aucun',
         profitability: profitabilityDisplay,
         investment: amount,
         profits: gains,
         total: total,
-        contractEnd: subscriptionData.contractEnd ? formatDateToFrench(subscriptionData.contractEnd) : 'N/A',
+        contractEnd: subscriptionData.contractEnd ? formatDateToFrench(subscriptionData.contractEnd) : 'Aucun',
         hasSignature: !!signature
       };
       
@@ -947,7 +940,6 @@ export function ProductDetail() {
     // Calculate interest (use the same logic as the profitability simulator)
     const sim = simulateProfitability(productData, amount, {
       rateMode: 'avg',
-      customRatePct: '',
       interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || productData.interest_period || '',
     });
     const profitabilityRate = sim.pickedRatePct;
@@ -1025,7 +1017,6 @@ export function ProductDetail() {
     const basePriceNum = parseFinancialValue(simulatorBasePrice) || 0;
     const sim = simulateProfitability(product, basePriceNum, {
       rateMode: simulatorRateMode,
-      customRatePct: simulatorCustomRate,
       interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     const calculatedGains = sim.totalProfit;
@@ -1106,7 +1097,7 @@ export function ProductDetail() {
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 className="platform-page-title" style={{ marginBottom: '8px', wordBreak: 'break-word', fontSize: isPhone ? '18px' : undefined }}>
-              {product.name || 'N/A'}
+              {product.name || 'Aucun'}
             </h1>
             {product.reference && (
               <div style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>
@@ -1164,7 +1155,7 @@ export function ProductDetail() {
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Durée</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {product.duration ? `${product.duration} Jours` : 'N/A'}
+                      {product.duration ? `${product.duration} Jours` : 'Durée indéterminée'}
                     </div>
                   </div>
                   
@@ -1178,14 +1169,21 @@ export function ProductDetail() {
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Investissement minimum</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {minInvestment > 0 ? `${minInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'N/A'}
+                      {minInvestment > 0 ? `${minInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'Aucun'}
                     </div>
                   </div>
                   
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Plafond de souscription</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {maxInvestment > 0 ? `${maxInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'N/A'}
+                      {maxInvestment > 0 ? `${maxInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'Aucun'}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Disponibilité des fonds</div>
+                    <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
+                      {(product.availableFunds ?? product.available_funds) ? 'Fonds disponibles' : 'Fonds bloqués'}
                     </div>
                   </div>
                   
@@ -1266,13 +1264,13 @@ export function ProductDetail() {
                     />
                   </div>
 
-                  {/* Taux (min/avg/max/custom) */}
+                  {/* Taux (min/avg/max) */}
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
                     <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
                       <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux utilisé</div>
                       <Select
                         value={simulatorRateMode}
-                        onValueChange={(v) => setSimulatorRateMode(v as any)}
+                        onValueChange={(v) => setSimulatorRateMode(v as 'min' | 'avg' | 'max')}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Choisir" />
@@ -1281,7 +1279,6 @@ export function ProductDetail() {
                           <SelectItem value="min">Minimum</SelectItem>
                           <SelectItem value="avg">Moyen</SelectItem>
                           <SelectItem value="max">Maximum</SelectItem>
-                          <SelectItem value="custom">Personnalisé</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1290,10 +1287,9 @@ export function ProductDetail() {
                       <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux (%)</div>
                       <Input
                         type="number"
-                        value={simulatorRateMode === 'custom' ? simulatorCustomRate : String(sim.pickedRatePct || 0)}
-                        onChange={(e) => setSimulatorCustomRate(e.target.value)}
-                        disabled={simulatorRateMode !== 'custom'}
-                        style={{ backgroundColor: simulatorRateMode === 'custom' ? 'white' : '#f9fafb' }}
+                        value={String(sim.pickedRatePct || 0)}
+                        readOnly
+                        style={{ backgroundColor: '#f9fafb' }}
                       />
                       <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
                         {sim.compound
@@ -1322,7 +1318,7 @@ export function ProductDetail() {
                       borderRadius: '6px',
                     }}>
                       <span style={{ fontSize: '14px', color: '#374151', fontWeight: '500' }}>Durée</span>
-                      <span style={{ fontSize: '14px', color: '#6b7280' }}>{product.duration ? `${product.duration} Jours` : 'N/A'}</span>
+                      <span style={{ fontSize: '14px', color: '#6b7280' }}>{product.duration ? `${product.duration} Jours` : 'Durée indéterminée'}</span>
                     </div>
                     
                     {/* Rentabilité */}
@@ -1398,26 +1394,6 @@ export function ProductDetail() {
                       </span>
                     </div>
 
-                    {/* Annualized */}
-                    {sim.annualizedPct != null && Number.isFinite(sim.annualizedPct) && (
-                      <div style={{ 
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: isMobile ? '8px' : '8px 12px',
-                        backgroundColor: '#f9fafb',
-                        borderRadius: '6px',
-                        flexWrap: 'wrap',
-                        gap: isMobile ? '4px' : '0',
-                      }}>
-                        <span style={{ fontSize: isMobile ? '13px' : '14px', color: '#374151', fontWeight: '500' }}>
-                          Annualisé (indicatif)
-                        </span>
-                        <span style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280' }}>
-                          {sim.annualizedPct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
-                        </span>
-                      </div>
-                    )}
                   </div>
 
                   {/* Breakdown table */}
@@ -2201,7 +2177,7 @@ export function ProductDetail() {
                 margin: 0,
                 wordBreak: 'break-word',
               }}>
-                {asset.reference || 'N/A'} {asset.name || ''}
+                {asset.reference || 'Aucun'} {asset.name || ''}
               </h1>
             </div>
             

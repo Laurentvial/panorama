@@ -400,10 +400,10 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                             <td className="py-3 px-4 min-w-[140px] whitespace-nowrap">
                               {product.duration ? (() => {
                                 const days = parseInt(String(product.duration).replace(/\D/g, ''), 10) || 0;
-                                if (days <= 0) return '-';
+                                if (days <= 0) return 'Durée indéterminée';
                                 const months = Math.round(days / 30);
                                 return `${days} Jours (${months} mois)`;
-                              })() : '-'}
+                              })() : 'Durée indéterminée'}
                             </td>
                             <td className="py-3 px-4">
                               <Button

@@ -364,11 +364,6 @@ export function AddProduct() {
 
     // Validation: si produit avec rentabilité, les champs requis doivent être remplis
     if (!formData.noProfitability) {
-      if (!formData.duration) {
-        toast.error('La durée est requise pour un produit avec rentabilité');
-        setLoading(false);
-        return;
-      }
       if (formData.isVariableProfitability === 'Non') {
         if (!formData.profitabilityRate) {
           toast.error('Le taux de rentabilité est requis');
@@ -430,8 +425,8 @@ export function AddProduct() {
         if (profitabilityValue !== undefined && !isNaN(profitabilityValue)) {
           formDataToSend.append('profitability', profitabilityValue.toString());
         }
-        // Send duration if product has profitability (noProfitability is false)
-        if (!formData.noProfitability && formData.duration) formDataToSend.append('duration', formData.duration);
+        // Always send duration (empty = durée indéterminée)
+        formDataToSend.append('duration', formData.duration || '');
         if (formData.description) formDataToSend.append('description', formData.description);
         if (formData.cgv) formDataToSend.append('cgv', formData.cgv);
         formDataToSend.append('active', (formData.status === 'Actif').toString());
@@ -471,7 +466,7 @@ export function AddProduct() {
             type: formData.type || undefined,
             // Price field removed - using minEntryValue instead
             profitability: profitabilityValue,
-            duration: !formData.noProfitability ? formData.duration : undefined,
+            duration: formData.duration || '',
             categoryId: formData.categoryId || undefined,
             subcategory: Array.isArray(formData.subcategory) && formData.subcategory.length > 0 
               ? formData.subcategory 
@@ -814,7 +809,7 @@ export function AddProduct() {
               {!formData.noProfitability && (
                 <div className="space-y-4 pl-4 border-l-2 border-slate-200">
                   <div className="space-y-2">
-                    <Label htmlFor="product-duration-profitability">Durée (en jours) *</Label>
+                    <Label htmlFor="product-duration-profitability">Durée (en jours)</Label>
                     <Input
                       id="product-duration-profitability"
                       type="number"
@@ -827,8 +822,7 @@ export function AddProduct() {
                           duration: e.target.value.replace(/[^0-9]/g, ''),
                         })
                       }
-                      required
-                      placeholder="Ex: 365"
+                      placeholder="Laisser vide pour durée indéterminée"
                     />
                   </div>
 

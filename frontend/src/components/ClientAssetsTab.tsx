@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
+import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Checkbox } from './ui/checkbox';
@@ -35,6 +36,13 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  // Add product modal: multi-select state (productSearchQuery is modal-only)
+  const [selectedProductIdsInModal, setSelectedProductIdsInModal] = useState<Set<string>>(new Set());
+  const [productSearchQuery, setProductSearchQuery] = useState<string>('');
+  // Shared product filters for both table and add-product modal
+  const [filterProductType, setFilterProductType] = useState<string>('all');
+  const [filterProductCategory, setFilterProductCategory] = useState<string>('all');
+  const [filterProductSubcategory, setFilterProductSubcategory] = useState<string>('all');
 
   useEffect(() => {
     setLocalClientAssets(clientAssets || []);
@@ -79,8 +87,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     });
   }
 
-  function handleSelectAllProducts() {
-    const visibleIds = localClientProducts
+  function handleSelectAllProducts(filteredProducts: any[]) {
+    const visibleIds = filteredProducts
       .map((cp: any) => cp.product?.id)
       .filter(Boolean) as string[];
     if (selectedProductIds.size === visibleIds.length) {
@@ -186,27 +194,52 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     }
   }
 
-  async function handleAddProduct(productId: string) {
-    const product = availableProducts.find((p: any) => p.id === productId);
-    const tempId = `pending-${productId}-${Date.now()}`;
-    if (product) {
-      setLocalClientProducts((prev) => [...prev, { id: tempId, product, featured: false }]);
-    }
+  function closeAddProductModal() {
     setIsAddProductDialogOpen(false);
+    setSelectedProductIdsInModal(new Set());
+    setProductSearchQuery('');
+  }
+
+  async function handleAddProducts(productIds: string[]) {
+    if (productIds.length === 0) return;
+    const productsToAdd = productIds.map((id) => availableProducts.find((p: any) => p.id === id)).filter(Boolean);
+    const tempItems = productsToAdd.map((product: any) => ({
+      id: `pending-${product.id}-${Date.now()}`,
+      product,
+      featured: false
+    }));
+    setLocalClientProducts((prev) => [...prev, ...tempItems]);
+    closeAddProductModal();
+    let addedCount = 0;
+    let skippedCount = 0;
     try {
-      await apiCall(`/api/clients/${clientId}/products/add/`, {
-        method: 'POST',
-        body: JSON.stringify({ productId }),
-        headers: { 'Content-Type': 'application/json' }
+      const results = await Promise.allSettled(
+        productIds.map((productId) =>
+          apiCall(`/api/clients/${clientId}/products/add/`, {
+            method: 'POST',
+            body: JSON.stringify({ productId }),
+            headers: { 'Content-Type': 'application/json' }
+          })
+        )
+      );
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') addedCount++;
+        else {
+          const err = (result as PromiseRejectedResult).reason;
+          const msg = String(err?.message || err || '');
+          if (msg.includes('already has') || msg.includes('déjà')) skippedCount++;
+        }
       });
-      toast.success('Produit ajouté avec succès');
       onRefresh();
-    } catch (error: any) {
-      if (product) {
-        setLocalClientProducts((prev) => prev.filter((cp: any) => cp.id !== tempId));
+      if (skippedCount > 0) {
+        toast.success(`${addedCount} produit(s) ajouté(s), ${skippedCount} déjà assigné(s)`);
+      } else {
+        toast.success(`${addedCount} produit(s) ajouté(s) avec succès`);
       }
-      console.error('Error adding product:', error);
-      toast.error(error.message || 'Erreur lors de l\'ajout du produit');
+    } catch (error: any) {
+      onRefresh();
+      console.error('Error adding products:', error);
+      toast.error(error.message || 'Erreur lors de l\'ajout des produits');
     }
   }
 
@@ -302,10 +335,10 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="assets" className="space-y-6">
+      <Tabs defaultValue="products" className="space-y-6">
         <TabsList>
-          <TabsTrigger value="assets">Actifs</TabsTrigger>
           <TabsTrigger value="products">Produits</TabsTrigger>
+          <TabsTrigger value="assets">Actifs</TabsTrigger>
         </TabsList>
 
         {/* Assets Tab */}
@@ -418,7 +451,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                             .filter((asset: any) => !localClientAssets.some((ca: any) => ca.asset?.id === asset.id))
                             .map((asset: any) => (
                               <SelectItem key={asset.id} value={asset.id}>
-                                {asset.name} ({asset.type}) - {asset.reference || 'N/A'}
+                                {asset.name} ({asset.type}) - {asset.reference || 'Aucun'}
                               </SelectItem>
                             ))}
                         </SelectContent>
@@ -575,6 +608,59 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
         <TabsContent value="products">
           <div className="space-y-6">
             <div className="flex justify-between items-center gap-4 flex-wrap">
+              {/* Filters */}
+              <div className="flex gap-2 flex-wrap">
+                <Select value={filterProductType} onValueChange={setFilterProductType}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Type de produit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les types</SelectItem>
+                    {Array.from(new Set(localClientProducts.map((cp: any) => cp.product?.type).filter(Boolean) as string[])).sort().map((type) => (
+                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={filterProductCategory} onValueChange={(value) => {
+                  setFilterProductCategory(value);
+                  setFilterProductSubcategory('all');
+                }}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Catégorie" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les catégories</SelectItem>
+                    {Array.from(new Set(localClientProducts.map((cp: any) => cp.product?.categoryTitle || cp.product?.category?.title).filter(Boolean) as string[])).sort().map((category) => (
+                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={filterProductSubcategory} onValueChange={setFilterProductSubcategory}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Sous-catégorie" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les sous-catégories</SelectItem>
+                    {(() => {
+                      const filteredForSub = localClientProducts.filter(
+                        (cp: any) => cp.product && (filterProductCategory === 'all' || (cp.product.categoryTitle || cp.product.category?.title) === filterProductCategory)
+                      );
+                      const subs = new Set<string>();
+                      filteredForSub.forEach((cp: any) => {
+                        const sub = cp.product?.subcategory;
+                        if (Array.isArray(sub)) sub.forEach((s: string) => s && subs.add(s));
+                        else if (sub) subs.add(String(sub));
+                      });
+                      return Array.from(subs).sort().map((sub) => (
+                        <SelectItem key={sub} value={sub}>{sub}</SelectItem>
+                      ));
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Actions */}
               <div className="flex gap-2">
                 {selectedProductIds.size > 0 && (
@@ -610,49 +696,209 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                 </Button>
                 <Button onClick={() => setIsAddProductDialogOpen(true)}>
                   <Plus className="w-4 h-4 mr-2" />
-                  Ajouter un produit
+                  Ajouter des produits
                 </Button>
               </div>
             </div>
 
             {isAddProductDialogOpen && (
-              <div className="modal-overlay" onClick={() => setIsAddProductDialogOpen(false)}>
-                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-overlay" onClick={closeAddProductModal}>
+                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '90vh' }}>
                   <div className="modal-header">
-                    <h2 className="modal-title">Ajouter un produit</h2>
+                    <h2 className="modal-title">Ajouter des produits</h2>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
                       className="modal-close"
-                      onClick={() => setIsAddProductDialogOpen(false)}
+                      onClick={closeAddProductModal}
                     >
                       <X className="planning-icon-md" />
                     </Button>
                   </div>
-                  <div className="modal-form">
-                    <div className="modal-form-field">
-                      <Label>Produit</Label>
-                      <Select onValueChange={(value) => handleAddProduct(value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sélectionner un produit" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableProducts
-                            .filter((product: any) => !localClientProducts.some((cp: any) => cp.product?.id === product.id))
-                            .map((product: any) => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.name} ({product.type || 'N/A'}) - {product.reference || 'N/A'}
-                              </SelectItem>
+
+                  {/* Filters */}
+                  <div className="space-y-4 mb-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="product-filter-type">Type</Label>
+                        <Select
+                          value={filterProductType}
+                          onValueChange={(value) => {
+                            setFilterProductType(value);
+                            setFilterProductSubcategory('all');
+                          }}
+                        >
+                          <SelectTrigger id="product-filter-type">
+                            <SelectValue placeholder="Tous les types" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Tous les types</SelectItem>
+                            {(Array.from(new Set(availableProducts.map((p: any) => p.type).filter(Boolean))) as string[]).sort().map((type: string) => (
+                              <SelectItem key={type} value={type}>{type}</SelectItem>
                             ))}
-                        </SelectContent>
-                      </Select>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="product-filter-category">Catégorie</Label>
+                        <Select
+                          value={filterProductCategory}
+                          onValueChange={(value) => {
+                            setFilterProductCategory(value);
+                            setFilterProductSubcategory('all');
+                          }}
+                        >
+                          <SelectTrigger id="product-filter-category">
+                            <SelectValue placeholder="Toutes les catégories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les catégories</SelectItem>
+                            {(Array.from(new Set(availableProducts.map((p: any) => p.categoryTitle || p.category?.title).filter(Boolean))) as string[]).sort().map((cat: string) => (
+                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="product-filter-subcategory">Sous-catégorie</Label>
+                        <Select
+                          value={filterProductSubcategory}
+                          onValueChange={setFilterProductSubcategory}
+                        >
+                          <SelectTrigger id="product-filter-subcategory">
+                            <SelectValue placeholder="Toutes les sous-catégories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les sous-catégories</SelectItem>
+                            {(() => {
+                              const filteredForSub = availableProducts.filter(
+                                (p: any) => p.status === 'Actif' && (filterProductCategory === 'all' || (p.categoryTitle || p.category?.title) === filterProductCategory)
+                              );
+                              return (Array.from(new Set(filteredForSub.map((p: any) => p.subcategory).filter(Boolean))) as string[]).sort().map((sub: string) => (
+                                <SelectItem key={sub} value={sub}>{sub}</SelectItem>
+                              ));
+                            })()}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div className="modal-form-actions">
-                      <Button type="button" variant="outline" onClick={() => setIsAddProductDialogOpen(false)}>
-                        Annuler
-                      </Button>
+                    <div className="space-y-2">
+                      <Label htmlFor="product-search">Rechercher</Label>
+                      <Input
+                        id="product-search"
+                        placeholder="Rechercher par nom ou référence..."
+                        value={productSearchQuery}
+                        onChange={(e) => setProductSearchQuery(e.target.value)}
+                      />
                     </div>
+                  </div>
+
+                  {/* Product list */}
+                  {(() => {
+                    const assignedIds = new Set(localClientProducts.map((cp: any) => cp.product?.id).filter(Boolean));
+                    const filteredProducts = availableProducts.filter((product: any) => {
+                      if (assignedIds.has(product.id)) return false;
+                      if (product.status !== 'Actif') return false;
+                      const typeMatch = filterProductType === 'all' || product.type === filterProductType;
+                      const catTitle = product.categoryTitle || product.category?.title;
+                      const categoryMatch = filterProductCategory === 'all' || catTitle === filterProductCategory;
+                      const subMatch = filterProductSubcategory === 'all' || product.subcategory === filterProductSubcategory;
+                      const q = productSearchQuery.trim().toLowerCase();
+                      const searchMatch = !q || (product.name || '').toLowerCase().includes(q) || (product.reference || '').toLowerCase().includes(q);
+                      return typeMatch && categoryMatch && subMatch && searchMatch;
+                    });
+                    const availableIds = filteredProducts.map((p: any) => p.id);
+                    const allAvailableSelected = availableIds.length > 0 && availableIds.every((id: string) => selectedProductIdsInModal.has(id));
+
+                    return (
+                      <>
+                        {filteredProducts.length > 0 && (
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm text-slate-600">
+                              {filteredProducts.length} produit{filteredProducts.length > 1 ? 's' : ''} trouvé{filteredProducts.length > 1 ? 's' : ''}
+                            </span>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (allAvailableSelected) {
+                                  setSelectedProductIdsInModal((prev) => {
+                                    const next = new Set(prev);
+                                    availableIds.forEach((id: string) => next.delete(id));
+                                    return next;
+                                  });
+                                } else {
+                                  setSelectedProductIdsInModal((prev) => {
+                                    const next = new Set(prev);
+                                    availableIds.forEach((id: string) => next.add(id));
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                            >
+                              {allAvailableSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                            </a>
+                          </div>
+                        )}
+                        <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
+                          {filteredProducts.length > 0 ? (
+                            <div className="space-y-2">
+                              {filteredProducts.map((product: any) => {
+                                const isSelected = selectedProductIdsInModal.has(product.id);
+                                return (
+                                  <div
+                                    key={product.id}
+                                    className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                      isSelected
+                                        ? 'border-blue-500 bg-blue-50'
+                                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <Checkbox
+                                      checked={isSelected}
+                                      onCheckedChange={(checked) => {
+                                        setSelectedProductIdsInModal((prev) => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(product.id);
+                                          else next.delete(product.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <div className="flex-1">
+                                      <div className="font-medium text-slate-900">{product.name}</div>
+                                      <div className="text-sm text-slate-500">
+                                        {product.reference && `${product.reference} • `}
+                                        {product.type || 'Aucun'}
+                                        {(product.categoryTitle || product.category?.title) && ` • ${product.categoryTitle || product.category?.title}`}
+                                        {product.subcategory && ` • ${product.subcategory}`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="text-center py-8 text-slate-500">Aucun produit trouvé avec ces filtres</div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
+                    <Button type="button" variant="outline" onClick={closeAddProductModal}>
+                      Annuler
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleAddProducts(Array.from(selectedProductIdsInModal))}
+                      disabled={selectedProductIdsInModal.size === 0}
+                    >
+                      Ajouter la sélection ({selectedProductIdsInModal.size})
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -663,8 +909,20 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                 <CardTitle>Produits visibles par le client</CardTitle>
               </CardHeader>
               <CardContent>
-                {localClientProducts.length > 0 ? (
-                  <div className="overflow-x-auto">
+                {(() => {
+                  const filteredProducts = localClientProducts.filter((clientProduct: any) => {
+                    const product = clientProduct.product;
+                    if (!product) return false;
+                    const typeMatch = filterProductType === 'all' || product.type === filterProductType;
+                    const categoryMatch = filterProductCategory === 'all' || (product.categoryTitle || product.category?.title) === filterProductCategory;
+                    const productSub = product.subcategory;
+                    const productSubList = Array.isArray(productSub) ? productSub : (productSub ? [productSub] : []);
+                    const subcategoryMatch = filterProductSubcategory === 'all' || productSubList.includes(filterProductSubcategory) || productSub === filterProductSubcategory;
+                    return typeMatch && categoryMatch && subcategoryMatch;
+                  });
+                  return (
+                    filteredProducts.length > 0 ? (
+                      <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-slate-200">
@@ -673,11 +931,11 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                               checked={
                                 selectedProductIds.size === 0
                                   ? false
-                                  : selectedProductIds.size === localClientProducts.filter((cp: any) => cp.product).length
+                                  : selectedProductIds.size === filteredProducts.length
                                   ? true
                                   : 'indeterminate'
                               }
-                              onCheckedChange={handleSelectAllProducts}
+                              onCheckedChange={() => handleSelectAllProducts(filteredProducts)}
                               aria-label="Tout sélectionner"
                             />
                           </th>
@@ -691,7 +949,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         </tr>
                       </thead>
                       <tbody>
-                        {localClientProducts.map((clientProduct: any) => {
+                        {filteredProducts.map((clientProduct: any) => {
                           const product = clientProduct.product;
                           if (!product) return null; // Skip if product was deleted
                           const isFeatured = clientProduct.featured || false;
@@ -779,10 +1037,14 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         })}
                       </tbody>
                     </table>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">Aucun produit assigné</p>
-                )}
+                      </div>
+                    ) : localClientProducts.length > 0 ? (
+                      <p className="text-sm text-slate-500">Aucun produit ne correspond aux filtres sélectionnés</p>
+                    ) : (
+                      <p className="text-sm text-slate-500">Aucun produit assigné</p>
+                    )
+                  );
+                })()}
               </CardContent>
             </Card>
           </div>

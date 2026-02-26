@@ -312,6 +312,12 @@ export function PlatformDiscover() {
       return 'epargne';
     }
     
+    // ETF
+    const categoryNorm = product.categoryTitle || product.category?.title || '';
+    if (type.includes('etf') || subcategory.includes('etf') || normalize(String(categoryNorm)).includes('etf')) {
+      return 'etf';
+    }
+    
     // Par défaut, autres produits internes
     return 'autres';
   };
@@ -804,7 +810,7 @@ export function PlatformDiscover() {
 
                           <div style={{ marginBottom: '12px' }}>
                             <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
-                              {asset.name || 'N/A'}
+                              {asset.name || 'Aucun'}
                             </div>
                             {asset.reference && (
                               <div style={{ fontSize: '14px', color: '#6b7280' }}>
@@ -961,7 +967,7 @@ export function PlatformDiscover() {
                           <div style={{ marginBottom: '20px', width: '64px', height: '64px' }}></div>
                           <div style={{ marginBottom: '12px' }}>
                             <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
-                              {product.name || 'N/A'}
+                              {product.name || 'Aucun'}
                             </div>
                             {product.reference && (
                               <div style={{ fontSize: '14px', color: '#6b7280' }}>
@@ -1005,7 +1011,7 @@ export function PlatformDiscover() {
                           </p>
                           <div style={{ marginBottom: '16px' }}>
                             <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
-                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                             </div>
                           </div>
                         </CardContent>
@@ -1084,7 +1090,7 @@ export function PlatformDiscover() {
                       </div>
                       <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
                         <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', color: '#030213', marginBottom: '8px', marginTop: 0 }}>
-                          {product.name || 'N/A'}
+                          {product.name || 'Aucun'}
                         </h4>
                         {(product.categoryName || product.subcategory) && (
                           <div style={{
@@ -1116,7 +1122,7 @@ export function PlatformDiscover() {
                         </p>
                         <div style={{ marginBottom: '16px' }}>
                           <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                           </div>
                         </div>
                       </CardContent>
@@ -1208,7 +1214,7 @@ export function PlatformDiscover() {
                               color: '#111827',
                               marginBottom: '8px',
                             }}>
-                              {portfolio.name || 'N/A'}
+                              {portfolio.name || 'Aucun'}
                             </div>
                             {portfolio.reference && (
                               <div style={{
@@ -1270,7 +1276,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             color: 'var(--secondary)',
                           }}>
-                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                             </div>
                           </div>
                         </CardContent>
@@ -1401,7 +1407,7 @@ export function PlatformDiscover() {
                           marginBottom: '8px',
                           marginTop: 0,
                         }}>
-                          {portfolio.name || 'N/A'}
+                          {portfolio.name || 'Aucun'}
                         </h4>
                         
                         {/* Description */}
@@ -1425,7 +1431,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             color: 'var(--secondary)',
                           }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                           </div>
                         </div>
                       </CardContent>
@@ -1630,7 +1636,7 @@ export function PlatformDiscover() {
                           color: '#111827',
                           marginBottom: '8px',
                         }}>
-                          {asset.name || 'N/A'}
+                          {asset.name || 'Aucun'}
                         </div>
                         {/* Reference */}
                         {asset.reference && (
@@ -1820,7 +1826,7 @@ export function PlatformDiscover() {
                             color: '#111827',
                             marginBottom: '8px',
                           }}>
-                            {product.name || 'N/A'}
+                            {product.name || 'Aucun'}
                           </div>
                           {product.reference && (
                             <div style={{
@@ -1882,7 +1888,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             color: 'var(--secondary)',
                           }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                           </div>
                         </div>
                       </CardContent>
@@ -1967,7 +1973,7 @@ export function PlatformDiscover() {
                         marginBottom: '8px',
                         marginTop: 0,
                       }}>
-                        {product.name || 'N/A'}
+                        {product.name || 'Aucun'}
                       </h4>
                       {(product.categoryName || product.subcategory) && (
                         <div style={{
@@ -2009,7 +2015,7 @@ export function PlatformDiscover() {
                           fontWeight: '700',
                           color: 'var(--secondary)',
                         }}>
-                          {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'N/A'}
+                          {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
                         </div>
                       </div>
                     </CardContent>

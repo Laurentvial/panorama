@@ -334,7 +334,7 @@ export function Placements({ user }: PlacementsProps) {
                             </td>
                             <td className="py-3 px-4">{product.price?.toLocaleString('fr-FR')} €</td>
                             <td className="py-3 px-4 text-green-600">{product.profitability}%</td>
-                            <td className="py-3 px-4">{product.duration ? `${product.duration} Jours` : '-'}</td>
+                            <td className="py-3 px-4">{product.duration ? `${product.duration} Jours` : 'Durée indéterminée'}</td>
                             <td className="py-3 px-4">
                               <Button
                                 variant="ghost"

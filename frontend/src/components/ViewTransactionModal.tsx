@@ -212,7 +212,7 @@ export function ViewTransactionModal({
   const isInvestmentTransfer = transaction.type === 'transfert' && (hasTransferProductTarget || hasSubscriptionProductId);
 
   const formatDateValue = (value: any) => {
-    if (!value) return 'N/A';
+    if (!value) return 'Aucun';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     return d.toLocaleDateString('fr-FR', {
@@ -224,10 +224,10 @@ export function ViewTransactionModal({
     });
   };
 
-  const productDuration = selectedProduct?.duration || subscriptionDetails?.duration || 'N/A';
+  const productDuration = selectedProduct?.duration || subscriptionDetails?.duration || 'Aucun';
   const productProfitabilityPeriod =
-    selectedProduct?.profitabilityPeriod || selectedProduct?.profitability_period || 'N/A';
-  const productInterestPeriod = selectedProduct?.interestPeriod || selectedProduct?.interest_period || 'N/A';
+    selectedProduct?.profitabilityPeriod || selectedProduct?.profitability_period || 'Aucun';
+  const productInterestPeriod = selectedProduct?.interestPeriod || selectedProduct?.interest_period || 'Aucun';
   const productProfitability = (() => {
     const isVariableRaw = selectedProduct?.isVariableProfitability ?? selectedProduct?.is_variable_profitability;
     const isVariable = String(isVariableRaw || '').toLowerCase() === 'oui';
@@ -239,7 +239,7 @@ export function ViewTransactionModal({
     if (baseRate != null && baseRate !== '') {
       return `${baseRate}%`;
     }
-    return subscriptionDetails?.profitability || 'N/A';
+    return subscriptionDetails?.profitability || 'Aucun';
   })();
   const productAvailabilityStart = formatDateValue(
     selectedProduct?.availabilityStart ?? selectedProduct?.availability_start
@@ -247,9 +247,9 @@ export function ViewTransactionModal({
   const productAvailabilityEnd = formatDateValue(
     selectedProduct?.availabilityEnd ?? selectedProduct?.availability_end
   );
-  const transactionIp = subscriptionDetails?.ip || transaction.subscription_ip || 'N/A';
+  const transactionIp = subscriptionDetails?.ip || transaction.subscription_ip || 'Aucun';
   const chosenInterestPeriod =
-    subscriptionDetails?.interestPeriod || subscriptionDetails?.interest_period || transaction.subscription_interest_period || 'N/A';
+    subscriptionDetails?.interestPeriod || subscriptionDetails?.interest_period || transaction.subscription_interest_period || 'Aucun';
   const hasSubscriptionOrProductInfo = transaction.type === 'transfert' && Boolean(subscriptionDetails || selectedProduct || productLoadError);
 
   const findAssetOrProduct = () => {
@@ -475,7 +475,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Prénom / Nom</Label>
                       <p className="text-slate-900 mt-1">
-                        {`${subscriptionDetails?.firstName || ''} ${subscriptionDetails?.lastName || ''}`.trim() || 'N/A'}
+                        {`${subscriptionDetails?.firstName || ''} ${subscriptionDetails?.lastName || ''}`.trim() || 'Aucun'}
                       </p>
                     </div>
                     <div>
@@ -487,13 +487,13 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Ville</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.city || 'N/A'}
+                        {subscriptionDetails?.city || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Date de naissance</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.birthDate || 'N/A'}
+                        {subscriptionDetails?.birthDate || 'Aucun'}
                       </p>
                     </div>
                   </div>
@@ -510,37 +510,37 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Catégorie</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.category || selectedProduct?.categoryTitle || selectedProduct?.category || 'N/A'}
+                        {subscriptionDetails?.category || selectedProduct?.categoryTitle || selectedProduct?.category || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Nom</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.productName || selectedProduct?.name || 'N/A'}
+                        {subscriptionDetails?.productName || selectedProduct?.name || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">N° contrat</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.productReference || selectedProduct?.reference || 'N/A'}
+                        {subscriptionDetails?.productReference || selectedProduct?.reference || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Pays</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.country || 'N/A'}
+                        {subscriptionDetails?.country || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Date de souscription</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.subscriptionDate || 'N/A'}
+                        {subscriptionDetails?.subscriptionDate || 'Aucun'}
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Durée</Label>
                       <p className="text-slate-900 mt-1">
-                        {productDuration !== 'N/A' ? `${productDuration} Jours` : productDuration}
+                        {productDuration !== 'Aucun' ? `${productDuration} Jours` : productDuration}
                       </p>
                     </div>
                     <div>
@@ -582,19 +582,19 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Investissement</Label>
                       <p className="text-slate-900 mt-1 font-semibold">
-                        {subscriptionDetails?.investment ? subscriptionDetails.investment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.investment ? subscriptionDetails.investment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
                       </p>
                     </div>
                     <div>
                       <Label className="text-slate-600 font-semibold">Profits</Label>
                       <p className="text-slate-900 mt-1 font-semibold text-green-600">
-                        {subscriptionDetails?.profits ? subscriptionDetails.profits.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.profits ? subscriptionDetails.profits.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
                       </p>
                     </div>
                     <div className="col-span-3">
                       <Label className="text-slate-600 font-semibold">TOTAL (Investissement + Profits)</Label>
                       <p className="text-slate-900 mt-1 font-bold text-lg">
-                        {subscriptionDetails?.total ? subscriptionDetails.total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'} €
+                        {subscriptionDetails?.total ? subscriptionDetails.total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
                       </p>
                     </div>
                     <div>
@@ -606,7 +606,7 @@ export function ViewTransactionModal({
                     <div>
                       <Label className="text-slate-600 font-semibold">Signature de la transaction</Label>
                       <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.hasSignature ? 'Signature' : 'N/A'}
+                        {subscriptionDetails?.hasSignature ? 'Signature' : 'Aucun'}
                       </p>
                     </div>
                     <div>

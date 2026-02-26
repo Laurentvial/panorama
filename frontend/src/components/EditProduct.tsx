@@ -593,11 +593,6 @@ export function EditProduct() {
     }
 
     if (!formData.noProfitability) {
-      if (!formData.duration) {
-        toast.error('La durée est requise pour un produit avec rentabilité');
-        setLoading(false);
-        return;
-      }
       if (formData.isVariableProfitability === 'Non') {
         if (!formData.profitabilityRate) {
           toast.error('Le taux de rentabilité est requis');
@@ -1192,7 +1187,7 @@ export function EditProduct() {
               {!formData.noProfitability && (
                 <div className="space-y-4 pl-4 border-l-2 border-slate-200">
                   <div className="space-y-2">
-                    <Label htmlFor="product-duration-profitability">Durée (en jours) *</Label>
+                    <Label htmlFor="product-duration-profitability">Durée (en jours)</Label>
                     <Input
                       id="product-duration-profitability"
                       type="number"
@@ -1205,8 +1200,7 @@ export function EditProduct() {
                           duration: e.target.value.replace(/[^0-9]/g, ''),
                         })
                       }
-                      required
-                      placeholder="Ex: 365"
+                      placeholder="Laisser vide pour durée indéterminée"
                     />
                   </div>
 
