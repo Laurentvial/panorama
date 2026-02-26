@@ -219,11 +219,6 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     fetchClientNotifications(true);
   }, [clientNotificationsOpen, fetchClientNotifications]);
 
-  React.useEffect(() => {
-    const t = setInterval(() => fetchClientNotifications(false), 60000);
-    return () => clearInterval(t);
-  }, [fetchClientNotifications]);
-
   const handleClientNotificationMarkRead = async (id: string) => {
     try {
       await apiCall(`/api/client/notifications/${id}/read/`, { method: 'PATCH' });

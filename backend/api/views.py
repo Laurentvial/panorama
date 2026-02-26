@@ -11706,7 +11706,13 @@ def news_fetch_from_api(request):
 
         articles = []
         seen_urls = set()
-        limit = min(int(request.GET.get('pageSize', 30)), 50)
+        try:
+            limit = int(request.GET.get('pageSize', 30))
+            if limit < 1:
+                limit = 30
+            limit = min(limit, 50)
+        except (ValueError, TypeError):
+            limit = 30
         headers = {'User-Agent': 'Panorama/1.0 (News aggregator)'}
 
         for feed_url, source_name in _NEWS_RSS_FEEDS:

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, MessageCircle, Send, X } from 'lucide-react';
+import { ArrowLeft, Send, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import { Button } from './ui/button';
@@ -116,11 +116,9 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, clientId, view, selectedConversationId]);
 
-  // Preload manager photo/name for the floating chat bubble.
+  // Preload manager photo/name/phone for the floating chat bubble.
   useEffect(() => {
     if (!clientId) return;
-    if (managerPhoto) return;
-    // Best-effort: fetch manager meta once.
     (async () => {
       try {
         const data = await apiCall(`/api/clients/${clientId}/conversations/`);
@@ -128,12 +126,14 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
         if (m) setManagerName(m);
         const photo = data?.manager?.profilePhoto;
         if (typeof photo === 'string') setManagerPhoto(photo);
+        const phone = data?.manager?.phone;
+        if (typeof phone === 'string') setManagerPhone(phone);
       } catch {
         // ignore
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, managerPhoto]);
+  }, [clientId]);
 
   useEffect(() => {
     if (!open) return;
@@ -230,9 +230,11 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
           }}
           aria-label="Ouvrir le chat"
           style={{
-            width: 80,
-            height: 80,
-            borderRadius: 9999,
+            width: managerPhoto ? 80 : 'auto',
+            height: managerPhoto ? 80 : 'auto',
+            minWidth: managerPhoto ? undefined : 140,
+            padding: managerPhoto ? 0 : '12px 16px',
+            borderRadius: managerPhoto ? 9999 : 16,
             border: '1px solid rgba(2, 6, 23, 0.12)',
             background: 'white',
             boxShadow: '0 10px 24px rgba(2, 6, 23, 0.12)',
@@ -248,12 +250,31 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
               src={managerPhoto}
               alt={managerName}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = 'none';
-              }}
+              onError={() => setManagerPhoto('')}
             />
           ) : (
-            <MessageCircle size={36} />
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 2,
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 500 }}>
+                Votre conseiller
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
+                {managerName}
+              </div>
+              {managerPhone && (
+                <div style={{ fontSize: 12, color: '#2563eb', fontWeight: 500 }}>
+                  {managerPhone}
+                </div>
+              )}
+            </div>
           )}
         </button>
       ) : (

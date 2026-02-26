@@ -69,11 +69,6 @@ export function Header({ user }: HeaderProps) {
     fetchNotifications(true);
   }, [notificationsOpen, fetchNotifications]);
 
-  useEffect(() => {
-    const interval = setInterval(() => fetchNotifications(false), 60000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
-
   const handleMarkRead = async (id: string) => {
     try {
       await apiCall(`/api/notifications/${id}/read/`, { method: 'PATCH' });

@@ -94,18 +94,11 @@ export function ManageAssets() {
   useEffect(() => {
     loadAssets();
     
-    // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
-    const priceRefreshInterval = setInterval(() => {
-      loadAssets();
-    }, 120000); // 2 minutes
-    
-    // Cleanup function to clear timeout and interval on unmount
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = null;
       }
-      clearInterval(priceRefreshInterval);
     };
   }, []);
 

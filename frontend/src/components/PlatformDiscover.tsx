@@ -67,15 +67,6 @@ export function PlatformDiscover() {
   useEffect(() => {
     if (currentUser && currentUser.id) {
       loadDiscoverData();
-      
-      // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
-      const priceRefreshInterval = setInterval(() => {
-        loadDiscoverData();
-      }, 120000); // 2 minutes
-      
-      return () => {
-        clearInterval(priceRefreshInterval);
-      };
     }
   }, [currentUser]);
 

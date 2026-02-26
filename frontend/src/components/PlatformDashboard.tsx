@@ -191,15 +191,6 @@ export function PlatformDashboard() {
     if (currentUser && currentUser.id) {
       loadDashboardData();
       loadNewsPosts();
-      
-      // Refresh asset prices every 2 minutes (scheduler runs every 10 minutes)
-      const priceRefreshInterval = setInterval(() => {
-        loadDashboardData();
-      }, 120000); // 2 minutes
-      
-      return () => {
-        clearInterval(priceRefreshInterval);
-      };
     }
   }, [currentUser]);
 
