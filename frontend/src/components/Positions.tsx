@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 
@@ -91,28 +91,30 @@ const formatPositionDateTime = (p: PositionRow) => {
   return '-';
 };
 
+const PAGE_SIZE = 50;
+
 export function Positions() {
   const [loading, setLoading] = useState(true);
   const [positions, setPositions] = useState<PositionRow[]>([]);
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, total_pages: 1 });
+  const [counts, setCounts] = useState({ pending: 0, open: 0, closed: 0 });
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
   const [selectedProductId, setSelectedProductId] = useState<string>('all');
+  const [selectedClientId, setSelectedClientId] = useState<string>('all');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
   const openStatuses = useMemo(() => new Set(['open']), []);
   const closedStatuses = useMemo(() => new Set(['done', 'cancelled']), []);
 
   const productOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const p of positions) {
-      const productId = String(p.productId || '').trim();
-      if (!productId) continue;
-      const productName = String(p.productName || productId).trim();
-      if (!map.has(productId)) map.set(productId, productName);
-    }
-    return Array.from(map.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  }, [positions]);
+    return [...products].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }, [products]);
+
+  const clientOptions = useMemo(() => {
+    return [...clients].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  }, [clients]);
 
   useEffect(() => {
     if (selectedProductId === 'all') return;
@@ -120,52 +122,49 @@ export function Positions() {
     if (!stillExists) setSelectedProductId('all');
   }, [productOptions, selectedProductId]);
 
+  useEffect(() => {
+    if (selectedClientId === 'all') return;
+    const stillExists = clientOptions.some((c) => c.id === selectedClientId);
+    if (!stillExists) setSelectedClientId('all');
+  }, [clientOptions, selectedClientId]);
+
   const filtered = useMemo(() => {
     return positions.filter((p) => {
-      // During loading, keep current rows visible and only apply product filter.
-      if (loading) {
-        if (selectedProductId !== 'all' && String(p.productId) !== selectedProductId) return false;
-        return true;
-      }
-
-      const isUpcoming = upcomingStatuses.has(p.status);
-      const isOpen = openStatuses.has(p.status);
-      const isClosed = closedStatuses.has(p.status);
-      if (activeTab === 'upcoming' && !isUpcoming) return false;
-      if (activeTab === 'open' && !isOpen) return false;
-      if (activeTab === 'closed' && !isClosed) return false;
-
       if (selectedProductId !== 'all' && String(p.productId) !== selectedProductId) return false;
+      if (selectedClientId !== 'all' && String(p.clientId) !== selectedClientId) return false;
       return true;
     });
-  }, [positions, activeTab, loading, selectedProductId, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [positions, selectedProductId, selectedClientId]);
 
-  const counts = useMemo(() => {
-    let upcoming = 0;
-    let open = 0;
-    let closed = 0;
-    for (const p of positions) {
-      if (upcomingStatuses.has(p.status)) upcoming += 1;
-      else if (openStatuses.has(p.status)) open += 1;
-      else if (closedStatuses.has(p.status)) closed += 1;
-    }
-    return { upcoming, open, closed };
-  }, [positions, upcomingStatuses, openStatuses, closedStatuses]);
-
-  async function loadPositions() {
+  const loadPositions = useCallback(async (page: number = 1) => {
     try {
       setLoading(true);
-      // Pass status filter to backend for proper sorting
-      let url = '/api/positions/';
+      const params = new URLSearchParams();
       if (activeTab === 'upcoming') {
-        url += '?status=pending';
+        params.set('status', 'pending');
       } else if (activeTab === 'open') {
-        url += '?status=open';
+        params.set('status', 'open');
       } else if (activeTab === 'closed') {
-        url += '?status=done,cancelled';
+        params.set('status', 'done,cancelled');
       }
-      const data = await apiCall(url);
+      params.set('page', String(page));
+      params.set('limit', String(PAGE_SIZE));
+      if (selectedProductId !== 'all') {
+        params.set('product_id', selectedProductId);
+      }
+      if (selectedClientId !== 'all') {
+        params.set('client_id', selectedClientId);
+      }
+      const data = await apiCall(`/api/positions/?${params.toString()}`);
       setPositions((data as any)?.positions || []);
+      setProducts((data as any)?.products || []);
+      setClients((data as any)?.clients || []);
+      if ((data as any).counts) {
+        setCounts((data as any).counts);
+      }
+      if ((data as any).pagination) {
+        setPagination((data as any).pagination);
+      }
     } catch (error: any) {
       console.error('Error loading positions:', error);
       toast.error(error?.message || 'Erreur lors du chargement des positions');
@@ -173,12 +172,44 @@ export function Positions() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [activeTab, selectedProductId, selectedClientId]);
 
   useEffect(() => {
-    loadPositions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+    loadPositions(1);
+  }, [loadPositions]);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.total_pages) {
+      loadPositions(newPage);
+    }
+  };
+
+  const PaginationBar = () =>
+    pagination.total_pages > 1 ? (
+      <div className="flex items-center justify-between mt-6">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handlePageChange(pagination.page - 1)}
+          disabled={pagination.page === 1 || loading}
+        >
+          <ChevronLeft className="w-4 h-4 mr-1" />
+          Précédent
+        </Button>
+        <span className="text-sm text-slate-600">
+          Page {pagination.page} sur {pagination.total_pages} ({pagination.total} positions)
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handlePageChange(pagination.page + 1)}
+          disabled={pagination.page >= pagination.total_pages || loading}
+        >
+          Suivant
+          <ChevronRight className="w-4 h-4 ml-1" />
+        </Button>
+      </div>
+    ) : null;
 
   return (
     <div className="space-y-6">
@@ -188,7 +219,7 @@ export function Positions() {
           <p className="page-subtitle">Suivi des positions mensuelles liées aux investissements</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={loadPositions} disabled={loading}>
+          <Button variant="outline" onClick={() => loadPositions(pagination.page)} disabled={loading}>
             <RefreshCw className="w-4 h-4 mr-2" />
             {loading ? 'Chargement...' : 'Rafraîchir'}
           </Button>
@@ -200,8 +231,23 @@ export function Positions() {
           <CardTitle>Liste des positions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="w-full md:w-[360px]">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="w-full md:w-[280px]">
+              <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filtrer par client" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les clients</SelectItem>
+                  {clientOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full md:w-[280px]">
               <Select value={selectedProductId} onValueChange={setSelectedProductId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Filtrer par produit" />
@@ -220,7 +266,7 @@ export function Positions() {
 
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList>
-              <TabsTrigger value="upcoming">Positions à venir ({loading ? '...' : counts.upcoming})</TabsTrigger>
+              <TabsTrigger value="upcoming">Positions à venir ({loading ? '...' : counts.pending})</TabsTrigger>
               <TabsTrigger value="open">Positions ouvertes ({loading ? '...' : counts.open})</TabsTrigger>
               <TabsTrigger value="closed">Positions fermées ({loading ? '...' : counts.closed})</TabsTrigger>
             </TabsList>
@@ -238,6 +284,7 @@ export function Positions() {
                     </div>
                   )}
                   <PositionsTable rows={filtered} />
+                  <PaginationBar />
                 </div>
               )}
             </TabsContent>
@@ -254,6 +301,7 @@ export function Positions() {
                     </div>
                   )}
                   <PositionsTable rows={filtered} />
+                  <PaginationBar />
                 </div>
               )}
             </TabsContent>
@@ -270,6 +318,7 @@ export function Positions() {
                     </div>
                   )}
                   <PositionsTable rows={filtered} />
+                  <PaginationBar />
                 </div>
               )}
             </TabsContent>

@@ -15,6 +15,7 @@ django-cloudinary-storage
 django-storages
 cloudinary
 requests
+feedparser
 alpha_vantage
 reportlab
 whitenoise

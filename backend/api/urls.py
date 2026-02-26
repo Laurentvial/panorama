@@ -10,6 +10,7 @@ urlpatterns = [
     path('clients/', api_views.ClientView.as_view(), name='client-list'),
     path('clients/create/', api_views.client_create, name='client-create'),
     path('clients/online-ids/', api_views.client_online_ids, name='client-online-ids'),
+    path('platform-logs/', api_views.platform_logs_list, name='platform-logs-list'),
     path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
     path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
     path('clients/<str:client_id>/delete/', api_views.client_delete, name='client-delete'),

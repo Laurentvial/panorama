@@ -890,7 +890,7 @@ export function PlatformDashboard() {
                     </div>
                   )}
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                     <h2
                       style={{
                         fontSize: isMobile ? '18px' : '20px',
@@ -907,25 +907,28 @@ export function PlatformDashboard() {
                       style={{
                         fontSize: 14,
                         color: '#4b5563',
-                        marginBottom: 14,
+                        marginBottom: 0,
                         lineHeight: '1.55',
                       }}
                     >
                       La vérification de votre identité aide à empêcher quelqu’un d’autre de créer un compte en votre nom.
                     </p>
 
-                    <Button
-                      onClick={() => {
-                        navigate('/platform/verification');
-                      }}
-                      variant="platform"
-                      style={{
-                        width: isMobile ? '100%' : 'auto',
-                        ['--platform-button-bg' as any]: '#10b981',
-                      }}
-                    >
-                      Vérifier votre compte
-                    </Button>
+                    <div style={{ flex: 1, minHeight: 24 }} />
+                    <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button
+                        onClick={() => {
+                          navigate('/platform/verification');
+                        }}
+                        variant="platform"
+                        style={{
+                          borderRadius: 12,
+                          ['--platform-button-bg' as any]: '#10b981',
+                        }}
+                      >
+                        Vérifier votre compte
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -1277,19 +1280,17 @@ export function PlatformDashboard() {
                               href={doc.fileUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="platform-hoverable"
+                              aria-label="Voir le document"
                               style={{
                                 flexShrink: 0,
-                                padding: '6px 12px',
-                                fontSize: isMobile ? 12 : 13,
+                                fontSize: isMobile ? 13 : 14,
                                 fontWeight: 600,
                                 color: 'var(--platform-button-bg, #030213)',
-                                textDecoration: 'none',
-                                borderRadius: 8,
-                                border: '1px solid currentColor',
+                                textDecoration: 'underline',
+                                textUnderlineOffset: 3,
                               }}
                             >
-                              Voir
+                              Voir le document
                             </a>
                           )}
                         </div>

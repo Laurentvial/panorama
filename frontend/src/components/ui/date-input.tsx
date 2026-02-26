@@ -1,5 +1,9 @@
 import * as React from "react";
+import { CalendarIcon } from "lucide-react";
 import { Input } from "./input";
+import { Button } from "./button";
+import { SimpleCalendar } from "./simple-calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { cn } from "./utils";
 
 interface DateInputProps extends Omit<React.ComponentProps<"input">, "type" | "value" | "onChange"> {
@@ -116,5 +120,61 @@ function DateInput({ value, onChange, className, label, ...props }: DateInputPro
   );
 }
 
-export { DateInput };
+interface DateInputWithCalendarProps extends Omit<DateInputProps, "className"> {
+  className?: string;
+}
+
+function DateInputWithCalendar({ value, onChange, className, ...props }: DateInputWithCalendarProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  const selectedDate = React.useMemo(() => {
+    if (!value) return undefined;
+    const d = new Date(value + "T00:00:00");
+    return isNaN(d.getTime()) ? undefined : d;
+  }, [value]);
+
+  const handleSelect = (date: Date | undefined) => {
+    if (date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      onChange(`${year}-${month}-${day}`);
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div className={cn("flex", className)}>
+      <DateInput
+        value={value}
+        onChange={onChange}
+        placeholder="jj/mm/aaaa"
+        className="flex-1 rounded-r-none border-r-0"
+        {...props}
+      />
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="shrink-0 rounded-none border-l-0 px-3"
+            aria-label="Ouvrir le calendrier"
+          >
+            <CalendarIcon className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0 border shadow-lg" align="end">
+          <SimpleCalendar
+            selected={selectedDate}
+            onSelect={handleSelect}
+            className="min-w-[260px]"
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+export { DateInput, DateInputWithCalendar };
 

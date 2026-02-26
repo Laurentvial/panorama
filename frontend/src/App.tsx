@@ -27,6 +27,7 @@ const ManageAssets = lazy(() => import('./components/ManageAssets').then(m => ({
 const ManageUsefulLinks = lazy(() => import('./components/ManageUsefulLinks').then(m => ({ default: m.ManageUsefulLinks })));
 const ManageNews = lazy(() => import('./components/ManageNews').then(m => ({ default: m.ManageNews })));
 const Transactions = lazy(() => import('./components/Transactions').then(m => ({ default: m.Transactions })));
+const PlatformLogs = lazy(() => import('./components/PlatformLogs').then(m => ({ default: m.PlatformLogs })));
 const Messagerie = lazy(() => import('./components/Messagerie').then(m => ({ default: m.Messagerie })));
 const ProduitsInvestissements = lazy(() => import('./components/ProduitsInvestissements').then(m => ({ default: m.ProduitsInvestissements })));
 const AddProduct = lazy(() => import('./components/AddProduct').then(m => ({ default: m.AddProduct })));
@@ -242,6 +243,15 @@ function App() {
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <Transactions />
+                                </Suspense>
+                            </Layout>
+                        </AdminRoleProtectedRoute>
+                    } />
+                    <Route path="/admin/platform-logs" element={
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
+                            <Layout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLogs />
                                 </Suspense>
                             </Layout>
                         </AdminRoleProtectedRoute>

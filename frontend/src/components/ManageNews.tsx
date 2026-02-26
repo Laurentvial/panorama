@@ -279,7 +279,7 @@ export function ManageNews() {
         <div className="flex gap-2">
           <Button onClick={fetchNewsFromApi} variant="outline" disabled={loadingApi}>
             <Download className="w-4 h-4 mr-2" />
-            {loadingApi ? 'Chargement...' : 'Importer depuis NewsAPI'}
+            {loadingApi ? 'Chargement...' : 'Importer des actualités'}
           </Button>
           <Button onClick={() => handleOpenDialog()}>
             <Plus className="w-4 h-4 mr-2" />
@@ -487,7 +487,7 @@ export function ManageNews() {
         </div>
       )}
 
-      {/* NewsAPI Articles Dialog */}
+      {/* Articles disponibles (flux RSS) */}
       {isApiDialogOpen && (
         <div className="modal-overlay" onClick={() => setIsApiDialogOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '80vh', overflowY: 'auto' }}>

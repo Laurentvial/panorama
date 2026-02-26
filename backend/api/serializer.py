@@ -745,6 +745,22 @@ class ClientPlatformLogSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         return ret
 
+
+class PlatformLogWithClientSerializer(ClientPlatformLogSerializer):
+    """ClientPlatformLog serializer with clientDisplayName for aggregated platform logs view."""
+    clientDisplayName = serializers.SerializerMethodField()
+
+    class Meta(ClientPlatformLogSerializer.Meta):
+        fields = ClientPlatformLogSerializer.Meta.fields + ['clientDisplayName']
+
+    def get_clientDisplayName(self, obj):
+        if not obj.client:
+            return ''
+        fname = (obj.client.fname or '').strip()
+        lname = (obj.client.lname or '').strip()
+        return f'{fname} {lname}'.strip() or obj.client.email or obj.client.id
+
+
 class AssetSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)

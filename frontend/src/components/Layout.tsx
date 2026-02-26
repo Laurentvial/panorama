@@ -21,6 +21,7 @@ const LayoutComponent = ({ children }: LayoutProps) => {
     if (path === '/admin/clients' || path.startsWith('/admin/clients/')) return 'clients';
     if (path === '/admin/planning') return 'planning';
     if (path === '/admin/transactions') return 'transactions';
+    if (path === '/admin/platform-logs') return 'platform-logs';
     if (path === '/admin/positions' || path.startsWith('/admin/positions/')) return 'positions';
     if (path === '/admin/messagerie') return 'messagerie';
     if (path === '/admin/produits-investissements' || path.startsWith('/admin/produits-investissements/')) return 'placements';

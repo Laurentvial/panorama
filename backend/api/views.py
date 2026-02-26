@@ -1671,6 +1671,91 @@ def client_history(request, client_id):
         }
     })
 
+
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to reject client_ tokens
+@permission_classes([AllowAny])
+def platform_logs_list(request):
+    """Aggregated platform logs from all clients the user has access to. Filters: client_id, action_type, date_from, date_to."""
+    from rest_framework_simplejwt.authentication import JWTAuthentication
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    token = auth_header.replace('Bearer ', '')
+    if token.startswith('client_'):
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    jwt_auth = JWTAuthentication()
+    try:
+        validated_token = jwt_auth.get_validated_token(token)
+        user = jwt_auth.get_user(validated_token)
+        if not user.is_authenticated:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        request.user = user
+    except Exception:
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    client_ids = _get_client_ids_user_has_access_to(request)
+    qs = ClientPlatformLog.objects.select_related('client').order_by('-created_at')
+    if client_ids is not None:
+        qs = qs.filter(client_id__in=client_ids)
+
+    client_id = request.GET.get('client_id', '').strip()
+    if client_id:
+        if client_ids is not None and client_id not in client_ids:
+            return Response({'error': 'Accès refusé à ce client'}, status=status.HTTP_403_FORBIDDEN)
+        qs = qs.filter(client_id=client_id)
+
+    action_type = request.GET.get('action_type', '').strip()
+    if action_type:
+        qs = qs.filter(action_type=action_type)
+
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+    if date_from:
+        try:
+            d = datetime.strptime(date_from, '%Y-%m-%d').date()
+            qs = qs.filter(created_at__date__gte=d)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            d = datetime.strptime(date_to, '%Y-%m-%d').date()
+            qs = qs.filter(created_at__date__lte=d)
+        except ValueError:
+            pass
+
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '50')
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 50
+        if limit > 500:
+            limit = 500
+    except (ValueError, TypeError):
+        page = 1
+        limit = 50
+
+    total_count = qs.count()
+    offset = (page - 1) * limit
+    paginated_logs = qs[offset:offset + limit]
+
+    from .serializer import PlatformLogWithClientSerializer
+    serializer = PlatformLogWithClientSerializer(paginated_logs, many=True)
+    return Response({
+        'platformLogs': serializer.data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        }
+    })
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
 @permission_classes([AllowAny])
@@ -6320,9 +6405,80 @@ def positions_list(request):
     else:
         # No status filter: default descending order
         qs = qs.order_by('-opened_at', '-period_date', '-created_at')
-    
-    serializer = PositionSerializer(qs, many=True)
-    return Response({'positions': serializer.data})
+
+    # Filter by product if requested
+    product_id_param = request.GET.get('product_id')
+    if product_id_param:
+        qs = qs.filter(product_id=product_id_param)
+
+    # Clients list for filter dropdown (unique clients in status+product filtered queryset, before client filter)
+    client_ids_in_qs = qs.exclude(client_id__isnull=True).values_list('client_id', flat=True).distinct()
+    clients_data = []
+    for c in Client.objects.filter(id__in=client_ids_in_qs).only('id', 'fname', 'lname', 'email'):
+        name = f"{c.fname} {c.lname}".strip() or (c.email or '') or c.id
+        clients_data.append({'id': c.id, 'name': name})
+    clients_data.sort(key=lambda x: x['name'].lower())
+
+    # Filter by client if requested
+    client_id_param = request.GET.get('client_id')
+    if client_id_param:
+        qs = qs.filter(client_id=client_id_param)
+
+    # Products list for filter dropdown (unique products in filtered queryset)
+    product_ids = qs.exclude(product_id__isnull=True).values_list('product_id', flat=True).distinct()
+    products_data = list(Product.objects.filter(id__in=product_ids).values('id', 'name').order_by('name'))
+
+    # Counts per status for tab labels (before pagination, same filters except status)
+    from django.db.models import Count
+    counts_qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').all()
+    if client_ids is not None:
+        counts_qs = counts_qs.filter(client_id__in=client_ids)
+    if product_id_param:
+        counts_qs = counts_qs.filter(product_id=product_id_param)
+    if client_id_param:
+        counts_qs = counts_qs.filter(client_id=client_id_param)
+    _sync_positions_statuses(counts_qs)
+    status_counts = dict(counts_qs.values('status').annotate(c=Count('id')).values_list('status', 'c'))
+    counts_data = {
+        'pending': status_counts.get('pending', 0),
+        'open': status_counts.get('open', 0),
+        'closed': status_counts.get('done', 0) + status_counts.get('cancelled', 0),
+    }
+
+    # Pagination support
+    page = request.GET.get('page', '1')
+    limit = request.GET.get('limit', '50')
+
+    try:
+        page = int(page)
+        limit = int(limit)
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 50
+        if limit > 500:  # Max limit to prevent abuse
+            limit = 500
+    except (ValueError, TypeError):
+        page = 1
+        limit = 50
+
+    total_count = qs.count()
+    offset = (page - 1) * limit
+    paginated_qs = qs[offset:offset + limit]
+
+    serializer = PositionSerializer(paginated_qs, many=True)
+    return Response({
+        'positions': serializer.data,
+        'products': products_data,
+        'clients': clients_data,
+        'counts': counts_data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        }
+    })
 
 
 @api_view(['GET'])
@@ -11528,12 +11684,112 @@ def news_create(request):
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+# RSS feeds gratuits pour actualités financières (pas de clé API requise)
+_NEWS_RSS_FEEDS = [
+    ('https://www.lesechos.fr/rss.xml', 'Les Echos'),
+    ('https://www.lemonde.fr/economie/rss_full.xml', 'Le Monde Économie'),
+    ('https://www.latribune.fr/rss.xml', 'La Tribune'),
+    ('https://www.investir.lesechos.fr/rss.xml', 'Investir Les Echos'),
+    ('https://www.lefigaro.fr/rss/figaro_finance-marches.xml', 'Le Figaro Finance'),
+]
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def news_fetch_from_api(request):
-    """Fetch news articles from external API (stub - returns empty; configure API key to enable)"""
-    articles = []
-    return Response({'articles': articles})
+    """Fetch news articles from free RSS feeds (no API key required)"""
+    try:
+        import requests
+        import feedparser
+        from html import unescape
+        import re
+
+        articles = []
+        seen_urls = set()
+        limit = min(int(request.GET.get('pageSize', 30)), 50)
+        headers = {'User-Agent': 'Panorama/1.0 (News aggregator)'}
+
+        for feed_url, source_name in _NEWS_RSS_FEEDS:
+            if len(articles) >= limit:
+                break
+            try:
+                resp = requests.get(feed_url, headers=headers, timeout=10)
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            except Exception:
+                continue
+            for entry in feed.entries:
+                if len(articles) >= limit:
+                    break
+                link = (entry.get('link') or '').strip()
+                if not link or link in seen_urls:
+                    continue
+                title = (entry.get('title') or '').strip()
+                if not title:
+                    continue
+                seen_urls.add(link)
+                # Nettoyer le HTML du summary/description
+                raw_desc = entry.get('summary') or entry.get('description') or ''
+                if raw_desc:
+                    raw_desc = re.sub(r'<[^>]+>', '', raw_desc)
+                    raw_desc = unescape(raw_desc).strip()[:500]
+                # Image: media_content, media_thumbnail, ou première img dans summary
+                img = ''
+                if hasattr(entry, 'media_content') and entry.media_content:
+                    img = entry.media_content[0].get('url', '') or ''
+                if not img and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                    img = entry.media_thumbnail[0].get('url', '') or ''
+                if not img and 'src="' in str(entry.get('summary', '')):
+                    m = re.search(r'src="([^"]+)"', str(entry.get('summary', '')))
+                    if m:
+                        img = m.group(1)
+                published = getattr(entry, 'published', '') or getattr(entry, 'updated', '') or ''
+                articles.append({
+                    'title': title[:200],
+                    'description': raw_desc,
+                    'content': raw_desc,
+                    'url': link[:500],
+                    'urlToImage': img[:500] if img else '',
+                    'publishedAt': published,
+                    'author': (entry.get('author') or '')[:200],
+                    'source_name': source_name[:200],
+                })
+        return Response({'articles': articles})
+    except Exception as e:
+        logging.exception('news_fetch_from_api error')
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def _download_and_save_news_image(post, image_url):
+    """Download image from URL and save to NewsPost.image"""
+    if not image_url or not str(image_url).startswith('http'):
+        return
+    try:
+        import requests
+        from django.core.files.base import ContentFile
+        resp = requests.get(image_url, timeout=10, stream=True, headers={'User-Agent': 'Panorama/1.0'})
+        resp.raise_for_status()
+        content_type = resp.headers.get('Content-Type', '')
+        if 'image/png' in content_type:
+            ext = '.png'
+        elif 'image/jpeg' in content_type or 'image/jpg' in content_type:
+            ext = '.jpg'
+        elif 'image/gif' in content_type:
+            ext = '.gif'
+        elif 'image/webp' in content_type:
+            ext = '.webp'
+        else:
+            from urllib.parse import urlparse
+            path = urlparse(image_url).path
+            _, ext = os.path.splitext(path)
+            ext = ext.lower() if ext and ext in ('.png', '.jpg', '.jpeg', '.gif', '.webp') else '.jpg'
+        custom_filename = f'news/{post.id}{ext}'
+        post.image.save(custom_filename, ContentFile(resp.content), save=True)
+    except Exception as e:
+        logging.warning('Could not download news image from %s: %s', image_url[:80], e)
 
 
 @api_view(['POST'])
@@ -11548,7 +11804,11 @@ def news_import_from_api(request):
         news_id = uuid.uuid4().hex[:12]
     title = (article.get('title') or article.get('headline') or 'Sans titre')[:200]
     content = (article.get('content') or article.get('description') or article.get('summary') or '')[:10000]
-    source_name = (article.get('source') or article.get('source_name') or article.get('author') or '')[:200]
+    src = article.get('source')
+    if isinstance(src, dict):
+        source_name = (src.get('name') or src.get('id') or '')[:200]
+    else:
+        source_name = (article.get('source_name') or (src if isinstance(src, str) else '') or article.get('author') or '')[:200]
     article_url = (article.get('url') or article.get('article_url') or article.get('link') or '')[:500]
     post = NewsPost.objects.create(
         id=news_id,
@@ -11559,6 +11819,9 @@ def news_import_from_api(request):
         author=request.user if request.user.is_authenticated else None,
         published=True,
     )
+    img_url = article.get('urlToImage') or article.get('url_to_image') or article.get('image')
+    if img_url:
+        _download_and_save_news_image(post, img_url)
     serializer = NewsPostSerializer(post, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -11577,9 +11840,13 @@ def news_bulk_import_from_api(request):
                 news_id = uuid.uuid4().hex[:12]
             title = (article.get('title') or article.get('headline') or 'Sans titre')[:200]
             content = (article.get('content') or article.get('description') or article.get('summary') or '')[:10000]
-            source_name = (article.get('source') or article.get('source_name') or article.get('author') or '')[:200]
+            src = article.get('source')
+            if isinstance(src, dict):
+                source_name = (src.get('name') or src.get('id') or '')[:200]
+            else:
+                source_name = (article.get('source_name') or (src if isinstance(src, str) else '') or article.get('author') or '')[:200]
             article_url = (article.get('url') or article.get('article_url') or article.get('link') or '')[:500]
-            NewsPost.objects.create(
+            post = NewsPost.objects.create(
                 id=news_id,
                 title=title,
                 content=content,
@@ -11588,6 +11855,9 @@ def news_bulk_import_from_api(request):
                 author=request.user if request.user.is_authenticated else None,
                 published=True,
             )
+            img_url = article.get('urlToImage') or article.get('url_to_image') or article.get('image')
+            if img_url:
+                _download_and_save_news_image(post, img_url)
             success_count += 1
         except Exception:
             error_count += 1
