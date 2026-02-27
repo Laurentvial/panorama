@@ -8342,7 +8342,6 @@ def client_transaction_update(request, client_id, transaction_id):
         # If transfer_from is a product ID (not 'balance'), set product field to that product
         if transaction.transfer_from and transaction.transfer_from != 'balance':
             try:
-                from .models import Product
                 source_product = Product.objects.get(id=transaction.transfer_from)
                 transaction.product = source_product
             except Product.DoesNotExist:
