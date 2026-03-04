@@ -2416,8 +2416,10 @@ def get_current_client(request):
             )
 
         serializer = ClientSerializer(client, context={'request': request})
+        client_data = dict(serializer.data)
+        client_data['hasUsefulLinks'] = ClientUsefulLink.objects.filter(client=client).exists()
         return Response({
-            'client': serializer.data,
+            'client': client_data,
             'userType': 'client'
         })
     except Client.DoesNotExist:
@@ -6182,14 +6184,67 @@ def useful_link_delete(request, useful_link_id):
     
     return Response(status=status.HTTP_204_NO_CONTENT)
 
+
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
+@authentication_classes([])  # Disable JWT auth; client_ tokens aren't JWTs
+def client_useful_links_current(request):
+    """Liste les liens utiles du client connecté (token client_ uniquement)."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+
+    client_useful_links = ClientUsefulLink.objects.filter(client=client).select_related('useful_link')
+    serializer = ClientUsefulLinkSerializer(client_useful_links, many=True, context={'request': request})
+    return Response({'usefulLinks': serializer.data})
+
+
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
 def client_useful_links(request, client_id):
-    """Liste les liens utiles d'un client"""
+    """Liste les liens utiles d'un client (admin ou client plateforme)"""
     client = get_object_or_404(Client, id=client_id)
-    err = _check_gestionnaire_client_access(request, client)
-    if err:
-        return err
+
+    # Check if it's a client accessing their own data
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
+
+    is_client_access = False
+    if token and token.startswith('client_'):
+        is_client_access = True
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif auth_header.startswith('Bearer '):
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not is_client_access:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+
     client_useful_links = ClientUsefulLink.objects.filter(client=client).select_related('useful_link')
     serializer = ClientUsefulLinkSerializer(client_useful_links, many=True, context={'request': request})
     return Response({'usefulLinks': serializer.data})

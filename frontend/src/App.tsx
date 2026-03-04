@@ -37,6 +37,7 @@ const PlatformDashboard = lazy(() => import('./components/PlatformDashboard').th
 const PlatformPortfolio = lazy(() => import('./components/PlatformPortfolio').then(m => ({ default: m.PlatformPortfolio })));
 const PlatformTrading = lazy(() => import('./components/PlatformTrading').then(m => ({ default: m.PlatformTrading })));
 const PlatformDiscover = lazy(() => import('./components/PlatformDiscover').then(m => ({ default: m.PlatformDiscover })));
+const PlatformUsefulLinks = lazy(() => import('./components/PlatformUsefulLinks').then(m => ({ default: m.PlatformUsefulLinks })));
 const PlatformProfilePage = lazy(() => import('./components/PlatformProfilePage').then(m => ({ default: m.PlatformProfilePage })));
 const PlatformTransfertProprietePage = lazy(() => import('./components/PlatformTransfertProprietePage').then(m => ({ default: m.PlatformTransfertProprietePage })));
 const PlatformAccountVerification = lazy(() => import('./components/PlatformAccountVerification').then(m => ({ default: m.PlatformAccountVerification })));
@@ -410,6 +411,19 @@ function App() {
                                     <PlatformLayout>
                                         <Suspense fallback={<LoadingFallback />}>
                                             <PlatformDiscover />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/useful-links" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformUsefulLinks />
                                         </Suspense>
                                     </PlatformLayout>
                                 </Suspense>

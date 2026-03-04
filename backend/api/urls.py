@@ -48,6 +48,7 @@ urlpatterns = [
     path('client/notifications/', api_views.client_notification_list, name='client-notification-list'),
     path('client/notifications/read-all/', api_views.client_notification_mark_all_read, name='client-notification-mark-all-read'),
     path('client/notifications/<str:notification_id>/read/', api_views.client_notification_mark_read, name='client-notification-mark-read'),
+    path('client/useful-links/', api_views.client_useful_links_current, name='client-useful-links-current'),
     # Client chat (client <-> manager)
     path('clients/<str:client_id>/chat/', api_views.client_chat, name='client-chat'),
     # Client conversations (threaded messaging)

@@ -5,7 +5,7 @@ import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
 import { apiCall } from '../utils/api';
-import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
+import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp, Bell, LinkIcon } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import {
@@ -236,12 +236,19 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     navigate('/login');
   };
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Tableau de bord', icon: Home, path: '/platform' },
-    { id: 'portfolio', label: 'Portefeuille', icon: Wallet, path: '/platform/portfolio' },
-    { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/funds' },
-    { id: 'discover', label: 'Découvrir', icon: Compass, path: '/platform/discover' },
-  ];
+  const menuItems = useMemo(() => {
+    const items = [
+      { id: 'dashboard', label: 'Tableau de bord', icon: Home, path: '/platform' },
+      { id: 'portfolio', label: 'Portefeuille', icon: Wallet, path: '/platform/portfolio' },
+      { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/funds' },
+      { id: 'discover', label: 'Découvrir', icon: Compass, path: '/platform/discover' },
+      { id: 'useful-links', label: 'Liens utiles', icon: LinkIcon, path: '/platform/useful-links' },
+    ];
+    if (currentUser?.userType === 'client' && currentUser?.hasUsefulLinks === false) {
+      return items.filter((item) => item.id !== 'useful-links');
+    }
+    return items;
+  }, [currentUser?.userType, currentUser?.hasUsefulLinks]);
 
   const handleMenuClick = (path: string) => {
     navigate(path);
