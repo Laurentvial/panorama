@@ -88,6 +88,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [transactionForPositionGeneration, setTransactionForPositionGeneration] = useState<any>(null);
   const [isWithdrawalForPositionGeneration, setIsWithdrawalForPositionGeneration] = useState(false);
+  const [positionModalSource, setPositionModalSource] = useState<'create' | 'validate'>('create');
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
@@ -233,18 +234,12 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     const hasAllocations = relevantProductId ? await productHasAllocationsForValidate(relevantProductId) : false;
 
     if (hasAllocations) {
-      try {
-        const updatedTx = await apiCall(`/api/clients/${clientId}/transactions/${tx.id}/`, {
-          method: 'PUT',
-          body: JSON.stringify(buildValidateUpdatePayload(tx, true)),
-        });
-        clearApiCache(`/api/clients/${clientId}/transactions/`);
-        setTransactionForPositionGeneration((updatedTx as any) ?? { ...tx, status: 'valide' });
-        setIsWithdrawalForPositionGeneration(isWithdrawal);
-        setIsPositionGenerationModalOpen(true);
-      } catch (err: any) {
-        toast.error((err as any).message || 'Erreur lors de la mise à jour');
-      }
+      // Do NOT update status to "valide" before modal - validation requires position generation.
+      // Open modal with transaction as-is; status will be set to "valide" only when user completes.
+      setPositionModalSource('validate');
+      setTransactionForPositionGeneration(tx);
+      setIsWithdrawalForPositionGeneration(isWithdrawal);
+      setIsPositionGenerationModalOpen(true);
     } else {
       try {
         await apiCall(`/api/clients/${clientId}/transactions/${tx.id}/`, {
@@ -622,6 +617,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
         if (responseEligibleForModal) {
           // Set the transaction for position generation
+          setPositionModalSource('create');
           setTransactionForPositionGeneration(response);
           setIsWithdrawalForPositionGeneration(responseIsWithdrawal);
           setIsPositionGenerationModalOpen(true);
@@ -658,6 +654,12 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           } catch (error: any) {
             console.error('Error updating transaction status back to valide:', error);
             toast.error('Erreur lors de la mise à jour du statut de la transaction');
+            // Transaction exists in DB as 'en_cours' - close dialog and refresh so user can edit it
+            setIsTransactionDialogOpen(false);
+            loadTransactions(1, pagination.limit);
+            loadContractDocuments();
+            onRefresh();
+            return; // Do not continue to success flow - transaction is stuck in 'en_cours'
           }
         }
       }
@@ -1370,6 +1372,10 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           setIsViewTransactionModalOpen(false);
           setSelectedTransaction(null);
         }}
+        onRefresh={() => {
+          loadTransactions(pagination.page, pagination.limit);
+          onRefresh();
+        }}
       />
 
       {/* Edit Transaction Modal */}
@@ -1396,14 +1402,17 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           transaction={transactionForPositionGeneration}
           clientId={clientId}
           onClose={() => {
-            // If user closes modal without completing, delete the temporary transaction
-            // or keep it in "en_cours" status (user can complete it later)
-            // For now, we'll keep it in "en_cours" so user can retry later
+            const isValidate = positionModalSource === 'validate';
             setIsPositionGenerationModalOpen(false);
             setTransactionForPositionGeneration(null);
             setIsWithdrawalForPositionGeneration(false);
+            setPositionModalSource('create');
             setIsTransactionDialogOpen(false);
-            toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
+            if (isValidate) {
+              toast.info('La validation requiert la génération des positions. La transaction reste en cours.');
+            } else {
+              toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
+            }
             loadTransactions(pagination.page, pagination.limit);
             loadContractDocuments();
             onRefresh();

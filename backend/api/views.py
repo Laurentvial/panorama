@@ -7460,6 +7460,17 @@ def client_transaction_create(request, client_id):
     # This ensures positions are ready when the transaction becomes visible in the database.
     # The signal will be skipped because _skip_auto_position_generation is set.
 
+    # For interets (superformance) transactions: link to product or asset from subscription_details
+    if transaction_type == 'interets' and isinstance(subscription_details_data, dict):
+        asset_id_for_interets = subscription_details_data.get('assetId') or subscription_details_data.get('asset_id')
+        if asset_id_for_interets:
+            try:
+                asset_obj = Asset.objects.get(id=str(asset_id_for_interets))
+                transaction.asset = asset_obj
+                transaction.save(update_fields=['asset'])
+            except Asset.DoesNotExist:
+                pass
+
     # If this transfert is a client trading order (solde -> trading wallet), create a Position (ordre).
     # The trading order is represented by:
     # - a transfert transaction (keeps a trace of funds moved from available funds to trading portfolio)

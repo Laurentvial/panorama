@@ -431,6 +431,7 @@ export function Transactions() {
           setIsViewTransactionModalOpen(false);
           setSelectedTransaction(null);
         }}
+        onRefresh={loadData}
       />
 
       {/* Edit Transaction Modal */}

@@ -478,10 +478,11 @@ export function EditTransactionModal({
         // has external asset allocations configured.
         const hasAllocations = await productHasAllocations(finalProductId);
         if (hasAllocations) {
-          // Persist edited details before opening generation modal so backend uses latest interest period and status.
+          // Persist edited details with status "en_cours" - validation requires position generation.
+          // Status will be set to "valide" only when user completes the modal.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(effectiveStatus, true, { datetime: submittedDatetime }))
+            body: JSON.stringify(buildUpdatePayload('en_cours', true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for investment');
           setIsWithdrawalTransaction(false);
@@ -494,10 +495,11 @@ export function EditTransactionModal({
         const relevantProductId = transferFrom && transferFrom !== 'solde' ? transferFrom : null;
         const hasAllocations = await productHasAllocations(relevantProductId);
         if (hasAllocations) {
-          // Persist edited details before opening generation modal so backend uses latest interest period and status.
+          // Persist edited details with status "en_cours" - validation requires position generation.
+          // Status will be set to "valide" only when user completes the modal.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(effectiveStatus, true, { datetime: submittedDatetime }))
+            body: JSON.stringify(buildUpdatePayload('en_cours', true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for withdrawal');
           setIsWithdrawalTransaction(true);
@@ -569,6 +571,9 @@ export function EditTransactionModal({
   const handlePositionModalClose = () => {
     setShowPositionModal(false);
     setPendingStatusUpdate(null);
+    // User closed without completing - do NOT invoke success (transaction was already saved as "en_cours").
+    // Just close the position modal and inform the user. Edit modal stays open.
+    toast.info('La validation requiert la génération des positions. La transaction reste en cours.');
   };
 
   const handleDelete = async () => {

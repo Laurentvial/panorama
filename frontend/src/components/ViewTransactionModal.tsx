@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { X, ArrowLeftRight } from 'lucide-react';
+import { Input } from './ui/input';
+import { X, ArrowLeftRight, TrendingUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { 
   getTypeLabel, 
@@ -24,6 +25,7 @@ interface ViewTransactionModalProps {
   assets?: any[];
   products?: any[];
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
 export function ViewTransactionModal({
@@ -32,7 +34,8 @@ export function ViewTransactionModal({
   clientId,
   assets = [],
   products = [],
-  onClose
+  onClose,
+  onRefresh
 }: ViewTransactionModalProps) {
   const navigate = useNavigate();
   const [transactionLogs, setTransactionLogs] = useState<any[]>([]);
@@ -41,6 +44,17 @@ export function ViewTransactionModal({
   const [productLoadError, setProductLoadError] = useState<string | null>(null);
   const [assetsMap, setAssetsMap] = useState<Record<string, any>>({});
   const assetsMapEffectKeyRef = useRef<string>('');
+  const [showAddSuperformance, setShowAddSuperformance] = useState(false);
+  const [superformanceAmount, setSuperformanceAmount] = useState('');
+  const [superformanceSubmitting, setSuperformanceSubmitting] = useState(false);
+
+  // Reset superformance form when modal closes or transaction changes
+  useEffect(() => {
+    if (!isOpen) {
+      setShowAddSuperformance(false);
+      setSuperformanceAmount('');
+    }
+  }, [isOpen, transaction?.id]);
 
   // Find asset/product ID by name
   const findAssetProductId = (name: string, reference: string | null): string | null => {
@@ -241,12 +255,6 @@ export function ViewTransactionModal({
     }
     return subscriptionDetails?.profitability || 'Aucun';
   })();
-  const productAvailabilityStart = formatDateValue(
-    selectedProduct?.availabilityStart ?? selectedProduct?.availability_start
-  );
-  const productAvailabilityEnd = formatDateValue(
-    selectedProduct?.availabilityEnd ?? selectedProduct?.availability_end
-  );
   const transactionIp = subscriptionDetails?.ip || transaction.subscription_ip || 'Aucun';
   const chosenInterestPeriod =
     subscriptionDetails?.interestPeriod || subscriptionDetails?.interest_period || transaction.subscription_interest_period || 'Aucun';
@@ -269,6 +277,77 @@ export function ViewTransactionModal({
   };
 
   const assetOrProduct = findAssetOrProduct();
+
+  // Résoudre le produit ou actif lié à la transaction (pour superformance)
+  const linkedProductId =
+    transaction?.productId ||
+    transaction?.product_id ||
+    transaction?.product?.id ||
+    subscriptionDetails?.productId ||
+    (transaction?.type === 'transfert' && transaction?.transfer_to && transaction?.transfer_to !== 'solde' && transaction?.transfer_to !== 'trading' ? transaction.transfer_to : null) ||
+    (transaction?.type === 'transfert' && transaction?.transfer_from && transaction?.transfer_from !== 'solde' ? transaction.transfer_from : null) ||
+    selectedProduct?.id ||
+    (assetOrProduct?.kind === 'product' ? assetOrProduct.data?.id : null) ||
+    null;
+  const linkedAssetId =
+    transaction?.assetId ||
+    transaction?.asset_id ||
+    transaction?.asset?.id ||
+    (assetOrProduct?.kind === 'asset' ? assetOrProduct.data?.id : null) ||
+    null;
+  const linkedItemName =
+    selectedProduct?.name ||
+    assetOrProduct?.data?.name ||
+    (linkedProductId ? products.find((p: any) => p.id === linkedProductId)?.name : null) ||
+    (linkedAssetId ? assets.find((a: any) => a.id === linkedAssetId)?.name : null) ||
+    'Produit';
+  const canAddSuperformance = clientId && (linkedProductId || linkedAssetId);
+
+  const handleAddSuperformance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clientId || (!linkedProductId && !linkedAssetId)) return;
+    const amount = parseFloat(superformanceAmount?.replace(',', '.') || '0');
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error('Veuillez saisir un montant valide.');
+      return;
+    }
+    setSuperformanceSubmitting(true);
+    try {
+      const now = new Date();
+      const datetimeISO = now.toISOString();
+      const description = `Surperformance ${linkedItemName}`;
+      const payload: Record<string, unknown> = {
+        type: 'interets',
+        amount,
+        description,
+        datetime: datetimeISO,
+        status: 'valide',
+        subscription_details: {},
+      };
+      if (linkedProductId) {
+        (payload.subscription_details as Record<string, unknown>).productId = linkedProductId;
+      }
+      if (linkedAssetId) {
+        (payload.subscription_details as Record<string, unknown>).assetId = linkedAssetId;
+      }
+      await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      toast.success('Transaction de superformance créée avec succès.');
+      setSuperformanceAmount('');
+      setShowAddSuperformance(false);
+      clearApiCache(`/api/clients/${clientId}/transactions/`);
+      clearApiCache(`/api/clients/${clientId}/transactions/?`);
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Error creating superformance transaction:', err);
+      toast.error(err?.message || 'Erreur lors de la création de la transaction.');
+    } finally {
+      setSuperformanceSubmitting(false);
+    }
+  };
+
   const assetTypeText = (() => {
     if (!assetOrProduct) return '-';
     const item = assetOrProduct.data;
@@ -496,6 +575,12 @@ export function ViewTransactionModal({
                         {subscriptionDetails?.birthDate || 'Aucun'}
                       </p>
                     </div>
+                    <div>
+                      <Label className="text-slate-600 font-semibold">Signature de la transaction</Label>
+                      <p className="text-slate-900 mt-1">
+                        {subscriptionDetails?.hasSignature ? 'Signature' : 'Aucun'}
+                      </p>
+                    </div>
                   </div>
                 </div>
                 
@@ -567,54 +652,6 @@ export function ViewTransactionModal({
                         {productInterestPeriod}
                       </p>
                     </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Fonds disponibles à partir du</Label>
-                      <p className="text-slate-900 mt-1">
-                        {productAvailabilityStart}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Fonds disponibles jusqu&apos;au</Label>
-                      <p className="text-slate-900 mt-1">
-                        {productAvailabilityEnd}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Investissement</Label>
-                      <p className="text-slate-900 mt-1 font-semibold">
-                        {subscriptionDetails?.investment ? subscriptionDetails.investment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Profits</Label>
-                      <p className="text-slate-900 mt-1 font-semibold text-green-600">
-                        {subscriptionDetails?.profits ? subscriptionDetails.profits.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
-                      </p>
-                    </div>
-                    <div className="col-span-3">
-                      <Label className="text-slate-600 font-semibold">TOTAL (Investissement + Profits)</Label>
-                      <p className="text-slate-900 mt-1 font-bold text-lg">
-                        {subscriptionDetails?.total ? subscriptionDetails.total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Aucun'} €
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Conditions</Label>
-                      <p className="text-slate-900 mt-1">
-                        voir
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Signature de la transaction</Label>
-                      <p className="text-slate-900 mt-1">
-                        {subscriptionDetails?.hasSignature ? 'Signature' : 'Aucun'}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600 font-semibold">Statut</Label>
-                      <p className="text-slate-900 mt-1">
-                        {getStatusLabel(transaction.status, transaction.type)}
-                      </p>
-                    </div>
                   </div>
                 </div>
               </>
@@ -627,20 +664,57 @@ export function ViewTransactionModal({
               </p>
             </div>
             
-            <div>
-              <Label className="text-slate-600 font-semibold">Date de création</Label>
-              <p className="text-slate-900 mt-1">
-                {new Date(transaction.createdAt).toLocaleDateString('fr-FR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </p>
-            </div>
           </div>
           
+          {canAddSuperformance && (
+            <div className="border-t pt-4 mt-6">
+              {!showAddSuperformance ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowAddSuperformance(true)}
+                  className="flex items-center gap-2"
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  Ajouter une superformance
+                </Button>
+              ) : (
+                <form onSubmit={handleAddSuperformance} className="space-y-3">
+                  <div>
+                    <Label htmlFor="superformance-amount" className="text-slate-600 font-semibold">
+                      Montant (€)
+                    </Label>
+                    <Input
+                      id="superformance-amount"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      value={superformanceAmount}
+                      onChange={(e) => setSuperformanceAmount(e.target.value)}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={superformanceSubmitting}>
+                      {superformanceSubmitting ? 'Enregistrement...' : 'Enregistrer'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setShowAddSuperformance(false);
+                        setSuperformanceAmount('');
+                      }}
+                      disabled={superformanceSubmitting}
+                    >
+                      Annuler
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
           {/* Position Generation History Section */}
           {transaction.type === 'transfert' && transaction.position_generation_history && Array.isArray(transaction.position_generation_history) && transaction.position_generation_history.length > 0 && (
             <div className="border-t pt-4 mt-6">
@@ -901,7 +975,7 @@ export function ViewTransactionModal({
               )}
             </div>
           )}
-          
+
           <div className="modal-form-actions mt-6">
             <Button
               type="button"
