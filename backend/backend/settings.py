@@ -61,6 +61,13 @@ if render_external_url:
         render_external_url = f'https://{render_external_url}'
     CSRF_TRUSTED_ORIGINS.append(render_external_url)
 
+# Add Coolify / generic backend URL (for self-hosted VPS)
+backend_public_url = os.getenv('BACKEND_PUBLIC_URL') or os.getenv('COOLIFY_EXTERNAL_URL')
+if backend_public_url:
+    if not backend_public_url.startswith(('http://', 'https://')):
+        backend_public_url = f'https://{backend_public_url}'
+    CSRF_TRUSTED_ORIGINS.append(backend_public_url)
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),

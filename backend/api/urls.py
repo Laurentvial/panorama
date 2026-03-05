@@ -1,7 +1,11 @@
 from django.urls import path
 from . import views as api_views
+from . import cron_views
 
 urlpatterns = [
+    # Cron endpoints (Coolify Scheduled Tasks - protected by CRON_SECRET_TOKEN)
+    path('cron/refresh-prices/', cron_views.cron_refresh_prices, name='cron-refresh-prices'),
+    path('cron/process-positions/', cron_views.cron_process_positions, name='cron-process-positions'),
     # Notes endpoints
     path('notes/', api_views.NoteListCreateView.as_view(), name='note-list-create'),
     path('notes/delete/<str:pk>/', api_views.NoteDeleteView.as_view(), name='note-delete'),
