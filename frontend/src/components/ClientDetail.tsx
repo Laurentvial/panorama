@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { ArrowLeft, User, Power, CheckCircle, XCircle, Calendar, FileText, Mail } from 'lucide-react';
+import { ArrowLeft, User, Power, CheckCircle, XCircle, FileText, Mail } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { toast } from 'sonner';
@@ -99,18 +99,20 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   }
 
   // Load tab data lazily when tab is accessed
-  async function loadTabData(tabName: string, forceReload: boolean = false) {
+  async function loadTabData(tabName: string, forceReload: boolean = false, silent: boolean = false) {
     if (!forceReload && loadedTabs.has(tabName)) {
       return; // Already loaded, skip unless forced
     }
 
-    setLoadingTab(tabName);
+    if (!silent) {
+      setLoadingTab(tabName);
+    }
     try {
       switch (tabName) {
         case 'notes':
           const notesData = await apiCall(`/api/notes/`);
           const notesArray = Array.isArray(notesData) ? notesData : ((notesData as any).notes || notesData || []);
-          const clientNotes = notesArray.filter((note: any) => note.clientId === clientId);
+          const clientNotes = notesArray.filter((note: any) => (note.clientId ?? note.client_id) === clientId);
           setNotes(clientNotes);
           setLoadedTabs(prev => new Set(prev).add('notes'));
           break;
@@ -152,7 +154,9 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       console.error(`Error loading tab data for ${tabName}:`, error);
       toast.error(`Erreur lors du chargement des données de l'onglet`);
     } finally {
-      setLoadingTab(null);
+      if (!silent) {
+        setLoadingTab(null);
+      }
     }
   }
 
@@ -265,17 +269,13 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       {/* Quick Actions */}
       <div className="flex gap-2 flex-wrap">
         <Button 
-          size="sm"
-          onClick={() => toast.info('Fonctionnalité à venir - Placer RDV')}
-        >
-          <Calendar className="w-4 h-4 mr-2" />
-          Placer RDV
-        </Button>
-
-        <Button 
           size="sm" 
           variant="outline"
-          onClick={() => toast.info('Fonctionnalité à venir - Ajouter une note')}
+          onClick={() => {
+            setActiveTab('notes');
+            sessionStorage.setItem(`${CLIENT_DETAIL_TAB_STORAGE_PREFIX}${clientId}`, 'notes');
+            loadTabData('notes');
+          }}
         >
           <FileText className="w-4 h-4 mr-2" />
           Ajouter une note
@@ -394,7 +394,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             <ClientNotesTab 
               notes={notes}
               clientId={clientId}
-              onRefresh={loadClientData}
+              onRefresh={() => loadTabData('notes', true, true)}
+              onNoteCreated={(note) => setNotes(prev => [note, ...prev])}
             />
           )}
         </TabsContent>

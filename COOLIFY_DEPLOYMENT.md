@@ -123,6 +123,29 @@ Example internal URL:
 postgresql://user:password@panorama-db:5432/postgres
 ```
 
+### Online database access (remote clients)
+
+To connect from pgAdmin, DBeaver, or your IDE:
+
+**Option A: Public Port (Coolify UI)**
+
+1. Open the PostgreSQL resource in Coolify
+2. Go to **Configuration** or **Ports**
+3. Enable **Public Port** (or add port mapping `5432`)
+4. Coolify will expose the DB; note the host (your server IP or domain) and port
+5. Connect with: `Host: yourdomain.com` (or `93.113.25.122`), `Port: 5432`, `User/Password` from the connection URL
+
+**Security**: Restrict access with a firewall (e.g. allow only your IP) or use a strong password. Prefer Option B for production.
+
+**Option B: SSH tunnel (recommended, more secure)**
+
+1. In Coolify, add **Port Mapping** `5432:5432` to the PostgreSQL resource so the host exposes port 5432.
+2. From your machine, create an SSH tunnel:
+   ```bash
+   ssh -L 5433:localhost:5432 your_username@93.113.25.122
+   ```
+3. In pgAdmin/DBeaver: connect to `localhost:5433` with the DB user/password. Traffic goes through the encrypted SSH tunnel; the DB is never exposed to the internet.
+
 ## 6. Deploy Backend
 
 1. Project → Add Resource → Application
