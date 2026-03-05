@@ -8106,6 +8106,7 @@ def client_transaction_create(request, client_id):
             
             # Terms & Conditions
             if product.cgv:
+                story.append(PageBreak())
                 story.append(Paragraph("TERMES & CONDITIONS", heading_style))
                 # Clean CGV text and convert to paragraphs
                 cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
@@ -10497,6 +10498,7 @@ def product_contract_pdf(request, product_id):
     
     # Terms & Conditions
     if product.cgv:
+        story.append(PageBreak())
         story.append(Paragraph("TERMES & CONDITIONS", heading_style))
         # Clean CGV text and convert to paragraphs
         cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')

@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, PieChart } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, Euro, PieChart } from 'lucide-react';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { logPlatformAction } from '../utils/platformLogger';
@@ -1146,7 +1146,7 @@ export function PlatformPortfolio() {
             <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="platform-portfolioStatTitle">Total Investi</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
+                <Euro className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="platform-portfolioStatValue">
