@@ -103,7 +103,7 @@ class Command(BaseCommand):
                 
                 # Get product
                 product = txn.product
-                if not product and txn.transfer_to and txn.transfer_to != 'balance':
+                if not product and txn.transfer_to and txn.transfer_to != 'solde':
                     product = Product.objects.filter(id=txn.transfer_to).first()
                 if not product:
                     continue
@@ -181,7 +181,7 @@ class Command(BaseCommand):
             Transaction.objects
             .filter(type='transfert', status='valide')
             .exclude(transfer_to__isnull=True)
-            .exclude(transfer_to='balance')
+            .exclude(transfer_to='solde')
             .select_related('product', 'client')
         )
 
@@ -193,7 +193,7 @@ class Command(BaseCommand):
                 continue
 
             product = txn.product
-            if not product and txn.transfer_to and txn.transfer_to != 'balance':
+            if not product and txn.transfer_to and txn.transfer_to != 'solde':
                 product = Product.objects.filter(id=txn.transfer_to).first()
             if not product:
                 continue

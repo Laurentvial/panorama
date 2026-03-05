@@ -93,7 +93,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // achat + transfert (balance → product) - transfert (product → balance) when status is 'valide'
+    let calculatedTotalInvesti = 0; // achat + transfert (solde → product) - transfert (product → solde) when status is 'valide'
 
     // Only consider completed transactions (status === 'valide')
     const completedTransactions = transactions.filter((transaction: any) => 
@@ -132,11 +132,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
           // For now, we don't adjust profit/loss for sales since we don't track cost basis
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance
-          // They increase investedCapital (available funds) because they add money to the cash balance
+          // Interest transactions credit gains to cash solde
+          // They increase investedCapital (available funds) because they add money to the cash solde
           calculatedInvestedCapital += amount;
           // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           calculatedProfitLoss -= amount;
           break;
         case 'frais':
@@ -146,27 +146,27 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
           break;
         case 'transfert':
           // Simplified logic: only check transfer_to (to_field)
-          // If transfer_to = product ID → investment (balance → product)
-          // If transfer_to = 'balance' → withdrawal (product → balance)
+          // If transfer_to = product ID → investment (solde → product)
+          // If transfer_to = 'solde' → withdrawal (product → solde)
           const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
           const hasProductId = transaction.productId || null;
           
-          // If transfer_to is a product ID (not 'balance'), it's an investment
-          if (transferTo && transferTo !== 'balance') {
-            // Investment: balance → product
+          // If transfer_to is a product ID (not 'solde'), it's an investment
+          if (transferTo && transferTo !== 'solde') {
+            // Investment: solde → product
             calculatedTotalInvesti += amount;
             calculatedTradingPortfolio += amount;
             // Don't affect profit/loss - investments start at 0 profit/loss
             // Profit/loss will only change when position values change (future feature)
-          } else if (transferTo === 'balance') {
-            // Withdrawal: product → balance
+          } else if (transferTo === 'solde') {
+            // Withdrawal: product → solde
             // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
             calculatedTotalInvesti -= amount;
             calculatedTradingPortfolio -= amount;
             // Note: Withdrawal profit/loss will be calculated based on position values when that feature is implemented
             // For now, we don't adjust profit/loss for withdrawals since we don't track position values
           } else if (hasProductId) {
-            // Fallback: If transaction has productId but no transfer_to, assume it's a subscription (balance → product)
+            // Fallback: If transaction has productId but no transfer_to, assume it's a subscription (solde → product)
             calculatedTotalInvesti += amount;
             calculatedTradingPortfolio += amount;
             // Don't affect profit/loss - investments start at 0 profit/loss
@@ -325,7 +325,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     return total;
   }, [positions, calculatedValues, hasCompletedTransactions, assetsById]);
   
-  // Total Investi: only achat and transfert (balance → product)
+  // Total Investi: only achat and transfert (solde → product)
   const totalInvesti = useMemo(() => 
     hasCompletedTransactions 
       ? calculatedValues.totalInvesti 

@@ -203,7 +203,7 @@ export function PlatformTrading() {
           investedCapital += amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance (same as PlatformPortfolio)
+          // Interest transactions credit gains to cash solde (same as PlatformPortfolio)
           investedCapital += amt;
           break;
         case 'achat':
@@ -215,8 +215,8 @@ export function PlatformTrading() {
         case 'transfert': {
           const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
           const hasProductId = transaction.productId || null;
-          if (transferTo && transferTo !== 'balance') tradingPortfolio += amt;
-          else if (transferTo === 'balance') tradingPortfolio -= amt;
+          if (transferTo && transferTo !== 'solde') tradingPortfolio += amt;
+          else if (transferTo === 'solde') tradingPortfolio -= amt;
           else if (hasProductId) tradingPortfolio += amt;
           break;
         }

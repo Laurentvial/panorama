@@ -227,7 +227,7 @@ export function PlatformDashboard() {
           calculatedInvestedCapital += amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance; subtract from P&L to avoid double-counting with positions
+          // Interest transactions credit gains to cash solde; subtract from P&L to avoid double-counting with positions
           calculatedInvestedCapital += amt;
           calculatedProfitLoss -= amt;
           break;
@@ -244,9 +244,9 @@ export function PlatformDashboard() {
         case 'transfert': {
           const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
           const hasProductId = transaction.productId || null;
-          if (transferTo && transferTo !== 'balance') {
+          if (transferTo && transferTo !== 'solde') {
             calculatedTradingPortfolio += amt;
-          } else if (transferTo === 'balance') {
+          } else if (transferTo === 'solde') {
             calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
             calculatedTradingPortfolio += amt;
@@ -443,20 +443,20 @@ export function PlatformDashboard() {
       const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
 
       // What counts for "portfolio allocation" is the product/asset side, not deposits/withdrawals.
-      // - transfert: balance → product (invest) / product → balance (withdraw)
+      // - transfert: solde → product (invest) / product → solde (withdraw)
       // - achat / investissement: invest
       // - vente: disinvest (if resolvable)
       let delta = 0;
       let typeLabel: string | null = null;
 
       if (t?.type === 'transfert') {
-        if (to && String(to) !== 'balance') {
-          // balance -> product
+        if (to && String(to) !== 'solde') {
+          // solde -> product
           delta = amount;
           typeLabel = resolveTypeLabel(t, to);
-        } else if (to && String(to) === 'balance') {
-          // product -> balance
-          const productId = from && String(from) !== 'balance' ? from : t?.productId || null;
+        } else if (to && String(to) === 'solde') {
+          // product -> solde
+          const productId = from && String(from) !== 'solde' ? from : t?.productId || null;
           delta = -amount;
           typeLabel = resolveTypeLabel(t, productId);
         } else {
@@ -478,7 +478,7 @@ export function PlatformDashboard() {
       totals.set(key, (totals.get(key) || 0) + delta);
     }
 
-    // Ajouter la balance (fonds disponibles)
+    // Ajouter le solde (fonds disponibles)
     const cash = Math.max(0, parseFinancialValue(availableFunds));
     if (cash > 0) {
       totals.set('Balance', (totals.get('Balance') || 0) + cash);

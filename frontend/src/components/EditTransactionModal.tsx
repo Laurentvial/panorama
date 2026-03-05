@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { ProductTransferSelect } from './ProductTransferSelect';
 import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
@@ -56,8 +57,8 @@ export function EditTransactionModal({
     description: '',
     status: 'en_attente_paiement',
     datetime: '',
-    from_field: 'balance',
-    to_field: 'balance',
+    from_field: 'solde',
+    to_field: 'solde',
     productId: '',
     interestPeriod: '',
   });
@@ -193,8 +194,8 @@ export function EditTransactionModal({
         description: transaction.description || '',
         status: transaction.status || 'en_cours',
         datetime: datetimeLocal,
-        from_field: transaction.transfer_from || transaction.from_field || transaction.from || 'balance',
-        to_field: transaction.transfer_to || transaction.to_field || transaction.to || 'balance',
+        from_field: transaction.transfer_from || transaction.from_field || transaction.from || 'solde',
+        to_field: transaction.transfer_to || transaction.to_field || transaction.to || 'solde',
         productId:
           transaction.productId ||
           transaction.product_id ||
@@ -252,8 +253,8 @@ export function EditTransactionModal({
         null;
       const productId =
         (transactionForm.productId ? transactionForm.productId : null) ||
-        (transferTo && transferTo !== 'balance' ? transferTo : null) ||
-        (transferFrom && transferFrom !== 'balance' ? transferFrom : null) ||
+        (transferTo && transferTo !== 'solde' ? transferTo : null) ||
+        (transferFrom && transferFrom !== 'solde' ? transferFrom : null) ||
         productIdFromSubscription;
 
       if (!productId) {
@@ -328,8 +329,8 @@ export function EditTransactionModal({
       description: '',
       status: 'en_attente_paiement',
       datetime: '',
-      from_field: 'balance',
-      to_field: 'balance',
+      from_field: 'solde',
+      to_field: 'solde',
       productId: '',
       interestPeriod: '',
     });
@@ -343,8 +344,8 @@ export function EditTransactionModal({
       : {};
     const productId =
       transactionForm.productId ||
-      (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : undefined) ||
-      (transactionForm.from_field && transactionForm.from_field !== 'balance' ? transactionForm.from_field : undefined) ||
+      (transactionForm.to_field && transactionForm.to_field !== 'solde' ? transactionForm.to_field : undefined) ||
+      (transactionForm.from_field && transactionForm.from_field !== 'solde' ? transactionForm.from_field : undefined) ||
       existing.productId ||
       transaction?.product?.id ||
       transaction?.product_id ||
@@ -353,7 +354,7 @@ export function EditTransactionModal({
       undefined;
     return {
       ...existing,
-      ...(productId && productId !== 'balance' ? { productId } : {}),
+      ...(productId && productId !== 'solde' ? { productId } : {}),
       interestPeriod: transactionForm.interestPeriod || '',
       interest_period: transactionForm.interestPeriod || '',
     };
@@ -387,8 +388,8 @@ export function EditTransactionModal({
       skip_position_generation: skipPositionGeneration,
       ...(transactionForm.type === 'transfert'
         ? {
-            from_field: transactionForm.from_field || 'balance',
-            to_field: transactionForm.to_field || 'balance',
+            from_field: transactionForm.from_field || 'solde',
+            to_field: transactionForm.to_field || 'solde',
             subscription_details: buildSubscriptionDetailsForUpdate(),
             interestPeriod: transactionForm.interestPeriod || '',
           }
@@ -400,6 +401,8 @@ export function EditTransactionModal({
     e.preventDefault();
     
     if (!transaction) return;
+    
+    const effectiveStatus = transactionForm.status;
     
     if (!dateDisplay.trim()) {
       toast.error('La date est requise');
@@ -430,7 +433,7 @@ export function EditTransactionModal({
     // If status was already "valide", no need to regenerate positions
     const isTransfert = transactionForm.type === 'transfert';
     const wasAlreadyTermine = transaction.status === 'valide';
-    const isChangingToTermine = transactionForm.status === 'valide' && 
+    const isChangingToTermine = effectiveStatus === 'valide' && 
                                  !wasAlreadyTermine;
     
     if (isTransfert && isChangingToTermine) {
@@ -447,14 +450,14 @@ export function EditTransactionModal({
       
       const finalProductId = transferTo || productIdFromSubscription;
       
-      // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
+      // Check if this is an investment (transfert to product) or withdrawal (transfert from product to solde)
       const isInvestment = finalProductId && 
-                           String(finalProductId) !== 'balance' &&
+                           String(finalProductId) !== 'solde' &&
                            String(finalProductId) !== 'trading';
       
-      // Check if this is a withdrawal (transfert from product to balance)
+      // Check if this is a withdrawal (transfert from product to solde)
       const transferFrom = transactionForm.from_field || null;
-      const isWithdrawal = (transferTo === 'balance' || transferFrom !== null) && !isInvestment;
+      const isWithdrawal = (transferTo === 'solde' || transferFrom !== null) && !isInvestment;
       
       // Debug logging
       console.log('EditTransactionModal - Checking transfert:', {
@@ -466,7 +469,7 @@ export function EditTransactionModal({
         isInvestment,
         isWithdrawal,
         currentStatus: transaction.status,
-        newStatus: transactionForm.status,
+        newStatus: effectiveStatus,
         isChangingToTermine
       });
       
@@ -478,27 +481,27 @@ export function EditTransactionModal({
           // Persist edited details before opening generation modal so backend uses latest interest period and status.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(transactionForm.status, true, { datetime: submittedDatetime }))
+            body: JSON.stringify(buildUpdatePayload(effectiveStatus, true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for investment');
           setIsWithdrawalTransaction(false);
-          setPendingStatusUpdate(transactionForm.status);
+          setPendingStatusUpdate(effectiveStatus);
           setShowPositionModal(true);
           return;
         }
       } else if (isWithdrawal) {
         // Only show the modal for withdrawals when the source product has asset allocations.
-        const relevantProductId = transferFrom && transferFrom !== 'balance' ? transferFrom : null;
+        const relevantProductId = transferFrom && transferFrom !== 'solde' ? transferFrom : null;
         const hasAllocations = await productHasAllocations(relevantProductId);
         if (hasAllocations) {
           // Persist edited details before opening generation modal so backend uses latest interest period and status.
           await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
             method: 'PUT',
-            body: JSON.stringify(buildUpdatePayload(transactionForm.status, true, { datetime: submittedDatetime }))
+            body: JSON.stringify(buildUpdatePayload(effectiveStatus, true, { datetime: submittedDatetime }))
           });
           console.log('EditTransactionModal - Showing position generation modal for withdrawal');
           setIsWithdrawalTransaction(true);
-          setPendingStatusUpdate(transactionForm.status);
+          setPendingStatusUpdate(effectiveStatus);
           setShowPositionModal(true);
           return;
         }
@@ -506,19 +509,19 @@ export function EditTransactionModal({
     }
     
     try {
-      // Check if this is a withdrawal (transfert from product to balance)
+      // Check if this is a withdrawal (transfert from product to solde)
       // Only recalculate if status is changing TO "valide" (not if it was already "valide")
       const transferTo = transactionForm.to_field || null;
       const transferFrom = transactionForm.from_field || null;
       const wasAlreadyTermine = transaction.status === 'valide';
       const isWithdrawal = transactionForm.type === 'transfert' && 
-                          transactionForm.status === 'valide' &&
+                          effectiveStatus === 'valide' &&
                           !wasAlreadyTermine && // Only if status is changing TO "valide"
-                          (transferTo === 'balance' || (transferFrom && transferFrom !== 'balance'));
+                          (transferTo === 'solde' || (transferFrom && transferFrom !== 'solde'));
       
       const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
         method: 'PUT',
-        body: JSON.stringify(buildUpdatePayload(transactionForm.status, wasAlreadyTermine, { datetime: submittedDatetime }))
+        body: JSON.stringify(buildUpdatePayload(effectiveStatus, wasAlreadyTermine, { datetime: submittedDatetime }))
       });
       bustTransactionsCache(clientId);
       
@@ -596,7 +599,7 @@ export function EditTransactionModal({
   return (
     <>
       <div className="modal-overlay" onClick={handleClose}>
-        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '36rem' }}>
           <div className="modal-header">
             <h2 className="modal-title">Modifier la transaction</h2>
             <Button
@@ -610,13 +613,14 @@ export function EditTransactionModal({
             </Button>
           </div>
           <form onSubmit={handleSubmit} className="modal-form">
+            <div className="grid grid-cols-2" style={{ columnGap: '2rem', rowGap: '1rem' }}>
             <div className="modal-form-field">
               <Label>Type</Label>
               <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                   {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
                     <SelectItem key={key} value={key}>{config.label}</SelectItem>
                   ))}
@@ -625,89 +629,61 @@ export function EditTransactionModal({
             </div>
             {transactionForm.type === 'transfert' && (
               <>
-                <div className="modal-form-field">
-                  <Label>Transfert de</Label>
-                  <Select
-                    value={transactionForm.from_field || 'balance'}
-                    onValueChange={(value) => {
-                      const nextFrom = value || 'balance';
-                      const nextTo = transactionForm.to_field || 'balance';
-                      const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
+                <ProductTransferSelect
+                  label="Transfert de"
+                  value={transactionForm.from_field || 'solde'}
+                  products={products}
+                  onValueChange={(nextFrom) => {
+                    const nextTo = transactionForm.to_field || 'solde';
+                    const nextProductId = nextFrom !== 'solde' ? nextFrom : (nextTo !== 'solde' ? nextTo : '');
 
-                      let fromName = 'Solde';
-                      let toName = 'Solde';
-                      if (nextFrom !== 'balance') {
-                        const fromProduct = products.find((p: any) => p.id === nextFrom);
-                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
-                      }
-                      if (nextTo !== 'balance') {
-                        const toProduct = products.find((p: any) => p.id === nextTo);
-                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
-                      }
+                    let fromName = 'Solde';
+                    let toName = 'Solde';
+                    if (nextFrom !== 'solde') {
+                      const fromProduct = products.find((p: any) => p.id === nextFrom);
+                      if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                    }
+                    if (nextTo !== 'solde') {
+                      const toProduct = products.find((p: any) => p.id === nextTo);
+                      if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                    }
 
-                      setTransactionForm({
-                        ...transactionForm,
-                        from_field: nextFrom,
-                        productId: nextProductId,
-                        description: `Transfert de ${fromName} vers ${toName}.`,
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="balance">Solde</SelectItem>
-                      {products.map((p: any) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}{p.reference ? ` (${p.reference})` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                    setTransactionForm({
+                      ...transactionForm,
+                      from_field: nextFrom,
+                      productId: nextProductId,
+                      description: `Transfert de ${fromName} vers ${toName}.`,
+                    });
+                  }}
+                />
 
-                <div className="modal-form-field">
-                  <Label>Transfert vers</Label>
-                  <Select
-                    value={transactionForm.to_field || 'balance'}
-                    onValueChange={(value) => {
-                      const nextTo = value || 'balance';
-                      const nextFrom = transactionForm.from_field || 'balance';
-                      const nextProductId = nextFrom !== 'balance' ? nextFrom : (nextTo !== 'balance' ? nextTo : '');
+                <ProductTransferSelect
+                  label="Transfert vers"
+                  value={transactionForm.to_field || 'solde'}
+                  products={products}
+                  onValueChange={(nextTo) => {
+                    const nextFrom = transactionForm.from_field || 'solde';
+                    const nextProductId = nextFrom !== 'solde' ? nextFrom : (nextTo !== 'solde' ? nextTo : '');
 
-                      let fromName = 'Solde';
-                      let toName = 'Solde';
-                      if (nextFrom !== 'balance') {
-                        const fromProduct = products.find((p: any) => p.id === nextFrom);
-                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
-                      }
-                      if (nextTo !== 'balance') {
-                        const toProduct = products.find((p: any) => p.id === nextTo);
-                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
-                      }
+                    let fromName = 'Solde';
+                    let toName = 'Solde';
+                    if (nextFrom !== 'solde') {
+                      const fromProduct = products.find((p: any) => p.id === nextFrom);
+                      if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                    }
+                    if (nextTo !== 'solde') {
+                      const toProduct = products.find((p: any) => p.id === nextTo);
+                      if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                    }
 
-                      setTransactionForm({
-                        ...transactionForm,
-                        to_field: nextTo,
-                        productId: nextProductId,
-                        description: `Transfert de ${fromName} vers ${toName}.`,
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="balance">Solde</SelectItem>
-                      {products.map((p: any) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}{p.reference ? ` (${p.reference})` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                    setTransactionForm({
+                      ...transactionForm,
+                      to_field: nextTo,
+                      productId: nextProductId,
+                      description: `Transfert de ${fromName} vers ${toName}.`,
+                    });
+                  }}
+                />
               </>
             )}
             {transactionForm.type === 'transfert' && transferProduct && (
@@ -722,7 +698,7 @@ export function EditTransactionModal({
                     })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="text-slate-700 [&[data-placeholder]]:text-slate-600">
                     <SelectValue
                       placeholder={
                         loadingTransferProduct
@@ -731,7 +707,7 @@ export function EditTransactionModal({
                       }
                     />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                     {interestPeriodOptions.map((option) => (
                       <SelectItem key={option} value={option}>
                         {option}
@@ -782,7 +758,7 @@ export function EditTransactionModal({
                 required
               />
             </div>
-            <div className="modal-form-field">
+            <div className="modal-form-field col-span-2">
               <Label>Description</Label>
               <Textarea
                 value={transactionForm.description}
@@ -796,7 +772,7 @@ export function EditTransactionModal({
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                   {getAvailableStatuses().map((status) => (
                     <SelectItem key={status} value={status}>
                       {getStatusLabel(status, transactionForm.type)}
@@ -805,7 +781,8 @@ export function EditTransactionModal({
                 </SelectContent>
               </Select>
             </div>
-            <div className="modal-form-actions">
+            </div>
+            <div className="modal-form-actions mt-4">
               {transaction.status !== 'valide' && (
                 <Button 
                   type="button" 

@@ -262,7 +262,7 @@ export function PlatformLogs() {
             </div>
           </div>
           <div className="mt-4">
-            <Button onClick={applyFilters}>Appliquer les filtres</Button>
+            <Button onClick={applyFilters} className="rounded-md">Appliquer les filtres</Button>
           </div>
         </CardContent>
       </Card>

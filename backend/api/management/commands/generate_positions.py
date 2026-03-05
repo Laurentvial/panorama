@@ -31,7 +31,7 @@ class Command(BaseCommand):
         transaction_id = options.get("transaction_id")
         client_id = options.get("client_id")
 
-        qs = Transaction.objects.filter(type="transfert").exclude(transfer_to__isnull=True).exclude(transfer_to="balance")
+        qs = Transaction.objects.filter(type="transfert").exclude(transfer_to__isnull=True).exclude(transfer_to="solde")
         if transaction_id:
             qs = qs.filter(id=transaction_id)
         if client_id:

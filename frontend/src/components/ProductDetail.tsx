@@ -174,7 +174,7 @@ export function ProductDetail() {
     setSubscriptionData(prev => ({ ...prev, contractEnd: `${day}/${month}/${year}` }));
   }, []);
 
-  // Load transactions to calculate available balance
+  // Load transactions to calculate available solde
   useEffect(() => {
     if (currentUser && currentUser.id) {
       const loadTransactions = async () => {
@@ -772,14 +772,14 @@ export function ProductDetail() {
       };
       
       // Create transaction of type 'transfert' - Transfer from Solde to the chosen product
-      // We only need to_field: product ID = investment (balance → product)
+      // We only need to_field: product ID = investment (solde → product)
       const transactionData = {
         type: 'transfert',
         amount: amount,
         description: `Transfert de Solde vers ${productData.name}${productData.reference ? ` (${productData.reference})` : ''}.`,
         status: 'en_cours',
         datetime: new Date().toISOString(),
-        to_field: productData.id, // Transfer to product (investment: balance → product)
+        to_field: productData.id, // Transfer to product (investment: solde → product)
         subscription_details: {
           ...subscriptionDetails,
           signature: signature || null, // Include signature in subscription_details
@@ -2439,7 +2439,7 @@ export function ProductDetail() {
                       description: `Ordre de trading: ${asset?.reference || asset?.name || asset?.id}`,
                       datetime: new Date().toISOString(),
                       status: 'valide',
-                      transfer_from: 'balance',
+                      transfer_from: 'solde',
                       transfer_to: 'trading',
                       subscription_details: {
                         tradeType: 'asset',

@@ -187,7 +187,7 @@ class ClientSerializer(serializers.ModelSerializer):
             elif txn.type == 'bonus':
                 calculated_invested_capital += amount
             elif txn.type == 'interets':
-                # Interest transactions credit gains to cash balance
+                # Interest transactions credit gains to cash solde
                 calculated_invested_capital += amount
         
         # Use calculated value if transactions exist, otherwise fallback to stored value
@@ -231,7 +231,7 @@ class ClientSerializer(serializers.ModelSerializer):
             elif txn.type == 'bonus':
                 calculated_invested_capital += amount
             elif txn.type == 'interets':
-                # Interest transactions credit gains to cash balance
+                # Interest transactions credit gains to cash solde
                 calculated_invested_capital += amount
         
         # Use calculated value if transactions exist, otherwise fallback to stored value

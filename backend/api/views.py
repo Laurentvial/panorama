@@ -7303,42 +7303,42 @@ def client_transaction_create(request, client_id):
         except Product.DoesNotExist:
             product = None
     
-    # Validate balance for transfert transactions (balance → product)
+    # Validate solde for transfert transactions (solde → product)
     transaction_type = request.data.get('type')
     transfer_from = request.data.get('from_field') or request.data.get('transfer_from')
     transfer_to = request.data.get('to_field') or request.data.get('transfer_to')
     transaction_amount = float(request.data.get('amount', 0))
     
     # Auto-set transfer_to for subscription transactions (transfert with product)
-    # We only need transfer_to: if it's a product ID, it's an investment (balance → product)
+    # We only need transfer_to: if it's a product ID, it's an investment (solde → product)
     if transaction_type == 'transfert' and product:
-        # If transfer_to is not provided but product exists, assume it's a subscription (balance → product)
+        # If transfer_to is not provided but product exists, assume it's a subscription (solde → product)
         if not transfer_to:
             transfer_to = product.id
-        # Auto-set transfer_from to 'balance' for backward compatibility (but we mainly use transfer_to)
+        # Auto-set transfer_from to 'solde' for backward compatibility (but we mainly use transfer_to)
         if not transfer_from:
-            transfer_from = 'balance'
+            transfer_from = 'solde'
 
     # If it's a transfert investment but product wasn't resolved yet, infer from transfer_to
-    if transaction_type == 'transfert' and not product and transfer_to and transfer_to != 'balance':
+    if transaction_type == 'transfert' and not product and transfer_to and transfer_to != 'solde':
         try:
             product = Product.objects.get(id=transfer_to)
         except Product.DoesNotExist:
             product = None
     
-    # For withdrawals (transfert product -> balance), set product to source product (transfer_from)
+    # For withdrawals (transfert product -> solde), set product to source product (transfer_from)
     # This ensures recalculate_positions_for_product_withdrawal can identify the product correctly
-    if transaction_type == 'transfert' and transfer_to == 'balance':
-        # If transfer_from is a product ID (not 'balance'), set product to that product
-        if transfer_from and transfer_from != 'balance':
+    if transaction_type == 'transfert' and transfer_to == 'solde':
+        # If transfer_from is a product ID (not 'solde'), set product to that product
+        if transfer_from and transfer_from != 'solde':
             try:
                 product = Product.objects.get(id=transfer_from)
             except Product.DoesNotExist:
                 product = None  # Product doesn't exist, keep product as None
 
     # If admin created a transfert without subscription form, auto-fill all possible subscription details
-    # Only for investments (balance → product), not for withdrawals (product → balance)
-    if transaction_type == 'transfert' and product and transfer_to and transfer_to != 'balance':
+    # Only for investments (solde → product), not for withdrawals (product → solde)
+    if transaction_type == 'transfert' and product and transfer_to and transfer_to != 'solde':
         try:
             amount_dec = Decimal(str(request.data.get('amount') or 0))
         except Exception:
@@ -7352,7 +7352,7 @@ def client_transaction_create(request, client_id):
         )
         subscription_details_data = _merge_missing_fields(subscription_details_data, defaults)
     
-    # Transfer transactions can be created even when balance is insufficient (e.g. pending deposits).
+    # Transfer transactions can be created even when solde is insufficient (e.g. pending deposits).
     
     # Check if this is an investment transaction that will be created with status 'valide'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
@@ -7361,7 +7361,7 @@ def client_transaction_create(request, client_id):
     is_investment_transfert = (
         transaction_type == 'transfert' 
         and transfer_to 
-        and transfer_to != 'balance'
+        and transfer_to != 'solde'
     )
     if is_investment_transfert:
         chosen_interest_period = (
@@ -7460,7 +7460,7 @@ def client_transaction_create(request, client_id):
     # This ensures positions are ready when the transaction becomes visible in the database.
     # The signal will be skipped because _skip_auto_position_generation is set.
 
-    # If this transfert is a client trading order (balance -> trading wallet), create a Position (ordre).
+    # If this transfert is a client trading order (solde -> trading wallet), create a Position (ordre).
     # The trading order is represented by:
     # - a transfert transaction (keeps a trace of funds moved from available funds to trading portfolio)
     # - a Position linked to the Asset (the order itself)
@@ -7652,7 +7652,7 @@ def client_transaction_create(request, client_id):
     is_subscription_transfert = (
         transaction_type == 'transfert'
         and product is not None
-        and transfer_to != 'balance'
+        and transfer_to != 'solde'
     )
     if is_subscription_transfert:
         manager_user = _resolve_client_manager_user(client)
@@ -8278,7 +8278,7 @@ def client_transaction_update(request, client_id, transaction_id):
     was_investment = (
         original_type == 'transfert'
         and original_transfer_to
-        and original_transfer_to != 'balance'
+        and original_transfer_to != 'solde'
     )
     
     # Authorization check: Only allow client accessing their own data OR authenticated users
@@ -8404,7 +8404,7 @@ def client_transaction_update(request, client_id, transaction_id):
         transaction.subscription_interest_period = str(chosen_interest or '').strip()
     
     # Update transfer_to field (accept both to_field and transfer_to)
-    # We mainly use transfer_to: product ID = investment, 'balance' = withdrawal
+    # We mainly use transfer_to: product ID = investment, 'solde' = withdrawal
     if 'to_field' in request.data or 'transfer_to' in request.data:
         transaction.transfer_to = request.data.get('to_field') or request.data.get('transfer_to')
     
@@ -8416,15 +8416,15 @@ def client_transaction_update(request, client_id, transaction_id):
     if transaction.type == 'transfert' and transaction.product:
         if not transaction.transfer_to:
             transaction.transfer_to = transaction.product.id
-        # Auto-set transfer_from to 'balance' for backward compatibility
+        # Auto-set transfer_from to 'solde' for backward compatibility
         if not transaction.transfer_from:
-            transaction.transfer_from = 'balance'
+            transaction.transfer_from = 'solde'
     
-    # For withdrawals (transfert product -> balance), set product field to point to source product
+    # For withdrawals (transfert product -> solde), set product field to point to source product
     # This ensures recalculate_positions_for_product_withdrawal can identify the product correctly
-    if transaction.type == 'transfert' and transaction.transfer_to == 'balance':
-        # If transfer_from is a product ID (not 'balance'), set product field to that product
-        if transaction.transfer_from and transaction.transfer_from != 'balance':
+    if transaction.type == 'transfert' and transaction.transfer_to == 'solde':
+        # If transfer_from is a product ID (not 'solde'), set product field to that product
+        if transaction.transfer_from and transaction.transfer_from != 'solde':
             try:
                 source_product = Product.objects.get(id=transaction.transfer_from)
                 transaction.product = source_product
@@ -8438,13 +8438,13 @@ def client_transaction_update(request, client_id, transaction_id):
     
     transaction.save()
 
-    is_investment = (transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'balance')
+    is_investment = (transaction.type == 'transfert' and transaction.transfer_to and transaction.transfer_to != 'solde')
 
     # Ensure transaction has subscription details even if created/edited by admin without subscription form
     if is_investment:
         # Try to resolve product and persist it on transaction for consistency
         product = transaction.product
-        if not product and transaction.transfer_to and transaction.transfer_to != 'balance':
+        if not product and transaction.transfer_to and transaction.transfer_to != 'solde':
             try:
                 product = Product.objects.get(id=transaction.transfer_to)
                 transaction.product = product
@@ -8509,10 +8509,10 @@ def client_transaction_update(request, client_id, transaction_id):
                 logger.error(traceback.format_exc())
     
     # If a withdrawal becomes "valide", recalculate positions for all investment transactions on the same product
-    # A withdrawal is specifically when transfer_to == 'balance'
+    # A withdrawal is specifically when transfer_to == 'solde'
     is_withdrawal = (
         transaction.type == 'transfert' and
-        transaction.transfer_to == 'balance'
+        transaction.transfer_to == 'solde'
     )
     if is_withdrawal and transaction.status in COMPLETED_TRANSACTION_STATUSES and not skip_position_generation:
         if previous_status not in COMPLETED_TRANSACTION_STATUSES:
@@ -8593,19 +8593,19 @@ def transaction_generate_rates(request, client_id, transaction_id):
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
-        and transaction.transfer_to != 'balance'
+        and transaction.transfer_to != 'solde'
     )
     
     is_withdrawal = (
         transaction.type == 'transfert'
-        and transaction.transfer_to == 'balance'
+        and transaction.transfer_to == 'solde'
     )
     
     # Check if this investment requires recalculation (existing pending positions on same product)
     requires_addition_recalculation = False
     if is_investment:
         product_id = transaction.transfer_to
-        if product_id and product_id != 'balance':
+        if product_id and product_id != 'solde':
             from .models import Position
             pending_count = Position.objects.filter(
                 product_id=product_id,
@@ -8625,7 +8625,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
         if is_withdrawal:
             # Determine the product from which capital is being withdrawn
             product = None
-            if transaction.transfer_from and transaction.transfer_from != 'balance':
+            if transaction.transfer_from and transaction.transfer_from != 'solde':
                 try:
                     from .models import Product
                     product = Product.objects.get(id=transaction.transfer_from)
@@ -8650,7 +8650,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
                 status=transaction.status,
                 datetime=transaction.datetime,
                 transfer_to=product.id,  # Point to source product
-                transfer_from='balance',  # This helps identify it as a temp transaction for withdrawal
+                transfer_from='solde',  # This helps identify it as a temp transaction for withdrawal
                 product=product,
                 subscription_details=transaction.subscription_details or {}
             )
@@ -8666,7 +8666,7 @@ def transaction_generate_rates(request, client_id, transaction_id):
         elif requires_addition_recalculation:
             # For additions with recalculation, get the product and calculate metadata
             product = None
-            if transaction.transfer_to and transaction.transfer_to != 'balance':
+            if transaction.transfer_to and transaction.transfer_to != 'solde':
                 try:
                     from .models import Product
                     product = Product.objects.get(id=transaction.transfer_to)
@@ -8725,19 +8725,19 @@ def transaction_generate_positions(request, client_id, transaction_id):
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
-        and transaction.transfer_to != 'balance'
+        and transaction.transfer_to != 'solde'
     )
     
     is_withdrawal = (
         transaction.type == 'transfert'
-        and transaction.transfer_to == 'balance'
+        and transaction.transfer_to == 'solde'
     )
     
     # Check if this investment requires recalculation (existing pending positions on same product)
     requires_addition_recalculation = False
     if is_investment:
         product_id = transaction.transfer_to
-        if product_id and product_id != 'balance':
+        if product_id and product_id != 'solde':
             from .models import Position
             pending_count = Position.objects.filter(
                 product_id=product_id,
@@ -8848,7 +8848,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 }
 
             product = None
-            if transaction.transfer_to and transaction.transfer_to != 'balance':
+            if transaction.transfer_to and transaction.transfer_to != 'solde':
                 try:
                     from .models import Product
                     product = Product.objects.get(id=transaction.transfer_to)
@@ -8906,7 +8906,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 }
 
             product = None
-            if transaction.transfer_from and transaction.transfer_from != 'balance':
+            if transaction.transfer_from and transaction.transfer_from != 'solde':
                 try:
                     from .models import Product
                     product = Product.objects.get(id=transaction.transfer_from)
@@ -8944,7 +8944,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
         if is_withdrawal:
             # Determine the product from which capital is being withdrawn
             product = None
-            if transaction.transfer_from and transaction.transfer_from != 'balance':
+            if transaction.transfer_from and transaction.transfer_from != 'solde':
                 try:
                     from .models import Product
                     product = Product.objects.get(id=transaction.transfer_from)
@@ -8977,7 +8977,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 status=transaction.status,
                 datetime=transaction.datetime,
                 transfer_to=product.id,  # Point to source product
-                transfer_from='balance',  # This helps identify it as a temp transaction for withdrawal
+                transfer_from='solde',  # This helps identify it as a temp transaction for withdrawal
                 product=product,
                 subscription_details=temp_subscription_details
             )
@@ -9077,7 +9077,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 product_id = transaction.transfer_to
             elif is_withdrawal:
                 # For withdrawals, get product from transfer_from
-                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                if transaction.transfer_from and transaction.transfer_from != 'solde':
                     product_id = transaction.transfer_from
                 elif transaction.product:
                     product_id = transaction.product.id
@@ -9172,19 +9172,19 @@ def transaction_save_positions(request, client_id, transaction_id):
     is_investment = (
         transaction.type == 'transfert'
         and transaction.transfer_to
-        and transaction.transfer_to != 'balance'
+        and transaction.transfer_to != 'solde'
     )
     
     is_withdrawal = (
         transaction.type == 'transfert'
-        and transaction.transfer_to == 'balance'
+        and transaction.transfer_to == 'solde'
     )
     
     # Check if this investment requires recalculation (existing pending positions on same product)
     requires_addition_recalculation = False
     if is_investment:
         product_id = transaction.transfer_to
-        if product_id and product_id != 'balance':
+        if product_id and product_id != 'solde':
             from .models import Position
             pending_count = Position.objects.filter(
                 product_id=product_id,
@@ -9233,7 +9233,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                 deleted_positions_info = None
                 addition_metadata = None
                 product = None
-                if transaction.transfer_to and transaction.transfer_to != 'balance':
+                if transaction.transfer_to and transaction.transfer_to != 'solde':
                     from .models import Product
                     try:
                         product = Product.objects.get(id=transaction.transfer_to)
@@ -9344,7 +9344,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                 deleted_positions_info = None
                 withdrawal_metadata = None
                 product = None
-                if transaction.transfer_from and transaction.transfer_from != 'balance':
+                if transaction.transfer_from and transaction.transfer_from != 'solde':
                     from .models import Product
                     try:
                         product = Product.objects.get(id=transaction.transfer_from)

@@ -329,7 +329,7 @@ export function Transactions() {
               <Button
                 variant="outline"
                 onClick={clearFilters}
-                className="w-full"
+                className="w-full rounded-md"
               >
                 Réinitialiser les filtres
               </Button>

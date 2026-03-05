@@ -70,7 +70,7 @@ def _transaction_generate_positions_on_valide(sender, instance: Transaction, cre
         is_investment = (
             instance.type == "transfert"
             and bool(instance.transfer_to)
-            and instance.transfer_to != "balance"
+            and instance.transfer_to != "solde"
         )
         if not is_investment:
             return
@@ -117,17 +117,17 @@ def _transaction_generate_positions_on_valide(sender, instance: Transaction, cre
 def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transaction, created: bool, **kwargs):
     """
     Recalculate positions for all investment transactions on the same product
-    when a withdrawal (product -> balance) is validated.
+    when a withdrawal (product -> solde) is validated.
     
     This ensures that when capital is withdrawn, future positions are recalculated
     with the new (reduced) invested capital.
     """
     try:
-        # Check if this is a withdrawal (transfert from product to balance)
-        # A withdrawal is specifically when transfer_to == 'balance'
+        # Check if this is a withdrawal (transfert from product to solde)
+        # A withdrawal is specifically when transfer_to == 'solde'
         is_withdrawal = (
             instance.type == "transfert"
-            and instance.transfer_to == "balance"
+            and instance.transfer_to == "solde"
         )
         if not is_withdrawal:
             return
@@ -207,8 +207,8 @@ def _position_create_interest_transaction_for_period(sender, instance: Position,
             logger.warning("Position %s references non-existent transaction %s", instance.id, instance.transaction_id)
             return
         
-        # Only process investment transactions (transfert balance -> product)
-        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'balance':
+        # Only process investment transactions (transfert solde -> product)
+        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'solde':
             return
         
         # Ensure the position's product reference is still valid

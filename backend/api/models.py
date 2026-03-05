@@ -512,10 +512,10 @@ class Transaction(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     # Transfer direction fields (for transfert transactions)
-    # 'from' can be: null, 'balance', or product ID
-    # 'to' can be: null, 'balance', or product ID
-    transfer_from = models.CharField(max_length=50, null=True, blank=True, default=None)  # Source: 'balance' or product ID
-    transfer_to = models.CharField(max_length=50, null=True, blank=True, default=None)  # Destination: 'balance' or product ID
+    # 'from' can be: null, 'solde', or product ID
+    # 'to' can be: null, 'solde', or product ID
+    transfer_from = models.CharField(max_length=50, null=True, blank=True, default=None)  # Source: 'solde' or product ID
+    transfer_to = models.CharField(max_length=50, null=True, blank=True, default=None)  # Destination: 'solde' or product ID
     
     # Subscription details for transfert transactions
     subscription_details = models.JSONField(default=dict, blank=True, null=True)  # Store subscription form data as JSON
@@ -550,7 +550,7 @@ class Transaction(models.Model):
 
 class Position(models.Model):
     """
-    Position mensuelle créée lors du démarrage d'un investissement (transfert balance -> produit).
+    Position mensuelle créée lors du démarrage d'un investissement (transfert solde -> produit).
     Une ligne = un mois/période pour un client sur un produit.
     """
     STATUS_CHOICES = [

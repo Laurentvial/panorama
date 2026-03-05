@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from './ui/button';
-import { ArrowLeftRight, Eye, Edit, FileText } from 'lucide-react';
+import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getStatusLabel, getTypeLabel, getTypeColors, getStatusColors, extractAssetInfo } from './transactionUtils';
 
@@ -68,6 +68,7 @@ interface TransactionListProps {
   showIcons?: boolean;
   onView?: (transaction: any) => void;
   onEdit?: (transaction: any) => void;
+  onValidateAndGenerate?: (transaction: any) => void;
   emptyMessage?: string;
 }
 
@@ -82,6 +83,7 @@ export function TransactionList({
   showIcons = true,
   onView,
   onEdit,
+  onValidateAndGenerate,
   emptyMessage = 'Aucune transaction trouvée'
 }: TransactionListProps) {
   const navigate = useNavigate();
@@ -265,6 +267,22 @@ export function TransactionList({
                 )}
                 <td className="py-3 px-4 text-right">
                   <div className="flex gap-2 justify-end relative" style={{ zIndex: 10 }}>
+                    {onValidateAndGenerate && transaction.type === 'transfert' && transaction.status !== 'valide' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onValidateAndGenerate(transaction);
+                        }}
+                        className="hover:!bg-green-50 hover:!text-green-600 transition-colors duration-200 px-4"
+                        style={{ position: 'relative', zIndex: 10 }}
+                        title="Valider et générer les positions"
+                      >
+                        {showIcons && <CheckCircle className="w-4 h-4 mr-1" />}
+                        Valider
+                      </Button>
+                    )}
                     {onView ? (
                       <Button 
                         variant="ghost" 

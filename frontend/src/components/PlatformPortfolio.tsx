@@ -418,7 +418,7 @@ export function PlatformPortfolio() {
     const normalizeId = (value: any): string | null => {
       if (value == null) return null;
       const v = String(value).trim();
-      if (!v || v === 'balance' || v === 'trading') return null;
+      if (!v || v === 'solde' || v === 'trading') return null;
       return v;
     };
 
@@ -472,15 +472,15 @@ export function PlatformPortfolio() {
       const outflowProductId = normalizeId(from);
 
       // Direction based on transfer endpoints:
-      // - balance -> product : +amount on destination product
-      // - product -> balance : -amount on source product
+      // - solde -> product : +amount on destination product
+      // - product -> solde : -amount on source product
       // - product -> product : -source and +destination
-      if (from === 'balance' && inflowProductId) {
+      if (from === 'solde' && inflowProductId) {
         addMovement(inflowProductId, amt, t);
         continue;
       }
 
-      if (to === 'balance' && outflowProductId) {
+      if (to === 'solde' && outflowProductId) {
         addMovement(outflowProductId, -amt, t);
         continue;
       }
@@ -787,7 +787,7 @@ export function PlatformPortfolio() {
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // achat + transfert (balance -> product) - transfert (product -> balance) when status is 'valide'
+    let calculatedTotalInvesti = 0; // achat + transfert (solde -> product) - transfert (product -> solde) when status is 'valide'
 
     const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
 
@@ -814,11 +814,11 @@ export function PlatformPortfolio() {
           calculatedTradingPortfolio -= amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance
-          // They increase investedCapital (available funds) because they add money to the cash balance
+          // Interest transactions credit gains to cash solde
+          // They increase investedCapital (available funds) because they add money to the cash solde
           calculatedInvestedCapital += amt;
           // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           calculatedProfitLoss -= amt;
           break;
         case 'frais':
@@ -829,17 +829,17 @@ export function PlatformPortfolio() {
           const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
           const hasProductId = transaction.productId || null;
 
-          if (transferTo && transferTo !== 'balance') {
-            // balance -> product
+          if (transferTo && transferTo !== 'solde') {
+            // solde -> product
             calculatedTotalInvesti += amt;
             calculatedTradingPortfolio += amt;
-          } else if (transferTo === 'balance') {
-            // product -> balance
+          } else if (transferTo === 'solde') {
+            // product -> solde
             // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
             calculatedTotalInvesti -= amt;
             calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
-            // Fallback: assume subscription (balance -> product)
+            // Fallback: assume subscription (solde -> product)
             calculatedTotalInvesti += amt;
             calculatedTradingPortfolio += amt;
           }
@@ -988,7 +988,7 @@ export function PlatformPortfolio() {
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
-  // Calculate gains/losses from interest transactions (these are credited to cash balance)
+  // Calculate gains/losses from interest transactions (these are credited to cash solde)
   const interestGainsInCash = useMemo(() => {
     const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
     let total = 0;
@@ -1055,20 +1055,20 @@ export function PlatformPortfolio() {
       const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
 
       // What counts for "portfolio allocation" is the product/asset side, not deposits/withdrawals.
-      // - transfert: balance → product (invest) / product → balance (withdraw)
+      // - transfert: solde → product (invest) / product → solde (withdraw)
       // - achat / investissement: invest
       // - vente: disinvest (if resolvable)
       let delta = 0;
       let typeLabel: string | null = null;
 
       if (t?.type === 'transfert') {
-        if (to && String(to) !== 'balance') {
-          // balance -> product
+        if (to && String(to) !== 'solde') {
+          // solde -> product
           delta = amount;
           typeLabel = resolveTypeLabel(t, to);
-        } else if (to && String(to) === 'balance') {
-          // product -> balance
-          const productId = from && String(from) !== 'balance' ? from : t?.productId || null;
+        } else if (to && String(to) === 'solde') {
+          // product -> solde
+          const productId = from && String(from) !== 'solde' ? from : t?.productId || null;
           delta = -amount;
           typeLabel = resolveTypeLabel(t, productId);
         } else {
@@ -1090,7 +1090,7 @@ export function PlatformPortfolio() {
       totals.set(key, (totals.get(key) || 0) + delta);
     }
 
-    // Ajouter la balance (fonds disponibles)
+    // Ajouter le solde (fonds disponibles)
     const cash = Math.max(0, availableFunds);
     if (cash > 0) {
       totals.set('Balance', (totals.get('Balance') || 0) + cash);
@@ -1462,7 +1462,7 @@ export function PlatformPortfolio() {
                         
                         const isTransferToBalance =
                           t.type === 'transfert' &&
-                          (t.to === 'balance' || t.to_field === 'balance' || t.transfer_to === 'balance');
+                          (t.to === 'solde' || t.to_field === 'solde' || t.transfer_to === 'solde');
 
                         const typeLabel =
                           t.type === 'depot'

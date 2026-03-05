@@ -7,11 +7,12 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
-import { Plus, X, Filter, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { Plus, X, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { TransactionList } from './TransactionList';
+import { ProductTransferSelect } from './ProductTransferSelect';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { PositionGenerationModal } from './PositionGenerationModal';
@@ -163,6 +164,103 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     loadAssetsAndProducts();
   }, []);
 
+  const productHasAllocationsForValidate = async (productId: any): Promise<boolean> => {
+    if (!productId) return false;
+    try {
+      const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
+      const p = res?.product || res || null;
+      const allocations = p?.assetAllocations || p?.asset_allocations || [];
+      return Array.isArray(allocations) && allocations.length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  const buildValidateUpdatePayload = (tx: any, skipPositionGeneration: boolean) => {
+    let datetimeISO = tx.datetime || tx.createdAt || '';
+    if (datetimeISO && typeof datetimeISO === 'string') {
+      if (!datetimeISO.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+        const match = datetimeISO.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+        if (match) datetimeISO = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:00`;
+      }
+    }
+    const payload: any = {
+      type: tx.type,
+      amount: parseFloat(tx.amount || 0),
+      description: tx.description || '',
+      status: 'valide',
+      datetime: datetimeISO,
+      skip_position_generation: skipPositionGeneration,
+    };
+    if (tx.type === 'transfert') {
+      payload.from_field = tx.transfer_from || tx.from_field || tx.from || 'solde';
+      payload.to_field = tx.transfer_to || tx.to_field || tx.to || 'solde';
+      payload.subscription_details = tx.subscription_details || {};
+      payload.interestPeriod = tx.subscription_interest_period || tx.subscription_details?.interestPeriod || '';
+    }
+    return payload;
+  };
+
+  const handleValidateAndGenerate = async (tx: any) => {
+    if (tx.status === 'valide') {
+      toast.info('La transaction est déjà validée');
+      return;
+    }
+    if (tx.type !== 'transfert') {
+      try {
+        await apiCall(`/api/clients/${clientId}/transactions/${tx.id}/`, {
+          method: 'PUT',
+          body: JSON.stringify(buildValidateUpdatePayload(tx, false)),
+        });
+        clearApiCache(`/api/clients/${clientId}/transactions/`);
+        loadTransactions(pagination.page, pagination.limit);
+        onRefresh();
+        toast.success('Transaction modifiée avec succès');
+      } catch (err: any) {
+        toast.error((err as any).message || 'Erreur lors de la mise à jour');
+      }
+      return;
+    }
+
+    const transferTo = tx.transfer_to || tx.to_field || tx.to || null;
+    const transferFrom = tx.transfer_from || tx.from_field || tx.from || null;
+    const productIdFromSub = tx.subscription_details?.productId || tx.productId || tx.product_id || null;
+    const finalProductId = transferTo || productIdFromSub;
+    const isInvestment = finalProductId && String(finalProductId) !== 'solde' && String(finalProductId) !== 'trading';
+    const isWithdrawal = transferTo === 'solde' && transferFrom && transferFrom !== 'solde';
+
+    const relevantProductId = isInvestment ? finalProductId : (transferFrom && transferFrom !== 'solde' ? transferFrom : null);
+    const hasAllocations = relevantProductId ? await productHasAllocationsForValidate(relevantProductId) : false;
+
+    if (hasAllocations) {
+      try {
+        const updatedTx = await apiCall(`/api/clients/${clientId}/transactions/${tx.id}/`, {
+          method: 'PUT',
+          body: JSON.stringify(buildValidateUpdatePayload(tx, true)),
+        });
+        clearApiCache(`/api/clients/${clientId}/transactions/`);
+        setTransactionForPositionGeneration((updatedTx as any) ?? { ...tx, status: 'valide' });
+        setIsWithdrawalForPositionGeneration(isWithdrawal);
+        setIsPositionGenerationModalOpen(true);
+      } catch (err: any) {
+        toast.error((err as any).message || 'Erreur lors de la mise à jour');
+      }
+    } else {
+      try {
+        await apiCall(`/api/clients/${clientId}/transactions/${tx.id}/`, {
+          method: 'PUT',
+          body: JSON.stringify(buildValidateUpdatePayload(tx, false)),
+        });
+        clearApiCache(`/api/clients/${clientId}/transactions/`);
+        loadTransactions(pagination.page, pagination.limit);
+        onRefresh();
+        toast.success('Transaction modifiée avec succès');
+      } catch (err: any) {
+        toast.error((err as any).message || 'Erreur lors de la mise à jour');
+      }
+    }
+  };
+
   // Parse subscription details from transaction - check both subscription_details field and description fallback
   const parseSubscriptionDetails = (transaction: any): any | null => {
     if (!transaction) return null;
@@ -235,8 +333,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     status: 'en_attente_paiement',
     datetime: '',
     // transfert fields (admin create)
-    from_field: 'balance',
-    to_field: 'balance',
+    from_field: 'solde',
+    to_field: 'solde',
     productId: '',
     interestPeriod: '',
     // kept for backward compatibility with existing UI resets
@@ -299,9 +397,9 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     }
 
     const transferProductId =
-      transactionForm.from_field && transactionForm.from_field !== 'balance'
+      transactionForm.from_field && transactionForm.from_field !== 'solde'
         ? transactionForm.from_field
-        : (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
+        : (transactionForm.to_field && transactionForm.to_field !== 'solde' ? transactionForm.to_field : '');
 
     if (!transferProductId) {
       if (transactionForm.interestPeriod) {
@@ -323,21 +421,21 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   // Auto-generate description for transfert transactions
   useEffect(() => {
     if (transactionForm.type === 'transfert' && (transactionForm.from_field || transactionForm.to_field)) {
-      const fromField = transactionForm.from_field || 'balance';
-      const toField = transactionForm.to_field || 'balance';
+      const fromField = transactionForm.from_field || 'solde';
+      const toField = transactionForm.to_field || 'solde';
       
       // Find product names
       let fromName = 'Solde';
       let toName = 'Solde';
       
-      if (fromField !== 'balance') {
+      if (fromField !== 'solde') {
         const fromProduct = products.find((p: any) => p.id === fromField);
         if (fromProduct) {
           fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
         }
       }
       
-      if (toField !== 'balance') {
+      if (toField !== 'solde') {
         const toProduct = products.find((p: any) => p.id === toField);
         if (toProduct) {
           toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
@@ -390,8 +488,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
     const isTransferWithProduct =
       transactionForm.type === 'transfert' &&
-      ((transactionForm.from_field && transactionForm.from_field !== 'balance') ||
-        (transactionForm.to_field && transactionForm.to_field !== 'balance'));
+      ((transactionForm.from_field && transactionForm.from_field !== 'solde') ||
+        (transactionForm.to_field && transactionForm.to_field !== 'solde'));
     if (isTransferWithProduct && !String(transactionForm.interestPeriod || '').trim()) {
       toast.error("La période d'intérêt est obligatoire pour un transfert impliquant un produit.");
       setIsCreatingTransaction(false);
@@ -422,24 +520,24 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       
       if (isTransfert && isTermine) {
         // Check transfer direction from form fields to determine if this qualifies for position generation
-        const transferTo = transactionForm.to_field || 'balance';
-        const transferFrom = transactionForm.from_field || 'balance';
+        const transferTo = transactionForm.to_field || 'solde';
+        const transferFrom = transactionForm.from_field || 'solde';
         
-        // Check if this is an investment (transfert to product) or withdrawal (transfert from product to balance)
-        // Investment: transferTo is a product ID (not 'balance' or 'trading')
+        // Check if this is an investment (transfert to product) or withdrawal (transfert from product to solde)
+        // Investment: transferTo is a product ID (not 'solde' or 'trading')
         isInvestment = transferTo && 
-                      transferTo !== 'balance' && 
+                      transferTo !== 'solde' && 
                       transferTo !== 'trading' &&
                       String(transferTo).trim() !== '';
         
-        // Withdrawal: transferTo is 'balance' and transferFrom is a product ID (not 'balance')
-        isWithdrawal = transferTo === 'balance' && 
+        // Withdrawal: transferTo is 'solde' and transferFrom is a product ID (not 'solde')
+        isWithdrawal = transferTo === 'solde' && 
                       transferFrom && 
-                      transferFrom !== 'balance' &&
+                      transferFrom !== 'solde' &&
                       transferFrom !== 'trading' &&
                       String(transferFrom).trim() !== '';
         
-        // Only show modal for actual investments or withdrawals (not balance-to-balance or balance-to-trading)
+        // Only show modal for actual investments or withdrawals (not solde-to-solde or solde-to-trading)
         const productHasAllocations = (productId: any) => {
           if (!productId) return false;
           const p = products.find((x: any) => String(x?.id) === String(productId));
@@ -473,7 +571,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
           skip_position_generation: shouldShowModal, // Skip auto-generation only if showing modal
           ...(transactionForm.type === 'transfert'
             ? {
-                from_field: transactionForm.from_field || 'balance',
+                from_field: transactionForm.from_field || 'solde',
                 to_field: transactionForm.to_field || undefined,
                 // help backend reliably resolve product
                 subscription_details: transactionForm.productId
@@ -502,11 +600,11 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         
         // Double-check that this is still an investment or withdrawal based on actual response
         const responseIsInvestment = responseTransferTo && 
-                                    String(responseTransferTo) !== 'balance' && 
+                                    String(responseTransferTo) !== 'solde' && 
                                     String(responseTransferTo) !== 'trading';
-        const responseIsWithdrawal = responseTransferTo === 'balance' && 
+        const responseIsWithdrawal = responseTransferTo === 'solde' && 
                                     responseTransferFrom && 
-                                    String(responseTransferFrom) !== 'balance' &&
+                                    String(responseTransferFrom) !== 'solde' &&
                                     String(responseTransferFrom) !== 'trading';
         
         // Only show modal if response confirms it's an investment or withdrawal
@@ -536,8 +634,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             description: '',
             status: 'en_attente_paiement',
             datetime: '',
-            from_field: 'balance',
-            to_field: 'balance',
+            from_field: 'solde',
+            to_field: 'solde',
             productId: '',
             interestPeriod: '',
             visibleByClient: true
@@ -577,8 +675,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
         description: '',
         status: 'en_attente_paiement',
         datetime: '',
-        from_field: 'balance',
-        to_field: 'balance',
+        from_field: 'solde',
+        to_field: 'solde',
         productId: '',
         interestPeriod: '',
         visibleByClient: true
@@ -704,17 +802,17 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
   // Check if we should show warning for product without available funds
   const shouldShowWarning = transactionForm.type === 'transfert' && 
                             transactionForm.from_field && 
-                            transactionForm.from_field !== 'balance' && 
-                            transactionForm.to_field === 'balance';
+                            transactionForm.from_field !== 'solde' && 
+                            transactionForm.to_field === 'solde';
   
   const sourceProduct = shouldShowWarning 
     ? products.find((p: any) => p.id === transactionForm.from_field)
     : null;
 
   const transferProductId =
-    transactionForm.from_field && transactionForm.from_field !== 'balance'
+    transactionForm.from_field && transactionForm.from_field !== 'solde'
       ? transactionForm.from_field
-      : (transactionForm.to_field && transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
+      : (transactionForm.to_field && transactionForm.to_field !== 'solde' ? transactionForm.to_field : '');
   const transferProduct = transferProductId
     ? products.find((p: any) => String(p?.id) === String(transferProductId))
     : null;
@@ -739,8 +837,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             description: '',
             status: 'en_attente_paiement',
             datetime: '',
-            from_field: 'balance',
-            to_field: 'balance',
+            from_field: 'solde',
+            to_field: 'solde',
             productId: '',
             interestPeriod: '',
             visibleByClient: true
@@ -754,10 +852,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       {/* Filters */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="w-5 h-5" />
-            Filtres
-          </CardTitle>
+          <CardTitle>Filtres</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -769,7 +864,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   <Button
                     variant="outline"
                     role="combobox"
-                    className="w-full justify-between h-9 border-input bg-input-background px-3 py-2 text-sm"
+                    className="w-full justify-between h-9 rounded-md border-input bg-input-background px-3 py-2 text-sm text-slate-700"
                   >
                     <span className="truncate">{getTypeFilterDisplayText()}</span>
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -823,6 +918,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   placeholder="Min"
                   value={filters.amountMin}
                   onChange={(e) => setFilters({ ...filters, amountMin: e.target.value })}
+                  className="text-slate-700 placeholder:text-slate-600"
                 />
                 <Input
                   type="number"
@@ -830,6 +926,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   placeholder="Max"
                   value={filters.amountMax}
                   onChange={(e) => setFilters({ ...filters, amountMax: e.target.value })}
+                  className="text-slate-700 placeholder:text-slate-600"
                 />
               </div>
             </div>
@@ -841,6 +938,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 type="date"
                 value={filters.dateFrom}
                 onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                className="text-slate-700 placeholder:text-slate-600"
               />
             </div>
 
@@ -850,6 +948,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 type="date"
                 value={filters.dateTo}
                 onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                className="text-slate-700 placeholder:text-slate-600"
               />
             </div>
 
@@ -859,7 +958,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
               <Button
                 variant="outline"
                 onClick={clearFilters}
-                className="w-full"
+                className="w-full rounded-md"
               >
                 Réinitialiser les filtres
               </Button>
@@ -878,14 +977,14 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             description: '',
             status: 'en_attente_paiement',
             datetime: '',
-            from_field: 'balance',
-            to_field: 'balance',
+            from_field: 'solde',
+            to_field: 'solde',
             productId: '',
             interestPeriod: '',
             visibleByClient: true
           });
         }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '36rem' }}>
             <div className="modal-header">
               <h2 className="modal-title">Nouvelle transaction</h2>
               <Button
@@ -902,8 +1001,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     description: '',
                     status: 'en_attente_paiement',
                     datetime: '',
-                    from_field: 'balance',
-                    to_field: 'balance',
+                    from_field: 'solde',
+                    to_field: 'solde',
                     productId: '',
                     interestPeriod: '',
                     visibleByClient: true
@@ -914,13 +1013,14 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
               </Button>
             </div>
             <form onSubmit={handleCreateTransaction} className="modal-form">
+              <div className="grid grid-cols-2" style={{ columnGap: '2rem', rowGap: '1rem' }}>
               <div className="modal-form-field">
                 <Label>Type</Label>
                 <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                     {Object.entries(TRANSACTION_TYPES).map(([key, config]) => (
                       <SelectItem key={key} value={key}>{config.label}</SelectItem>
                     ))}
@@ -930,111 +1030,61 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
               {transactionForm.type === 'transfert' && (
                 <>
-                  <div className="modal-form-field">
-                    <Label>Transfert de</Label>
-                    <Select
-                      value={transactionForm.from_field || 'balance'}
-                      onValueChange={(value) => {
-                        const nextFrom = value || 'balance';
-                        // Set productId to the source product (from_field) if it's a product
-                        // Otherwise, if transferring to a product, use that as productId
-                        const nextProductId = nextFrom !== 'balance' ? nextFrom : (transactionForm.to_field !== 'balance' ? transactionForm.to_field : '');
-                        
-                        // Update description based on new values
-                        const toField = transactionForm.to_field || 'balance';
-                        let fromName = 'Solde';
-                        let toName = 'Solde';
-                        
-                        if (nextFrom !== 'balance') {
-                          const fromProduct = products.find((p: any) => p.id === nextFrom);
-                          if (fromProduct) {
-                            fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
-                          }
-                        }
-                        
-                        if (toField !== 'balance') {
-                          const toProduct = products.find((p: any) => p.id === toField);
-                          if (toProduct) {
-                            toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
-                          }
-                        }
-                        
-                        const newDescription = `Transfert de ${fromName} vers ${toName}.`;
-                        
-                        setTransactionForm({
-                          ...transactionForm,
-                          from_field: nextFrom,
-                          productId: nextProductId,
-                          description: newDescription,
-                        });
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="balance">Solde</SelectItem>
-                        {products.map((p: any) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}{p.reference ? ` (${p.reference})` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <ProductTransferSelect
+                    label="Transfert de"
+                    value={transactionForm.from_field || 'solde'}
+                    products={products}
+                    onValueChange={(nextFrom) => {
+                      const nextProductId = nextFrom !== 'solde' ? nextFrom : (transactionForm.to_field !== 'solde' ? transactionForm.to_field : '');
+                      const toField = transactionForm.to_field || 'solde';
+                      let fromName = 'Solde';
+                      let toName = 'Solde';
 
-                  <div className="modal-form-field">
-                    <Label>Transfert vers</Label>
-                    <Select
-                      value={transactionForm.to_field || 'balance'}
-                      onValueChange={(value) => {
-                        const nextTo = value || 'balance';
-                        // Set productId to the source product (from_field) if it's a product
-                        // Otherwise, if transferring to a product, use that as productId
-                        const nextProductId = transactionForm.from_field !== 'balance' ? transactionForm.from_field : (nextTo !== 'balance' ? nextTo : '');
-                        
-                        // Update description based on new values
-                        const fromField = transactionForm.from_field || 'balance';
-                        let fromName = 'Solde';
-                        let toName = 'Solde';
-                        
-                        if (fromField !== 'balance') {
-                          const fromProduct = products.find((p: any) => p.id === fromField);
-                          if (fromProduct) {
-                            fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
-                          }
-                        }
-                        
-                        if (nextTo !== 'balance') {
-                          const toProduct = products.find((p: any) => p.id === nextTo);
-                          if (toProduct) {
-                            toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
-                          }
-                        }
-                        
-                        const newDescription = `Transfert de ${fromName} vers ${toName}.`;
-                        
-                        setTransactionForm({
-                          ...transactionForm,
-                          to_field: nextTo,
-                          productId: nextProductId,
-                          description: newDescription,
-                        });
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="balance">Solde</SelectItem>
-                        {products.map((p: any) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}{p.reference ? ` (${p.reference})` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      if (nextFrom !== 'solde') {
+                        const fromProduct = products.find((p: any) => p.id === nextFrom);
+                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                      }
+                      if (toField !== 'solde') {
+                        const toProduct = products.find((p: any) => p.id === toField);
+                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                      }
+
+                      setTransactionForm({
+                        ...transactionForm,
+                        from_field: nextFrom,
+                        productId: nextProductId,
+                        description: `Transfert de ${fromName} vers ${toName}.`,
+                      });
+                    }}
+                  />
+
+                  <ProductTransferSelect
+                    label="Transfert vers"
+                    value={transactionForm.to_field || 'solde'}
+                    products={products}
+                    onValueChange={(nextTo) => {
+                      const nextProductId = transactionForm.from_field !== 'solde' ? transactionForm.from_field : (nextTo !== 'solde' ? nextTo : '');
+                      const fromField = transactionForm.from_field || 'solde';
+                      let fromName = 'Solde';
+                      let toName = 'Solde';
+
+                      if (fromField !== 'solde') {
+                        const fromProduct = products.find((p: any) => p.id === fromField);
+                        if (fromProduct) fromName = fromProduct.name + (fromProduct.reference ? ` (${fromProduct.reference})` : '');
+                      }
+                      if (nextTo !== 'solde') {
+                        const toProduct = products.find((p: any) => p.id === nextTo);
+                        if (toProduct) toName = toProduct.name + (toProduct.reference ? ` (${toProduct.reference})` : '');
+                      }
+
+                      setTransactionForm({
+                        ...transactionForm,
+                        to_field: nextTo,
+                        productId: nextProductId,
+                        description: `Transfert de ${fromName} vers ${toName}.`,
+                      });
+                    }}
+                  />
 
                   {transferProduct && (
                     <div className="modal-form-field">
@@ -1048,10 +1098,10 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                           })
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="text-slate-700 [&[data-placeholder]]:text-slate-600">
                           <SelectValue placeholder="Sélectionnez une période d'intérêt" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                           {interestPeriodOptions.map((option) => (
                             <SelectItem key={option} value={option}>
                               {option}
@@ -1064,7 +1114,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
 
                   {/* Warning message for products without available funds */}
                   {showAvailableFundsWarning && (
-                    <div className="modal-form-field">
+                    <div className="modal-form-field col-span-2">
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                         <div className="font-semibold text-yellow-800 mb-1">⚠️ Attention</div>
                         <div className="text-sm text-yellow-700">
@@ -1096,7 +1146,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   required
                 />
               </div>
-              <div className="modal-form-field">
+              <div className="modal-form-field col-span-2">
                 <Label>Description</Label>
                 <Textarea
                   value={transactionForm.description}
@@ -1110,7 +1160,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
                     {getAvailableStatuses().map((status) => (
                       <SelectItem key={status} value={status}>
                         {getStatusLabel(status, transactionForm.type)}
@@ -1119,7 +1169,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   </SelectContent>
                 </Select>
               </div>
-              <div className="modal-form-actions">
+              </div>
+              <div className="modal-form-actions mt-4">
                 <Button type="button" variant="outline" disabled={isCreatingTransaction} onClick={() => {
                   setIsTransactionDialogOpen(false);
                   setIsCreatingTransaction(false);
@@ -1129,8 +1180,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     description: '',
                     status: 'en_attente_paiement',
                     datetime: '',
-                    from_field: 'balance',
-                    to_field: 'balance',
+                    from_field: 'solde',
+                    to_field: 'solde',
                     productId: '',
                     interestPeriod: '',
                     visibleByClient: true
@@ -1179,6 +1230,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 onEdit={(transaction) => {
                   openEditModal(transaction);
                 }}
+                onValidateAndGenerate={handleValidateAndGenerate}
                 emptyMessage="Aucune transaction"
               />
 

@@ -68,7 +68,7 @@ export function ViewTransactionModal({
         transaction?.transfer_to ||
         transaction?.to_field ||
         null;
-      const normalizedProductId = productId && productId !== 'balance' && productId !== 'trading' ? String(productId) : null;
+      const normalizedProductId = productId && productId !== 'solde' && productId !== 'trading' ? String(productId) : null;
       if (normalizedProductId) {
         setProductLoadError(null);
         apiCall(`/api/products/${normalizedProductId}/`)
@@ -203,12 +203,12 @@ export function ViewTransactionModal({
   const assetInfo = extractAssetInfo(transaction.description || '');
   const assetProductId = findAssetProductId(assetInfo.name, assetInfo.reference);
   const transferTo = transaction.transfer_to || transaction.to_field || transaction.to || null;
-  const hasTransferProductTarget = transferTo && transferTo !== 'balance' && transferTo !== 'trading';
+  const hasTransferProductTarget = transferTo && transferTo !== 'solde' && transferTo !== 'trading';
   const hasSubscriptionProductId = Boolean(
     subscriptionDetails?.productId || transaction.productId || transaction.product_id
   );
   
-  // Check if this is an investment transfert (transfer_to is a product ID, not 'balance')
+  // Check if this is an investment transfert (transfer_to is a product ID, not 'solde')
   const isInvestmentTransfer = transaction.type === 'transfert' && (hasTransferProductTarget || hasSubscriptionProductId);
 
   const formatDateValue = (value: any) => {
@@ -420,8 +420,8 @@ export function ViewTransactionModal({
                     <Label className="text-slate-600 font-semibold">Transfert de</Label>
                     <p className="text-slate-900 mt-1">
                       {(() => {
-                        const fromField = transaction.transfer_from || transaction.from_field || 'balance';
-                        if (fromField === 'balance') {
+                        const fromField = transaction.transfer_from || transaction.from_field || 'solde';
+                        if (fromField === 'solde') {
                           return 'Solde';
                         }
                         const fromProduct = products.find((p: any) => p.id === fromField);
@@ -436,8 +436,8 @@ export function ViewTransactionModal({
                     <Label className="text-slate-600 font-semibold">Transfert vers</Label>
                     <p className="text-slate-900 mt-1">
                       {(() => {
-                        const toField = transaction.transfer_to || transaction.to_field || 'balance';
-                        if (toField === 'balance') {
+                        const toField = transaction.transfer_to || transaction.to_field || 'solde';
+                        if (toField === 'solde') {
                           return 'Solde';
                         }
                         if (toField === 'trading') {

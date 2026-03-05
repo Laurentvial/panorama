@@ -98,11 +98,11 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           runningTradingPortfolio -= amount;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash balance
-          // They increase investedCapital (available funds) because they add money to the cash balance
+          // Interest transactions credit gains to cash solde
+          // They increase investedCapital (available funds) because they add money to the cash solde
           runningInvestedCapital += amount;
           // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash balance
+          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           runningProfitLoss -= amount;
           break;
         case 'frais':
@@ -111,9 +111,9 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           break;
         case 'transfert': {
           const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-          if (transferTo && transferTo !== 'balance') {
+          if (transferTo && transferTo !== 'solde') {
             runningTradingPortfolio += amount;
-          } else if (transferTo === 'balance') {
+          } else if (transferTo === 'solde') {
             runningTradingPortfolio -= amount;
           } else if (transaction.productId) {
             runningTradingPortfolio += amount;

@@ -2937,13 +2937,13 @@ def _calculate_real_invested_capital(client_id: str, product_id: str, *, up_to_d
     
     # Subtract transfers FROM the product (withdrawals)
     # Withdrawal can be identified by:
-    # 1. transfer_to='balance' AND product_id=product_id (product field set on transaction)
-    # 2. transfer_to='balance' AND transfer_from=product_id (transfer_from field set)
+    # 1. transfer_to='solde' AND product_id=product_id (product field set on transaction)
+    # 2. transfer_to='solde' AND transfer_from=product_id (transfer_from field set)
     # 3. transfer_from=product_id (regardless of transfer_to, if transfer_from is set)
     # We use distinct() to avoid counting the same transaction twice
     withdrawals = qs.filter(
-        Q(transfer_to='balance', product_id=product_id) |
-        Q(transfer_to='balance', transfer_from=product_id) |
+        Q(transfer_to='solde', product_id=product_id) |
+        Q(transfer_to='solde', transfer_from=product_id) |
         Q(transfer_from=product_id)
     ).distinct()
     for txn in withdrawals:
@@ -3031,7 +3031,7 @@ def calculate_withdrawal_recalculation_metadata(
     """
     resolved_product = product
     if resolved_product is None:
-        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
+        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'solde':
             resolved_product = Product.objects.filter(id=withdrawal_txn.transfer_from).first()
         if resolved_product is None and withdrawal_txn.product:
             resolved_product = withdrawal_txn.product
@@ -3281,7 +3281,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
 
     Investment definition:
     - txn.type == 'transfert'
-    - txn.transfer_to is a product id (not 'balance')
+    - txn.transfer_to is a product id (not 'solde')
     """
     if txn.type != 'transfert':
         return None
@@ -3292,7 +3292,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
         pid = txn.subscription_details.get('productId')
         if pid:
             product = Product.objects.filter(id=str(pid)).first()
-    if product is None and txn.transfer_to and txn.transfer_to != 'balance':
+    if product is None and txn.transfer_to and txn.transfer_to != 'solde':
         product = Product.objects.filter(id=txn.transfer_to).first()
     if product is None:
         product = _extract_product_from_description(txn.description or '')
@@ -3389,51 +3389,51 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
     # Check if this is a withdrawal by looking at the original transaction
     # For withdrawals, we create a temp transaction with transfer_to=product.id to simulate investment
     # But we need to check the original transaction's transfer_to to know if it's a withdrawal
-    # We can detect this by checking if transfer_from was originally 'balance' (meaning it's a temp transaction for withdrawal)
+    # We can detect this by checking if transfer_from was originally 'solde' (meaning it's a temp transaction for withdrawal)
     # OR by checking if the transaction ID matches a withdrawal pattern
-    # Actually, the safest way is to check: if transfer_to == product.id AND transfer_from == 'balance',
+    # Actually, the safest way is to check: if transfer_to == product.id AND transfer_from == 'solde',
     # AND the transaction was originally a withdrawal (we can't know this directly, so we need another way)
     # Better approach: check if this is a withdrawal by looking at the description or by checking
-    # if transfer_from == 'balance' AND we're in a withdrawal context
+    # if transfer_from == 'solde' AND we're in a withdrawal context
     
-    # For withdrawals, the temp transaction has transfer_to=product.id and transfer_from='balance'
-    # But we need to subtract, not add. We can detect this by checking if transfer_from == 'balance'
+    # For withdrawals, the temp transaction has transfer_to=product.id and transfer_from='solde'
+    # But we need to subtract, not add. We can detect this by checking if transfer_from == 'solde'
     # AND the transaction is being used for withdrawal recalculation
-    # Actually, simpler: if transfer_to == product.id AND transfer_from == 'balance' AND 
+    # Actually, simpler: if transfer_to == product.id AND transfer_from == 'solde' AND 
     # the transaction ID is the same as a withdrawal transaction, it's a withdrawal
     
     # The issue is: when we create a temp transaction for withdrawal, it looks like an investment
     # but we need to subtract it. We can detect this by checking the original transaction.
     # Since we don't have access to the original transaction here, we need to pass a flag
-    # OR we can check: if transfer_from == 'balance' AND transfer_to == product.id, 
+    # OR we can check: if transfer_from == 'solde' AND transfer_to == product.id, 
     # it might be a temp transaction for withdrawal. But this is ambiguous.
     
     # Better solution: Check if the transaction description indicates a withdrawal
-    # OR: Pass a flag through the context, OR: Check if transfer_from == 'balance' 
+    # OR: Pass a flag through the context, OR: Check if transfer_from == 'solde' 
     # which would indicate this is a temp transaction created for withdrawal
     
-    # Actually, the simplest fix: if transfer_from == 'balance' AND transfer_to == product.id,
+    # Actually, the simplest fix: if transfer_from == 'solde' AND transfer_to == product.id,
     # this is likely a temp transaction for withdrawal, so we should check the original transaction
     # But we don't have it here. Let's check the description pattern instead.
     
     # Check if this is a temporary transaction created for withdrawal recalculation
-    # These have transfer_to=product.id and transfer_from='balance' but represent a withdrawal
+    # These have transfer_to=product.id and transfer_from='solde' but represent a withdrawal
     # For withdrawals, we need to subtract the withdrawal amount from the capital
     # IMPORTANT: We need to distinguish between:
-    # - Normal investment: transfer_from='balance' (or None), transfer_to=product.id, description doesn't contain "vers Solde"
-    # - Withdrawal temp: transfer_from='balance', transfer_to=product.id, AND (_is_withdrawal_temp=True OR description contains "vers Solde")
+    # - Normal investment: transfer_from='solde' (or None), transfer_to=product.id, description doesn't contain "vers Solde"
+    # - Withdrawal temp: transfer_from='solde', transfer_to=product.id, AND (_is_withdrawal_temp=True OR description contains "vers Solde")
     is_withdrawal_temp_transaction = (
         getattr(txn, '_is_withdrawal_temp', False) or
-        (txn.transfer_from == 'balance' and 
+        (txn.transfer_from == 'solde' and 
          txn.transfer_to == product.id and
          ('vers Solde' in (txn.description or '') or 
-          'vers balance' in (txn.description or '').lower()))
+          'vers solde' in (txn.description or '').lower()))
     )
     
     # Debug logging for withdrawal detection
     import logging
     logger = logging.getLogger(__name__)
-    if txn.transfer_from == 'balance' and txn.transfer_to == product.id:
+    if txn.transfer_from == 'solde' and txn.transfer_to == product.id:
         logger.info(f"Checking withdrawal temp transaction for txn {txn.id}: "
                     f"_is_withdrawal_temp={getattr(txn, '_is_withdrawal_temp', False)}, "
                     f"transfer_from='{txn.transfer_from}', transfer_to='{txn.transfer_to}', "
@@ -3474,7 +3474,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
         real_invested_capital += current_txn_amount
         logger.info(f"Investment detected for txn {txn.id}: adding {current_txn_amount} to capital. "
                     f"Capital after investment: {real_invested_capital}")
-    elif txn.transfer_to == 'balance' or txn.transfer_from == product.id:
+    elif txn.transfer_to == 'solde' or txn.transfer_from == product.id:
         # This is a direct withdrawal: subtract the withdrawal amount from the capital
         real_invested_capital -= current_txn_amount
         logger.info(f"Direct withdrawal detected for txn {txn.id}: subtracting {current_txn_amount} from capital. "
@@ -3506,7 +3506,7 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
             pass
     
     # Log final capital for debugging - ALWAYS log for withdrawal temp transactions
-    if txn.transfer_from == 'balance' and txn.transfer_to == product.id:
+    if txn.transfer_from == 'solde' and txn.transfer_to == product.id:
         logger.info(f"Final capital calculation for withdrawal temp transaction {txn.id}: "
                    f"real_invested_capital={real_invested_capital}, "
                    f"invested_amount={invested_amount}, "
@@ -3716,11 +3716,11 @@ def recalculate_positions_for_product_withdrawal(
             return execution_summary
         
         # Determine the product from which capital is being withdrawn
-        # For withdrawals (transfert product -> balance), the product is the source (transfer_from)
+        # For withdrawals (transfert product -> solde), the product is the source (transfer_from)
         product: Product | None = None
         
         # First, try to get product from transfer_from (most reliable for withdrawals)
-        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'balance':
+        if withdrawal_txn.transfer_from and withdrawal_txn.transfer_from != 'solde':
             try:
                 product = Product.objects.get(id=withdrawal_txn.transfer_from)
             except Product.DoesNotExist:
@@ -3730,8 +3730,8 @@ def recalculate_positions_for_product_withdrawal(
         if product is None and withdrawal_txn.product:
             product = withdrawal_txn.product
         
-        # If still not found and transfer_to == 'balance', try to extract from description
-        if product is None and withdrawal_txn.transfer_to == 'balance':
+        # If still not found and transfer_to == 'solde', try to extract from description
+        if product is None and withdrawal_txn.transfer_to == 'solde':
             product = _extract_product_from_description(withdrawal_txn.description or '')
         
         # If we still don't have a product, we can't proceed
@@ -3747,7 +3747,7 @@ def recalculate_positions_for_product_withdrawal(
         
         # Verify this is indeed a withdrawal
         is_withdrawal = (
-            withdrawal_txn.transfer_to == 'balance' or
+            withdrawal_txn.transfer_to == 'solde' or
             withdrawal_txn.transfer_from == product.id
         )
         if not is_withdrawal:
@@ -4003,7 +4003,7 @@ def calculate_addition_recalculation_metadata(
     """
     resolved_product = product
     if resolved_product is None:
-        if addition_txn.transfer_to and addition_txn.transfer_to != 'balance':
+        if addition_txn.transfer_to and addition_txn.transfer_to != 'solde':
             resolved_product = Product.objects.filter(id=addition_txn.transfer_to).first()
         if resolved_product is None and addition_txn.product:
             resolved_product = addition_txn.product
@@ -4132,11 +4132,11 @@ def recalculate_positions_for_product_addition(
             return execution_summary
         
         # Determine the product to which capital is being added
-        # For additions (transfert balance -> product), the product is the destination (transfer_to)
+        # For additions (transfert solde -> product), the product is the destination (transfer_to)
         product: Product | None = None
         
         # Try to get product from transfer_to (most reliable for additions)
-        if addition_txn.transfer_to and addition_txn.transfer_to != 'balance':
+        if addition_txn.transfer_to and addition_txn.transfer_to != 'solde':
             try:
                 product = Product.objects.get(id=addition_txn.transfer_to)
             except Product.DoesNotExist:
@@ -4160,7 +4160,7 @@ def recalculate_positions_for_product_addition(
         # Verify this is indeed an addition (investment)
         is_addition = (
             addition_txn.transfer_to == product.id and
-            addition_txn.transfer_from == 'balance'
+            addition_txn.transfer_from == 'solde'
         )
         if not is_addition:
             execution_summary['status'] = 'skipped_not_addition'
@@ -4531,7 +4531,7 @@ def create_interest_transaction_for_period_if_complete(
     the payment frequency.
     
     Args:
-        txn: Investment transaction (transfert balance -> product)
+        txn: Investment transaction (transfert solde -> product)
         period_index: Period index to check (0-based)
         trigger: Optional trigger string for logging
     
@@ -4543,7 +4543,7 @@ def create_interest_transaction_for_period_if_complete(
     
     try:
         # Verify this is an investment transaction
-        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'balance':
+        if txn.type != 'transfert' or not txn.transfer_to or txn.transfer_to == 'solde':
             return None
         
         # Get the product
