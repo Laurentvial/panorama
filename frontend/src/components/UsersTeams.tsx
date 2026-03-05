@@ -1,11 +1,15 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { useUser } from '../contexts/UserContext';
 import '../styles/UsersTeam.css';
 import '../styles/PageHeader.css';
 import { UsersTab } from './UsersTab';
 import { TeamsTab } from './TeamsTab';
 
 export function UsersTeams() {
+  const { currentUser } = useUser();
+  const isTeamleader = (currentUser?.role || '').toLowerCase().trim() === 'teamleader';
+
   return (
     <div className="users-teams-container">
       <div className="page-header-section">
@@ -13,20 +17,26 @@ export function UsersTeams() {
         <p className="page-subtitle">Gestion des utilisateurs et des équipes</p>
       </div>
 
-      <Tabs defaultValue="users" className="users-teams-tabs">
-        <TabsList>
-          <TabsTrigger value="users">Utilisateurs</TabsTrigger>
-          <TabsTrigger value="teams">Équipes</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="users" className="users-teams-tab-content">
+      {isTeamleader ? (
+        <div className="users-teams-tab-content">
           <UsersTab />
-        </TabsContent>
+        </div>
+      ) : (
+        <Tabs defaultValue="users" className="users-teams-tabs">
+          <TabsList>
+            <TabsTrigger value="users">Utilisateurs</TabsTrigger>
+            <TabsTrigger value="teams">Équipes</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="teams" className="users-teams-tab-content">
-          <TeamsTab />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="users" className="users-teams-tab-content">
+            <UsersTab />
+          </TabsContent>
+
+          <TabsContent value="teams" className="users-teams-tab-content">
+            <TeamsTab />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

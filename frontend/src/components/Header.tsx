@@ -13,6 +13,7 @@ import { HiOutlineBell, HiOutlineLogout, HiOutlineUser } from 'react-icons/hi';
 import { useTheme } from '../contexts/ThemeContext';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { apiCall } from '../utils/api';
+import { formatRoleLabel } from '../utils/constants';
 import '../styles/Header.css';
 
 type AppNotification = {
@@ -231,7 +232,7 @@ export function Header({ user }: HeaderProps) {
                     {fullName && user?.email && (
                       <p className="header-user-email">{user?.email}</p>
                     )}
-                    {user?.role && <p className="header-user-role">{user?.role}</p>}
+                    {user?.role && <p className="header-user-role">{formatRoleLabel(user.role)}</p>}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />

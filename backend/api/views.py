@@ -3138,6 +3138,19 @@ def update_own_profile(request):
 @permission_classes([IsAuthenticated])
 def team_list(request):
     teams = Team.objects.all()
+    try:
+        requester_details = UserDetails.objects.get(django_user=request.user)
+        role = (requester_details.role or '').lower().strip()
+        if role == 'teamleader':
+            team_memberships = requester_details.team_memberships.all()
+            team_ids = [tm.team_id for tm in team_memberships if tm.team_id]
+            if team_ids:
+                teams = Team.objects.filter(id__in=team_ids)
+            else:
+                # Teamleader with no team: return no teams
+                teams = Team.objects.none()
+    except UserDetails.DoesNotExist:
+        pass
     serializer = TeamSerializer(teams, many=True)
     return Response({'teams': serializer.data})
 
@@ -3228,9 +3241,24 @@ def team_detail(request, team_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_list(request):
-    # Return all users regardless of role (admin, teamleader, gestionnaire, etc.)
-    # No filtering by role or active status - show all users
+    # Admin: return all users. Teamleader: return only users in their team(s).
     users = UserDetails.objects.all()
+    try:
+        requester_details = UserDetails.objects.get(django_user=request.user)
+        role = (requester_details.role or '').lower().strip()
+        if role == 'teamleader':
+            team_memberships = requester_details.team_memberships.all()
+            team_ids = [tm.team_id for tm in team_memberships if tm.team_id]
+            if team_ids:
+                # Only users who are in at least one of the teamleader's teams
+                users = UserDetails.objects.filter(
+                    team_memberships__team_id__in=team_ids
+                ).distinct()
+            else:
+                # Teamleader with no team: only themselves
+                users = UserDetails.objects.filter(django_user=request.user)
+    except UserDetails.DoesNotExist:
+        pass  # No UserDetails (e.g. superuser), return all
     serializer = UserDetailsSerializer(users, many=True, context={'request': request})
     return Response({'users': serializer.data})
 

@@ -50,6 +50,7 @@ const Settings = lazy(() => import('./components/Settings').then(m => ({ default
 // Role constants for route protection (must match Sidebar menuItems)
 const ROLES_ALL = ['admin', 'teamleader', 'gestionnaire'] as const;
 const ROLES_ADMIN_ONLY = ['admin'] as const;
+const ROLES_ADMIN_AND_TEAMLEADER = ['admin', 'teamleader'] as const;
 
 // Loading fallback component
 const LoadingFallback = () => (
@@ -161,7 +162,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/users" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_AND_TEAMLEADER}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <UsersAndTeams />
@@ -204,7 +205,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/ribs" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageRibs />
@@ -213,7 +214,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/assets" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageAssets />
@@ -222,7 +223,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/useful-links" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageUsefulLinks />
@@ -276,14 +277,14 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <PlacementsWrapper />
                             </Layout>
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements/add" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <AddProduct />
@@ -292,7 +293,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/produits-investissements/edit/:id" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <EditProduct />

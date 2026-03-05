@@ -6,6 +6,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { TeamDetail } from '../types';
 import { apiCall } from '../utils/api';
+import { formatRoleLabel } from '../utils/constants';
 import { useUsers } from '../hooks/useUsers';
 import { Crown, UserMinus, Save, X } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
@@ -274,7 +275,7 @@ export function TeamDetailDialog({ team, isOpen, onOpenChange, onTeamUpdated }: 
                               )}
                             </div>
                           </td>
-                          <td style={{ padding: '12px 8px' }}>{member.userData?.role || '-'}</td>
+                          <td style={{ padding: '12px 8px' }}>{member.userData?.role ? formatRoleLabel(member.userData.role) : '-'}</td>
                           <td style={{ padding: '12px 8px' }}>{formatDate(member.createdAt)}</td>
                           <td style={{ padding: '12px 8px', textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>

@@ -187,7 +187,7 @@ export function RegisterPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Administrateur</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="teamleader">Chef d'équipe</SelectItem>
                   <SelectItem value="gestionnaire">Gestionnaire</SelectItem>
                 </SelectContent>

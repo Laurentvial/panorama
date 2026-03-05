@@ -31,12 +31,12 @@ const menuItems = [
   { id: 'platform-logs', label: 'Logs plateforme', icon: ClipboardList, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/platform-logs' },
   { id: 'positions', label: 'Positions', icon: ChartPie, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/positions' },
   { id: 'messagerie', label: 'Messagerie', icon: Mail, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/messagerie' },
-  { id: 'manage-assets', label: 'Actifs externes', icon: TrendingUp, roles: ['admin'], path: '/admin/manage/assets' },
-  { id: 'placements', label: 'Produits financiers internes', icon: Package, roles: ['admin'], path: '/admin/produits-investissements' },
-  { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin'], path: '/admin/manage/ribs' },
-  { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin'], path: '/admin/manage/useful-links' },
+  { id: 'manage-assets', label: 'Actifs externes', icon: TrendingUp, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/assets' },
+  { id: 'placements', label: 'Produits financiers internes', icon: Package, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/produits-investissements' },
+  { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/ribs' },
+  { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/useful-links' },
   { id: 'manage-news', label: 'Gestion Actualités', icon: Newspaper, roles: ['admin'], path: '/admin/manage/news' },
-  { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin'], path: '/admin/users' },
+  { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin', 'teamleader'], path: '/admin/users' },
   { id: 'settings', label: 'Paramètres', icon: SettingsIcon, roles: ['admin'], path: '/admin/settings' },
 ];
 

@@ -230,9 +230,7 @@ export function EditUserModal({ isOpen, onClose, user, onUserUpdated }: EditUser
                 <SelectValue placeholder="Sélectionner un rôle" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="admin">
-                  Administrateur
-                </SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="teamleader">Chef d'équipe</SelectItem>
                 <SelectItem value="gestionnaire">Gestionnaire</SelectItem>
               </SelectContent>

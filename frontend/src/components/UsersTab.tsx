@@ -9,6 +9,7 @@ import { CreateUserModal } from './CreateUserModal';
 import { EditUserModal } from './EditUserModal';
 import { ResetPasswordModal } from './ResetPasswordModal';
 import { User } from '../types';
+import { formatRoleLabel } from '../utils/constants';
 import LoadingIndicator from './LoadingIndicator';
 
 export function UsersTab() {
@@ -168,7 +169,7 @@ export function UsersTab() {
                         </td>
                         <td className="users-teams-table-email">{user.email || user.username || '-'}</td>
                         <td>
-                          <Badge variant="outline">{user.role}</Badge>
+                          <Badge variant="outline">{formatRoleLabel(user.role)}</Badge>
                         </td>
                         <td>
                           {teamName || '-'}
