@@ -131,23 +131,28 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "0"))  # Default 0 seconds (close immediately)
 
 if DATABASE_URL:
-    # Heroku/Scalingo provides DATABASE_URL; enable persistent connections + require SSL
-    # Use shorter conn_max_age to prevent connection pool exhaustion
+    # Heroku/Scalingo/Render: require SSL. Coolify/internal Docker: often no SSL.
+    # Set DB_SSL_REQUIRE=false for Coolify or other internal Postgres without SSL.
+    ssl_require = os.getenv("DB_SSL_REQUIRE", "true").lower() in ("true", "1", "yes")
     db_config = dj_database_url.config(
         default=DATABASE_URL,
         conn_max_age=CONN_MAX_AGE,
-        ssl_require=True,
+        ssl_require=ssl_require,
     )
     # Explicitly set CONN_MAX_AGE to ensure it's applied (override any defaults)
     # Force CONN_MAX_AGE to 0 to ensure connections are closed immediately
     db_config['CONN_MAX_AGE'] = 0  # Force immediate closure
     # Add connection options to prevent too many connections
     db_config.setdefault('OPTIONS', {})
-    db_config['OPTIONS'].update({
+    db_options = {
         'connect_timeout': 10,
         # Ensure connections are properly closed and limit idle time
         'options': '-c statement_timeout=30000 -c idle_in_transaction_session_timeout=10000',  # 30s statement timeout, 10s idle timeout
-    })
+    }
+    # Explicitly set sslmode in OPTIONS to override URL parsing (Coolify/internal Postgres often needs disable)
+    if not ssl_require:
+        db_options['sslmode'] = 'disable'
+    db_config['OPTIONS'].update(db_options)
     # Disable atomic requests to prevent long-held connections
     db_config['ATOMIC_REQUESTS'] = False
     DATABASES = {

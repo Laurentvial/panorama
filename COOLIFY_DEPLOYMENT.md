@@ -162,6 +162,7 @@ Add these in the project or application environment:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | From PostgreSQL resource (e.g. `postgresql://user:pass@panorama-db:5432/postgres`) |
+| `DB_SSL_REQUIRE` | Yes (Coolify) | Set to `false` – Coolify Postgres does not use SSL for internal connections |
 | `SECRET_KEY` | Yes | Django secret (generate: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`) |
 | `CRON_SECRET_TOKEN` | Yes | Random token for cron endpoints (e.g. `openssl rand -hex 32`) |
 | `BACKEND_PUBLIC_URL` | Yes | Public backend URL (e.g. `https://api.yourdomain.com`) |
@@ -275,6 +276,16 @@ Alternatively, run migrations on an empty DB and re-seed if acceptable.
 - Verify `DATABASE_URL` is correct and the DB is reachable from the backend container
 - Ensure `SECRET_KEY` and `CRON_SECRET_TOKEN` are set
 - Check `/health/` endpoint returns 200
+
+### "server does not support SSL, but SSL was required"
+
+Coolify's PostgreSQL container does not use SSL for internal connections. Add this environment variable to your backend service:
+
+```
+DB_SSL_REQUIRE=false
+```
+
+Then redeploy.
 
 ### Frontend shows wrong API URL
 
