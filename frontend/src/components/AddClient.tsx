@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -12,6 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collap
 import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUsers } from '../hooks/useUsers';
+import { useUser } from '../contexts/UserContext';
 import { toast } from 'sonner';
 import '../styles/Clients.css';
 import '../styles/PageHeader.css';
@@ -19,6 +20,19 @@ import '../styles/PageHeader.css';
 export function AddClient() {
   const navigate = useNavigate();
   const { users, loading: usersLoading } = useUsers();
+  const { currentUser } = useUser();
+  const hasSetDefaultManager = useRef(false);
+
+  // Par défaut, sélectionner l'utilisateur courant comme gestionnaire s'il est dans la liste
+  useEffect(() => {
+    if (hasSetDefaultManager.current || usersLoading || !currentUser?.id) return;
+    hasSetDefaultManager.current = true; // Marquer comme traité pour éviter les re-exécutions
+    const currentUserId = String(currentUser.id);
+    const isInList = users.some((u: any) => String(u.id) === currentUserId);
+    if (isInList) {
+      setFormData(prev => (prev.managerId === '' ? { ...prev, managerId: currentUserId } : prev));
+    }
+  }, [usersLoading, users, currentUser?.id]);
   const [loading, setLoading] = useState(false);
   const [isPatrimonialOpen, setIsPatrimonialOpen] = useState(false);
   const [newProfession, setNewProfession] = useState('');
@@ -285,7 +299,7 @@ export function AddClient() {
       }
 
       toast.success('Client créé avec succès');
-      navigate('/admin/clients');
+      navigate('/admin/clients', { state: { clientCreated: true } });
     } catch (error: any) {
       console.error('Error creating client:', error);
       let errorMessage = 'Erreur lors de la création du client';

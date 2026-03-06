@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Plus, Search, Eye, LogIn, Trash2, Users, UserCheck, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
 import LoadingIndicator from './LoadingIndicator';
@@ -20,6 +20,7 @@ interface ClientsProps {
 
 export function Clients({ onSelectClient }: ClientsProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { users, loading: usersLoading, error: usersError } = useUsers();
   const { currentUser } = useUser();
   const [clients, setClients] = useState<any[]>([]);
@@ -47,9 +48,14 @@ export function Clients({ onSelectClient }: ClientsProps) {
     }
   }, [users, usersLoading, usersError]);
 
+  // Refetch when navigating to clients page (e.g. after creating or returning from add)
   useEffect(() => {
     loadData();
-  }, []);
+    // Clear clientCreated state after handling (avoids stale state in history)
+    if (location.state?.clientCreated) {
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.key]);
 
   async function loadData() {
     try {
@@ -240,12 +246,12 @@ export function Clients({ onSelectClient }: ClientsProps) {
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce client ?')) return;
     
     try {
-      // TODO: Implémenter l'endpoint de suppression
-      // await apiCall(`/api/clients/${clientId}/`, { method: 'DELETE' });
-      console.log('Supprimer client:', clientId);
+      await apiCall(`/api/clients/${clientId}/delete/`, { method: 'DELETE' });
+      toast.success('Client supprimé');
       loadData();
     } catch (error) {
       console.error('Error deleting client:', error);
+      toast.error('Erreur lors de la suppression du client');
     }
   }
 

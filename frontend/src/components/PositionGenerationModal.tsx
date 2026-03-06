@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -6,6 +6,8 @@ import { X, Loader2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
+
+const API_TIMEOUT_MS = 120_000; // 2 minutes
 
 interface PeriodRate {
   periodIndex: number;
@@ -158,6 +160,9 @@ export function PositionGenerationModal({
     note: string | null;
   } | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isUserCancelRef = useRef<boolean>(false);
+
   useEffect(() => {
     if (isOpen && transaction) {
       // Reset state when modal opens
@@ -178,20 +183,32 @@ export function PositionGenerationModal({
       setIsRecalculationSaved(false);
       setRecalculationPreview(null);
       setRecalculationExecution(null);
-      
+
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
       generateRates();
     }
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [isOpen, transaction, isWithdrawal]);
 
   const generateRates = async () => {
     if (!transaction) return;
-    
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    isUserCancelRef.current = false;
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, API_TIMEOUT_MS);
+
     try {
       setStep('loading-rates');
       setError(null);
-      
+
       console.log('PositionGenerationModal - Calling generate-rates API for transaction:', transaction.id);
       console.log('PositionGenerationModal - Transaction details:', {
         id: transaction.id,
@@ -201,10 +218,10 @@ export function PositionGenerationModal({
         status: transaction.status,
         product: transaction.product
       });
-      
+
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-rates/`,
-        { method: 'POST' }
+        { method: 'POST', signal: controller.signal }
       );
       
       console.log('PositionGenerationModal - Response from generate-rates:', response);
@@ -252,9 +269,22 @@ export function PositionGenerationModal({
         initialEdited[rate.periodIndex] = rate.baseRatePct;
       });
       setEditedRates(initialEdited);
-      
+
       setStep('review-rates');
     } catch (err: any) {
+      clearTimeout(timeoutId);
+      abortControllerRef.current = null;
+
+      if (err?.name === 'AbortError') {
+        if (isUserCancelRef.current) return;
+        setError(
+          'La requête a expiré. La génération peut prendre du temps pour les produits avec beaucoup de transactions. Réessayez ou contactez l\'administrateur.'
+        );
+        setStep('review-rates');
+        toast.error('La requête a expiré. Réessayez.');
+        return;
+      }
+
       console.error('Error generating rates:', err);
       // Check if error has response with error message
       let errorMessage = 'Erreur lors de la génération des taux';
@@ -270,6 +300,19 @@ export function PositionGenerationModal({
       setError(errorMessage);
       setStep('review-rates'); // Show review step so user can see the error
       toast.error(errorMessage);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const handleCancelLoading = () => {
+    isUserCancelRef.current = true;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    if (step === 'loading-positions') {
+      setStep('review-rates');
+    } else if (step === 'loading-rates') {
+      onClose();
     }
   };
 
@@ -283,10 +326,19 @@ export function PositionGenerationModal({
   };
 
   const handleContinue = async () => {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    isUserCancelRef.current = false;
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, API_TIMEOUT_MS);
+
     try {
       setStep('loading-positions');
       setError(null);
-      
+
       // Validate rates - ensure all periods have valid rates
       const ratesToUse: Record<number, number> = {};
       
@@ -305,6 +357,7 @@ export function PositionGenerationModal({
         }
         
         if (isNaN(rateValue) || rateValue < 0) {
+          clearTimeout(timeoutId);
           toast.error(`Le taux pour la période ${periodIdx + 1} est invalide`);
           setStep('review-rates');
           return;
@@ -327,18 +380,21 @@ export function PositionGenerationModal({
         const maxVal = positionsPerMonthMax.trim() !== '' ? parseInt(positionsPerMonthMax.trim(), 10) : null;
         
         if (minVal !== null && (isNaN(minVal) || minVal < 0)) {
+          clearTimeout(timeoutId);
           setPositionsRangeError('Le minimum doit être un nombre entier >= 0');
           setStep('review-rates');
           return;
         }
-        
+
         if (maxVal !== null && (isNaN(maxVal) || maxVal < 0)) {
+          clearTimeout(timeoutId);
           setPositionsRangeError('Le maximum doit être un nombre entier >= 0');
           setStep('review-rates');
           return;
         }
-        
+
         if (minVal !== null && maxVal !== null && minVal > maxVal) {
+          clearTimeout(timeoutId);
           setPositionsRangeError('Le minimum doit être <= au maximum');
           setStep('review-rates');
           return;
@@ -358,7 +414,8 @@ export function PositionGenerationModal({
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-positions/`,
         {
           method: 'POST',
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
         }
       );
       
@@ -385,8 +442,22 @@ export function PositionGenerationModal({
       
       setStep('review-positions');
     } catch (err: any) {
+      clearTimeout(timeoutId);
+      abortControllerRef.current = null;
+
+      if (err?.name === 'AbortError') {
+        if (isUserCancelRef.current) return;
+        setError(
+          'La requête a expiré. La génération peut prendre du temps pour les produits avec beaucoup de transactions. Réessayez ou contactez l\'administrateur.'
+        );
+        setPositionsRangeError(null);
+        setStep('review-rates');
+        toast.error('La requête a expiré. Réessayez.');
+        return;
+      }
+
       console.error('Error generating positions:', err);
-      
+
       // Check if it's a positions range error
       if (err?.error_type === 'positions_range_too_high' || err?.message?.includes('fourchette') || err?.message?.includes('positions/mois')) {
         setPositionsRangeError(err?.message || 'La fourchette demandée est trop élevée pour cette durée');
@@ -395,9 +466,11 @@ export function PositionGenerationModal({
         setError(err?.message || 'Erreur lors de la génération des positions');
         setPositionsRangeError(null);
       }
-      
+
       toast.error(err?.message || 'Erreur lors de la génération des positions');
       setStep('review-rates');
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
@@ -805,6 +878,9 @@ export function PositionGenerationModal({
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
               <p style={{ fontSize: '16px', color: '#64748b' }}>Génération des taux de rentabilité...</p>
+              <Button type="button" variant="outline" onClick={handleCancelLoading} style={{ marginTop: '20px' }}>
+                Annuler
+              </Button>
             </div>
           )}
 
@@ -987,6 +1063,9 @@ export function PositionGenerationModal({
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <Loader2 className="animate-spin" style={{ width: '48px', height: '48px', margin: '0 auto 20px', color: '#3b82f6' }} />
               <p style={{ fontSize: '16px', color: '#64748b' }}>Génération des positions...</p>
+              <Button type="button" variant="outline" onClick={handleCancelLoading} style={{ marginTop: '20px' }}>
+                Annuler
+              </Button>
             </div>
           )}
 

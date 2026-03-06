@@ -1155,6 +1155,23 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
                   placeholder="Description de la transaction"
                 />
+                {transactionForm.type === 'depot' && (
+                  <div className="flex flex-col gap-1 mt-1.5 p-2 rounded bg-slate-100">
+                    <span className="text-[11px] text-slate-500">Suggestion</span>
+                    <div className="flex flex-wrap gap-1">
+                      {['Virement SEPA', 'CB'].map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          className="text-[11px] px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors"
+                          onClick={() => setTransactionForm({ ...transactionForm, description: suggestion })}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="modal-form-field">
                 <Label>Statut</Label>

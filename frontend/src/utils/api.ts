@@ -205,6 +205,10 @@ async function retryRequest(
       // If we get a response (even if error status), it means server is up
       return response;
     } catch (error: any) {
+      // Never retry on abort - user cancelled or timeout
+      if (error?.name === 'AbortError') {
+        throw error;
+      }
       if (isNetworkError(error) && i < retries - 1) {
         // Wait before retrying with exponential backoff
         await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
