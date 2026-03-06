@@ -225,12 +225,12 @@ Coolify Scheduled Tasks run `curl` to hit HTTP endpoints. The backend exposes cr
 1. Coolify → Scheduled Tasks (or within the backend application)
 2. Add Task 1:
    - **Name**: refresh-prices
-   - **Command**: `curl --fail -X POST "https://api.yourdomain.com/api/cron/refresh-prices/?token=YOUR_CRON_SECRET_TOKEN"`
+   - **Command**: `curl --fail -X POST "http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_CRON_SECRET_TOKEN"`
    - **Schedule**: `0 * * * *` (hourly)
 3. Add Task 2:
    - **Name**: process-positions
-   - **Command**: `curl --fail -X POST "https://api.yourdomain.com/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN"`
-   - **Schedule**: `0 * * * *` (hourly)
+   - **Command**: `curl --fail -X POST "http://YOUR_SERVER_IP/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN"`
+   - **Schedule**: `0 0 * * *` (daily at midnight)
 
 Replace `YOUR_CRON_SECRET_TOKEN` with the value you set in the backend env.
 
@@ -245,7 +245,7 @@ Replace `YOUR_CRON_SECRET_TOKEN` with the value you set in the backend env.
 Example:
 
 ```
-https://api.yourdomain.com/api/cron/refresh-prices/?token=YOUR_TOKEN&limit=20&min_age_seconds=240
+http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN&limit=20&min_age_seconds=240
 ```
 
 ## 9. Database Migration from Render
@@ -295,7 +295,7 @@ Then redeploy.
 ### Cron tasks fail
 
 - Verify `CRON_SECRET_TOKEN` matches in backend env and curl command
-- Test manually: `curl -X POST "https://api.yourdomain.com/api/cron/refresh-prices/?token=YOUR_TOKEN"`
+- Test manually: `curl -X POST "http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN"`
 - Check Coolify logs for the scheduled task
 
 ### CORS errors
