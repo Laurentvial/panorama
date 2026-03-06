@@ -66,6 +66,8 @@ from urllib.parse import quote
 import secrets
 import logging
 
+logger = logging.getLogger(__name__)
+
 from .emailing import (
     send_resend_email,
     render_email,
@@ -850,12 +852,19 @@ class ClientView(generics.ListAPIView):
         return qs
     
     def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        online_client_ids = _get_online_client_ids(request)
-        return Response({
-            'clients': response.data,
-            'onlineClientIds': online_client_ids,
-        })
+        try:
+            response = super().list(request, *args, **kwargs)
+            online_client_ids = _get_online_client_ids(request)
+            return Response({
+                'clients': response.data,
+                'onlineClientIds': online_client_ids,
+            })
+        except Exception as exc:
+            logger.exception(
+                "ClientView.list failed: %s. Check DATABASE_URL, DB_SSL_REQUIRE, migrations, Cloudinary.",
+                exc,
+            )
+            raise
 
 
 @api_view(['GET'])

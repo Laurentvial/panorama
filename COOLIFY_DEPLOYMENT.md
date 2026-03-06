@@ -298,6 +298,27 @@ Then redeploy.
 - Test manually: `curl -X POST "http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN"`
 - Check Coolify logs for the scheduled task
 
+### 500 Internal Server Error on /api/clients/
+
+If the Clients page returns `GET /api/clients/ 500 (Internal Server Error)`:
+
+1. **Check backend logs** – Coolify → Backend Application → Logs. The traceback will show the real error (e.g. database, missing table, Cloudinary).
+
+2. **Database configuration** (most common):
+   - `DATABASE_URL` must point to the Coolify PostgreSQL internal URL, e.g. `postgresql://user:pass@panorama-db:5432/postgres` (host = your PostgreSQL resource name in Coolify).
+   - Set `DB_SSL_REQUIRE=false` – Coolify internal Postgres does not use SSL. Without this, you may see "server does not support SSL, but SSL was required".
+
+3. **Migrations** – If using a fresh Coolify database, run migrations. The backend runs them on startup; if startup fails before that, run manually in Coolify → Backend → Terminal:
+   ```bash
+   python manage.py migrate
+   ```
+
+4. **Migrated database** – If you imported a dump from Render/Scalingo, ensure the import completed successfully and all tables exist.
+
+5. **Cloudinary** – Ensure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` are set. Missing credentials can cause 500 when serializing clients with profile photos.
+
+6. **Quick test** – Call `https://api.yourdomain.com/health/` to confirm the backend is up. Then test `/api/clients/` with a valid JWT in the `Authorization` header.
+
 ### CORS errors
 
 - Backend is configured with `CORS_ALLOW_ALL_ORIGINS = True`; if you restrict to specific origins, add `https://yourdomain.com` and `https://www.yourdomain.com` to `CORS_ALLOWED_ORIGINS`
