@@ -43,9 +43,9 @@ Dans les paramètres du service backend → **Variables**, ajoutez les variables
 | `SECRET_KEY` | Clé secrète Django (générez-en une nouvelle pour la production) | `django-insecure-...` |
 | `DEBUG` | Mode debug (désactivé en production) | `False` |
 | `DATABASE_URL` | URL de la base de données (ajoutée automatiquement si vous utilisez Railway PostgreSQL) | `postgresql://...` |
-| `CLOUDINARY_CLOUD_NAME` | Nom du cloud Cloudinary | Votre nom Cloudinary |
-| `CLOUDINARY_API_KEY` | Clé API Cloudinary | Votre clé API |
-| `CLOUDINARY_API_SECRET` | Secret API Cloudinary | Votre secret API |
+| `AWS_ACCESS_KEY_ID` | Clé d'accès S3/MinIO | Votre clé d'accès |
+| `AWS_SECRET_ACCESS_KEY` | Secret S3/MinIO | Votre secret |
+| `AWS_STORAGE_BUCKET_NAME` | Nom du bucket S3/MinIO | Votre bucket |
 | `GEMINI_API_KEY` | Clé API Google Gemini (optionnel) | Votre clé API Gemini |
 
 #### Variables optionnelles
@@ -162,10 +162,10 @@ railway run python manage.py shell
 - Vérifiez que `CORS_ALLOW_ALL_ORIGINS = True` ou que vos domaines sont dans `CORS_ALLOWED_ORIGINS`
 - Vérifiez que le middleware CORS est bien configuré
 
-### Erreurs Cloudinary
+### Erreurs S3/MinIO
 
-- Vérifiez que `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, et `CLOUDINARY_API_SECRET` sont définis
-- Vérifiez vos identifiants Cloudinary
+- Vérifiez que `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, et `AWS_STORAGE_BUCKET_NAME` sont définis
+- Vérifiez vos identifiants S3/MinIO
 
 ## Avantages de Railway vs Heroku
 

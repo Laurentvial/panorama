@@ -5035,7 +5035,7 @@ Entrée (JSON):
 
         # Download logo from external API to storage if it's an external URL
         # This avoids making requests to external APIs on every page load
-        if logo_url and logo_url.startswith('http') and not any(x in logo_url for x in ['cloudinary.com', 's3.', 'minio']):
+        if logo_url and logo_url.startswith('http') and not any(x in logo_url for x in ['s3.', 'minio']):
             try:
                 logo_url = download_logo_to_storage(logo_url, asset_id)
             except Exception as e:

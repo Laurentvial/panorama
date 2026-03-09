@@ -22,9 +22,9 @@ Check Railway dashboard → Your Service → Variables. All of these MUST be set
 - ✅ `SECRET_KEY` - Django secret key (generate with: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`)
 - ✅ `DEBUG` - Set to `False` for production
 - ✅ `DATABASE_URL` - Automatically set if you added PostgreSQL service
-- ✅ `CLOUDINARY_CLOUD_NAME` - Your Cloudinary cloud name
-- ✅ `CLOUDINARY_API_KEY` - Your Cloudinary API key
-- ✅ `CLOUDINARY_API_SECRET` - Your Cloudinary API secret
+- ✅ `AWS_ACCESS_KEY_ID` - S3/MinIO access key
+- ✅ `AWS_SECRET_ACCESS_KEY` - S3/MinIO secret key
+- ✅ `AWS_STORAGE_BUCKET_NAME` - S3/MinIO bucket name
 
 **Optional Variables:**
 - `GEMINI_API_KEY` - Only if using Gemini AI features
@@ -35,7 +35,7 @@ Check Railway dashboard → Your Service → Variables. All of these MUST be set
 In Railway dashboard → Your Service → Deployments → Click on latest deployment → View Logs
 
 Look for:
-- ❌ `ValueError: Cloudinary credentials are REQUIRED` → Missing Cloudinary env vars
+- ❌ `ValueError: S3/MinIO not configured` → Missing AWS_* env vars
 - ❌ `django.core.exceptions.ImproperlyConfigured` → Missing SECRET_KEY or DATABASE_URL
 - ❌ `OperationalError: could not connect to server` → Database connection issue
 - ❌ `Address already in use` → Port binding issue (shouldn't happen with $PORT)
@@ -87,9 +87,9 @@ export PORT=8000
 export SECRET_KEY="test-key"
 export DEBUG=False
 export DATABASE_URL="postgresql://..."
-export CLOUDINARY_CLOUD_NAME="..."
-export CLOUDINARY_API_KEY="..."
-export CLOUDINARY_API_SECRET="..."
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_STORAGE_BUCKET_NAME="..."
 gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT
 ```
 
@@ -118,9 +118,9 @@ Set Root Directory to `backend` in Railway dashboard → Service → Settings
 - [ ] SECRET_KEY is set (not the default insecure key)
 - [ ] DEBUG is set to `False`
 - [ ] DATABASE_URL is set (from PostgreSQL service)
-- [ ] CLOUDINARY_CLOUD_NAME is set
-- [ ] CLOUDINARY_API_KEY is set
-- [ ] CLOUDINARY_API_SECRET is set
+- [ ] AWS_ACCESS_KEY_ID is set
+- [ ] AWS_SECRET_ACCESS_KEY is set
+- [ ] AWS_STORAGE_BUCKET_NAME is set
 - [ ] PostgreSQL service is running
 - [ ] Migrations completed successfully (check logs)
 - [ ] Build completed without errors (check logs)
@@ -139,7 +139,7 @@ If the issue persists:
 | Error | Solution |
 |-------|----------|
 | `Application failed to respond` | Check logs, verify PORT binding, check env vars |
-| `Cloudinary credentials are REQUIRED` | Add CLOUDINARY_* env vars |
+| `S3/MinIO not configured` | Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_STORAGE_BUCKET_NAME |
 | `SECRET_KEY` not set | Add SECRET_KEY env var |
 | `could not connect to server` | Check DATABASE_URL, ensure PostgreSQL is running |
 | `ModuleNotFoundError: No module named 'X'` | Add missing package to requirements.txt |

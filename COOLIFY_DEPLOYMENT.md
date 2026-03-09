@@ -166,9 +166,10 @@ Add these in the project or application environment:
 | `SECRET_KEY` | Yes | Django secret (generate: `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`) |
 | `CRON_SECRET_TOKEN` | Yes | Random token for cron endpoints (e.g. `openssl rand -hex 32`) |
 | `BACKEND_PUBLIC_URL` | Yes | Public backend URL (e.g. `https://api.yourdomain.com`) |
-| `CLOUDINARY_CLOUD_NAME` | Yes | Cloudinary cloud name |
-| `CLOUDINARY_API_KEY` | Yes | Cloudinary API key |
-| `CLOUDINARY_API_SECRET` | Yes | Cloudinary API secret |
+| `AWS_ACCESS_KEY_ID` | Yes | S3/MinIO access key |
+| `AWS_SECRET_ACCESS_KEY` | Yes | S3/MinIO secret key |
+| `AWS_STORAGE_BUCKET_NAME` | Yes | S3/MinIO bucket name |
+| `AWS_S3_ENDPOINT_URL` | For MinIO | e.g. `http://minio:9000` |
 | `DEBUG` | No | Set to `false` for production |
 | `GEMINI_API_KEY` | No | For AI features |
 | `ALPHA_VANTAGE_API_KEY` | No | For price refresh |
@@ -315,7 +316,7 @@ If the Clients page returns `GET /api/clients/ 500 (Internal Server Error)`:
 
 4. **Migrated database** – If you imported a dump from Render/Scalingo, ensure the import completed successfully and all tables exist.
 
-5. **Cloudinary** – Ensure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` are set. Missing credentials can cause 500 when serializing clients with profile photos.
+5. **S3/MinIO** – Ensure `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_STORAGE_BUCKET_NAME` are set. Missing credentials can cause 500 when serializing clients with profile photos.
 
 6. **Quick test** – Call `https://api.yourdomain.com/health/` to confirm the backend is up. Then test `/api/clients/` with a valid JWT in the `Authorization` header.
 

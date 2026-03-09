@@ -1393,8 +1393,7 @@ class NewsPostSerializer(serializers.ModelSerializer):
             try:
                 image_url = obj.image.url
                 if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    if 'res.cloudinary.com' in image_url or image_url.startswith('http'):
-                        return image_url
+                    return image_url
                 request = self.context.get('request')
                 if request and image_url:
                     if not image_url.startswith('http'):
@@ -1487,25 +1486,14 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
                 # Check if it's a PDF file
                 is_pdf = obj.file.name.lower().endswith('.pdf') if obj.file.name else False
                 
-                # Cloudinary URLs are public by default, but for PDFs use media proxy to ensure correct Content-Type and Content-Disposition
+                # Absolute URLs (S3/MinIO) - return as-is. For PDFs on external URLs, media proxy ensures correct Content-Type.
                 if file_url and (file_url.startswith('http://') or file_url.startswith('https://')):
-                    # Verify it's a valid Cloudinary URL
-                    if 'res.cloudinary.com' in file_url:
-                        # For PDFs, ALWAYS use media proxy to ensure:
-                        # - Correct Content-Type (application/pdf)
-                        # - Content-Disposition: inline (for browser preview)
-                        # - Proper CORS headers
-                        if is_pdf:
-                            request = self.context.get('request')
-                            if request:
-                                # Use media proxy with the full Cloudinary URL encoded
-                                # This ensures proper headers for browser preview
-                                from urllib.parse import quote
-                                encoded_url = quote(file_url, safe='')
-                                return request.build_absolute_uri(f'/api/media/{encoded_url}/')
-                        # For non-PDFs, return Cloudinary URL directly
-                        return file_url
-                    # If it's another absolute URL, return as-is
+                    if is_pdf:
+                        request = self.context.get('request')
+                        if request:
+                            from urllib.parse import quote
+                            encoded_url = quote(file_url, safe='')
+                            return request.build_absolute_uri(f'/api/media/{encoded_url}/')
                     return file_url
                 else:
                     # Local path - use media proxy for better CORS support

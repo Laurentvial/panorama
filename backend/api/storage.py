@@ -75,6 +75,6 @@ class S3MediaStorage(Storage):
         return self._storage.size(name)
 
 
-# Backward compatibility for migrations that reference CloudinaryMediaStorage
+# Backward compatibility: migrations reference CloudinaryMediaStorage (now S3)
 CloudinaryMediaStorage = S3MediaStorage
 CloudinaryDeferredStorage = S3DeferredStorage
