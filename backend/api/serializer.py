@@ -1111,15 +1111,11 @@ class ProductSerializer(serializers.ModelSerializer):
                 # Get the URL using the storage backend
                 image_url = obj.image.url
                 
-                # Cloudinary URLs are public by default, so we can return them directly
-                # If URL is already absolute (Cloudinary URL), return as-is
+                # S3/MinIO URLs are public by default, return absolute URLs as-is
                 if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    # Ensure it's a valid Cloudinary URL format
-                    if 'res.cloudinary.com' in image_url or image_url.startswith('http'):
-                        return image_url
+                    return image_url
                 
-                # If URL is relative or not a Cloudinary URL, try to build absolute URI
-                # This should not happen with Cloudinary, but handle it gracefully
+                # If URL is relative, try to build absolute URI
                 request = self.context.get('request')
                 if request and image_url:
                     # If it's a relative path, build absolute URI

@@ -216,60 +216,54 @@ STATIC_URL = '/static/'
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# Media files (user uploads)
-# Cloudinary configuration
-CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.getenv('CLOUDINARY_CLOUD_NAME', ''),
-    'API_KEY': os.getenv('CLOUDINARY_API_KEY', ''),
-    'API_SECRET': os.getenv('CLOUDINARY_API_SECRET', ''),
-}
+# Media files (user uploads) - S3/MinIO storage
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', '')
+AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL') or None  # e.g. https://minio.votredomaine.com or http://minio:9000
+AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
+AWS_S3_USE_SSL = os.getenv('AWS_S3_USE_SSL', 'true').lower() in ('true', '1', 'yes')
+AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '')
+# MinIO does not support object ACLs - use bucket policy for public read instead
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False  # Public URLs without signed query params
+AWS_S3_ADDRESSING_STYLE = 'path'  # Required for MinIO
+AWS_S3_FILE_OVERWRITE = False
 
-CLOUDINARY_CONFIGURED = bool(
-    CLOUDINARY_STORAGE['CLOUD_NAME'] and
-    CLOUDINARY_STORAGE['API_KEY'] and
-    CLOUDINARY_STORAGE['API_SECRET']
+S3_CONFIGURED = bool(
+    AWS_ACCESS_KEY_ID and
+    AWS_SECRET_ACCESS_KEY and
+    AWS_STORAGE_BUCKET_NAME
 )
 IS_RENDER = os.getenv('RENDER', '').lower() == 'true'
 
-# Validate Cloudinary: required locally; on Render allow startup without it (add secrets after first deploy)
-if not CLOUDINARY_CONFIGURED:
+# Validate S3/MinIO: required locally; on Render allow startup without it (add secrets after first deploy)
+if not S3_CONFIGURED:
     if IS_RENDER:
-        # Render: allow startup so user can add CLOUDINARY_* in Dashboard and redeploy
         pass
     else:
         raise ValueError(
-            "Cloudinary credentials are REQUIRED. "
-            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment variables. "
-            "Local file storage is no longer supported - all media files must be uploaded to Cloudinary."
+            "S3/MinIO credentials are REQUIRED. "
+            "Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_STORAGE_BUCKET_NAME in your environment variables. "
+            "Local file storage is no longer supported - all media files must be uploaded to S3/MinIO."
         )
 
-# Configure Cloudinary globally when credentials are present
-if CLOUDINARY_CONFIGURED:
-    import cloudinary
-    cloudinary.config(
-        cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
-        api_key=CLOUDINARY_STORAGE['API_KEY'],
-        api_secret=CLOUDINARY_STORAGE['API_SECRET'],
-    )
-
-# Use Cloudinary storage for ALL media files - no local storage fallback
-# On Render without Cloudinary: use deferred storage that raises clear error on first upload
+# Use S3/MinIO storage for ALL media files
+# On Render without S3: use deferred storage that raises clear error on first upload
 # Django 4.2+ storage config (required for Django 5+).
 STORAGES = {
     'default': {
         'BACKEND': (
-            'api.storage.CloudinaryMediaStorage' if CLOUDINARY_CONFIGURED
-            else 'api.storage.CloudinaryDeferredStorage'
+            'api.storage.S3MediaStorage' if S3_CONFIGURED
+            else 'api.storage.S3DeferredStorage'
         ),
     },
     'staticfiles': {
         'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
     },
 }
-# Set MEDIA_URL and MEDIA_ROOT for compatibility (even though Cloudinary handles URLs differently)
-# Cloudinary URLs are generated dynamically, but we need these for urlpatterns
-MEDIA_URL = '/media/'  # Not used by Cloudinary, but needed for compatibility
-MEDIA_ROOT = BASE_DIR / "media"  # Not used by Cloudinary, but needed for compatibility
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / "media"
 
 # Upload handling
 # On Windows/Python 3.14 we have seen issues with Django's TemporaryFile cleanup during uploads.

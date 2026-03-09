@@ -1410,7 +1410,7 @@ export function ManageAssets() {
                               >
                                 {uploadingLogo ? 'Téléchargement...' : 'Télécharger le logo'}
                               </Button>
-                              {!formData.logoUrl && formData.alphaVantageSymbol && (
+                              {formData.alphaVantageSymbol && (
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -1441,7 +1441,20 @@ export function ManageAssets() {
                         </div>
                       </div>
                     ) : (
-                      <div>
+                      <div className="flex items-start gap-4">
+                        {formData.logoUrl && (
+                          <div className="flex-shrink-0">
+                            <img 
+                              src={formData.logoUrl} 
+                              alt={formData.name || 'Logo'}
+                              className="w-20 h-20 rounded object-contain border border-slate-200 bg-white p-1"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          </div>
+                        )}
+                        <div className="flex-1 space-y-2">
                         <Input
                           id="asset-logo-file"
                           type="file"
@@ -1450,7 +1463,7 @@ export function ManageAssets() {
                           className="cursor-pointer"
                           disabled={uploadingLogo || fetchingLogo || deletingLogo}
                         />
-                        {editingAsset && !formData.logoUrl && formData.alphaVantageSymbol && (
+                        {editingAsset && formData.alphaVantageSymbol && (
                           <Button
                             type="button"
                             variant="outline"
@@ -1476,12 +1489,13 @@ export function ManageAssets() {
                             ✓ Logo téléchargé avec succès
                           </p>
                         )}
+                        </div>
                       </div>
                     )}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
                     {editingAsset 
-                      ? 'Cliquez sur "Récupérer depuis l\'API" pour obtenir le logo automatiquement, ou téléchargez-le manuellement. Formats acceptés: JPG, PNG, GIF (max 5MB)'
+                      ? 'Cliquez sur "Récupérer depuis l\'API" pour obtenir le logo automatiquement, ou sélectionnez un fichier puis "Télécharger le logo" pour le remplacer manuellement. Formats acceptés: JPG, PNG, GIF (max 5MB)'
                       : 'Sélectionnez un logo à télécharger après la création de l\'actif. Formats acceptés: JPG, PNG, GIF (max 5MB)'}
                   </p>
                 </div>

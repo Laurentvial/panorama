@@ -672,7 +672,7 @@ class UserCreateView(generics.CreateAPIView):
             user_details = UserDetails.objects.filter(django_user=user).first()
             profile_photo_file = self.request.FILES.get('profilePhoto')
             if user_details and profile_photo_file:
-                # Build a stable filename for Cloudinary
+                # Build a stable filename for storage
                 original_filename = profile_photo_file.name or 'photo'
                 _, ext = os.path.splitext(original_filename)
                 ext = ext.lower() if ext else '.jpg'
@@ -861,7 +861,7 @@ class ClientView(generics.ListAPIView):
             })
         except Exception as exc:
             logger.exception(
-                "ClientView.list failed: %s. Check DATABASE_URL, DB_SSL_REQUIRE, migrations, Cloudinary.",
+                "ClientView.list failed: %s. Check DATABASE_URL, DB_SSL_REQUIRE, migrations, S3/MinIO.",
                 exc,
             )
             raise
@@ -1050,7 +1050,7 @@ def client_create(request):
     try:
         client = Client.objects.create(**client_data)
         
-        # Handle profile photo upload explicitly for Cloudinary
+        # Handle profile photo upload explicitly for storage
         if profile_photo_file:
             try:
                 # Get file extension
@@ -1064,21 +1064,21 @@ def client_create(request):
                 # Save with custom filename - this will upload to cloud storage
                 client.profile_photo.save(custom_filename, profile_photo_file, save=True)
                 
-                # Verify the photo was saved and uploaded to Cloudinary
+                # Verify the photo was saved and uploaded to storage
                 if not client.profile_photo:
                     print("Warning: Profile photo upload failed - file was not saved")
                 else:
-                    # Verify Cloudinary upload
+                    # Verify storage upload
                     try:
                         storage = client.profile_photo.storage
-                        from api.storage import CloudinaryMediaStorage
-                        if isinstance(storage, CloudinaryMediaStorage):
+                        from api.storage import S3MediaStorage
+                        if isinstance(storage, S3MediaStorage):
                             photo_url = client.profile_photo.url
                             if photo_url and (photo_url.startswith('http://') or photo_url.startswith('https://')):
-                                print(f"Profile photo successfully uploaded to Cloudinary: {client.profile_photo.name}")
-                                print(f"Cloudinary URL: {photo_url[:100]}...")
+                                print(f"Profile photo successfully uploaded to storage: {client.profile_photo.name}")
+                                print(f"S3 URL: {photo_url[:100]}...")
                     except Exception as verify_error:
-                        print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                        print(f"Warning: Could not verify storage upload: {str(verify_error)}")
             except Exception as upload_error:
                 print(f"Error uploading profile photo: {str(upload_error)}")
                 import traceback
@@ -1316,21 +1316,21 @@ def client_detail(request, client_id):
                 # Save with custom filename - this will upload to cloud storage
                 client.profile_photo.save(custom_filename, profile_photo_file, save=True)
                 
-                # Verify the photo was saved and uploaded to Cloudinary
+                # Verify the photo was saved and uploaded to storage
                 if not client.profile_photo:
                     return Response({'error': 'Profile photo upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
-                # Verify Cloudinary upload
+                # Verify storage upload
                 try:
                     storage = client.profile_photo.storage
-                    from api.storage import CloudinaryMediaStorage
-                    if isinstance(storage, CloudinaryMediaStorage):
+                    from api.storage import S3MediaStorage
+                    if isinstance(storage, S3MediaStorage):
                         photo_url = client.profile_photo.url
                         if photo_url and (photo_url.startswith('http://') or photo_url.startswith('https://')):
-                            print(f"Profile photo successfully uploaded to Cloudinary: {client.profile_photo.name}")
-                            print(f"Cloudinary URL: {photo_url[:100]}...")
+                            print(f"Profile photo successfully uploaded to storage: {client.profile_photo.name}")
+                            print(f"storage URL: {photo_url[:100]}...")
                 except Exception as verify_error:
-                    print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                    print(f"Warning: Could not verify storage upload: {str(verify_error)}")
             except Exception as upload_error:
                 print(f"Error uploading profile photo: {str(upload_error)}")
                 import traceback
@@ -3688,17 +3688,17 @@ def asset_delete(request, asset_id):
     asset.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
-def download_logo_to_cloudinary(logo_url: str, asset_id: str) -> str:
+def download_logo_to_storage(logo_url: str, asset_id: str) -> str:
     """
-    Download a logo from an external URL and upload it to Cloudinary.
-    Returns the Cloudinary URL.
+    Download a logo from an external URL and upload it to S3/MinIO storage.
+    Returns the storage URL.
     """
     if not logo_url or not logo_url.startswith('http'):
         return logo_url  # Return as-is if not a valid HTTP URL
     
     try:
         import requests
-        from api.storage import CloudinaryMediaStorage
+        from api.storage import S3MediaStorage
         from django.core.files.base import ContentFile
         
         # Download the logo from the external URL
@@ -3729,21 +3729,21 @@ def download_logo_to_cloudinary(logo_url: str, asset_id: str) -> str:
         # Read image content
         image_content = response.content
         
-        # Upload to Cloudinary
-        storage = CloudinaryMediaStorage()
+        # Upload to S3/MinIO storage
+        storage = S3MediaStorage()
         content_file = ContentFile(image_content)
         content_file.name = custom_filename
         
         filename = storage.save(custom_filename, content_file)
-        cloudinary_url = storage.url(filename)
+        storage_url = storage.url(filename)
         
-        print(f"Logo downloaded from {logo_url} and uploaded to Cloudinary: {cloudinary_url}")
-        return cloudinary_url
+        print(f"Logo downloaded from {logo_url} and uploaded to storage: {storage_url}")
+        return storage_url
         
     except Exception as e:
         import traceback
         error_msg = str(e)
-        print(f"Error downloading logo from {logo_url} to Cloudinary: {error_msg}")
+        print(f"Error downloading logo from {logo_url} to storage: {error_msg}")
         print(traceback.format_exc())
         # Return original URL if download fails
         return logo_url
@@ -3779,11 +3779,11 @@ def asset_upload_logo(request, asset_id):
         
         print(f"Uploading asset logo: {original_filename} as {custom_filename} for asset {asset_id}")
         
-        # Upload to Cloudinary using the storage backend
-        from api.storage import CloudinaryMediaStorage
+        # Upload to S3/MinIO using the storage backend
+        from api.storage import S3MediaStorage
         from django.core.files.base import ContentFile
         
-        storage = CloudinaryMediaStorage()
+        storage = S3MediaStorage()
         
         # Read file content and create ContentFile
         logo_file.seek(0)
@@ -3791,7 +3791,7 @@ def asset_upload_logo(request, asset_id):
         content_file = ContentFile(file_content)
         content_file.name = custom_filename
         
-        # Upload to Cloudinary
+        # Upload to storage
         filename = storage.save(custom_filename, content_file)
         
         # Get the URL
@@ -5033,14 +5033,14 @@ Entrée (JSON):
         category = _country_to_fr_import(category)
         region = _country_to_fr_import(region)
 
-        # Download logo from external API to Cloudinary if it's an external URL
+        # Download logo from external API to storage if it's an external URL
         # This avoids making requests to external APIs on every page load
-        if logo_url and logo_url.startswith('http') and 'cloudinary.com' not in logo_url:
+        if logo_url and logo_url.startswith('http') and not any(x in logo_url for x in ['cloudinary.com', 's3.', 'minio']):
             try:
-                logo_url = download_logo_to_cloudinary(logo_url, asset_id)
+                logo_url = download_logo_to_storage(logo_url, asset_id)
             except Exception as e:
                 # If download fails, keep original URL
-                print(f"Warning: Could not download logo to Cloudinary, keeping original URL: {str(e)}")
+                print(f"Warning: Could not download logo to storage, keeping original URL: {str(e)}")
 
         asset = Asset.objects.create(
             id=asset_id,
@@ -6061,7 +6061,7 @@ def useful_link_create(request):
             useful_link_id = uuid.uuid4().hex[:12]
         useful_link = serializer.save(id=useful_link_id)
         
-        # Handle image upload explicitly for Cloudinary
+        # Handle image upload explicitly for storage
         if 'image' in request.FILES:
             try:
                 image_file = request.FILES['image']
@@ -6076,21 +6076,21 @@ def useful_link_create(request):
                 # Save with custom filename - this will upload to cloud storage
                 useful_link.image.save(custom_filename, image_file, save=True)
                 
-                # Verify the image was saved and uploaded to Cloudinary
+                # Verify the image was saved and uploaded to storage
                 if not useful_link.image:
                     return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
-                # Verify Cloudinary upload
+                # Verify storage upload
                 try:
                     storage = useful_link.image.storage
-                    from api.storage import CloudinaryMediaStorage
-                    if isinstance(storage, CloudinaryMediaStorage):
+                    from api.storage import S3MediaStorage
+                    if isinstance(storage, S3MediaStorage):
                         image_url = useful_link.image.url
                         if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                            print(f"Image successfully uploaded to Cloudinary: {useful_link.image.name}")
-                            print(f"Cloudinary URL: {image_url[:100]}...")
+                            print(f"Image successfully uploaded to storage: {useful_link.image.name}")
+                            print(f"S3 URL: {image_url[:100]}...")
                 except Exception as verify_error:
-                    print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                    print(f"Warning: Could not verify storage upload: {str(verify_error)}")
             except Exception as upload_error:
                 print(f"Error uploading image: {str(upload_error)}")
                 import traceback
@@ -6125,7 +6125,7 @@ def useful_link_update(request, useful_link_id):
         useful_link.image.delete(save=False)
         useful_link.image = None
     
-    # Handle image upload explicitly for Cloudinary
+    # Handle image upload explicitly for storage
     if 'image' in request.FILES:
         try:
             image_file = request.FILES['image']
@@ -6151,21 +6151,21 @@ def useful_link_update(request, useful_link_id):
             # Save with custom filename - this will upload to cloud storage
             useful_link.image.save(custom_filename, image_file, save=True)
             
-            # Verify the image was saved and uploaded to Cloudinary
+            # Verify the image was saved and uploaded to storage
             if not useful_link.image:
                 return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Verify Cloudinary upload
+            # Verify storage upload
             try:
                 storage = useful_link.image.storage
-                from api.storage import CloudinaryMediaStorage
-                if isinstance(storage, CloudinaryMediaStorage):
+                from api.storage import S3MediaStorage
+                if isinstance(storage, S3MediaStorage):
                     image_url = useful_link.image.url
                     if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                        print(f"Image successfully uploaded to Cloudinary: {useful_link.image.name}")
-                        print(f"Cloudinary URL: {image_url[:100]}...")
+                        print(f"Image successfully uploaded to storage: {useful_link.image.name}")
+                        print(f"S3 URL: {image_url[:100]}...")
             except Exception as verify_error:
-                print(f"Warning: Could not verify Cloudinary upload: {str(verify_error)}")
+                print(f"Warning: Could not verify storage upload: {str(verify_error)}")
         except Exception as upload_error:
             print(f"Error uploading image: {str(upload_error)}")
             import traceback
@@ -7727,7 +7727,7 @@ def client_transaction_create(request, client_id):
                 if app_settings.logo:
                     try:
                         logo_url = app_settings.logo.url
-                        # If it's a Cloudinary URL, use it directly
+                        # If it's a storage URL, use it directly
                         if not (logo_url.startswith('http://') or logo_url.startswith('https://')):
                             # Build absolute URL if needed
                             logo_url = request.build_absolute_uri(logo_url)
@@ -9860,68 +9860,28 @@ def product_create(request):
             # Save with custom filename - this will upload to cloud storage
             product.image.save(custom_filename, image_file, save=True)
             
-            # Verify the image was saved and uploaded to Cloudinary
+            # Verify the image was saved and uploaded to storage
             if not product.image:
                 return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Get the actual Cloudinary URL to extract the real public_id
-            # Cloudinary may add suffixes (like _vlhlvf) to filenames, so we need to use the actual public_id
-            try:
-                storage = product.image.storage
-                from api.storage import CloudinaryMediaStorage
-                if isinstance(storage, CloudinaryMediaStorage):
-                    # Get the actual Cloudinary URL
-                    cloudinary_url = product.image.url
-                    print(f"Cloudinary URL: {cloudinary_url}")
-                    
-                    # Extract public_id from Cloudinary URL
-                    # Format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}
-                    if cloudinary_url and 'res.cloudinary.com' in cloudinary_url and '/image/upload/' in cloudinary_url:
-                        # Extract the public_id from the URL
-                        url_parts = cloudinary_url.split('/image/upload/')
-                        if len(url_parts) == 2:
-                            # Remove version prefix (v1/, v2/, etc.) if present
-                            public_id_part = url_parts[1]
-                            if public_id_part.startswith('v') and '/' in public_id_part:
-                                # Skip version: v1/media/products/... -> media/products/...
-                                public_id_part = public_id_part.split('/', 1)[1]
-                            
-                            # This is the actual public_id in Cloudinary
-                            actual_public_id = public_id_part
-                            print(f"Actual Cloudinary public_id: {actual_public_id}")
-                            
-                            # Update the database with the actual public_id if it's different
-                            if product.image.name != actual_public_id:
-                                print(f"Updating database filename from '{product.image.name}' to '{actual_public_id}'")
-                                # Update the image field directly
-                                product.image.name = actual_public_id
-                                product.save(update_fields=['image'])
-                                # Refresh to verify
-                                product.refresh_from_db(fields=['image'])
-                                print(f"Updated database filename: {product.image.name}")
-            except Exception as url_error:
-                print(f"Warning: Could not extract Cloudinary public_id: {str(url_error)}")
-                import traceback
-                print(traceback.format_exc())
-            
-            # Verify the file exists in Cloudinary storage
+            # Verify the file exists in S3 storage
             try:
                 storage = product.image.storage
                 
-                # Check if storage is Cloudinary storage
-                from api.storage import CloudinaryMediaStorage
-                if isinstance(storage, CloudinaryMediaStorage):
-                    # Cloudinary handles uploads automatically and provides URLs
+                # Check if storage backend is S3
+                from api.storage import S3MediaStorage
+                if isinstance(storage, S3MediaStorage):
+                    # S3 handles uploads automatically and provides URLs
                     # Verify the image URL is accessible
                     try:
                         image_url = product.image.url
                         if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                            print(f"Image successfully uploaded to Cloudinary: {product.image.name}")
-                            print(f"Cloudinary URL: {image_url[:100]}...")
+                            print(f"Image successfully uploaded to storage: {product.image.name}")
+                            print(f"S3 URL: {image_url[:100]}...")
                         else:
                             print(f"WARNING: Image URL not generated properly: {image_url}")
                     except Exception as url_error:
-                        print(f"WARNING: Could not verify Cloudinary URL: {str(url_error)}")
+                        print(f"WARNING: Could not verify storage URL: {str(url_error)}")
                 else:
                     print(f"INFO: Storage backend is {type(storage).__name__}")
                     print(f"Image path: {product.image.name}")
@@ -9929,7 +9889,7 @@ def product_create(request):
                         print(f"Image URL: {product.image.url}")
             except Exception as verify_error:
                 import traceback
-                print(f"Warning: Could not verify image in Cloudinary: {str(verify_error)}")
+                print(f"Warning: Could not verify image in storage: {str(verify_error)}")
                 print(traceback.format_exc())
             
             # Refresh the image field to ensure the URL is updated
@@ -10113,7 +10073,7 @@ def product_contract_pdf(request, product_id):
         if app_settings.logo:
             try:
                 logo_url = app_settings.logo.url
-                # If it's a Cloudinary URL, use it directly
+                # If it's a storage URL, use it directly
                 if not (logo_url.startswith('http://') or logo_url.startswith('https://')):
                     # Build absolute URL if needed
                     logo_url = request.build_absolute_uri(logo_url)
@@ -10660,68 +10620,28 @@ def product_update(request, product_id):
             print(f"Image saved. Database filename: {product.image.name}")
             print(f"Expected filename: products/{custom_filename}")
             
-            # Verify the image was saved and uploaded to Cloudinary
+            # Verify the image was saved and uploaded to storage
             if not product.image:
                 return Response({'error': 'Image upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Get the actual Cloudinary URL to extract the real public_id
-            # Cloudinary may add suffixes (like _vlhlvf) to filenames, so we need to use the actual public_id
-            try:
-                storage = product.image.storage
-                from api.storage import CloudinaryMediaStorage
-                if isinstance(storage, CloudinaryMediaStorage):
-                    # Get the actual Cloudinary URL
-                    cloudinary_url = product.image.url
-                    print(f"Cloudinary URL: {cloudinary_url}")
-                    
-                    # Extract public_id from Cloudinary URL
-                    # Format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}
-                    if cloudinary_url and 'res.cloudinary.com' in cloudinary_url and '/image/upload/' in cloudinary_url:
-                        # Extract the public_id from the URL
-                        url_parts = cloudinary_url.split('/image/upload/')
-                        if len(url_parts) == 2:
-                            # Remove version prefix (v1/, v2/, etc.) if present
-                            public_id_part = url_parts[1]
-                            if public_id_part.startswith('v') and '/' in public_id_part:
-                                # Skip version: v1/media/products/... -> media/products/...
-                                public_id_part = public_id_part.split('/', 1)[1]
-                            
-                            # This is the actual public_id in Cloudinary
-                            actual_public_id = public_id_part
-                            print(f"Actual Cloudinary public_id: {actual_public_id}")
-                            
-                            # Update the database with the actual public_id if it's different
-                            if product.image.name != actual_public_id:
-                                print(f"Updating database filename from '{product.image.name}' to '{actual_public_id}'")
-                                # Update the image field directly
-                                product.image.name = actual_public_id
-                                product.save(update_fields=['image'])
-                                # Refresh to verify
-                                product.refresh_from_db(fields=['image'])
-                                print(f"Updated database filename: {product.image.name}")
-            except Exception as url_error:
-                print(f"Warning: Could not extract Cloudinary public_id: {str(url_error)}")
-                import traceback
-                print(traceback.format_exc())
-            
-            # Verify the file exists in Cloudinary storage
+            # Verify the file exists in S3 storage
             try:
                 storage = product.image.storage
                 
-                # Check if storage is Cloudinary storage
-                from api.storage import CloudinaryMediaStorage
-                if isinstance(storage, CloudinaryMediaStorage):
-                    # Cloudinary handles uploads automatically and provides URLs
+                # Check if storage backend is S3
+                from api.storage import S3MediaStorage
+                if isinstance(storage, S3MediaStorage):
+                    # S3 handles uploads automatically and provides URLs
                     # Verify the image URL is accessible
                     try:
                         image_url = product.image.url
                         if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                            print(f"Image successfully uploaded to Cloudinary: {product.image.name}")
-                            print(f"Cloudinary URL: {image_url[:100]}...")
+                            print(f"Image successfully uploaded to storage: {product.image.name}")
+                            print(f"S3 URL: {image_url[:100]}...")
                         else:
                             print(f"WARNING: Image URL not generated properly: {image_url}")
                     except Exception as url_error:
-                        print(f"WARNING: Could not verify Cloudinary URL: {str(url_error)}")
+                        print(f"WARNING: Could not verify storage URL: {str(url_error)}")
                 else:
                     print(f"INFO: Storage backend is {type(storage).__name__}")
                     print(f"Image path: {product.image.name}")
@@ -10729,7 +10649,7 @@ def product_update(request, product_id):
                         print(f"Image URL: {product.image.url}")
             except Exception as verify_error:
                 import traceback
-                print(f"Warning: Could not verify image in Cloudinary: {str(verify_error)}")
+                print(f"Warning: Could not verify image in storage: {str(verify_error)}")
                 print(traceback.format_exc())
             
             # Refresh the image field to ensure the URL is updated
@@ -11045,7 +10965,7 @@ def product_duplicate(request, product_id):
             new_filename = f'{new_product_id}{ext}'
             
             # Copy the image file
-            # For Cloudinary storage, we need to read the original and save it as new
+            # For S3 storage, we need to read the original and save it as new
             if original_image.storage.exists(original_image.name):
                 # Open the original image file
                 with original_image.open('rb') as original_file:
@@ -11554,20 +11474,20 @@ def app_settings(request):
                     settings_obj.logo.save(custom_filename, ContentFile(logo_file.read()), save=True)
                     uploaded_file_fields.append('logo')
                     
-                    # Verify the logo was saved and uploaded to Cloudinary
+                    # Verify the logo was saved and uploaded to storage
                     if not settings_obj.logo:
                         return Response({'error': 'Logo upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     
-                    # Verify Cloudinary upload
+                    # Verify storage upload
                     try:
                         storage = settings_obj.logo.storage
-                        from api.storage import CloudinaryMediaStorage
-                        if isinstance(storage, CloudinaryMediaStorage):
+                        from api.storage import S3MediaStorage
+                        if isinstance(storage, S3MediaStorage):
                             logo_url = settings_obj.logo.url
                             if not logo_url or not (logo_url.startswith('http://') or logo_url.startswith('https://')):
-                                return Response({'error': 'Logo upload failed - Cloudinary URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                return Response({'error': 'Logo upload failed - storage URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     except Exception:
-                        # Cloudinary verification failed, but file was saved - continue
+                        # storage verification failed, but file was saved - continue
                         pass
                 except Exception as upload_error:
                     import traceback
@@ -11597,20 +11517,20 @@ def app_settings(request):
                     settings_obj.favicon.save(custom_filename, ContentFile(favicon_file.read()), save=True)
                     uploaded_file_fields.append('favicon')
                     
-                    # Verify the favicon was saved and uploaded to Cloudinary
+                    # Verify the favicon was saved and uploaded to storage
                     if not settings_obj.favicon:
                         return Response({'error': 'Favicon upload failed - file was not saved'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     
-                    # Verify Cloudinary upload
+                    # Verify storage upload
                     try:
                         storage = settings_obj.favicon.storage
-                        from api.storage import CloudinaryMediaStorage
-                        if isinstance(storage, CloudinaryMediaStorage):
+                        from api.storage import S3MediaStorage
+                        if isinstance(storage, S3MediaStorage):
                             favicon_url = settings_obj.favicon.url
                             if not favicon_url or not (favicon_url.startswith('http://') or favicon_url.startswith('https://')):
-                                return Response({'error': 'Favicon upload failed - Cloudinary URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                                return Response({'error': 'Favicon upload failed - storage URL not available'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     except Exception:
-                        # Cloudinary verification failed, but file was saved - continue
+                        # storage verification failed, but file was saved - continue
                         pass
                 except Exception as upload_error:
                     import traceback
@@ -12019,7 +11939,7 @@ def news_delete(request, news_id):
 @authentication_classes([])
 @permission_classes([AllowAny])
 def media_proxy(request, file_path):
-    """Proxy media files (Cloudinary URLs or local paths) with proper Content-Type and Content-Disposition for CORS/preview"""
+    """Proxy media files (storage URLs or local paths) with proper Content-Type and Content-Disposition for CORS/preview"""
     from django.http import HttpResponse
     from urllib.parse import unquote
 

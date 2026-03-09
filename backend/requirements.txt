@@ -11,9 +11,8 @@ python-dotenv
 dj-database-url
 gunicorn
 google-genai
-django-cloudinary-storage
 django-storages
-cloudinary
+boto3>=1.34.0
 requests
 feedparser
 alpha_vantage

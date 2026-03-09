@@ -15,16 +15,16 @@ def check_environment():
     # Required variables (always required)
     required_vars = {
         'SECRET_KEY': 'Django secret key',
-        'CLOUDINARY_CLOUD_NAME': 'Cloudinary cloud name',
-        'CLOUDINARY_API_KEY': 'Cloudinary API key',
-        'CLOUDINARY_API_SECRET': 'Cloudinary API secret',
+        'AWS_ACCESS_KEY_ID': 'S3/MinIO access key',
+        'AWS_SECRET_ACCESS_KEY': 'S3/MinIO secret key',
+        'AWS_STORAGE_BUCKET_NAME': 'S3/MinIO bucket name',
     }
 
     for var, description in required_vars.items():
         value = os.getenv(var)
         if not value:
-            # On Render: allow startup without Cloudinary so user can add secrets after first deploy
-            if is_render and var.startswith('CLOUDINARY_'):
+            # On Render: allow startup without S3 so user can add secrets after first deploy
+            if is_render and var.startswith('AWS_'):
                 warnings.append(
                     f"Missing {var} - add it in Render Dashboard and redeploy. "
                     "Media uploads will fail until configured."
@@ -85,12 +85,15 @@ def check_django_imports():
             print("  (This will be retried when handling requests)")
             # Don't fail here - let wsgi.py handle it
         
-        # Check Cloudinary
+        # Check S3/MinIO storage
         try:
-            import cloudinary
-            print(f"✓ Cloudinary configured")
+            s3_configured = getattr(settings, 'S3_CONFIGURED', False)
+            if s3_configured:
+                print(f"✓ S3/MinIO storage configured")
+            else:
+                print(f"⚠️  S3/MinIO not configured (media uploads will fail)")
         except Exception as e:
-            print(f"⚠️  Cloudinary check failed: {e}")
+            print(f"⚠️  S3/MinIO check failed: {e}")
             print("  (This will be caught by Django settings)")
             # Don't fail here - settings.py will raise ValueError if needed
         

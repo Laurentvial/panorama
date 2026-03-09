@@ -3,22 +3,17 @@ from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 
-# Import storage - Cloudinary for media; deferred storage when not yet configured (Render bootstrap)
+# Import storage - S3/MinIO for media; deferred storage when not yet configured (Render bootstrap)
 try:
-    from api.storage import CloudinaryMediaStorage, CloudinaryDeferredStorage
-    cloudinary_config = getattr(settings, 'CLOUDINARY_STORAGE', {})
-    cloudinary_configured = (
-        cloudinary_config.get('CLOUD_NAME') and
-        cloudinary_config.get('API_KEY') and
-        cloudinary_config.get('API_SECRET')
-    )
+    from api.storage import S3MediaStorage, S3DeferredStorage
+    s3_configured = getattr(settings, 'S3_CONFIGURED', False)
     is_render = getattr(settings, 'IS_RENDER', __import__('os').environ.get('RENDER', '').lower() == 'true')
-    # Use real Cloudinary when configured; deferred (raises on first upload) when not (e.g. Render first deploy)
-    _media_storage = CloudinaryMediaStorage if cloudinary_configured else CloudinaryDeferredStorage
-    if not cloudinary_configured and not is_render:
+    # Use real S3 when configured; deferred (raises on first upload) when not (e.g. Render first deploy)
+    _media_storage = S3MediaStorage if s3_configured else S3DeferredStorage
+    if not s3_configured and not is_render:
         raise ValueError(
-            "Cloudinary credentials are REQUIRED. "
-            "Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET."
+            "S3/MinIO credentials are REQUIRED. "
+            "Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_STORAGE_BUCKET_NAME."
         )
     product_storage = _media_storage
     app_settings_storage = _media_storage
@@ -27,8 +22,8 @@ try:
     user_profile_storage = _media_storage
 except ImportError as e:
     raise ImportError(
-        "Cloudinary storage is required. "
-        "Please install django-cloudinary-storage: pip install django-cloudinary-storage"
+        "S3 storage is required. "
+        "Please install django-storages and boto3: pip install django-storages boto3"
     ) from e
 
 # Create your models here.

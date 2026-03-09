@@ -4,7 +4,7 @@
 #
 # Deploy flow:
 # 1. Deploy Blueprint (services will start with empty/placeholder vars).
-# 2. In Dashboard, add CLOUDINARY_*, etc. to the "panorama-secrets" env group.
+# 2. In Dashboard, add AWS_*, etc. to the "panorama-secrets" env group.
 # 3. Backend and cron jobs use fromGroup - no need to set vars on backend directly.
 # 4. Frontend → Environment: add VITE_URL and VITE_API_URL (backend URL).
 # 5. Redeploy backend and frontend.
@@ -16,11 +16,15 @@
 envVarGroups:
   - name: panorama-secrets
     envVars:
-      - key: CLOUDINARY_CLOUD_NAME
+      - key: AWS_ACCESS_KEY_ID
         sync: false
-      - key: CLOUDINARY_API_KEY
+      - key: AWS_SECRET_ACCESS_KEY
         sync: false
-      - key: CLOUDINARY_API_SECRET
+      - key: AWS_STORAGE_BUCKET_NAME
+        sync: false
+      - key: AWS_S3_ENDPOINT_URL
+        sync: false
+      - key: AWS_S3_REGION_NAME
         sync: false
       - key: GEMINI_API_KEY
         sync: false

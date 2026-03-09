@@ -30,6 +30,6 @@ urlpatterns = [
     path('api/', include('api.urls')),
 ]
 
-# Media files are served directly from Cloudinary - no local file serving
-# Local file storage is no longer supported - all media files must be uploaded to Cloudinary
-# All media files are accessed via Cloudinary URLs, no local serving needed
+# Media files are served directly from S3/MinIO - no local file serving
+# Local file storage is no longer supported - all media files must be uploaded to S3/MinIO
+# All media files are accessed via S3/MinIO URLs, no local serving needed
