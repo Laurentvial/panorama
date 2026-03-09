@@ -264,14 +264,8 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
 
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
-        // Si le profit_loss est dans une devise différente de EUR, convertir en EUR
-        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-          // profit_loss est en devise de l'actif, convertir en EUR: EUR = asset_ccy / fx_rate_eur_to_asset
-          positionPnl = profitLossNum / fxRate;
-        } else {
-          // Déjà en EUR ou pas de taux de change disponible
-          positionPnl = profitLossNum;
-        }
+        // profit_loss est toujours en EUR (objectif de période)
+        positionPnl = profitLossNum;
       } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
         // Calculer le P&L à partir de expected_total et invested_amount
         // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)

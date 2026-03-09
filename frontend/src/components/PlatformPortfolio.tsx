@@ -725,23 +725,8 @@ export function PlatformPortfolio() {
         // Sum P&L
         const pnlNum = pos.profit_loss == null ? null : typeof pos.profit_loss === 'string' ? parseFloat(pos.profit_loss) : Number(pos.profit_loss);
         if (pnlNum != null && Number.isFinite(pnlNum)) {
-          // Handle FX conversion if needed
-          const assetCurrency = (pos?.assetCurrency || pos?.asset_currency || pos?.asset?.currency || 'EUR').trim().toUpperCase();
-          const fxNum =
-            pos?.fx_rate_eur_to_asset == null
-              ? null
-              : typeof pos.fx_rate_eur_to_asset === 'string'
-                ? parseFloat(pos.fx_rate_eur_to_asset)
-                : Number(pos.fx_rate_eur_to_asset);
-          const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
-          
-          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-            // profit_loss is in asset currency, convert to EUR
-            totalPnl += pnlNum / fxRate;
-          } else {
-            // Already in EUR
-            totalPnl += pnlNum;
-          }
+          // profit_loss est toujours en EUR (objectif de période)
+          totalPnl += pnlNum;
         }
       }
       
@@ -924,14 +909,8 @@ export function PlatformPortfolio() {
 
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
-        // Si le profit_loss est dans une devise différente de EUR, convertir en EUR
-        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-          // profit_loss est en devise de l'actif, convertir en EUR: EUR = asset_ccy / fx_rate_eur_to_asset
-          positionPnl = profitLossNum / fxRate;
-        } else {
-          // Déjà en EUR ou pas de taux de change disponible
-          positionPnl = profitLossNum;
-        }
+        // profit_loss est toujours en EUR (objectif de période)
+        positionPnl = profitLossNum;
       } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
         // Calculer le P&L à partir de expected_total et invested_amount
         // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
@@ -1687,14 +1666,13 @@ export function PlatformPortfolio() {
                         let pnlAsset: number | null = null;
                         let pnlEur: number | null = pnlNum;
                         
-                        // Si profit_loss est stocké, il est probablement en devise de l'actif
+                        // profit_loss stocké est toujours en EUR (objectif de période)
                         if (pnlNum != null && Number.isFinite(pnlNum)) {
-                          // Si la devise n'est pas EUR, profit_loss est en devise de l'actif
                           if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-                            pnlAsset = pnlNum; // P&L en devise de l'actif
-                            pnlEur = pnlNum / fxRate; // Convertir en EUR
+                            pnlEur = pnlNum;
+                            pnlAsset = pnlNum * fxRate; // conversion EUR → devise actif pour affichage secondaire
                           } else {
-                            pnlEur = pnlNum; // Déjà en EUR
+                            pnlEur = pnlNum;
                             pnlAsset = null;
                           }
                         } else if (p?.status === 'open' && hasAsset && asset && entryPriceNum != null && qtyNum != null && qtyNum > 0) {
@@ -1721,26 +1699,30 @@ export function PlatformPortfolio() {
                         }
                         
                         // Labels pour l'affichage
-                        // Pour les positions non-EUR : afficher devise de l'actif en principal, EUR en secondaire
-                        // Pour les positions EUR : afficher EUR uniquement
+                        // profit_loss stocké = toujours en EUR → afficher EUR principal, devise actif secondaire
+                        // P&L temps réel (positions ouvertes) = en devise actif → afficher actif principal, EUR secondaire
+                        const hasStoredProfitLoss = pnlNum != null && Number.isFinite(pnlNum);
                         let pnlLabelMain: string;
                         let pnlLabelSub: string | null = null;
                         let finalPnlColor: string;
-                        
-                        if (assetCurrency !== 'EUR' && pnlAsset != null && Number.isFinite(pnlAsset)) {
-                          // Position non-EUR : devise de l'actif en principal
-                          pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
-                          // EUR en secondaire (estimation)
-                          pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) && fxRate != null && fxRate > 0
-                            ? `≈ ${formatCurrency(pnlEur)}`
+
+                        if (assetCurrency === 'EUR') {
+                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                          finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                        } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
+                          // profit_loss stocké : EUR principal, devise actif secondaire
+                          pnlLabelMain = formatCurrency(pnlEur);
+                          pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
+                            ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                             : null;
-                          // Couleur basée sur le P&L en devise de l'actif
+                          finalPnlColor = pnlEur >= 0 ? '#10b981' : '#ef4444';
+                        } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
+                          // P&L temps réel : devise actif principal, EUR secondaire
+                          pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
+                          pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
                           finalPnlColor = pnlAsset >= 0 ? '#10b981' : '#ef4444';
                         } else {
-                          // Position EUR : EUR uniquement
-                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) 
-                            ? formatCurrency(pnlEur)
-                            : '-';
+                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
                           finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         }
                         

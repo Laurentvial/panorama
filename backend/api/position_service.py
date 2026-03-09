@@ -96,6 +96,40 @@ def _period_months_from_profitability_period(period: str | None) -> float:
     return 1.0
 
 
+def _parse_subscription_date(txn: Transaction) -> date | None:
+    """
+    Parse subscription date from transaction (subscription_date or subscription_details.subscriptionDate).
+    Returns a date object if parseable, None otherwise.
+    Supports formats: dd/mm/yyyy, dd-mm-yyyy, yyyy-mm-dd.
+    """
+    sub_date = getattr(txn, 'subscription_date', None) or ''
+    if not sub_date and isinstance(getattr(txn, 'subscription_details', None), dict):
+        sub_date = (txn.subscription_details or {}).get('subscriptionDate') or ''
+    sub_date = str(sub_date).strip()
+    if not sub_date:
+        return None
+    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(sub_date, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _get_contract_start_date(txn: Transaction) -> date | None:
+    """
+    Get contract start date. Uses the date displayed in the transaction table (txn.datetime),
+    as users can create transactions retroactively and that date reflects the actual transaction date.
+    Falls back to subscription_date when datetime is not available.
+    """
+    if txn.datetime:
+        return txn.datetime.date()
+    parsed = _parse_subscription_date(txn)
+    if parsed is not None:
+        return parsed
+    return None
+
+
 def _resolve_interest_period_for_txn(txn: Transaction, product: Product | None = None) -> str:
     """
     Return the selected interest period for a transaction.
@@ -198,8 +232,8 @@ def _should_create_interest_payment_for_date(
     import logging
     logger = logging.getLogger(__name__)
     
-    # Get contract start date
-    contract_start = txn.datetime.date() if txn.datetime else None
+    # Get contract start date (prefers subscription_date when available)
+    contract_start = _get_contract_start_date(txn)
     if not contract_start:
         logger.warning(f"Cannot determine contract start date for transaction {txn.id}")
         return False
@@ -214,40 +248,44 @@ def _should_create_interest_payment_for_date(
         # This will be handled separately by the contract end logic
         return False
     
-    # Calculate the time elapsed since contract start
-    days_elapsed = (check_date - contract_start).days
-    
-    # Convert payment period to days (approximate)
-    # Using 30 days per month as an approximation
-    payment_period_days = payment_period_months * 30
-    
-    # For the first payment period, we need at least one full period to elapse
-    # For example, if interest_period is "Quotidien", we need at least 1 day to pass
-    # If it's "Mensuel", we need at least 30 days to pass
-    if days_elapsed < payment_period_days:
+    # For monthly and longer periods: use calendar month arithmetic
+    # (e.g. Feb 9 + 1 month = March 9, not 30 days later)
+    if payment_period_months >= 1.0:
+        tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(
+            datetime.combine(contract_start, datetime.min.time()),
+            tz
+        )
+        end_of_first_period = _add_months_dt(start_dt, payment_period_months).date()
+        if check_date >= end_of_first_period:
+            logger.debug(
+                f"Transaction {txn.id}: Payment condition met (calendar month). "
+                f"contract_start={contract_start}, check_date={check_date}, "
+                f"end_of_first_period={end_of_first_period}, interest_period={interest_period_str}"
+            )
+            return True
         logger.debug(
-            f"Transaction {txn.id}: Not enough time elapsed for first payment. "
-            f"days_elapsed={days_elapsed}, payment_period_days={payment_period_days}, "
-            f"interest_period={interest_period_str}"
+            f"Transaction {txn.id}: Not enough time elapsed for first payment (calendar month). "
+            f"contract_start={contract_start}, check_date={check_date}, "
+            f"end_of_first_period={end_of_first_period}, interest_period={interest_period_str}"
         )
         return False
     
-    # Check if check_date aligns with a payment date
-    # Payment dates are contract_start + N * payment_period_months
-    # We allow payments when we've completed at least one full period
-    
-    # Calculate how many complete periods have elapsed
-    periods_elapsed = days_elapsed / payment_period_days
-    
-    # We should have completed at least 1 full period
-    if periods_elapsed >= 1.0:
+    # For daily/weekly periods: use day-based logic (approximate)
+    days_elapsed = (check_date - contract_start).days
+    payment_period_days = max(1, round(payment_period_months * 30))
+    if days_elapsed >= payment_period_days:
         logger.debug(
             f"Transaction {txn.id}: Payment condition met. "
-            f"days_elapsed={days_elapsed}, periods_elapsed={periods_elapsed:.2f}, "
+            f"days_elapsed={days_elapsed}, payment_period_days={payment_period_days}, "
             f"interest_period={interest_period_str}"
         )
         return True
-    
+    logger.debug(
+        f"Transaction {txn.id}: Not enough time elapsed for first payment. "
+        f"days_elapsed={days_elapsed}, payment_period_days={payment_period_days}, "
+        f"interest_period={interest_period_str}"
+    )
     return False
 
 
@@ -1789,9 +1827,18 @@ def generate_rates_for_investment(
     if product is not None:
         has_allocations = ProductAssetAllocation.objects.filter(product_id=product.id).exists()
 
-    start_dt = txn.datetime or timezone.now()
+    # Use subscription_date for contract start when available (from create transaction modal)
+    contract_start = _get_contract_start_date(txn)
+    tz = timezone.get_current_timezone()
+    if contract_start:
+        start_dt = timezone.make_aware(
+            datetime.combine(contract_start, datetime.min.time()),
+            tz
+        )
+    else:
+        start_dt = txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
-        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+        start_dt = timezone.make_aware(start_dt, tz)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -3309,8 +3356,9 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
         logger.info(f"Product resolved for transaction {txn.id}: product_id={product.id}, "
                    f"product_name={product.name}, transfer_to={txn.transfer_to}")
 
-    # Determine start date (transaction datetime date)
-    start = txn.datetime.date() if txn.datetime else date.today()
+    # Determine start date (prefers subscription_date when available)
+    contract_start = _get_contract_start_date(txn)
+    start = contract_start if contract_start else (txn.datetime.date() if txn.datetime else date.today())
     start = date(start.year, start.month, 1)
 
     # Determine duration (months): product.duration is the source of truth
@@ -4447,8 +4495,8 @@ def _group_calculation_periods_by_payment_period(
             'totalProfit': str(total_profit),
         }]
     
-    # Get contract start date
-    contract_start = txn.datetime.date() if txn.datetime else None
+    # Get contract start date (prefers subscription_date when available)
+    contract_start = _get_contract_start_date(txn)
     if not contract_start:
         logger.warning(f"Cannot determine contract start date for transaction {txn.id}")
         return []
@@ -4615,36 +4663,61 @@ def create_interest_transaction_for_period_if_complete(
             )
             return None
         
-        if not _should_create_interest_payment_for_date(txn, product, period_end_date):
+        # Use today's date for the payment check: we want to know if the payment is due *now*,
+        # not whether the period end date (last trading day) has passed - period_end_date can be
+        # 1 day before the calendar month boundary (e.g. March 8 vs March 9)
+        if not _should_create_interest_payment_for_date(txn, product, timezone.localdate()):
             logger.debug(
                 f"Skipping interest transaction for transaction {txn.id}, period {period_index}: "
-                f"payment not yet due based on interest_period (period_end={period_end_date.isoformat()})"
+                f"payment not yet due based on interest_period (today={timezone.localdate().isoformat()})"
             )
             return None
 
+        # Get period date range for description and idempotence check
+        if used_positions:
+            period_positions = positions_in_period.order_by('period_date')
+            first_date = period_positions.first().period_date if period_positions.exists() else None
+            last_date = period_positions.last().period_date if period_positions.exists() else None
+        else:
+            first_raw = (period_summary or {}).get("startDate")
+            last_raw = (period_summary or {}).get("endDate")
+            try:
+                first_date = date.fromisoformat(str(first_raw)) if first_raw else None
+            except Exception:
+                first_date = None
+            try:
+                last_date = date.fromisoformat(str(last_raw)) if last_raw else None
+            except Exception:
+                last_date = None
+
+        # Build period_info for description and idempotence
+        period_info = f"Période {period_index + 1}"
+        if first_date and last_date:
+            if first_date == last_date:
+                period_info += f" ({first_date.strftime('%d/%m/%Y')})"
+            else:
+                period_info += f" ({first_date.strftime('%d/%m/%Y')} - {last_date.strftime('%d/%m/%Y')})"
+
         # Check if an interest transaction already exists for this period (idempotent)
-        # We identify it by checking for an 'interets' transaction with:
-        # - same client
-        # - same product
-        # - description containing the period index and transaction reference
-        period_ref = f"Période {period_index + 1}"
+        # We identify it by source transaction, client, product, and period.
+        # Each source transaction must generate its own interest; period_info alone is not unique
+        # when multiple transactions share the same client/product/period date range.
+        # Match by source: subscription_details.sourceTransactionId (new) or "Transaction {id}" in description (legacy)
         existing_interest = Transaction.objects.filter(
             client=txn.client,
             type='interets',
             product=product,
-            description__icontains=period_ref
+            description__icontains=period_info
         ).filter(
-            # Also check that it references this transaction's period
-            Q(description__icontains=f"transaction {txn.id}") |
-            Q(description__icontains=f"txn {txn.id}") |
-            # Or check by datetime proximity (within same period date range)
-            Q(datetime__gte=txn.datetime)
+            Q(subscription_details__sourceTransactionId=txn.id)
+            | Q(description__icontains=f"Transaction {txn.id}")
+            | Q(description__icontains=f"txn {txn.id}")
         ).first()
-        
+
         if existing_interest:
             logger.debug(f"Interest transaction already exists for transaction {txn.id}, period {period_index} (transaction {existing_interest.id})")
             return None
-        
+
         # Calculate total profit for this period:
         # - from realized positions when available
         # - from generated targetProfit when no positions are linked to this transaction
@@ -4661,40 +4734,18 @@ def create_interest_transaction_for_period_if_complete(
         if total_profit <= 0:
             # No profit to create interest transaction for
             return None
-        
-        # Get period date range for description
-        if used_positions:
-            period_positions = positions_in_period.order_by('period_date')
-            first_date = period_positions.first().period_date if period_positions.exists() else None
-            last_date = period_positions.last().period_date if period_positions.exists() else None
-        else:
-            first_raw = (period_summary or {}).get("startDate")
-            last_raw = (period_summary or {}).get("endDate")
-            try:
-                first_date = date.fromisoformat(str(first_raw)) if first_raw else None
-            except Exception:
-                first_date = None
-            try:
-                last_date = date.fromisoformat(str(last_raw)) if last_raw else None
-            except Exception:
-                last_date = None
-        
+
         # Create the interest transaction
         transaction_id = uuid.uuid4().hex[:12]
         while Transaction.objects.filter(id=transaction_id).exists():
             transaction_id = uuid.uuid4().hex[:12]
         
-        # Build description with transaction reference for better idempotence checking
+        # Build description
         product_name = product.name or f"Produit {product.id}"
-        period_info = f"Période {period_index + 1}"
-        if first_date and last_date:
-            if first_date == last_date:
-                period_info += f" ({first_date.strftime('%d/%m/%Y')})"
-            else:
-                period_info += f" ({first_date.strftime('%d/%m/%Y')} - {last_date.strftime('%d/%m/%Y')})"
-        description = f"Intérêts {product_name} - {period_info} - Transaction {txn.id}"
+        description = f"Intérêts {product_name} - {period_info}"
         
         # Create the interest transaction
+        # Store source transaction ID in subscription_details for idempotence (not in description)
         interest_transaction = Transaction.objects.create(
             id=transaction_id,
             client=txn.client,
@@ -4704,6 +4755,7 @@ def create_interest_transaction_for_period_if_complete(
             status='valide',  # Auto-completed since it's automatic
             datetime=timezone.now(),
             product=product,  # Link to the product for reference
+            subscription_details={'sourceTransactionId': txn.id},
         )
         
         logger.info(

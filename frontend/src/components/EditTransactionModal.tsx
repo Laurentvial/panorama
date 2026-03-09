@@ -788,17 +788,15 @@ export function EditTransactionModal({
             </div>
             </div>
             <div className="modal-form-actions mt-4">
-              {transaction.status !== 'valide' && (
-                <Button 
-                  type="button" 
-                  variant="destructive" 
-                  onClick={handleDelete}
-                  style={{ marginRight: 'auto' }}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Supprimer
-                </Button>
-              )}
+              <Button 
+                type="button" 
+                variant="destructive" 
+                onClick={handleDelete}
+                style={{ marginRight: 'auto' }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Supprimer
+              </Button>
               <Button type="button" variant="outline" onClick={handleClose}>
                 Annuler
               </Button>
