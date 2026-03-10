@@ -708,17 +708,66 @@ export function PlatformDiscover() {
           {/* Featured Top Slider */}
           {featuredSliderItems.length > 0 && (
             <div style={{ marginBottom: '36px' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Tendance du moment
-                </h2>
-                <h3 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: '700', margin: 0 }}>
-                  Produits et actifs du moment
-                </h3>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: isMobile ? 'flex-start' : 'center',
+                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                gap: isMobile ? '12px' : '0',
+                marginBottom: '14px',
+              }}>
+                <div>
+                  <h3 style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: '700', margin: 0 }}>
+                    Produits et actifs du moment
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => scrollFeaturedSlider('left')}
+                    disabled={featuredSliderItems.length === 0}
+                    style={{
+                      width: '40px', height: '40px', borderRadius: '50%',
+                      border: '1px solid #e5e7eb', backgroundColor: 'white',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
+                      opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (featuredSliderItems.length === 0) return;
+                      e.currentTarget.style.backgroundColor = '#f3f4f6';
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollFeaturedSlider('right')}
+                    disabled={featuredSliderItems.length === 0}
+                    style={{
+                      width: '40px', height: '40px', borderRadius: '50%',
+                      border: '1px solid #e5e7eb', backgroundColor: 'white',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
+                      opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (featuredSliderItems.length === 0) return;
+                      e.currentTarget.style.backgroundColor = '#f3f4f6';
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
               <div
                 ref={featuredSliderRef}
+                className="hide-scrollbar"
                 style={{
                   display: 'flex',
                   gap: '14px',
@@ -763,24 +812,10 @@ export function PlatformDiscover() {
                         }}
                       >
                         <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
-                          <div style={{
-                            position: 'absolute',
-                            top: '16px',
-                            right: '16px',
-                            padding: '4px 10px',
-                            borderRadius: '12px',
-                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                            color: '#065f46',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            zIndex: 2,
-                          }}>
-                            Tendance du moment
-                          </div>
                           {isInPortfolio && (
                             <div style={{
                               position: 'absolute',
-                              top: '44px',
+                              top: '16px',
                               right: '16px',
                               padding: '4px 10px',
                               borderRadius: '12px',
@@ -958,20 +993,6 @@ export function PlatformDiscover() {
                         }}
                       >
                         <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
-                          <div style={{
-                            position: 'absolute',
-                            top: '16px',
-                            right: '16px',
-                            padding: '4px 10px',
-                            borderRadius: '12px',
-                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                            color: '#065f46',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            zIndex: 2,
-                          }}>
-                            Tendance du moment
-                          </div>
                           <div style={{ marginBottom: '20px', width: '64px', height: '64px' }}></div>
                           <div style={{ marginBottom: '12px' }}>
                             <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
@@ -1081,20 +1102,6 @@ export function PlatformDiscover() {
                             }}
                           />
                         )}
-                        <div style={{
-                          position: 'absolute',
-                          top: '12px',
-                          right: '12px',
-                          padding: '4px 10px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                          color: '#065f46',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          zIndex: 2,
-                        }}>
-                          Tendance du moment
-                        </div>
                       </div>
                       <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
                         <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', color: '#030213', marginBottom: '8px', marginTop: 0 }}>
@@ -1194,22 +1201,6 @@ export function PlatformDiscover() {
                         }}
                       >
                         <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
-                          {parseFeatured(portfolio?.isFeatured) && (
-                            <div style={{
-                              position: 'absolute',
-                              top: '16px',
-                              right: '16px',
-                              padding: '4px 10px',
-                              borderRadius: '12px',
-                              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                              color: '#065f46',
-                              fontSize: '11px',
-                              fontWeight: '700',
-                              zIndex: 2,
-                            }}>
-                              Tendance du moment
-                            </div>
-                          )}
                           <div style={{
                             marginBottom: '20px',
                             width: '64px',
@@ -1358,7 +1349,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             zIndex: 2,
                           }}>
-                            Tendance du moment
+                            Mis en avant
                           </div>
                         )}
                         {/* Trending Label or Menu Button */}
@@ -1462,77 +1453,9 @@ export function PlatformDiscover() {
             }}>
               Opportunités d'investissement
             </h2>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: isMobile ? 'flex-start' : 'center',
-              flexWrap: isMobile ? 'wrap' : 'nowrap',
-              gap: isMobile ? '12px' : '0',
-            }}>
-              <h1 className="platform-page-title" style={{ flex: 1, minWidth: 0 }}>
-                Explorer les marchés mondiaux
-              </h1>
-              <div style={{ 
-                display: 'flex', 
-                gap: '8px',
-                flexShrink: 0,
-              }}>
-                <button
-                  type="button"
-                  onClick={() => scrollFeaturedSlider('left')}
-                  disabled={featuredSliderItems.length === 0}
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    border: '1px solid #e5e7eb',
-                    backgroundColor: 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
-                    opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (featuredSliderItems.length === 0) return;
-                    e.currentTarget.style.backgroundColor = '#f3f4f6';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollFeaturedSlider('right')}
-                  disabled={featuredSliderItems.length === 0}
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    border: '1px solid #e5e7eb',
-                    backgroundColor: 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: featuredSliderItems.length === 0 ? 'not-allowed' : 'pointer',
-                    opacity: featuredSliderItems.length === 0 ? 0.5 : 1,
-                    transition: 'all 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (featuredSliderItems.length === 0) return;
-                    e.currentTarget.style.backgroundColor = '#f3f4f6';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
+            <h1 className="platform-page-title">
+              Explorer les marchés mondiaux
+            </h1>
           </div>
 
           {/* Assets Grid (External Assets + Other Internal Products) */}
@@ -1579,26 +1502,10 @@ export function PlatformDiscover() {
                   >
                     <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
                       {/* Featured Badge */}
-                      {parseFeatured(asset?.isFeatured) && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '16px',
-                          right: '16px',
-                          padding: '4px 10px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                          color: '#065f46',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          zIndex: 2,
-                        }}>
-                          Tendance du moment
-                        </div>
-                      )}
-                      {isInPortfolio && (
-                        <div style={{
-                          position: 'absolute',
-                          top: parseFeatured(asset?.isFeatured) ? '44px' : '16px',
+                          {isInPortfolio && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '16px',
                           right: '16px',
                           padding: '4px 10px',
                           borderRadius: '12px',
@@ -1819,7 +1726,7 @@ export function PlatformDiscover() {
                             fontWeight: '700',
                             zIndex: 2,
                           }}>
-                            Tendance du moment
+                            Mis en avant
                           </div>
                         )}
                         <div style={{
@@ -1955,22 +1862,6 @@ export function PlatformDiscover() {
                             zIndex: 0,
                           }}
                         />
-                      )}
-                      {parseFeatured(product?.isFeatured) && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '12px',
-                          right: '12px',
-                          padding: '4px 10px',
-                          borderRadius: '12px',
-                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                          color: '#065f46',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          zIndex: 2,
-                        }}>
-                          Tendance du moment
-                        </div>
                       )}
                     </div>
                     <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>

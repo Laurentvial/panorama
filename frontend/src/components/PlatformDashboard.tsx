@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { TrendingUp, TrendingDown, Check, PieChart } from 'lucide-react';
+import { TrendingUp, TrendingDown, Check, PieChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { useTheme } from '../contexts/ThemeContext';
+import { formatSubcategoryForDisplay } from './transactionUtils';
 import '../styles/PlatformDashboardMovers.css';
 
 export function PlatformDashboard() {
@@ -26,6 +27,9 @@ export function PlatformDashboard() {
   const [newsLoading, setNewsLoading] = useState(true);
   const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
   const [documents, setDocuments] = useState<any[]>([]);
+  const [clientAssets, setClientAssets] = useState<any[]>([]);
+  const [clientProducts, setClientProducts] = useState<any[]>([]);
+  const featuredSliderRef = useRef<HTMLDivElement | null>(null);
 
 
   const loadDashboardData = async () => {
@@ -64,17 +68,20 @@ export function PlatformDashboard() {
         apiCall(`/api/clients/${currentUser.id}/assets/`),
         apiCall(`/api/clients/${currentUser.id}/products/`),
       ]);
-      // Extract assets from ClientAsset objects
-      const clientAssets = (clientAssetsResponse as any)?.assets || [];
-      const assetsList = clientAssets.map((ca: any) => {
+      // Extract assets from ClientAsset objects (keep full ClientAsset for featured/availability)
+      const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
+      const assetsList = clientAssetsData.map((ca: any) => {
         return ca.asset || ca;
       }).filter(Boolean);
       setAssets(assetsList);
-      const clientProducts = (clientProductsResponse as any)?.products || [];
-      const productsList = clientProducts.map((cp: any) => {
+      setClientAssets(clientAssetsData);
+
+      const clientProductsData = (clientProductsResponse as any)?.products || [];
+      const productsList = clientProductsData.map((cp: any) => {
         return cp.product || cp;
       }).filter(Boolean);
       setProducts(productsList);
+      setClientProducts(clientProductsData);
       
       // Load verification config separately to avoid breaking the Promise.all if it fails
       try {
@@ -185,6 +192,96 @@ export function PlatformDashboard() {
     const c = (currencyRaw ?? '').toString().trim().toUpperCase();
     if (!c || c === 'EUR' || c === '€') return '€';
     return c;
+  };
+
+  const formatDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    if (isNaN(date.getTime())) return '';
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const featuredItems = React.useMemo(() => {
+    const items: Array<{
+      kind: 'asset' | 'product';
+      key: string;
+      data: any;
+      availabilityStart: string | null;
+      availabilityEnd: string | null;
+    }> = [];
+    for (const ca of clientAssets || []) {
+      if (ca.featured && ca.asset) {
+        items.push({
+          kind: 'asset',
+          key: `asset-${ca.asset.id}`,
+          data: ca.asset,
+          availabilityStart: ca.availabilityStart ?? null,
+          availabilityEnd: ca.availabilityEnd ?? null,
+        });
+      }
+    }
+    for (const cp of clientProducts || []) {
+      if (cp.featured && cp.product) {
+        const p = cp.product;
+        items.push({
+          kind: 'product',
+          key: `product-${p.id}`,
+          data: p,
+          availabilityStart: cp.availabilityStart ?? p.availabilityStart ?? p.availability_start ?? null,
+          availabilityEnd: cp.availabilityEnd ?? p.availabilityEnd ?? p.availability_end ?? null,
+        });
+      }
+    }
+    return items;
+  }, [clientAssets, clientProducts]);
+
+  const isAssetInPortfolio = (assetId: string) =>
+    positions.some((p: any) => {
+      const pid = p.assetId || p.asset_id || p.asset?.id;
+      return String(pid) === String(assetId) && p.status === 'open';
+    });
+
+  const parseNumber = (v: any): number => {
+    if (v == null || v === '') return 0;
+    const parsed = typeof v === 'string' ? parseFloat(v) : Number(v);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const getProfitabilityDisplay = (product: any): { text: string; isPositive: boolean } => {
+    const hasProfitability = product?.profitability != null && product?.profitability !== '';
+    const hasVariable =
+      product?.isVariableProfitability === 'Oui' &&
+      product?.variableProfitability != null &&
+      product?.variableProfitability !== '';
+    if (!hasProfitability && !hasVariable) return { text: '', isPositive: true };
+    const min = parseNumber(product?.profitability);
+    const isPositive = min >= 0;
+    const period = product?.profitabilityPeriod ? ` ${product.profitabilityPeriod}` : '';
+    if (hasVariable) {
+      const max = parseNumber(product?.variableProfitability);
+      return { text: `${min.toFixed(2)}% - ${max.toFixed(2)}%${period}`, isPositive };
+    }
+    return { text: `${min.toFixed(2)}%${period}`, isPositive };
+  };
+
+  const scrollFeaturedSlider = (direction: 'left' | 'right') => {
+    const slider = featuredSliderRef.current;
+    if (!slider) return;
+    const step = isMobile ? 280 : 320;
+    const delta = direction === 'left' ? -step : step;
+    slider.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
+  const formatAvailabilityLabel = (start: string | null, end: string | null): string => {
+    const startStr = start ? formatDate(start) : null;
+    const endStr = end ? formatDate(end) : null;
+    if (startStr && endStr) return `Du ${startStr} au ${endStr}`;
+    if (startStr) return `Disponible à partir du ${startStr}`;
+    if (endStr) return `Disponible jusqu'au ${endStr}`;
+    return 'Disponible dès maintenant et indéfiniment';
   };
 
   useEffect(() => {
@@ -1004,6 +1101,322 @@ export function PlatformDashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Produits et actifs du moment - cartes style Découvrir */}
+          {featuredItems.length > 0 && (
+            <div style={{ marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: isMobile ? 'flex-start' : 'center',
+                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                gap: isMobile ? '12px' : '0',
+                marginBottom: isMobile ? '14px' : '18px',
+              }}>
+                <div>
+                  <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Recommandés pour vous
+                  </h2>
+                  <h3 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', margin: 0 }}>
+                    Produits et actifs du moment
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => scrollFeaturedSlider('left')}
+                    disabled={featuredItems.length === 0}
+                    style={{
+                      width: '40px', height: '40px', borderRadius: '50%',
+                      border: '1px solid #e5e7eb', backgroundColor: 'white',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: featuredItems.length === 0 ? 'not-allowed' : 'pointer',
+                      opacity: featuredItems.length === 0 ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (featuredItems.length === 0) return;
+                      e.currentTarget.style.backgroundColor = '#f3f4f6';
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollFeaturedSlider('right')}
+                    disabled={featuredItems.length === 0}
+                    style={{
+                      width: '40px', height: '40px', borderRadius: '50%',
+                      border: '1px solid #e5e7eb', backgroundColor: 'white',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: featuredItems.length === 0 ? 'not-allowed' : 'pointer',
+                      opacity: featuredItems.length === 0 ? 0.5 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (featuredItems.length === 0) return;
+                      e.currentTarget.style.backgroundColor = '#f3f4f6';
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'white'; }}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              <div
+                ref={featuredSliderRef}
+                className="hide-scrollbar"
+                style={{
+                  display: 'flex',
+                  gap: isMobile ? '14px' : '20px',
+                  overflowX: 'auto',
+                  scrollBehavior: 'smooth',
+                  WebkitOverflowScrolling: 'touch',
+                  paddingBottom: '6px',
+                }}
+              >
+                {featuredItems.map((item) => {
+                  if (item.kind === 'asset') {
+                    const asset = item.data;
+                    const inPortfolio = isAssetInPortfolio(asset.id);
+                    return (
+                      <Card
+                        key={item.key}
+                        onClick={() => navigate(`/platform/product/${asset.id}`)}
+                        style={{
+                          minWidth: isMobile ? '260px' : '300px',
+                          maxWidth: isMobile ? '260px' : '300px',
+                          flexShrink: 0,
+                          position: 'relative',
+                          overflow: 'hidden',
+                          background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          border: 'none',
+                          borderRadius: '16px',
+                          cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s',
+                          minHeight: '200px',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                          {inPortfolio && (
+                            <div style={{
+                              position: 'absolute', top: '16px', right: '16px',
+                              padding: '4px 10px', borderRadius: '12px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.9)', color: '#065f46',
+                              fontSize: '11px', fontWeight: '600', zIndex: 2,
+                            }}>
+                              Dans le portefeuille
+                            </div>
+                          )}
+                          <div style={{
+                            marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: '64px', height: '64px', borderRadius: '16px',
+                            backgroundColor: asset.logoUrl ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
+                            overflow: 'hidden',
+                          }}>
+                            {asset.logoUrl ? (
+                              <img src={asset.logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} loading="lazy" referrerPolicy="no-referrer" />
+                            ) : null}
+                          </div>
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                              {asset.name || 'Aucun'}
+                            </div>
+                            {asset.reference && (
+                              <div style={{ fontSize: '14px', color: '#6b7280' }}>{asset.reference}</div>
+                            )}
+                          </div>
+                          {(asset.category || asset.subcategory) && (
+                            <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              {asset.category && <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>{asset.category}</div>}
+                              {asset.subcategory && (
+                                <>
+                                  {asset.category && <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>}
+                                  <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>{formatSubcategoryForDisplay(asset.subcategory)}</div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {((asset.lastPrice != null) || (asset.price != null)) && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontSize: '24px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+                                {(() => {
+                                  const p = asset.lastPrice ?? asset.price;
+                                  const num = typeof p === 'number' ? p : parseFloat(p);
+                                  return Number.isFinite(num) ? num.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : p;
+                                })()}
+                                {asset.currency && ` ${asset.currency}`}
+                              </div>
+                              {(asset.priceChangePercent != null || asset.priceChange != null || asset.changePercent != null) && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <div style={{
+                                    fontSize: '14px', fontWeight: '600',
+                                    color: parseFinancialValue(asset.priceChangePercent ?? asset.changePercent) >= 0 ? '#10b981' : '#ef4444',
+                                  }}>
+                                    ({parseFinancialValue(asset.priceChangePercent ?? asset.changePercent) >= 0 ? '+' : ''}
+                                    {parseFinancialValue(asset.priceChangePercent ?? asset.changePercent).toFixed(2)}%)
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div style={{
+                            marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(229, 231, 235, 0.8)',
+                            fontSize: '13px', color: '#6b7280',
+                          }}>
+                            {formatAvailabilityLabel(item.availabilityStart, item.availabilityEnd)}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  const product = item.data;
+                  const profitabilityInfo = getProfitabilityDisplay(product);
+                  const isPositive = profitabilityInfo.isPositive;
+                  const hasImage = Boolean(product.imageUrl);
+
+                  if (!hasImage) {
+                    return (
+                      <Card
+                        key={item.key}
+                        onClick={() => navigate(`/platform/product/${product.id}`)}
+                        style={{
+                          minWidth: isMobile ? '260px' : '300px',
+                          maxWidth: isMobile ? '260px' : '300px',
+                          flexShrink: 0,
+                          position: 'relative', overflow: 'hidden',
+                          background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          border: 'none', borderRadius: '16px', cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s', minHeight: '200px',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)';
+                          e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <CardContent style={{ padding: '24px', position: 'relative', zIndex: 1 }}>
+                          <div style={{ marginBottom: '20px', width: '64px', height: '64px' }} />
+                          <div style={{ marginBottom: '12px' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '600', color: '#111827', marginBottom: '8px' }}>
+                              {product.name || 'Aucun'}
+                            </div>
+                            {product.reference && (
+                              <div style={{ fontSize: '14px', color: '#6b7280' }}>{product.reference}</div>
+                            )}
+                          </div>
+                          {(product.categoryName || product.subcategory) && (
+                            <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              {product.categoryName && <div style={{ fontSize: '16px', fontWeight: '600', color: '#374151' }}>{product.categoryName}</div>}
+                              {product.subcategory && (
+                                <>
+                                  {product.categoryName && <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>}
+                                  <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>{formatSubcategoryForDisplay(product.subcategory)}</div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {profitabilityInfo.text && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary, #10b981)' }}>
+                                {isPositive ? '+' : ''}{profitabilityInfo.text}
+                              </div>
+                            </div>
+                          )}
+                          <div style={{
+                            marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(229, 231, 235, 0.8)',
+                            fontSize: '13px', color: '#6b7280',
+                          }}>
+                            {formatAvailabilityLabel(item.availabilityStart, item.availabilityEnd)}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  return (
+                    <Card
+                      key={item.key}
+                      onClick={() => navigate(`/platform/product/${product.id}`)}
+                      style={{
+                        minWidth: isMobile ? '260px' : '300px',
+                        maxWidth: isMobile ? '260px' : '300px',
+                        flexShrink: 0,
+                        position: 'relative', overflow: 'hidden', border: '1px solid #e5e7eb',
+                        borderRadius: '12px', cursor: 'pointer',
+                        transition: 'transform 0.2s, box-shadow 0.2s', backgroundColor: 'white',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{
+                        position: 'relative', height: '180px', backgroundColor: '#ffffff',
+                        overflow: 'hidden', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', padding: '12px',
+                      }}>
+                        {product.imageUrl && (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.name || 'Product'}
+                            style={{
+                              position: 'absolute', inset: 0, width: '100%', height: '100%',
+                              objectFit: 'cover', objectPosition: 'center',
+                              transform: 'scale(1.22)', transformOrigin: 'center', zIndex: 0,
+                            }}
+                          />
+                        )}
+                      </div>
+                      <CardContent style={{ padding: isMobile ? '16px' : '20px' }}>
+                        <h4 style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: '700', marginBottom: '8px', color: '#111827' }}>
+                          {product.name || 'Aucun'}
+                        </h4>
+                        {(product.categoryName || product.subcategory) && (
+                          <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {product.categoryName && <div style={{ fontSize: '14px', fontWeight: '600', color: '#374151' }}>{product.categoryName}</div>}
+                            {product.subcategory && (
+                              <>
+                                {product.categoryName && <span style={{ fontSize: '14px', color: '#9ca3af' }}>•</span>}
+                                <div style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>{formatSubcategoryForDisplay(product.subcategory)}</div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {profitabilityInfo.text && (
+                          <div style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '700', color: 'var(--secondary, #10b981)' }}>
+                            {isPositive ? '+' : ''}{profitabilityInfo.text}
+                          </div>
+                        )}
+                        <div style={{
+                          marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(229, 231, 235, 0.8)',
+                          fontSize: '13px', color: '#6b7280',
+                        }}>
+                          {formatAvailabilityLabel(item.availabilityStart, item.availabilityEnd)}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Actualités | [Mes documents above Plus fortes hausses] on desktop; on phone: Actualités last */}
           <div
