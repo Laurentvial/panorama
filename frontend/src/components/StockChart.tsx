@@ -15,6 +15,7 @@ interface ChartDataPoint {
 interface StockChartProps {
   assetId: string;
   assetName?: string;
+  assetType?: string;
   width?: string | number;
   height?: string | number;
   chartType?: 'line' | 'area' | 'candlestick';
@@ -26,6 +27,7 @@ interface StockChartProps {
 export function StockChart({
   assetId,
   assetName,
+  assetType,
   width = '100%',
   height = 500,
   chartType = 'area',
@@ -33,6 +35,7 @@ export function StockChart({
   timeframe = '1W',
   onPerformanceChange,
 }: StockChartProps) {
+  const isCrypto = (assetType || '').toLowerCase() === 'crypto' || (assetType || '').toLowerCase() === 'cryptocurrency';
   const [allChartData, setAllChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +53,8 @@ export function StockChart({
       setError(null);
 
       try {
-        const response = await apiCall(`/api/assets/${assetId}/chart-data/`, {
+        // Request full data to support 1Y, 3Y, MAX timeframes (compact only returns ~100 days)
+        const response = await apiCall(`/api/assets/${assetId}/chart-data/?outputsize=full`, {
           method: 'GET',
         });
 
@@ -83,6 +87,10 @@ export function StockChart({
     fetchChartData();
   }, [assetId]);
 
+  // Format date as YYYY-MM-DD for reliable date-only comparison (avoids timezone issues)
+  const toDateStr = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   // Filter data based on timeframe
   const getFilteredData = (): ChartDataPoint[] => {
     if (!allChartData || allChartData.length === 0) {
@@ -92,10 +100,10 @@ export function StockChart({
     // Ensure consistent ordering (oldest -> newest) for slicing.
     const sortedAll = allChartData
       .slice()
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
     const now = new Date();
-    let startDate: Date;
+    let cutoffStr: string;
 
     switch (timeframe) {
       case '1D':
@@ -103,30 +111,42 @@ export function StockChart({
         // often returns 0 points. For 1D view, show the last 2 daily points
         // (yesterday -> today) so users always see a meaningful 1-day move.
         return sortedAll.length <= 2 ? sortedAll : sortedAll.slice(-2);
-      case '1W':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      case '1W': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 7);
+        cutoffStr = toDateStr(d);
         break;
-      case '1M':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
+      case '1M': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 1);
+        cutoffStr = toDateStr(d);
         break;
-      case '6M':
-        startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+      }
+      case '6M': {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() - 6);
+        cutoffStr = toDateStr(d);
         break;
-      case '1Y':
-        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      }
+      case '1Y': {
+        const d = new Date(now);
+        d.setFullYear(d.getFullYear() - 1);
+        cutoffStr = toDateStr(d);
         break;
-      case '3Y':
-        startDate = new Date(now.getTime() - 3 * 365 * 24 * 60 * 60 * 1000);
+      }
+      case '3Y': {
+        const d = new Date(now);
+        d.setFullYear(d.getFullYear() - 3);
+        cutoffStr = toDateStr(d);
         break;
+      }
       case 'MAX':
       default:
         return sortedAll;
     }
 
-    return sortedAll.filter((point) => {
-      const pointDate = new Date(point.date);
-      return pointDate >= startDate;
-    });
+    return sortedAll.filter((point) => (point.date || '') >= cutoffStr);
   };
 
   // Use useMemo to recalculate filtered data when timeframe or allChartData changes
@@ -179,6 +199,11 @@ export function StockChart({
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     
+    // For 3Y and MAX: show year only (too many months otherwise)
+    if (timeframe === '3Y' || timeframe === 'MAX') {
+      return date.getFullYear().toString();
+    }
+    
     // For 1D we are showing daily points, so show day/month (not time).
     if (timeframe === '1D') {
       return date.toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' });
@@ -194,9 +219,22 @@ export function StockChart({
       return date.toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' });
     }
     
-    // For long timeframes (1Y, 3Y, MAX), show month and year or just month
-    return date.toLocaleDateString('fr-FR', { month: 'short', year: timeframe === 'MAX' ? 'numeric' : undefined });
+    // For 1Y we need 12 ticks: show month
+    return date.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' });
   };
+
+  // For 3Y and MAX: show one tick per year (avoid clutter)
+  const xAxisTicks = useMemo(() => {
+    if ((timeframe !== '3Y' && timeframe !== 'MAX') || !chartData?.length) return undefined;
+    const years = new Set<string>();
+    chartData.forEach((p) => {
+      if (p.date && p.date.length >= 4) years.add(p.date.slice(0, 4));
+    });
+    return Array.from(years)
+      .sort()
+      .map((y) => chartData.find((p) => p.date?.startsWith(y))?.date)
+      .filter(Boolean) as string[];
+  }, [chartData, timeframe]);
 
   // Format price for tooltip
   const formatPrice = (value: number) => {
@@ -235,7 +273,7 @@ export function StockChart({
           <p style={{ fontWeight: '600', marginBottom: '8px' }}>{data.date}</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
-              <span style={{ color: '#6b7280' }}>Ouverture:</span>
+              <span style={{ color: '#6b7280' }}>{isCrypto ? 'Début période:' : 'Ouverture:'}</span>
               <span style={{ fontWeight: '600' }}>{formatPrice(data.open)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
@@ -247,7 +285,7 @@ export function StockChart({
               <span style={{ fontWeight: '600', color: '#ef4444' }}>{formatPrice(data.low)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
-              <span style={{ color: '#6b7280' }}>Fermeture:</span>
+              <span style={{ color: '#6b7280' }}>{isCrypto ? 'Fin période:' : 'Fermeture:'}</span>
               <span style={{ fontWeight: '600' }}>{formatPrice(data.close)}</span>
             </div>
             {showVolume && (
@@ -337,6 +375,7 @@ export function StockChart({
           <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <XAxis
               dataKey="date"
+              ticks={xAxisTicks}
               tickFormatter={formatDate}
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
@@ -370,6 +409,7 @@ export function StockChart({
             </defs>
             <XAxis
               dataKey="date"
+              ticks={xAxisTicks}
               tickFormatter={formatDate}
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
@@ -398,6 +438,7 @@ export function StockChart({
           <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <XAxis
               dataKey="date"
+              ticks={xAxisTicks}
               tickFormatter={formatDate}
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
@@ -411,7 +452,7 @@ export function StockChart({
             <Tooltip content={<CustomTooltip />} />
             <Bar dataKey="high" fill="#10b981" name="Haut" />
             <Bar dataKey="low" fill="#ef4444" name="Bas" />
-            <Bar dataKey="close" fill="#3b82f6" name="Fermeture" />
+            <Bar dataKey="close" fill="#3b82f6" name={isCrypto ? 'Fin période' : 'Fermeture'} />
           </BarChart>
         </ResponsiveContainer>
       )}
@@ -422,6 +463,7 @@ export function StockChart({
             <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <XAxis
                 dataKey="date"
+                ticks={xAxisTicks}
                 tickFormatter={formatDate}
                 stroke="#6b7280"
                 style={{ fontSize: '12px' }}

@@ -221,9 +221,14 @@ export function PlatformDiscover() {
       return 'devises';
     }
     
-    // Épargne (savings)
-    if (type.includes('epargne') || type.includes('savings') || type.includes('livret') ||
-        category.includes('epargne') || category.includes('savings') || category.includes('livret')) {
+    // Livret (savings accounts - Livret A, LDD, etc.)
+    if (type.includes('livret') || category.includes('livret')) {
+      return 'livret';
+    }
+    
+    // Épargne (savings - PEA, PEL, CEL, assurance vie, etc.)
+    if (type.includes('epargne') || type.includes('savings') ||
+        category.includes('epargne') || category.includes('savings')) {
       return 'epargne';
     }
     
@@ -282,9 +287,14 @@ export function PlatformDiscover() {
       return 'smart_portfolio';
     }
     
+    // Livret (Livret A, LDD, Compte Sur Livret, etc.)
+    if (type.includes('livret') || subcategory.includes('livret')) {
+      return 'livret';
+    }
+    
     // Épargne (savings) - normalized comparison handles all variants: "Épargne", "Épargne Salariale", "épargne", etc.
-    if (type.includes('epargne') || type.includes('savings') || type.includes('livret') ||
-        subcategory.includes('epargne') || subcategory.includes('livret')) {
+    if (type.includes('epargne') || type.includes('savings') ||
+        subcategory.includes('epargne')) {
       return 'epargne';
     }
     
@@ -416,16 +426,17 @@ export function PlatformDiscover() {
     return assetsOfType.length + productsOfType.length;
   };
 
-  // Available tabs with their labels
+  // Available tabs with their labels (Épargne, Livret, ETF before Actions, Cryptomonnaies)
   const allTabs = [
     { value: 'smart_portfolio', label: 'Smart Portfolios' },
+    { value: 'epargne', label: 'Épargne' },
+    { value: 'livret', label: 'Livret' },
+    { value: 'etf', label: 'ETF' },
     { value: 'actions', label: 'Actions' },
     { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
-    { value: 'etf', label: 'ETF' },
     { value: 'obligations', label: 'Obligations' },
     { value: 'matieres_premieres', label: 'Matières premières' },
     { value: 'devises', label: 'Devises' },
-    { value: 'epargne', label: 'Épargne' },
     { value: 'autres', label: 'Autres' },
   ];
 
@@ -463,6 +474,8 @@ export function PlatformDiscover() {
         return <DollarSign className="h-5 w-5" />;
       case 'epargne':
         return <CircleDollarSign className="h-5 w-5" />;
+      case 'livret':
+        return <CircleDollarSign className="h-5 w-5" />;
       case 'smart_portfolio':
         return <BarChart3 className="h-5 w-5" />;
       case 'autres':
@@ -488,6 +501,8 @@ export function PlatformDiscover() {
         return { bg: '#dbeafe', text: '#1e40af', border: '#60a5fa' }; // Bleu
       case 'epargne':
         return { bg: '#dcfce7', text: '#166534', border: '#86efac' }; // Vert clair
+      case 'livret':
+        return { bg: '#ccfbf1', text: '#0f766e', border: '#5eead4' }; // Teal
       case 'smart_portfolio':
         return { bg: '#f0f9ff', text: '#0c4a6e', border: '#7dd3fc' }; // Bleu ciel
       case 'autres':
@@ -513,6 +528,8 @@ export function PlatformDiscover() {
         return 'Devises';
       case 'epargne':
         return 'Épargne';
+      case 'livret':
+        return 'Livret';
       case 'smart_portfolio':
         return 'Smart Portfolio';
       case 'autres':

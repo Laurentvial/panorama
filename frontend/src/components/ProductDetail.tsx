@@ -2631,6 +2631,7 @@ export function ProductDetail() {
                     <StockChart
                       assetId={String(asset.id)}
                       assetName={asset.name || asset.reference}
+                      assetType={asset.type || asset.assetType}
                       width="100%"
                       height={isPhone ? 260 : isMobile ? 400 : 500}
                       chartType="area"

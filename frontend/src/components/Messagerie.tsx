@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { Send, RefreshCw, Sparkles } from 'lucide-react';
+import { Send, RefreshCw, Sparkles, Pencil, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
@@ -57,6 +57,9 @@ export function Messagerie() {
   const [sending, setSending] = useState(false);
   const [reformulating, setReformulating] = useState(false);
   const [draft, setDraft] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   // Backend /api/clients/ already filters by permissions (admin/teamleader/gestionnaire)
@@ -165,6 +168,44 @@ export function Messagerie() {
       alert('Erreur lors de la reformulation.');
     } finally {
       setReformulating(false);
+    }
+  }
+
+  async function updateMessage(messageId: string, newText: string) {
+    if (!selectedRequest || !newText.trim()) return;
+    try {
+      await apiCall(
+        `/api/clients/${selectedRequest.clientId}/conversations/${selectedRequest.conversationId}/messages/${messageId}/`,
+        { method: 'PATCH', body: JSON.stringify({ message: newText.trim() }) },
+      );
+      setEditingMessageId(null);
+      setEditingText('');
+      clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
+      await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
+      await loadRequests();
+    } catch (e) {
+      console.error('Error updating message:', e);
+      alert('Erreur lors de la modification.');
+    }
+  }
+
+  async function deleteMessage(messageId: string) {
+    if (!selectedRequest) return;
+    if (!window.confirm('Supprimer ce message ?')) return;
+    setDeletingMessageId(messageId);
+    try {
+      await apiCall(
+        `/api/clients/${selectedRequest.clientId}/conversations/${selectedRequest.conversationId}/messages/${messageId}/`,
+        { method: 'DELETE' },
+      );
+      setDeletingMessageId(null);
+      clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
+      await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
+      await loadRequests();
+    } catch (e) {
+      console.error('Error deleting message:', e);
+      setDeletingMessageId(null);
+      alert('Erreur lors de la suppression.');
     }
   }
 
@@ -331,21 +372,81 @@ export function Messagerie() {
                 ) : (
                   <div className="flex flex-col gap-3">
                     {chatMessages.map((m) => {
-                      // Treat any non-client sender as "us" (manager/admin).
                       const isMe = m.sender !== 'client';
+                      const isEditing = editingMessageId === m.id;
+                      const isDeleting = deletingMessageId === m.id;
                       return (
                         <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                          <div className="max-w-[80%]">
-                            <div
-                              className={`px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
-                                isMe ? 'bg-primary text-accent-foreground' : 'bg-white border'
-                              }`}
-                            >
-                              {m.message}
-                            </div>
-                            {m.createdAt && (
-                              <div className={`mt-1 text-[11px] text-slate-400 ${isMe ? 'text-right' : 'text-left'}`}>
-                                {new Date(m.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                          <div className="max-w-[80%] group/message">
+                            {isEditing ? (
+                              <div className="px-3 py-2 rounded-xl bg-white border border-primary/30">
+                                <Textarea
+                                  value={editingText}
+                                  onChange={(e) => setEditingText(e.target.value)}
+                                  rows={3}
+                                  className="text-sm mb-2"
+                                  autoFocus
+                                />
+                                <div className="flex gap-2 justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingMessageId(null);
+                                      setEditingText('');
+                                    }}
+                                  >
+                                    Annuler
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => updateMessage(m.id, editingText)}
+                                    disabled={!editingText.trim()}
+                                  >
+                                    Enregistrer
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div
+                                className={`px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
+                                  isMe ? 'bg-primary text-accent-foreground' : 'bg-white border'
+                                }`}
+                              >
+                                {m.message}
+                              </div>
+                            )}
+                            {!isEditing && (
+                              <div className={`mt-1 flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                {m.createdAt && (
+                                  <span className="text-[11px] text-slate-400">
+                                    {new Date(m.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                                  </span>
+                                )}
+                                <div className="flex gap-1 ml-2 opacity-70 group-hover/message:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingMessageId(m.id);
+                                      setEditingText(m.message);
+                                    }}
+                                    className="p-1 rounded hover:bg-slate-200 text-slate-500 hover:text-slate-700"
+                                    title="Modifier"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteMessage(m.id)}
+                                    disabled={isDeleting}
+                                    className="p-1 rounded hover:bg-red-100 text-slate-500 hover:text-red-600"
+                                    title="Supprimer"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>

@@ -437,6 +437,83 @@ class AlphaVantageService:
             logger.error(f"Error fetching FX daily data for {from_currency}/{to_currency}: {str(e)}")
             return None
     
+    def get_crypto_daily_data(self, symbol: str, market: str = 'USD') -> Optional[Dict]:
+        """
+        Get daily cryptocurrency time series using Alpha Vantage DIGITAL_CURRENCY_DAILY.
+        Returns data formatted for charts (same shape as get_daily_data()).
+        
+        Args:
+            symbol: Cryptocurrency symbol (e.g., "BTC", "ETH")
+            market: Market currency (default: "USD")
+        
+        Returns:
+            Dictionary with chart data or None if error
+        """
+        try:
+            params = {
+                'function': 'DIGITAL_CURRENCY_DAILY',
+                'symbol': (symbol or '').strip().upper(),
+                'market': (market or 'USD').strip().upper(),
+                'apikey': self.api_key
+            }
+            response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'Error Message' in data:
+                logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+                return None
+            if 'Note' in data:
+                logger.warning(f"Alpha Vantage API note: {data['Note']}")
+                return None
+            if 'Information' in data:
+                info_msg = data['Information']
+                logger.warning(f"Alpha Vantage API information: {info_msg}")
+                if 'rate limit' in info_msg.lower():
+                    return None
+            
+            time_series_key = 'Time Series (Digital Currency Daily)'
+            if time_series_key not in data:
+                return None
+            
+            time_series = data[time_series_key]
+            meta_data = data.get('Meta Data', {})
+            
+            # Digital currency uses "1a. open (USD)", "2a. high (USD)", etc. (or "1. open" for single-currency)
+            def _get_float(d: dict, *keys: str) -> float:
+                for k in keys:
+                    v = d.get(k)
+                    if v is not None and v != '':
+                        try:
+                            return float(v)
+                        except (TypeError, ValueError):
+                            pass
+                return 0.0
+
+            chart_data = []
+            for date_str, values in time_series.items():
+                chart_data.append({
+                    'date': date_str,
+                    'open': _get_float(values, '1a. open (USD)', '1a. open (usd)', '1. open'),
+                    'high': _get_float(values, '2a. high (USD)', '2a. high (usd)', '2. high'),
+                    'low': _get_float(values, '3a. low (USD)', '3a. low (usd)', '3. low'),
+                    'close': _get_float(values, '4a. close (USD)', '4a. close (usd)', '4. close'),
+                    'volume': int(_get_float(values, '5. volume'))
+                })
+            chart_data.sort(key=lambda x: x['date'])
+            
+            return {
+                'data': chart_data,
+                'meta_data': {
+                    'symbol': meta_data.get('2. Digital Currency Code', symbol),
+                    'last_refreshed': meta_data.get('6. Last Refreshed', ''),
+                    'timezone': meta_data.get('7. Time Zone', '')
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error fetching crypto daily data for {symbol}: {str(e)}")
+            return None
+
     def get_crypto_quote(self, symbol: str, market: str = 'USD') -> Optional[Dict]:
         """
         Get cryptocurrency quote
@@ -884,8 +961,9 @@ def get_crypto_candles_finnhub(symbol: str, resolution: str = 'D', days: int = 1
         if FINNHUB_API_KEY:
             params['token'] = FINNHUB_API_KEY
         
+        # Use crypto/candle endpoint for cryptocurrencies (stock/candle does not support crypto symbols)
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/stock/candle",
+            f"{FINNHUB_BASE_URL}/crypto/candle",
             params=params,
             timeout=10
         )
@@ -1309,6 +1387,38 @@ def search_crypto_finnhub(keywords: str) -> List[Dict]:
     except Exception as e:
         logger.error(f"Error searching crypto for '{keywords}': {str(e)}")
         return []
+
+
+def get_crypto_quote_alpha_vantage(symbol: str, market: str = 'USD') -> Optional[Dict]:
+    """
+    Get cryptocurrency quote from Alpha Vantage (format compatible with Finnhub).
+    Uses DIGITAL_CURRENCY_DAILY: last close = price, change from previous close.
+    
+    Returns:
+        Dict with keys: symbol, price, change, change_percent (same format as get_crypto_quote_finnhub)
+    """
+    av = get_alpha_vantage_service()
+    if not av:
+        return None
+    daily = av.get_crypto_daily_data(symbol, market)
+    if not daily or not daily.get('data'):
+        return None
+    series = daily['data']
+    if not series:
+        return None
+    last = series[-1]
+    price = float(last.get('close', 0) or 0)
+    change = change_percent = None
+    if len(series) >= 2:
+        prev_close = float(series[-2].get('close', 0) or 0)
+        change = price - prev_close
+        change_percent = (change / prev_close * 100) if prev_close else None
+    return {
+        'symbol': (symbol or '').strip().upper(),
+        'price': price,
+        'change': change,
+        'change_percent': str(change_percent) if change_percent is not None else None,
+    }
 
 
 def get_alpha_vantage_service() -> Optional[AlphaVantageService]:

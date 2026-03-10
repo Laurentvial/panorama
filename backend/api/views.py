@@ -4675,17 +4675,21 @@ def asset_chart_data(request, asset_id):
         outputsize = 'compact'
     
     try:
-        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        # Use Alpha Vantage for cryptos and stocks/ETFs
         if asset.type.lower() == 'crypto':
-            from api.alpha_vantage_service import get_crypto_candles_finnhub
-            chart_data = get_crypto_candles_finnhub(asset.alpha_vantage_symbol, resolution='D', days=100 if outputsize == 'compact' else 730)
-            
-            if not chart_data:
+            av_service = get_alpha_vantage_service()
+            if not av_service:
+                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            chart_data = av_service.get_crypto_daily_data(asset.alpha_vantage_symbol, market=(asset.currency or 'USD').strip().upper() or 'USD')
+            if chart_data and chart_data.get('data'):
+                # Alpha Vantage returns ~1000 days; compact=100 days, full=keep all for 1Y/3Y/MAX
+                if outputsize == 'compact':
+                    chart_data['data'] = chart_data['data'][-100:]
+            if not chart_data or not chart_data.get('data'):
                 return Response({
                     'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
             return Response(chart_data, status=status.HTTP_200_OK)
         else:
             # Use Alpha Vantage for stocks/ETFs
@@ -4879,10 +4883,10 @@ def asset_create_from_alpha_vantage(request):
         overview_currency = ''
         overview_country = ''
 
-        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        # Use Alpha Vantage for cryptos, stocks/ETFs
         if asset_type.lower() == 'crypto':
-            from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
-            quote = get_crypto_quote_finnhub(symbol)
+            from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
+            quote = get_crypto_quote_alpha_vantage(symbol)
             
             if not quote:
                 return Response({'error': f'Crypto symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -4891,7 +4895,7 @@ def asset_create_from_alpha_vantage(request):
             if not logo_url:
                 logo_url = get_crypto_logo(symbol) or ''
 
-            # Finnhub quotes for crypto are USD-based; ensure we store a sensible default.
+            # Alpha Vantage crypto quotes are USD-based; ensure we store a sensible default.
             if not currency:
                 currency = 'USD'
         else:
@@ -5143,10 +5147,10 @@ def asset_update_price(request, asset_id):
         return Response({'error': 'Asset does not have a symbol configured'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+        # Use Alpha Vantage for cryptos and stocks/ETFs
         if asset.type.lower() == 'crypto':
-            from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
-            quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
+            from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
+            quote = get_crypto_quote_alpha_vantage(asset.alpha_vantage_symbol)
             
             if not quote:
                 return Response({
@@ -5354,7 +5358,7 @@ def assets_bulk_update_prices(request):
     Updates: prices, logos, descriptions, sectors, and other company details
     """
     import time
-    from api.alpha_vantage_service import get_crypto_quote_finnhub, get_crypto_logo
+    from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
     
     asset_ids = request.data.get('assetIds', [])
     
@@ -5379,9 +5383,9 @@ def assets_bulk_update_prices(request):
             
             updated = False
             
-            # Use Finnhub for cryptos, Alpha Vantage for stocks/ETFs
+            # Use Alpha Vantage for cryptos and stocks/ETFs
             if asset.type.lower() == 'crypto':
-                quote = get_crypto_quote_finnhub(asset.alpha_vantage_symbol)
+                quote = get_crypto_quote_alpha_vantage(asset.alpha_vantage_symbol)
                 
                 if quote:
                     asset.last_price = quote['price']
@@ -5550,7 +5554,7 @@ def assets_bulk_import_from_index(request):
     """
     import time
     from api.index_constituent_service import get_index_constituents
-    from api.alpha_vantage_service import get_crypto_quote_finnhub, get_oanda_quote_finnhub
+    from api.alpha_vantage_service import get_oanda_quote_finnhub
     
     logger = logging.getLogger(__name__)
     
@@ -7186,6 +7190,51 @@ def client_conversation_messages(request, client_id, conversation_id):
         )
 
     return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def client_conversation_message_detail(request, client_id, conversation_id, message_id):
+    """
+    Edit (PATCH) or delete (DELETE) a chat message. Admin/manager only.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    is_legacy = str(conversation_id) == 'legacy'
+    conversation = None
+    if not is_legacy:
+        conversation = get_object_or_404(ClientConversation, id=conversation_id, client=client)
+
+    msg = get_object_or_404(
+        ClientChatMessage,
+        id=message_id,
+        client=client,
+        conversation=None if is_legacy else conversation,
+    )
+
+    if request.method == 'PATCH':
+        try:
+            payload = request.data or {}
+        except Exception:
+            payload = {}
+        message_text = str(payload.get('message', '') or '').strip()
+        if not message_text:
+            return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+        msg.message = message_text
+        msg.save(update_fields=['message'])
+        return Response({'message': ClientChatMessageSerializer(msg).data})
+
+    if request.method == 'DELETE':
+        msg.delete()
+        if conversation:
+            conversation.updated_at = timezone.now()
+            conversation.save(update_fields=['updated_at'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    return Response({'error': 'Méthode non autorisée'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 @api_view(['GET'])

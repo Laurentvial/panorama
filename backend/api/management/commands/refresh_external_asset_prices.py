@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from api.alpha_vantage_service import (
     get_alpha_vantage_service,
-    get_crypto_quote_finnhub,
+    get_crypto_quote_alpha_vantage,
     get_oanda_candles_finnhub,
     get_oanda_quote_finnhub,
 )
@@ -28,9 +28,9 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
     asset_type = (asset.type or "").strip().lower()
 
     try:
-        # Crypto: Finnhub
+        # Crypto: Alpha Vantage
         if asset_type == "crypto":
-            quote = get_crypto_quote_finnhub(symbol_upper)
+            quote = get_crypto_quote_alpha_vantage(symbol_upper)
             if not quote:
                 return False, "crypto quote not found / rate limited"
 
