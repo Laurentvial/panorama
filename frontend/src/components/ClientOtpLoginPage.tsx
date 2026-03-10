@@ -141,7 +141,7 @@ export function ClientOtpLoginPage() {
           {hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
           ) : (
-            <div className="login-banner-title">{platformName || 'Plateforme'}</div>
+            <div className="login-banner-title">{platformName}</div>
           )}
         </header>
         <div className="login-content">
@@ -171,7 +171,7 @@ export function ClientOtpLoginPage() {
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
         ) : (
-          <div className="login-banner-title">{platformName || 'Plateforme'}</div>
+          <div className="login-banner-title">{platformName}</div>
         )}
       </header>
 

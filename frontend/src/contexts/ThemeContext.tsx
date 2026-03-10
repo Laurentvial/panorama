@@ -87,7 +87,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     // Apply platform name (document title) — never show "Panorama" as default
     const platformName = (appSettings.platform_name || '').trim();
-    document.title = (platformName && platformName.toLowerCase() !== 'panorama') ? platformName : 'Plateforme';
+    document.title = (platformName && platformName.toLowerCase() !== 'panorama') ? platformName : '';
     
     // Apply favicon
     const faviconUrl = appSettings.favicon_url;

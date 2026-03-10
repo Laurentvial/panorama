@@ -80,7 +80,7 @@ export function RegisterPage() {
           <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl flex items-center justify-center mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <CardTitle>{platformName || 'Plateforme'}</CardTitle>
+          <CardTitle>{platformName}</CardTitle>
           <CardDescription>
             Créez votre compte administrateur
           </CardDescription>
