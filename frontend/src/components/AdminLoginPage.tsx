@@ -23,7 +23,7 @@ export function AdminLoginPage() {
   const [touched, setTouched] = useState<{ username?: boolean; password?: boolean }>({});
   const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const platformName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -141,14 +141,14 @@ export function AdminLoginPage() {
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
         ) : (
-          <div className="login-banner-title">{platformName}</div>
+          <div className="login-banner-title">{platformName || 'panorama - administration'}</div>
         )}
       </header>
 
       <div className="login-content">
         <Card className="login-card">
           <CardHeader className="login-card-header">
-            <CardTitle>{platformName ? `${platformName} - Administration` : 'Administration'}</CardTitle>
+            <CardTitle>{platformName ? `${platformName} - Administration` : 'panorama - administration'}</CardTitle>
             <CardDescription>
               Connectez-vous à votre compte administrateur
             </CardDescription>

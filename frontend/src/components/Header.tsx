@@ -147,7 +147,7 @@ export function Header({ user }: HeaderProps) {
                 <img src={settings.logo_url} alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
               ) : (
                 <div className="header-platform-name">
-                  {platformName}
+                  {platformName || 'panorama - administration'}
                 </div>
               )}
               <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>

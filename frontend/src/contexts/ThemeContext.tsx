@@ -87,9 +87,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     // Apply platform name (document title)
     const platformName = (appSettings.platform_name || '').trim();
-    if (platformName) {
-      document.title = platformName;
-    }
+    document.title = platformName || 'panorama - administration';
     
     // Apply favicon
     const faviconUrl = appSettings.favicon_url;
