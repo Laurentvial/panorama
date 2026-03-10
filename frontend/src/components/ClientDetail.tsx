@@ -357,7 +357,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Positions Tab */}
         <TabsContent value="positions">
-          <ClientPositionsTab clientId={clientId} />
+          <ClientPositionsTab clientId={clientId} accountCurrency={client?.accountCurrency || 'EUR'} />
         </TabsContent>
 
         {/* Assets Tab */}
@@ -408,7 +408,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Documents Tab */}
         <TabsContent value="documents">
-          <ClientDocumentsTab clientId={clientId} onRefresh={loadClientData} />
+          <ClientDocumentsTab clientId={clientId} accountCurrency={client?.accountCurrency || 'EUR'} onRefresh={loadClientData} />
         </TabsContent>
 
         {/* Misc Tab */}

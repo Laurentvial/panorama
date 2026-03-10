@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
+import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
@@ -28,18 +29,10 @@ type ClientPositionRow = {
   status: string;
 };
 
-const formatCurrency = (value: any) => {
-  const n = typeof value === 'string' ? parseFloat(value) : Number(value);
-  if (!Number.isFinite(n)) return '-';
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
-};
-
 const formatMoney = (value: any, currency: string | undefined, opts?: Intl.NumberFormatOptions) => {
   const n = typeof value === 'string' ? parseFloat(value) : Number(value);
   if (!Number.isFinite(n)) return '-';
-  const cur = String(currency || '').trim().toUpperCase();
-  if (!cur || cur === 'EUR') return formatCurrency(n);
-  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 8, ...opts })} ${cur}`;
+  return formatAmount(n, currency || 'EUR', opts);
 };
 
 const formatDateTime = (iso: string) => {
@@ -75,7 +68,7 @@ const formatPositionRange = (p: ClientPositionRow) => {
   return '-';
 };
 
-export function ClientPositionsTab({ clientId }: { clientId: string }) {
+export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clientId: string; accountCurrency?: string }) {
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
   const [allPositions, setAllPositions] = useState<ClientPositionRow[]>([]); // All positions for counts
@@ -295,7 +288,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} />
+                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
                 )}
               </TabsContent>
               <TabsContent value="open" className="mt-4">
@@ -306,7 +299,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} />
+                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
                 )}
               </TabsContent>
               <TabsContent value="closed" className="mt-4">
@@ -317,7 +310,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} />
+                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
                 )}
               </TabsContent>
             </Tabs>
@@ -423,7 +416,7 @@ export function ClientPositionsTab({ clientId }: { clientId: string }) {
   );
 }
 
-function PositionsTable({ rows, assets }: { rows: ClientPositionRow[]; assets: any[] }) {
+function PositionsTable({ rows, assets, accountCurrency = 'EUR' }: { rows: ClientPositionRow[]; assets: any[]; accountCurrency?: string }) {
   // Créer un Map pour accéder rapidement aux assets par ID
   const assetsById = new Map<string, any>();
   assets.forEach((asset) => {
@@ -507,11 +500,11 @@ function PositionsTable({ rows, assets }: { rows: ClientPositionRow[]; assets: a
             let finalPnlColor: string;
 
             if (assetCurrency === 'EUR') {
-              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAmount(pnlEur, 'EUR') : '-';
               finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? 'text-green-600' : 'text-red-600') : 'text-slate-700';
             } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
               // profit_loss stocké : EUR principal, devise actif secondaire
-              pnlLabelMain = formatCurrency(pnlEur);
+              pnlLabelMain = formatAmount(pnlEur, 'EUR');
               pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
                 ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                 : null;
@@ -519,10 +512,10 @@ function PositionsTable({ rows, assets }: { rows: ClientPositionRow[]; assets: a
             } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
               // P&L temps réel : devise actif principal, EUR secondaire
               pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
-              pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
+              pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatAmount(pnlEur, 'EUR')}` : null;
               finalPnlColor = pnlAsset >= 0 ? 'text-green-600' : 'text-red-600';
             } else {
-              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAmount(pnlEur, 'EUR') : '-';
               finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? 'text-green-600' : 'text-red-600') : 'text-slate-700';
             }
             
@@ -531,7 +524,11 @@ function PositionsTable({ rows, assets }: { rows: ClientPositionRow[]; assets: a
                 <td className="py-2 px-3">{formatPositionRange(p)}</td>
                 <td className="py-2 px-3">{p.productName || p.productId}</td>
                 <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
-                <td className="py-2 px-3 text-right">{formatCurrency(p.invested_amount)}</td>
+                <td className="py-2 px-3 text-right">
+                  {p.assetId && p.invested_amount_asset_currency != null
+                    ? formatMoney(p.invested_amount_asset_currency, assetCurrency, { maximumFractionDigits: 2 })
+                    : formatAmount(typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount), accountCurrency)}
+                </td>
                 <td className={`py-2 px-3 text-right font-medium ${finalPnlColor}`}>
                   <div>{pnlLabelMain}</div>
                   {pnlLabelSub && (

@@ -9,6 +9,7 @@ import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel } from './transactionUtils';
+import { getCurrencySymbol } from '../utils/currency';
 import { PositionGenerationModal } from './PositionGenerationModal';
 import '../styles/Modal.css';
 
@@ -16,6 +17,7 @@ interface EditTransactionModalProps {
   isOpen: boolean;
   transaction: any;
   clientId: string;
+  accountCurrency?: string;
   onClose: () => void;
   onSuccess: (updatedTransaction?: any) => void;
 }
@@ -24,9 +26,11 @@ export function EditTransactionModal({
   isOpen,
   transaction,
   clientId,
+  accountCurrency: accountCurrencyProp = 'EUR',
   onClose,
   onSuccess
 }: EditTransactionModalProps) {
+  const currencySym = getCurrencySymbol(accountCurrencyProp);
   const normalizeInterestPeriod = (value: string): string => {
     const v = String(value || '').trim();
     const legacyMapping: Record<string, string> = {
@@ -753,7 +757,7 @@ export function EditTransactionModal({
               />
             </div>
             <div className="modal-form-field">
-              <Label>Montant (€)</Label>
+              <Label>Montant ({currencySym})</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -809,6 +813,7 @@ export function EditTransactionModal({
       {showPositionModal && (
         <PositionGenerationModal
           isOpen={showPositionModal}
+          accountCurrency={accountCurrencyProp}
           transaction={{
             ...transaction,
             subscription_interest_period:

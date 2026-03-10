@@ -288,6 +288,19 @@ def _profitability_text_for_product(product: Product) -> str:
     return f"{base} {period}".strip()
 
 
+def _format_amount_for_contract(amount: float, currency: str | None) -> str:
+    """Format amount for contract PDF (French locale: 1 234,56 € / 1 234,56 CHF / 1 234,56 $)."""
+    ccy = (currency or 'EUR').strip().upper()
+    if ccy not in ('EUR', 'USD', 'CHF'):
+        ccy = 'EUR'
+    formatted = f"{float(amount):,.2f}".replace(',', ' ').replace('.', ',')
+    if ccy == 'USD':
+        return f"{formatted} $"
+    if ccy == 'CHF':
+        return f"{formatted} CHF"
+    return f"{formatted} €"
+
+
 def _profitability_rate_for_calc(product: Product) -> Decimal:
     """
     Best-effort rate for profits estimation (keeps consistency with existing frontend simulator).
@@ -7361,6 +7374,18 @@ def client_transactions(request, client_id):
 @permission_classes([AllowAny])
 def client_transaction_create(request, client_id):
     """Créer une transaction pour un client"""
+    try:
+        return _client_transaction_create_impl(request, client_id)
+    except Exception as e:
+        logger.exception("client_transaction_create failed")
+        return Response(
+            {'error': str(e), 'detail': str(e), 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def _client_transaction_create_impl(request, client_id):
+    """Implementation of client transaction creation."""
     client = get_object_or_404(Client, id=client_id)
     
     # Check if it's a client accessing their own data
@@ -7527,7 +7552,6 @@ def client_transaction_create(request, client_id):
             conv_txn.save()
             client.account_currency = to_currency
             client.save(update_fields=['account_currency'])
-        from .serializer import TransactionSerializer
         return Response({'transaction': TransactionSerializer(conv_txn).data}, status=status.HTTP_201_CREATED)
     
     # --- Deposit/bonus: convert EUR to account currency if needed ---
@@ -7536,14 +7560,28 @@ def client_transaction_create(request, client_id):
     if amount_currency not in ('EUR', 'USD', 'CHF'):
         amount_currency = (client.account_currency or 'EUR').strip().upper()
     if transaction_type in ('depot', 'bonus') and amount_currency != 'EUR':
-        # Deposits arrive in EUR; convert to account currency
-        fx_rate = _get_fx_rate('EUR', amount_currency)
-        if fx_rate is not None:
+        # Deposits: amount is in EUR, convert to account currency
+        # Use user-provided rate if present, else fetch from API
+        fx_rate = None
+        raw_fx = (
+            request.data.get('fx_rate_eur_to_account')
+            or (subscription_details_data or {}).get('fx_rate_eur_to_account')
+        )
+        if raw_fx is not None:
+            try:
+                fx_rate = float(raw_fx)
+            except (TypeError, ValueError):
+                pass
+        if fx_rate is None or fx_rate <= 0:
+            fx_rate = _get_fx_rate('EUR', amount_currency)
+        if fx_rate is not None and fx_rate > 0:
             final_amount = round(float(transaction_amount) * fx_rate, 2)
             if isinstance(subscription_details_data, dict):
                 subscription_details_data = dict(subscription_details_data)
-                subscription_details_data['deposit_eur_amount'] = transaction_amount
-                subscription_details_data['fx_rate_eur_to_account'] = fx_rate
+            else:
+                subscription_details_data = {}
+            subscription_details_data['deposit_eur_amount'] = transaction_amount
+            subscription_details_data['fx_rate_eur_to_account'] = fx_rate
         else:
             return Response({'error': f'Impossible d\'obtenir le taux de change EUR/{amount_currency} pour créditer le dépôt'}, status=status.HTTP_502_BAD_GATEWAY)
     
@@ -7876,7 +7914,10 @@ def client_transaction_create(request, client_id):
         manager_user = _resolve_client_manager_user(client)
         if manager_user:
             client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
-            amount_str = f"{transaction_amount:,.2f}".replace(',', ' ').replace('.', ',') + " €"
+            notif_ccy = (getattr(transaction, 'amount_currency', None) or client.account_currency or 'EUR').strip().upper()
+            if notif_ccy not in ('EUR', 'USD', 'CHF'):
+                notif_ccy = 'EUR'
+            amount_str = _format_amount_for_contract(transaction_amount, notif_ccy)
             if transaction_type == 'depot':
                 create_app_notification(
                     recipient_type=AppNotification.RECIPIENT_CRM_USER,
@@ -7981,8 +8022,13 @@ def client_transaction_create(request, client_id):
             duration = subscription_details_data.get('duration', '') if subscription_details_data else (product.duration or '30')
             duration_days = _parse_days_from_duration(duration)
             
-            # Amount
+            # Amount and currency (for contract display)
             amount = float(transaction.amount)
+            contract_currency = (
+                getattr(transaction, 'amount_currency', None) or client.account_currency or 'EUR'
+            ).strip().upper()
+            if contract_currency not in ('EUR', 'USD', 'CHF'):
+                contract_currency = 'EUR'
             
             # Profitability
             is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
@@ -8282,7 +8328,7 @@ def client_transaction_create(request, client_id):
                 ['TITRE', product_name],
                 ['DURÉE', duration_display],
                 ['RENTABILITÉ', profitability_text],
-                ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+                ['TOTAL NET', _format_amount_for_contract(amount, contract_currency)],
             ]
             summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
             summary_table.setStyle(TableStyle([
@@ -8361,7 +8407,7 @@ def client_transaction_create(request, client_id):
             # Interest table
             interest_data = [
                 ['Date', 'Intérêts payés', 'Performance'],
-                [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+                [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
             ]
             interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
             interest_table.setStyle(TableStyle([
@@ -8445,7 +8491,10 @@ def client_transaction_create(request, client_id):
                         if getattr(transaction, 'datetime', None)
                         else datetime.now().strftime('%d/%m/%Y %H:%M')
                     )
-                    amount_display = f"{float(transaction.amount):,.2f} EUR".replace(',', ' ')
+                    fb_ccy = (getattr(transaction, 'amount_currency', None) or getattr(client, 'account_currency', None) or 'EUR').strip().upper()
+                    if fb_ccy not in ('EUR', 'USD', 'CHF'):
+                        fb_ccy = 'EUR'
+                    amount_display = _format_amount_for_contract(float(transaction.amount), fb_ccy)
 
                     fallback_content = None
                     fallback_filename = f"contrat_{re.sub(r'[^a-zA-Z0-9_-]', '_', safe_product_name)[:50]}_{transaction_id}.pdf"
@@ -10256,6 +10305,11 @@ def product_contract_pdf(request, product_id):
     subscription_amount = request.GET.get('amount', '')
     subscription_interest_period = request.GET.get('interestPeriod', '')
     subscription_signature = request.GET.get('signature', '')  # Base64 encoded signature image
+    # Currency for contract amounts (EUR, USD, CHF)
+    contract_currency_raw = request.GET.get('currency', '').strip().upper()
+    if not contract_currency_raw and current_client:
+        contract_currency_raw = (getattr(current_client, 'account_currency', None) or '').strip().upper()
+    contract_currency = contract_currency_raw if contract_currency_raw in ('EUR', 'USD', 'CHF') else 'EUR'
     
     # Get user/client data for defaults
     if current_client:
@@ -10634,7 +10688,7 @@ def product_contract_pdf(request, product_id):
         ['TITRE', product_name],
         ['DURÉE', duration_display],
         ['RENTABILITÉ', profitability_text],
-        ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+        ['TOTAL NET', _format_amount_for_contract(amount, contract_currency)],
     ]
     summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
     summary_table.setStyle(TableStyle([
@@ -10713,7 +10767,7 @@ def product_contract_pdf(request, product_id):
     # Interest table
     interest_data = [
         ['Date', 'Intérêts payés', 'Performance'],
-        [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+        [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
     ]
     interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
     interest_table.setStyle(TableStyle([

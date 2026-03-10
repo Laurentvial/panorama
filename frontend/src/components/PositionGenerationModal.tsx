@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { X, Loader2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
 
@@ -111,6 +112,7 @@ interface PositionGenerationModalProps {
   isOpen: boolean;
   transaction: any;
   clientId: string;
+  accountCurrency?: string;
   onClose: () => void;
   onSuccess: () => void;
   isWithdrawal?: boolean; // If true, this is a withdrawal transaction
@@ -122,10 +124,12 @@ export function PositionGenerationModal({
   isOpen,
   transaction,
   clientId,
+  accountCurrency: accountCurrencyProp = 'EUR',
   onClose,
   onSuccess,
   isWithdrawal = false
 }: PositionGenerationModalProps) {
+  const displayCurrency = (accountCurrencyProp || transaction?.amountCurrency || transaction?.amount_currency || 'EUR').toString().trim().toUpperCase();
   const [step, setStep] = useState<Step>('loading-rates');
   const [rates, setRates] = useState<PeriodRate[]>([]);
   const [editedRates, setEditedRates] = useState<Record<number, string>>({});
@@ -642,7 +646,7 @@ export function PositionGenerationModal({
   const formatCurrency = (value: string) => {
     const num = parseFloat(value);
     if (isNaN(num)) return '-';
-    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(num);
+    return formatAmount(num, displayCurrency);
   };
 
   const formatDate = (dateStr: string | null) => {

@@ -3,6 +3,7 @@ import { Button } from './ui/button';
 import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getStatusLabel, getTypeLabel, getTypeColors, getStatusColors, extractAssetInfo } from './transactionUtils';
+import { formatAmount } from '../utils/currency';
 
 // Helper functions for French labels
 const getTypeColors = (type: string): { bg: string; text: string } => {
@@ -66,6 +67,7 @@ interface TransactionListProps {
   showContractColumn?: boolean;
   showClientColumn?: boolean;
   showIcons?: boolean;
+  accountCurrency?: string;
   onView?: (transaction: any) => void;
   onEdit?: (transaction: any) => void;
   onValidateAndGenerate?: (transaction: any) => void;
@@ -81,12 +83,14 @@ export function TransactionList({
   showContractColumn = false,
   showClientColumn = false,
   showIcons = true,
+  accountCurrency: accountCurrencyProp = 'EUR',
   onView,
   onEdit,
   onValidateAndGenerate,
   emptyMessage = 'Aucune transaction trouvée'
 }: TransactionListProps) {
   const navigate = useNavigate();
+  const defaultCcy = (accountCurrencyProp || 'EUR').toString().trim().toUpperCase();
 
   // Find asset/product ID by name
   const findAssetProductId = (name: string, reference: string | null): string | null => {
@@ -226,11 +230,11 @@ export function TransactionList({
                   {transaction.type === 'transfert' ? (
                     <span className="font-medium text-orange-600 flex items-center gap-1">
                       <ArrowLeftRight className="w-4 h-4" />
-                      {parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      {formatAmount(parseFloat(transaction.amount || 0), transaction.amountCurrency || transaction.amount_currency || defaultCcy)}
                     </span>
                   ) : (
                     <span className={`font-medium ${transaction.type === 'retrait' || transaction.type === 'perte' || transaction.type === 'frais' ? 'text-red-600' : 'text-green-600'}`}>
-                      {transaction.type === 'retrait' || transaction.type === 'perte' || transaction.type === 'frais' ? '-' : '+'}{parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      {transaction.type === 'retrait' || transaction.type === 'perte' || transaction.type === 'frais' ? '-' : '+'}{formatAmount(parseFloat(transaction.amount || 0), transaction.amountCurrency || transaction.amount_currency || defaultCcy)}
                     </span>
                   )}
                 </td>

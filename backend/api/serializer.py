@@ -177,9 +177,11 @@ class ClientSerializer(serializers.ModelSerializer):
                 status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
+        # Prefetch stores a list; QuerySet has order_by. Handle both.
+        ordered_txns = transactions.order_by('datetime') if hasattr(transactions, 'order_by') else sorted(transactions, key=lambda t: t.datetime)
         calculated_invested_capital = 0
         effective_currency = None
-        for txn in transactions.order_by('datetime'):
+        for txn in ordered_txns:
             amount = float(txn.amount) if txn.amount else 0
             txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
             if txn.type == 'conversion':
@@ -230,9 +232,11 @@ class ClientSerializer(serializers.ModelSerializer):
                 status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
+        # Prefetch stores a list; QuerySet has order_by. Handle both.
+        ordered_txns = transactions.order_by('datetime') if hasattr(transactions, 'order_by') else sorted(transactions, key=lambda t: t.datetime)
         calculated_invested_capital = 0
         effective_currency = None
-        for txn in transactions.order_by('datetime'):
+        for txn in ordered_txns:
             amount = float(txn.amount) if txn.amount else 0
             txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
             if txn.type == 'conversion':
@@ -1029,6 +1033,7 @@ class PositionSerializer(serializers.ModelSerializer):
     assetType = serializers.CharField(source='asset.type', read_only=True, allow_null=True)
     assetReference = serializers.CharField(source='asset.reference', read_only=True, allow_null=True)
     assetCurrency = serializers.SerializerMethodField()
+    amountCurrency = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
 
@@ -1039,7 +1044,7 @@ class PositionSerializer(serializers.ModelSerializer):
             'clientId', 'clientName',
             'productId', 'productName', 'productType', 'productReference',
             'transactionId',
-            'assetId', 'assetName', 'assetType', 'assetReference', 'assetCurrency',
+            'assetId', 'assetName', 'assetType', 'assetReference', 'assetCurrency', 'amountCurrency',
             'period_index', 'period_date',
             'invested_amount',
             'entry_price', 'quantity',
@@ -1085,6 +1090,12 @@ class PositionSerializer(serializers.ModelSerializer):
             return obj.asset.currency if obj.asset else None
         except Exception:
             return None
+
+    def get_amountCurrency(self, obj):
+        try:
+            return (obj.transaction.amount_currency or 'EUR').strip().upper() if obj.transaction else 'EUR'
+        except Exception:
+            return 'EUR'
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):

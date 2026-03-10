@@ -427,6 +427,7 @@ export function Transactions() {
         clientId={selectedTransaction?.clientId}
         assets={assets}
         products={products}
+        accountCurrency={clients.find(c => c.id === selectedTransaction?.clientId)?.accountCurrency || 'EUR'}
         onClose={() => {
           setIsViewTransactionModalOpen(false);
           setSelectedTransaction(null);
@@ -439,6 +440,7 @@ export function Transactions() {
         isOpen={isEditTransactionModalOpen}
         transaction={selectedTransaction}
         clientId={selectedTransaction?.clientId || ''}
+        accountCurrency={clients.find(c => c.id === selectedTransaction?.clientId)?.accountCurrency || 'EUR'}
         onClose={() => {
           setIsEditTransactionModalOpen(false);
           setSelectedTransaction(null);

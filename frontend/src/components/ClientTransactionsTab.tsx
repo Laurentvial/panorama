@@ -17,6 +17,7 @@ import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { PositionGenerationModal } from './PositionGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
+import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';
 
@@ -97,6 +98,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   const [positionModalSource, setPositionModalSource] = useState<'create' | 'validate'>('create');
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+
+  const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
 
   // Load transactions with pagination
   const loadTransactions = async (page: number = 1, limit: number = 50) => {
@@ -340,6 +343,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     interestPeriod: '',
     // conversion fields
     to_currency: '',
+    // depot/bonus for non-EUR account: amount in EUR, optional fx rate
+    fx_rate_eur_to_account: '',
     // kept for backward compatibility with existing UI resets
     visibleByClient: true
   });
@@ -389,6 +394,51 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       setTransactionForm(prev => ({ ...prev, datetime: `${year}-${month}-${day}T${hours}:${minutes}` }));
     }
   }, [isTransactionDialogOpen]);
+
+  // Fetch suggested FX rate for depot/bonus when account is non-EUR
+  const needsEurInputAndConversion = (
+    (transactionForm.type === 'depot' || transactionForm.type === 'bonus') &&
+    accountCurrency !== 'EUR'
+  );
+  useEffect(() => {
+    if (!isTransactionDialogOpen || !needsEurInputAndConversion) return;
+    if (transactionForm.fx_rate_eur_to_account) return; // User already entered one
+    let cancelled = false;
+    (async () => {
+      try {
+        const res: any = await apiCall(`/api/forex/quote/?from=EUR&to=${accountCurrency}`);
+        const rate = res?.exchange_rate;
+        if (!cancelled && rate != null && typeof rate === 'number') {
+          setTransactionForm(prev => ({ ...prev, fx_rate_eur_to_account: String(rate) }));
+        }
+      } catch {
+        // Ignore - user can enter manually
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isTransactionDialogOpen, needsEurInputAndConversion, accountCurrency]);
+
+  // Pre-fill description with conversion comment for depot/bonus with EUR→accountCurrency conversion
+  const conversionCommentPattern = /[\r\n]*\s*\(Conversion:.*?\)\s*$/;
+  useEffect(() => {
+    const baseDesc = (transactionForm.description || '').replace(conversionCommentPattern, '').trim();
+    if (!needsEurInputAndConversion || !transactionForm.amount || !transactionForm.fx_rate_eur_to_account) {
+      // Remove conversion line when amount/rate cleared
+      if (baseDesc !== (transactionForm.description || '').trim()) {
+        setTransactionForm(prev => ({ ...prev, description: baseDesc }));
+      }
+      return;
+    }
+    const amt = parseFloat(transactionForm.amount);
+    const rate = parseFloat(transactionForm.fx_rate_eur_to_account);
+    if (isNaN(amt) || amt <= 0 || isNaN(rate) || rate <= 0) return;
+    const converted = (amt * rate).toFixed(2);
+    const conversionLine = `\n\n(Conversion: ${amt.toLocaleString('fr-FR')} EUR × ${rate} = ${parseFloat(converted).toLocaleString('fr-FR')} ${accountCurrency})`;
+    const newDesc = baseDesc ? baseDesc + conversionLine : conversionLine.trim();
+    if (newDesc !== transactionForm.description) {
+      setTransactionForm(prev => ({ ...prev, description: newDesc }));
+    }
+  }, [needsEurInputAndConversion, transactionForm.amount, transactionForm.fx_rate_eur_to_account, transactionForm.description, accountCurrency]);
 
   // Keep interest period aligned with selected transfer product options.
   useEffect(() => {
@@ -496,6 +546,14 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       return;
     }
 
+    const needsEurAndRate = (transactionForm.type === 'depot' || transactionForm.type === 'bonus') &&
+      (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase() !== 'EUR';
+    if (needsEurAndRate && (!transactionForm.fx_rate_eur_to_account || parseFloat(transactionForm.fx_rate_eur_to_account) <= 0)) {
+      toast.error('Veuillez saisir un taux de conversion valide (EUR → ' + (client?.accountCurrency || client?.account_currency || 'CHF') + ')');
+      setIsCreatingTransaction(false);
+      return;
+    }
+
     const isTransferWithProduct =
       transactionForm.type === 'transfert' &&
       ((transactionForm.from_field && transactionForm.from_field !== 'solde') ||
@@ -591,6 +649,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                   : undefined,
               }
             : {}),
+        ...((transactionForm.type === 'depot' || transactionForm.type === 'bonus') && needsEurAndRate && transactionForm.fx_rate_eur_to_account
+          ? { subscription_details: { fx_rate_eur_to_account: parseFloat(transactionForm.fx_rate_eur_to_account) } }
+          : {}),
       };
 
       const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
@@ -652,6 +713,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             to_field: 'solde',
             productId: '',
             interestPeriod: '',
+            to_currency: '',
+            fx_rate_eur_to_account: '',
             visibleByClient: true
           });
           // Don't call onRefresh yet - wait for modal to complete
@@ -699,6 +762,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         to_field: 'solde',
         productId: '',
         interestPeriod: '',
+        to_currency: '',
+        fx_rate_eur_to_account: '',
         visibleByClient: true
       });
       // Reload first page to guarantee visibility of the newly created transaction.
@@ -707,7 +772,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       onRefresh();
     } catch (error: any) {
       console.error('Error creating transaction:', error);
-      toast.error(error.message || 'Erreur lors de la création de la transaction');
+      const msg = error?.response?.error || error.message || 'Erreur lors de la création de la transaction';
+      toast.error(msg);
     } finally {
       setIsCreatingTransaction(false);
     }
@@ -837,6 +903,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     ? products.find((p: any) => String(p?.id) === String(transferProductId))
     : null;
   const interestPeriodOptions = getInterestPeriodOptions(transferProduct);
+  const currencySym = getCurrencySymbol(accountCurrency);
   
   const hasAvailableFunds = sourceProduct 
     ? (sourceProduct.availableFunds ?? sourceProduct.available_funds ?? false)
@@ -862,6 +929,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             productId: '',
             interestPeriod: '',
             to_currency: '',
+            fx_rate_eur_to_account: '',
             visibleByClient: true
           });
         }}>
@@ -931,7 +999,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
 
             {/* Amount filter */}
             <div className="space-y-2">
-              <Label>Montant (€)</Label>
+              <Label>Montant ({currencySym})</Label>
               <div className="flex gap-2">
                 <Input
                   type="number"
@@ -1003,6 +1071,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             productId: '',
             interestPeriod: '',
             to_currency: '',
+            fx_rate_eur_to_account: '',
             visibleByClient: true
           });
         }}>
@@ -1028,6 +1097,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                     productId: '',
                     interestPeriod: '',
                     to_currency: '',
+                    fx_rate_eur_to_account: '',
                     visibleByClient: true
                   });
                 }}
@@ -1185,17 +1255,38 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 />
               </div>
               {transactionForm.type !== 'conversion' && (
-                <div className="modal-form-field">
-                  <Label>Montant (€)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={transactionForm.amount}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-                    required
-                  />
-                </div>
+                <>
+                  <div className="modal-form-field">
+                    <Label>
+                      Montant ({needsEurInputAndConversion ? 'EUR' : currencySym})
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={transactionForm.amount}
+                      onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
+                      required
+                    />
+                  </div>
+                  {needsEurInputAndConversion && (
+                    <div className="modal-form-field">
+                      <Label>Taux de conversion EUR → {accountCurrency}</Label>
+                      <Input
+                        type="number"
+                        step="0.00001"
+                        min="0.00001"
+                        placeholder="Ex. 0.95"
+                        value={transactionForm.fx_rate_eur_to_account}
+                        onChange={(e) => setTransactionForm({ ...transactionForm, fx_rate_eur_to_account: e.target.value })}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Le montant en {accountCurrency} enregistré sera : montant EUR × taux
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
               <div className="modal-form-field col-span-2">
                 <Label>Description</Label>
@@ -1253,6 +1344,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                     productId: '',
                     interestPeriod: '',
                     to_currency: '',
+                    fx_rate_eur_to_account: '',
                     visibleByClient: true
                   });
                 }}>
@@ -1290,6 +1382,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 products={products}
                 transactionDocuments={contractDocumentsByTransaction}
                 showContractColumn={true}
+                accountCurrency={accountCurrency}
                 showClientColumn={false}
                 showIcons={false}
                 onView={(transaction) => {
@@ -1435,6 +1528,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         clientId={clientId}
         assets={assets}
         products={products}
+        accountCurrency={accountCurrency}
         onClose={() => {
           setIsViewTransactionModalOpen(false);
           setSelectedTransaction(null);
@@ -1450,6 +1544,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         isOpen={isEditTransactionModalOpen}
         transaction={selectedTransaction}
         clientId={clientId}
+        accountCurrency={accountCurrency}
         onClose={() => {
           setIsEditTransactionModalOpen(false);
           setSelectedTransaction(null);
@@ -1468,6 +1563,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
           isOpen={isPositionGenerationModalOpen}
           transaction={transactionForPositionGeneration}
           clientId={clientId}
+          accountCurrency={accountCurrency}
           onClose={() => {
             const isValidate = positionModalSource === 'validate';
             setIsPositionGenerationModalOpen(false);
