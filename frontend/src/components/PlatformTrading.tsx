@@ -15,6 +15,7 @@ import { useLocation } from 'react-router-dom';
 import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import { getStatusColors, getStatusLabel } from './transactionUtils';
+import { getCurrencySymbol, formatAmount } from '../utils/currency';
 import '../styles/PlatformTrading.css';
 
 export function PlatformTrading() {
@@ -40,6 +41,9 @@ export function PlatformTrading() {
   const [cardDepositDialogOpen, setCardDepositDialogOpen] = useState(false);
   const [cardDepositSuccess, setCardDepositSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
+
+  const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
+  const currencySym = getCurrencySymbol(accountCurrency);
 
   const tabActiveColor = '#030213';
   const tabInactiveColor = '#6b7280';
@@ -256,7 +260,7 @@ export function PlatformTrading() {
     }
 
     if (movementType === 'retrait' && amountNum > withdrawableFunds) {
-      toast.error(`Fonds insuffisants. Disponible au retrait: ${withdrawableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
+      toast.error(`Fonds insuffisants. Disponible au retrait: ${formatAmount(withdrawableFunds, accountCurrency)}`);
       return;
     }
 
@@ -513,7 +517,7 @@ export function PlatformTrading() {
             </CardHeader>
             <CardContent>
               <div style={{ fontSize: '28px', fontWeight: 800 }}>
-                {withdrawableFunds.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                {formatAmount(withdrawableFunds, accountCurrency)}
               </div>
             </CardContent>
           </Card>
@@ -576,7 +580,7 @@ export function PlatformTrading() {
                   }}
                 >
                   <div style={{ flex: 1, minWidth: isMobile ? '100%' : 240 }}>
-                    <Label htmlFor="amount">Montant (€)</Label>
+                    <Label htmlFor="amount">Montant ({currencySym})</Label>
                     <Input
                       id="amount"
                       type="number"
@@ -756,7 +760,7 @@ export function PlatformTrading() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                       <span>Montant</span>
                       <strong>
-                        {transferSuccess.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        {formatAmount(transferSuccess.amount, accountCurrency)}
                       </strong>
                     </div>
                     {transferSuccess.transaction && (
@@ -811,7 +815,7 @@ export function PlatformTrading() {
                         <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af', textAlign: 'center' }}>
                           <div style={{ fontWeight: 600, marginBottom: 8 }}>Votre demande de dépôt est en cours de traitement</div>
                           <div style={{ fontSize: 13 }}>
-                            Montant : <strong>{pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong>
+                            Montant : <strong>{formatAmount(pendingAmount, accountCurrency)}</strong>
                           </div>
                         </div>
                       </div>
@@ -835,7 +839,7 @@ export function PlatformTrading() {
                       <div style={{ display: 'grid', gap: 12 }}>
                         <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
                           <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
-                            Montant à virer : {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            Montant à virer : {formatAmount(pendingAmount, accountCurrency)}
                           </div>
                           <div style={{ fontSize: 13, color: '#6b7280' }}>
                             Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
@@ -963,7 +967,7 @@ export function PlatformTrading() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                       <span>Montant</span>
                       <strong>
-                        {cardDepositSuccess.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        {formatAmount(cardDepositSuccess.amount, accountCurrency)}
                       </strong>
                     </div>
                     {cardDepositSuccess.transaction && (
@@ -999,7 +1003,7 @@ export function PlatformTrading() {
                   <DialogHeader>
                     <DialogTitle>Confirmation du dépôt par carte bancaire</DialogTitle>
                     <DialogDescription>
-                      Confirmez le dépôt de {pendingAmount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      Confirmez le dépôt de {formatAmount(pendingAmount, accountCurrency)}
                     </DialogDescription>
                   </DialogHeader>
 
@@ -1078,7 +1082,7 @@ export function PlatformTrading() {
                                 <td style={{ padding: '10px 8px' }}>{t.description || '—'}</td>
                                 <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
                                   {Number.isFinite(amt)
-                                    ? `${t.type === 'depot' ? '+' : '-'}${Math.abs(amt).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+                                    ? `${t.type === 'depot' ? '+' : '-'}${formatAmount(Math.abs(amt), t.amountCurrency || t.amount_currency || accountCurrency)}`
                                     : '-'}
                                 </td>
                                 <td style={{ padding: '10px 8px' }}>
@@ -1119,7 +1123,7 @@ export function PlatformTrading() {
                               <span className="platform-fundsHistoryCardLabel">Montant</span>
                               <span className="platform-fundsHistoryCardValue" style={{ color: amountColor }}>
                                 {Number.isFinite(amt)
-                                  ? `${t.type === 'depot' ? '+' : '-'}${Math.abs(amt).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+                                  ? `${t.type === 'depot' ? '+' : '-'}${formatAmount(Math.abs(amt), t.amountCurrency || t.amount_currency || accountCurrency)}`
                                   : '-'}
                               </span>
                             </div>

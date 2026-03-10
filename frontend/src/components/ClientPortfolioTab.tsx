@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Wallet, TrendingUp, TrendingDown, Euro, PieChart } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, PieChart } from 'lucide-react';
 import { ClientWallet } from './ClientWallet';
 import { apiCall } from '../utils/api';
+import { formatAmount } from '../utils/currency';
+import { CurrencyIcon } from './CurrencyIcon';
 
 interface ClientPortfolioTabProps {
   client: any;
@@ -335,14 +337,8 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     [availableFunds, tradingPortfolio, profitLoss]
   );
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
+  const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
+  const formatCurrency = (amount: number) => formatAmount(amount, accountCurrency);
 
   return (
     <div className="space-y-6">
@@ -369,7 +365,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Investi</CardTitle>
-            <Euro className="h-4 w-4 text-muted-foreground" />
+            <CurrencyIcon currency={accountCurrency} size={16} />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">

@@ -16,6 +16,7 @@ import {
   TRANSACTION_TYPES,
   STATUS_LABELS
 } from './transactionUtils';
+import { formatAmount, getCurrencySymbol } from '../utils/currency';
 import '../styles/Modal.css';
 
 interface ViewTransactionModalProps {
@@ -24,6 +25,7 @@ interface ViewTransactionModalProps {
   clientId?: string;
   assets?: any[];
   products?: any[];
+  accountCurrency?: string;
   onClose: () => void;
   onRefresh?: () => void;
 }
@@ -34,10 +36,12 @@ export function ViewTransactionModal({
   clientId,
   assets = [],
   products = [],
+  accountCurrency: accountCurrencyProp = 'EUR',
   onClose,
   onRefresh
 }: ViewTransactionModalProps) {
   const navigate = useNavigate();
+  const accountCurrency = (transaction?.amountCurrency || transaction?.amount_currency || accountCurrencyProp).toString().trim().toUpperCase();
   const [transactionLogs, setTransactionLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -429,10 +433,7 @@ export function ViewTransactionModal({
                 {transaction.type === 'transfert' ? (
                   <p className="text-lg font-medium mt-1 text-orange-600 flex items-center gap-1">
                     <ArrowLeftRight className="w-4 h-4" />
-                    {parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { 
-                      minimumFractionDigits: 2, 
-                      maximumFractionDigits: 2 
-                    })} €
+                    {formatAmount(parseFloat(transaction.amount || 0), accountCurrency)}
                   </p>
                 ) : (
                   <p className={`text-lg font-medium mt-1 ${
@@ -441,10 +442,7 @@ export function ViewTransactionModal({
                       : 'text-green-600'
                   }`}>
                     {transaction.type === 'retrait' || transaction.type === 'perte' || transaction.type === 'frais' ? '-' : '+'}
-                    {parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { 
-                      minimumFractionDigits: 2, 
-                      maximumFractionDigits: 2 
-                    })} €
+                    {formatAmount(parseFloat(transaction.amount || 0), accountCurrency)}
                   </p>
                 )}
               </div>
@@ -682,7 +680,7 @@ export function ViewTransactionModal({
                 <form onSubmit={handleAddSuperformance} className="space-y-3">
                   <div>
                     <Label htmlFor="superformance-amount" className="text-slate-600 font-semibold">
-                      Montant (€)
+                      Montant ({getCurrencySymbol(accountCurrency)})
                     </Label>
                     <Input
                       id="superformance-amount"
@@ -752,19 +750,13 @@ export function ViewTransactionModal({
                             <div>
                               <Label className="text-xs text-slate-500">Total investi</Label>
                               <p className="text-slate-900 font-semibold mt-1">
-                                {parseFloat(historyEntry.summary.total_invested || 0).toLocaleString('fr-FR', {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2
-                                })} €
+                                {formatAmount(parseFloat(historyEntry.summary.total_invested || 0), accountCurrency)}
                               </p>
                             </div>
                             <div>
                               <Label className="text-xs text-slate-500">Total profit</Label>
                               <p className="text-green-600 font-semibold mt-1">
-                                {parseFloat(historyEntry.summary.total_profit || 0).toLocaleString('fr-FR', {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2
-                                })} €
+                                {formatAmount(parseFloat(historyEntry.summary.total_profit || 0), accountCurrency)}
                               </p>
                             </div>
                             {historyEntry.deleted_future_positions && historyEntry.deleted_future_positions.count > 0 && (
@@ -794,16 +786,10 @@ export function ViewTransactionModal({
                                         {summary.count} position(s)
                                       </span>
                                       <span className="text-slate-700 font-medium">
-                                        {parseFloat(summary.total_invested || 0).toLocaleString('fr-FR', {
-                                          minimumFractionDigits: 2,
-                                          maximumFractionDigits: 2
-                                        })} €
+                                        {formatAmount(parseFloat(summary.total_invested || 0), accountCurrency)}
                                       </span>
                                       <span className="text-green-600 font-medium">
-                                        {parseFloat(summary.total_profit || 0).toLocaleString('fr-FR', {
-                                          minimumFractionDigits: 2,
-                                          maximumFractionDigits: 2
-                                        })} €
+                                        {formatAmount(parseFloat(summary.total_profit || 0), accountCurrency)}
                                       </span>
                                     </div>
                                   </div>
@@ -856,16 +842,10 @@ export function ViewTransactionModal({
                                     </td>
                                     <td className="p-2 text-right text-slate-900 font-medium">{parseFloat(period.baseRatePct || period.ratePct || 0).toFixed(2)}%</td>
                                     <td className="p-2 text-right text-slate-700">
-                                      {parseFloat(period.capitalBase || 0).toLocaleString('fr-FR', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                      })} €
+                                      {formatAmount(parseFloat(period.capitalBase || 0), accountCurrency)}
                                     </td>
                                     <td className="p-2 text-right text-green-600 font-medium">
-                                      {parseFloat(period.targetProfit || 0).toLocaleString('fr-FR', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                      })} €
+                                      {formatAmount(parseFloat(period.targetProfit || 0), accountCurrency)}
                                     </td>
                                   </tr>
                                 ))}
@@ -934,13 +914,13 @@ export function ViewTransactionModal({
                                     </span>
                                     <div className="flex items-center gap-1 flex-wrap min-w-0">
                                       <span className="text-red-600 line-through text-xs">
-                                        {key === 'amount' ? `${parseFloat(oldVal || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` :
+                                        {key === 'amount' ? formatAmount(parseFloat(oldVal || 0), accountCurrency) :
                                          key === 'status' ? getStatusLabel(oldVal, transaction?.type) :
                                          key === 'type' ? getTypeLabel(oldVal) :
                                          String(oldVal || '-')}
                                       </span>
                                       <span className="text-green-600 font-medium text-xs">
-                                        → {key === 'amount' ? `${parseFloat(newVal || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` :
+                                        → {key === 'amount' ? formatAmount(parseFloat(newVal || 0), accountCurrency) :
                                             key === 'status' ? getStatusLabel(newVal, transaction?.type) :
                                             key === 'type' ? getTypeLabel(newVal) :
                                             String(newVal || '-')}

@@ -7361,6 +7361,18 @@ def client_transactions(request, client_id):
 @permission_classes([AllowAny])
 def client_transaction_create(request, client_id):
     """Créer une transaction pour un client"""
+    try:
+        return _client_transaction_create_impl(request, client_id)
+    except Exception as e:
+        logger.exception("client_transaction_create failed")
+        return Response(
+            {'error': str(e), 'detail': str(e), 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def _client_transaction_create_impl(request, client_id):
+    """Implementation of client transaction creation."""
     client = get_object_or_404(Client, id=client_id)
     
     # Check if it's a client accessing their own data
@@ -7527,7 +7539,6 @@ def client_transaction_create(request, client_id):
             conv_txn.save()
             client.account_currency = to_currency
             client.save(update_fields=['account_currency'])
-        from .serializer import TransactionSerializer
         return Response({'transaction': TransactionSerializer(conv_txn).data}, status=status.HTTP_201_CREATED)
     
     # --- Deposit/bonus: convert EUR to account currency if needed ---
@@ -7536,14 +7547,28 @@ def client_transaction_create(request, client_id):
     if amount_currency not in ('EUR', 'USD', 'CHF'):
         amount_currency = (client.account_currency or 'EUR').strip().upper()
     if transaction_type in ('depot', 'bonus') and amount_currency != 'EUR':
-        # Deposits arrive in EUR; convert to account currency
-        fx_rate = _get_fx_rate('EUR', amount_currency)
-        if fx_rate is not None:
+        # Deposits: amount is in EUR, convert to account currency
+        # Use user-provided rate if present, else fetch from API
+        fx_rate = None
+        raw_fx = (
+            request.data.get('fx_rate_eur_to_account')
+            or (subscription_details_data or {}).get('fx_rate_eur_to_account')
+        )
+        if raw_fx is not None:
+            try:
+                fx_rate = float(raw_fx)
+            except (TypeError, ValueError):
+                pass
+        if fx_rate is None or fx_rate <= 0:
+            fx_rate = _get_fx_rate('EUR', amount_currency)
+        if fx_rate is not None and fx_rate > 0:
             final_amount = round(float(transaction_amount) * fx_rate, 2)
             if isinstance(subscription_details_data, dict):
                 subscription_details_data = dict(subscription_details_data)
-                subscription_details_data['deposit_eur_amount'] = transaction_amount
-                subscription_details_data['fx_rate_eur_to_account'] = fx_rate
+            else:
+                subscription_details_data = {}
+            subscription_details_data['deposit_eur_amount'] = transaction_amount
+            subscription_details_data['fx_rate_eur_to_account'] = fx_rate
         else:
             return Response({'error': f'Impossible d\'obtenir le taux de change EUR/{amount_currency} pour créditer le dépôt'}, status=status.HTTP_502_BAD_GATEWAY)
     

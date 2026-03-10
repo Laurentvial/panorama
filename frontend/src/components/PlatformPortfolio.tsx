@@ -2,14 +2,17 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Wallet, TrendingUp, TrendingDown, Euro, PieChart } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, PieChart } from 'lucide-react';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
 import { logPlatformAction } from '../utils/platformLogger';
+import { formatAmount } from '../utils/currency';
+import { CurrencyIcon } from './CurrencyIcon';
 import '../styles/PlatformPortfolio.css';
 
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
+  const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
   const navigate = useNavigate();
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
   const [productsIndex, setProductsIndex] = useState<any[]>([]);
@@ -93,34 +96,34 @@ export function PlatformPortfolio() {
   const loadPortfolioData = async () => {
     try {
       setLoading(true);
-      
-      // Load all positions by paginating through all pages
-      // This ensures we get all open and closed positions, not just the first 50
-      const allPositionsList: any[] = [];
-      let page = 1;
-      const limit = 500; // Backend max limit
-      let hasMore = true;
+      const clientId = currentUser.id;
+      const limit = 500;
 
-      while (hasMore) {
-        const positionsResponse = await apiCall(`/api/clients/${currentUser.id}/positions/?page=${page}&limit=${limit}`);
-        const positions = (positionsResponse as any)?.positions || [];
-        allPositionsList.push(...positions);
-        
-        const pagination = (positionsResponse as any).pagination;
-        if (pagination && page >= pagination.total_pages) {
-          hasMore = false;
-        } else if (positions.length < limit) {
-          hasMore = false;
-        } else {
-          page++;
+      const loadAllPositions = async (): Promise<any[]> => {
+        const list: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+          const res = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`);
+          const items = (res as any)?.positions || [];
+          list.push(...items);
+          const pagination = (res as any).pagination;
+          if (pagination && page >= pagination.total_pages) hasMore = false;
+          else if (items.length < limit) hasMore = false;
+          else page++;
         }
-      }
-      
-      const [transactionsResponse, assetsResponse, productsResponse] = await Promise.all([
-        apiCall(`/api/clients/${currentUser.id}/transactions/`),
+        return list;
+      };
+
+      // Run positions, transactions, assets, products, documents in parallel
+      const [allPositionsList, transactionsResponse, assetsResponse, productsResponse, documentsResponse] = await Promise.all([
+        loadAllPositions(),
+        apiCall(`/api/clients/${clientId}/transactions/`),
         apiCall('/api/assets/').catch(() => ({ assets: [] })),
         apiCall('/api/products/').catch(() => ({ products: [] })),
+        apiCall(`/api/clients/${clientId}/documents/`).catch(() => ({ documents: [] })),
       ]);
+
       setPositions(allPositionsList);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
         (a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
@@ -134,13 +137,11 @@ export function PlatformPortfolio() {
         return !isFuture && !isUpcomingStatus;
       });
       setTransactions(filteredTransactions);
-      
-      // Load and index contract documents by transaction ID; also collect unlinked contracts
+
+      // Index contract documents by transaction ID; also collect unlinked contracts
       const documentsMap: Record<string, any[]> = {};
       const unlinked: any[] = [];
-      try {
-        const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
-        const allDocuments = (documentsResponse as any)?.documents || [];
+      const allDocuments = (documentsResponse as any)?.documents || [];
         allDocuments.forEach((doc: any) => {
           if (doc?.documentType !== 'contract') return;
           if (doc?.transactionId) {
@@ -153,9 +154,6 @@ export function PlatformPortfolio() {
             unlinked.push(doc);
           }
         });
-      } catch (error) {
-        console.error('Error loading documents:', error);
-      }
       setTransactionDocuments(documentsMap);
       setUnlinkedContractDocuments(unlinked);
       
@@ -1117,12 +1115,12 @@ export function PlatformPortfolio() {
               </CardHeader>
               <CardContent>
                 <div className="platform-portfolioStatValue">
-                  {Math.max(0, availableFunds).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {formatAmount(Math.max(0, availableFunds), accountCurrency)}
                 </div>
                 <p className="platform-portfolioStatSub">Fonds disponibles pour investir</p>
                 {interestGainsInCash !== 0 && (
                   <p className={`text-xs mt-1 ${interestGainsInCash >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    dont {interestGainsInCash.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € de {interestGainsInCash >= 0 ? 'gains' : 'pertes'} d'intérêts déjà basculés dans le solde
+                    dont {formatAmount(interestGainsInCash, accountCurrency)} de {interestGainsInCash >= 0 ? 'gains' : 'pertes'} d'intérêts déjà basculés dans le solde
                   </p>
                 )}
               </CardContent>
@@ -1131,11 +1129,11 @@ export function PlatformPortfolio() {
             <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="platform-portfolioStatTitle">Total Investi</CardTitle>
-                <Euro className="h-4 w-4 text-muted-foreground" />
+                <CurrencyIcon currency={accountCurrency} size={16} />
               </CardHeader>
               <CardContent>
                 <div className="platform-portfolioStatValue">
-                  {totalInvesti.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {formatAmount(totalInvesti, accountCurrency)}
                 </div>
                 <p className="platform-portfolioStatSub">Capital total investi</p>
               </CardContent>
@@ -1155,7 +1153,7 @@ export function PlatformPortfolio() {
                   className="platform-portfolioStatValue"
                   style={{ color: isProfit ? '#10b981' : '#ef4444' }}
                 >
-                  {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
                 </div>
                 <p className="platform-portfolioStatSub">
                   {isProfit ? 'Gain réalisé' : 'Perte réalisée'}
@@ -1170,10 +1168,10 @@ export function PlatformPortfolio() {
               </CardHeader>
               <CardContent>
                 <div className="platform-portfolioStatValue">
-                  {portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {formatAmount(portfolioValue, accountCurrency)}
                 </div>
                 <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
-                  {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
                   {(() => {
                     const costBasis = portfolioValue - profitLoss;
                     const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;

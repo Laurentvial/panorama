@@ -177,9 +177,11 @@ class ClientSerializer(serializers.ModelSerializer):
                 status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
+        # Prefetch stores a list; QuerySet has order_by. Handle both.
+        ordered_txns = transactions.order_by('datetime') if hasattr(transactions, 'order_by') else sorted(transactions, key=lambda t: t.datetime)
         calculated_invested_capital = 0
         effective_currency = None
-        for txn in transactions.order_by('datetime'):
+        for txn in ordered_txns:
             amount = float(txn.amount) if txn.amount else 0
             txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
             if txn.type == 'conversion':
@@ -230,9 +232,11 @@ class ClientSerializer(serializers.ModelSerializer):
                 status__in=COMPLETED_TRANSACTION_STATUSES
             )
         
+        # Prefetch stores a list; QuerySet has order_by. Handle both.
+        ordered_txns = transactions.order_by('datetime') if hasattr(transactions, 'order_by') else sorted(transactions, key=lambda t: t.datetime)
         calculated_invested_capital = 0
         effective_currency = None
-        for txn in transactions.order_by('datetime'):
+        for txn in ordered_txns:
             amount = float(txn.amount) if txn.amount else 0
             txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
             if txn.type == 'conversion':

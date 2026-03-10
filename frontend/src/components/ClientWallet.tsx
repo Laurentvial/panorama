@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Card, CardContent } from './ui/card';
 import { Label } from './ui/label';
+import { formatAmount } from '../utils/currency';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface ClientWalletProps {
@@ -182,14 +183,8 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
     return data;
   }, [transactions, currentProfitLoss]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
+  const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
+  const formatCurrency = (amount: number) => formatAmount(amount, accountCurrency);
 
   return (
     <Card>

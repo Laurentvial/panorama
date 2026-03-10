@@ -9,7 +9,7 @@ import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
 import { DateInput } from './ui/date-input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
-import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User } from 'lucide-react';
+import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User, Loader2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
@@ -1008,7 +1008,10 @@ export function AddClient() {
           </Button>
           <Button type="submit" disabled={loading}>
             {loading ? (
-              'Création...'
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Création...
+              </>
             ) : (
               <>
                 <Save className="w-4 h-4 mr-2" />

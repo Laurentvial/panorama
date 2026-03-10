@@ -12,6 +12,7 @@ import '../styles/Modal.css';
 
 interface ClientDocumentsTabProps {
   clientId: string;
+  accountCurrency?: string;
   onRefresh: () => void;
 }
 
@@ -37,7 +38,7 @@ const DOCUMENT_TYPES = [
   { value: 'other', label: 'Autre' },
 ];
 
-export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabProps) {
+export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefresh }: ClientDocumentsTabProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -285,7 +286,8 @@ export function ClientDocumentsTab({ clientId, onRefresh }: ClientDocumentsTabPr
     };
     const typeLabel = typeLabels[transaction.type] || transaction.type;
     const date = new Date(transaction.datetime).toLocaleDateString('fr-FR');
-    return `${typeLabel} - ${transaction.amount}€ - ${date}`;
+    const curr = transaction.amountCurrency || accountCurrency;
+    return `${typeLabel} - ${formatAmount(parseFloat(transaction.amount || 0), curr)} - ${date}`;
   }
 
   if (loading) {

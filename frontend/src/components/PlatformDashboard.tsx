@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Skeleton } from './ui/skeleton';
 import { Button } from './ui/button';
 import { TrendingUp, TrendingDown, Check, PieChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../utils/api';
@@ -9,6 +10,7 @@ import { useIsMobile, useIsPhone, useIsNarrowForCards } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatSubcategoryForDisplay } from './transactionUtils';
+import { formatAmount } from '../utils/currency';
 import '../styles/PlatformDashboardMovers.css';
 
 export function PlatformDashboard() {
@@ -36,77 +38,75 @@ export function PlatformDashboard() {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      // Load all positions (paginated) and all transactions (paginated) so stats match page Portefeuille
+      const clientId = currentUser.id;
       const limit = 500;
-      const allPositionsList: any[] = [];
-      let pagePos = 1;
-      let hasMorePos = true;
-      while (hasMorePos) {
-        const positionsResponse = await apiCall(`/api/clients/${currentUser.id}/positions/?page=${pagePos}&limit=${limit}`);
-        const positions = (positionsResponse as any)?.positions || [];
-        allPositionsList.push(...positions);
-        const pagination = (positionsResponse as any).pagination;
-        if (pagination && pagePos >= pagination.total_pages) hasMorePos = false;
-        else if (positions.length < limit) hasMorePos = false;
-        else pagePos++;
-      }
-      const allTransactionsList: any[] = [];
-      let pageTx = 1;
-      let hasMoreTx = true;
-      while (hasMoreTx) {
-        const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/?page=${pageTx}&limit=${limit}`);
-        const txs = (transactionsResponse as any)?.transactions || [];
-        allTransactionsList.push(...txs);
-        const pagination = (transactionsResponse as any).pagination;
-        if (pagination && pageTx >= pagination.total_pages) hasMoreTx = false;
-        else if (txs.length < limit) hasMoreTx = false;
-        else pageTx++;
-      }
+
+      // Helper: paginate through all positions
+      const loadAllPositions = async (): Promise<any[]> => {
+        const list: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+          const res = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`);
+          const items = (res as any)?.positions || [];
+          list.push(...items);
+          const pagination = (res as any).pagination;
+          if (pagination && page >= pagination.total_pages) hasMore = false;
+          else if (items.length < limit) hasMore = false;
+          else page++;
+        }
+        return list;
+      };
+
+      // Helper: paginate through all transactions
+      const loadAllTransactions = async (): Promise<any[]> => {
+        const list: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+          const res = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+          const items = (res as any)?.transactions || [];
+          list.push(...items);
+          const pagination = (res as any).pagination;
+          if (pagination && page >= pagination.total_pages) hasMore = false;
+          else if (items.length < limit) hasMore = false;
+          else page++;
+        }
+        return list;
+      };
+
+      // Run positions, transactions, assets, products, config, documents in parallel
+      const [
+        allPositionsList,
+        allTransactionsList,
+        clientAssetsResponse,
+        clientProductsResponse,
+        verificationConfigResult,
+        documentsResult,
+      ] = await Promise.all([
+        loadAllPositions(),
+        loadAllTransactions(),
+        apiCall(`/api/clients/${clientId}/assets/`),
+        apiCall(`/api/clients/${clientId}/products/`),
+        apiCall(`/api/clients/${clientId}/verification-config/?_t=${Date.now()}`).catch(() => ({ stepsConfig: {} })),
+        apiCall(`/api/clients/${clientId}/documents/`).catch(() => ({ documents: [] })),
+      ]);
+
       setPositions(allPositionsList);
       setAllTransactions(allTransactionsList);
 
-      const [clientAssetsResponse, clientProductsResponse] = await Promise.all([
-        apiCall(`/api/clients/${currentUser.id}/assets/`),
-        apiCall(`/api/clients/${currentUser.id}/products/`),
-      ]);
-      // Extract assets from ClientAsset objects (keep full ClientAsset for featured/availability)
       const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
-      const assetsList = clientAssetsData.map((ca: any) => {
-        return ca.asset || ca;
-      }).filter(Boolean);
+      const assetsList = clientAssetsData.map((ca: any) => ca.asset || ca).filter(Boolean);
       setAssets(assetsList);
       setClientAssets(clientAssetsData);
 
       const clientProductsData = (clientProductsResponse as any)?.products || [];
-      const productsList = clientProductsData.map((cp: any) => {
-        return cp.product || cp;
-      }).filter(Boolean);
+      const productsList = clientProductsData.map((cp: any) => cp.product || cp).filter(Boolean);
       setProducts(productsList);
       setClientProducts(clientProductsData);
-      
-      // Load verification config separately to avoid breaking the Promise.all if it fails
-      try {
-        // Add cache-busting timestamp to ensure fresh data
-        const verificationConfigResponse = await apiCall(`/api/clients/${currentUser.id}/verification-config/?_t=${Date.now()}`);
-        const config = (verificationConfigResponse as any)?.stepsConfig || {};
-        setVerificationConfig(config);
-        console.log('Loaded verification config for dashboard:', config);
-        console.log('Step 3 (UI) maps to Step 8 (Config/KYC). Step 8 enabled?', config?.step_8?.enabled !== false);
-        console.log('Step 8 (KYC) config object:', config?.step_8);
-      } catch (error: any) {
-        // Silently fail - config will default to all steps enabled
-        console.log('Verification config not available, using defaults');
-        setVerificationConfig({});
-      }
 
-      // Load client documents
-      try {
-        const documentsResponse = await apiCall(`/api/clients/${currentUser.id}/documents/`);
-        setDocuments((documentsResponse as any)?.documents || []);
-      } catch (error: any) {
-        console.log('Documents not available', error);
-        setDocuments([]);
-      }
+      setVerificationConfig((verificationConfigResult as any)?.stepsConfig || {});
+      setDocuments((documentsResult as any)?.documents || []);
     } catch (error: any) {
       // If it's a redirect error, don't log it - page is navigating away
       if (error?.isRedirecting) {
@@ -189,9 +189,13 @@ export function PlatformDashboard() {
     ).toString();
   };
 
+  const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
+
   const formatAssetCurrency = (currencyRaw: any): string => {
     const c = (currencyRaw ?? '').toString().trim().toUpperCase();
     if (!c || c === 'EUR' || c === '€') return '€';
+    if (c === 'USD') return '$';
+    if (c === 'CHF') return 'CHF';
     return c;
   };
 
@@ -841,7 +845,28 @@ export function PlatformDashboard() {
     <div style={{ padding: isPhone ? 0 : isMobile ? '16px' : '20px 20px' }}>
 
       {loading ? (
-        <div>Chargement...</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? 16 : 24 }}>
+          <div style={{ display: 'flex', gap: isMobile ? 16 : 24, flexDirection: isMobile ? 'column' : 'row' }}>
+            <Card style={{ flex: 1, borderRadius: 16 }}>
+              <CardHeader><Skeleton className="h-5 w-40" /></CardHeader>
+              <CardContent>
+                <Skeleton className="h-9 w-32 mb-2" />
+                <Skeleton className="h-6 w-24" />
+              </CardContent>
+            </Card>
+            <Card style={{ flex: 1, borderRadius: 16 }}>
+              <CardHeader><Skeleton className="h-5 w-36" /></CardHeader>
+              <CardContent>
+                <Skeleton className="h-9 w-28 mb-2" />
+                <Skeleton className="h-6 w-20" />
+              </CardContent>
+            </Card>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: isMobile ? 16 : 24 }}>
+            <Card><CardHeader><Skeleton className="h-5 w-24" /></CardHeader><CardContent><Skeleton className="h-24 w-full" /></CardContent></Card>
+            <Card><CardHeader><Skeleton className="h-5 w-32" /></CardHeader><CardContent><Skeleton className="h-24 w-full" /></CardContent></Card>
+          </div>
+        </div>
       ) : (
         <>
           {/* Photo banner above verification block (from app settings) */}
@@ -1042,10 +1067,10 @@ export function PlatformDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '22px' : '28px' }}>
-                  {portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {formatAmount(portfolioValue, accountCurrency)}
                 </div>
                 <div style={{ marginTop: 8, fontSize: isMobile ? '16px' : '18px', fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
-                  {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
                   {(() => {
                     const costBasis = portfolioValue - profitLoss;
                     const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
