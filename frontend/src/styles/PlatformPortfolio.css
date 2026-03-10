@@ -170,3 +170,274 @@
 .platform-portfolioEmptyCta {
   margin-top: 10px;
 }
+
+/* Actifs détenus: tableau desktop / cartes mobile */
+.platform-portfolioTableDesktop {
+  display: block;
+}
+
+.platform-portfolioHoldingsCards,
+.platform-portfolioTransactionsCards,
+.platform-portfolioOrdersCards {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .platform-portfolioTableDesktop {
+    display: none;
+  }
+
+  .platform-portfolioHoldingsCards,
+  .platform-portfolioTransactionsCards,
+  .platform-portfolioOrdersCards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/* Cartes mobile - Actifs détenus */
+.platform-portfolioHoldingCard {
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.platform-portfolioHoldingCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.platform-portfolioHoldingCardLogo,
+.platform-portfolioHoldingCardLogoPlaceholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.platform-portfolioHoldingCardLogoPlaceholder {
+  background: color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.platform-portfolioHoldingCardHeaderText {
+  min-width: 0;
+  flex: 1;
+}
+
+.platform-portfolioHoldingCardName {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.platform-portfolioHoldingCardType {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+  margin-top: 2px;
+}
+
+.platform-portfolioHoldingCardMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.platform-portfolioHoldingCardMainItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.platform-portfolioHoldingCardLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioHoldingCardValue {
+  font-size: 14px;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+}
+
+.platform-portfolioHoldingCardSecondary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.platform-portfolioHoldingCardSecondaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.platform-portfolioHoldingCardSecondaryItem span:first-child {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}
+
+/* Cartes mobile - Transactions */
+.platform-portfolioTransactionCard {
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.platform-portfolioTransactionCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.platform-portfolioTransactionCardType {
+  font-size: 14px;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+}
+
+.platform-portfolioTransactionCardDate {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioTransactionCardMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.platform-portfolioTransactionCardMainItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.platform-portfolioTransactionCardLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioTransactionCardValue {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.platform-portfolioTransactionCardSecondary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.platform-portfolioTransactionCardSecondaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.platform-portfolioTransactionCardSecondaryItem span:first-child {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}
+
+.platform-portfolioTransactionCardSecondaryItem.platform-portfolioTransactionCardDescription,
+.platform-portfolioTransactionCardSecondaryItem.platform-portfolioTransactionCardActions {
+  grid-column: 1 / -1;
+}
+
+/* Cartes mobile - Ordres */
+.platform-portfolioOrderCard {
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.platform-portfolioOrderCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.platform-portfolioOrderCardAsset {
+  font-size: 14px;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+}
+
+.platform-portfolioOrderCardType {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioOrderCardMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.platform-portfolioOrderCardMainItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.platform-portfolioOrderCardLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-portfolioOrderCardValue {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.platform-portfolioOrderCardSecondary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.platform-portfolioOrderCardSecondaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.platform-portfolioOrderCardSecondaryItem span:first-child {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}

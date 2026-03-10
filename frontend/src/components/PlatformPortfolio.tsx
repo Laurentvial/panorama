@@ -1254,164 +1254,280 @@ export function PlatformPortfolio() {
                       </div>
                     </div>
                   ) : (
-                    <div className="platform-portfolioTableWrap">
-                      <table className="platform-portfolioTable">
-                        <thead>
-                          <tr className="platform-portfolioTheadRow">
-                            <th className="platform-portfolioTh">Actif</th>
-                            <th className="platform-portfolioTh">Type</th>
-                            <th className="platform-portfolioTh">Réf</th>
-                            <th className="platform-portfolioTh platform-portfolioNowrap">Dernière ouverture</th>
-                            <th className="platform-portfolioTh platform-portfolioAlignRight">Quantité</th>
-                            <th className="platform-portfolioTh platform-portfolioAlignRight">Prix moyen d'achat</th>
-                            <th className="platform-portfolioTh platform-portfolioAlignRight">Valeur investie</th>
-                            <th className="platform-portfolioTh platform-portfolioAlignRight">Prix</th>
-                            <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {mergedHoldingsTableRows.map((r) => {
-                            const qtyLabel =
-                              r.kind === 'asset'
-                                ? r.quantity.toLocaleString('fr-FR', { maximumFractionDigits: 8 })
-                                : '—';
-                            const avgLabel =
-                              r.kind === 'asset' && r.avgPaid != null
-                                ? formatMoney(r.avgPaid, r.currency, { maximumFractionDigits: 8 })
-                                : '—';
-                            const priceLabel =
-                              r.kind === 'asset' && r.currentPrice != null
-                                ? formatMoney(r.currentPrice, r.currency, { maximumFractionDigits: 8 })
-                                : '—';
-                            // Pour les positions non-EUR : afficher devise de l'actif en principal, EUR en secondaire
-                            // Pour les positions EUR : afficher EUR uniquement
-                            let investedLabelMain: string;
-                            let investedLabelSub: string | null = null;
-                            
-                            if (r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null && Number.isFinite(r.investedAsset)) {
-                              // Position non-EUR : devise de l'actif en principal
-                              investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
-                              // EUR en secondaire (estimation)
-                              if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
-                                // Calculer le taux de change implicite pour l'estimation EUR
-                                const fxRate = r.investedAsset / r.investedEur;
-                                if (fxRate > 0) {
-                                  investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
-                                }
-                              }
-                            } else {
-                              // Position EUR ou produit : EUR uniquement
-                              if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
-                                investedLabelMain = formatCurrency(r.investedEur);
-                              } else if (r.kind === 'asset' && r.investedEur != null) {
-                                investedLabelMain = formatCurrency(r.investedEur);
-                              } else {
-                                investedLabelMain = '—';
-                              }
-                            }
-                            
-                            // P&L : pour les positions non-EUR, afficher devise de l'actif en principal, EUR en secondaire
-                            // Pour les produits, afficher P&L en EUR
-                            const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
-                            let pnlLabelMain: string;
-                            let pnlLabelSub: string | null = null;
-                            
-                            if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
-                              // Produit interne : P&L en EUR uniquement
-                              pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
-                            } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
-                              if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null && 
-                                  Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
-                                // Position non-EUR : devise de l'actif en principal
-                                pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
-                                // EUR en secondaire (estimation avec taux de change implicite)
-                                const fxRate = r.investedAsset / r.investedEur;
-                                if (fxRate > 0) {
-                                  const pnlEur = r.pnl / fxRate;
-                                  pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
-                                }
-                              } else {
-                                // Position EUR : EUR uniquement
-                                pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
-                              }
-                            } else {
-                              pnlLabelMain = '—';
-                            }
-
-                            return (
-                              <tr key={r.key} className="platform-portfolioTbodyRow">
-                                <td className="platform-portfolioTd">
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
-                                    {r.logoUrl ? (
-                                      <img
-                                        src={r.logoUrl}
-                                        alt=""
-                                        style={{
-                                          width: 28,
-                                          height: 28,
-                                          borderRadius: 8,
-                                          objectFit: r.kind === 'product' ? 'cover' : 'contain',
-                                          background: r.kind === 'product' ? 'transparent' : 'rgba(255,255,255,0.9)',
-                                        }}
-                                        onError={(e) => {
-                                          (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                        }}
-                                      />
-                                    ) : (
-                                      <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f3f4f6' }} />
-                                    )}
-                                    <div style={{ minWidth: 0 }}>
-                                      <div 
-                                        onClick={() => {
-                                          // Extract ID from key (format: "asset-123" or "product-456")
-                                          const id = r.key.split('-').slice(1).join('-');
-                                          navigate(`/platform/product/${id}`);
-                                        }}
-                                        className="platform-portfolioLink"
-                                        style={{
-                                          display: 'inline-block',
-                                          maxWidth: '100%',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          cursor: 'pointer',
-                                        }}
-                                      >
-                                        {r.name}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="platform-portfolioTd">{r.type || '—'}</td>
-                                <td className="platform-portfolioTd">{r.reference || '—'}</td>
-                                <td className="platform-portfolioTd platform-portfolioNowrap">
-                                  {r.lastIso ? formatDateTime(r.lastIso) : '—'}
-                                </td>
-                                <td className="platform-portfolioTd platform-portfolioAlignRight">{qtyLabel}</td>
-                                <td className="platform-portfolioTd platform-portfolioAlignRight">{avgLabel}</td>
-                                <td className="platform-portfolioTd platform-portfolioAlignRight">
-                                  <div style={{ fontWeight: 800 }}>{investedLabelMain}</div>
-                                  {investedLabelSub && (
-                                    <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
-                                      {investedLabelSub}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="platform-portfolioTd platform-portfolioAlignRight">{priceLabel}</td>
-                                <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: pnlColor }}>
-                                  <div>{pnlLabelMain}</div>
-                                  {pnlLabelSub && (
-                                    <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
-                                      {pnlLabelSub}
-                                    </div>
-                                  )}
-                                </td>
+                    <>
+                      {/* Desktop: tableau (visible >= 768px) */}
+                      <div className="platform-portfolioTableDesktop">
+                        <div className="platform-portfolioTableWrap">
+                          <table className="platform-portfolioTable">
+                            <thead>
+                              <tr className="platform-portfolioTheadRow">
+                                <th className="platform-portfolioTh">Actif</th>
+                                <th className="platform-portfolioTh">Type</th>
+                                <th className="platform-portfolioTh">Réf</th>
+                                <th className="platform-portfolioTh platform-portfolioNowrap">Dernière ouverture</th>
+                                <th className="platform-portfolioTh platform-portfolioAlignRight">Quantité</th>
+                                <th className="platform-portfolioTh platform-portfolioAlignRight">Prix moyen d'achat</th>
+                                <th className="platform-portfolioTh platform-portfolioAlignRight">Valeur investie</th>
+                                <th className="platform-portfolioTh platform-portfolioAlignRight">Prix</th>
+                                <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                            </thead>
+                            <tbody>
+                              {mergedHoldingsTableRows.map((r) => {
+                                const qtyLabel =
+                                  r.kind === 'asset'
+                                    ? r.quantity.toLocaleString('fr-FR', { maximumFractionDigits: 8 })
+                                    : '—';
+                                const avgLabel =
+                                  r.kind === 'asset' && r.avgPaid != null
+                                    ? formatMoney(r.avgPaid, r.currency, { maximumFractionDigits: 8 })
+                                    : '—';
+                                const priceLabel =
+                                  r.kind === 'asset' && r.currentPrice != null
+                                    ? formatMoney(r.currentPrice, r.currency, { maximumFractionDigits: 8 })
+                                    : '—';
+                                let investedLabelMain: string;
+                                let investedLabelSub: string | null = null;
+                                if (r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null && Number.isFinite(r.investedAsset)) {
+                                  investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
+                                  if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                                    const fxRate = r.investedAsset / r.investedEur;
+                                    if (fxRate > 0) investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
+                                  }
+                                } else {
+                                  if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
+                                    investedLabelMain = formatCurrency(r.investedEur);
+                                  } else if (r.kind === 'asset' && r.investedEur != null) {
+                                    investedLabelMain = formatCurrency(r.investedEur);
+                                  } else {
+                                    investedLabelMain = '—';
+                                  }
+                                }
+                                const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
+                                let pnlLabelMain: string;
+                                let pnlLabelSub: string | null = null;
+                                if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
+                                  pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                                } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
+                                  if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null &&
+                                      Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                                    pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                                    const fxRate = r.investedAsset / r.investedEur;
+                                    if (fxRate > 0) {
+                                      const pnlEur = r.pnl / fxRate;
+                                      pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
+                                    }
+                                  } else {
+                                    pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                                  }
+                                } else {
+                                  pnlLabelMain = '—';
+                                }
+                                return (
+                                  <tr key={r.key} className="platform-portfolioTbodyRow">
+                                    <td className="platform-portfolioTd">
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
+                                        {r.logoUrl ? (
+                                          <img
+                                            src={r.logoUrl}
+                                            alt=""
+                                            style={{
+                                              width: 28,
+                                              height: 28,
+                                              borderRadius: 8,
+                                              objectFit: r.kind === 'product' ? 'cover' : 'contain',
+                                              background: r.kind === 'product' ? 'transparent' : 'rgba(255,255,255,0.9)',
+                                            }}
+                                            onError={(e) => {
+                                              (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                            }}
+                                          />
+                                        ) : (
+                                          <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f3f4f6' }} />
+                                        )}
+                                        <div style={{ minWidth: 0 }}>
+                                          <div
+                                            onClick={() => {
+                                              const id = r.key.split('-').slice(1).join('-');
+                                              navigate(`/platform/product/${id}`);
+                                            }}
+                                            className="platform-portfolioLink"
+                                            style={{
+                                              display: 'inline-block',
+                                              maxWidth: '100%',
+                                              whiteSpace: 'nowrap',
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            {r.name}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="platform-portfolioTd">{r.type || '—'}</td>
+                                    <td className="platform-portfolioTd">{r.reference || '—'}</td>
+                                    <td className="platform-portfolioTd platform-portfolioNowrap">
+                                      {r.lastIso ? formatDateTime(r.lastIso) : '—'}
+                                    </td>
+                                    <td className="platform-portfolioTd platform-portfolioAlignRight">{qtyLabel}</td>
+                                    <td className="platform-portfolioTd platform-portfolioAlignRight">{avgLabel}</td>
+                                    <td className="platform-portfolioTd platform-portfolioAlignRight">
+                                      <div style={{ fontWeight: 800 }}>{investedLabelMain}</div>
+                                      {investedLabelSub && (
+                                        <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                          {investedLabelSub}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="platform-portfolioTd platform-portfolioAlignRight">{priceLabel}</td>
+                                    <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: pnlColor }}>
+                                      <div>{pnlLabelMain}</div>
+                                      {pnlLabelSub && (
+                                        <div style={{ marginTop: 2, fontSize: 12 }} className="platform-portfolioMuted">
+                                          {pnlLabelSub}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      {/* Mobile: cartes (visible < 768px) */}
+                      <div className="platform-portfolioHoldingsCards">
+                        {mergedHoldingsTableRows.map((r) => {
+                          const qtyLabel =
+                            r.kind === 'asset'
+                              ? r.quantity.toLocaleString('fr-FR', { maximumFractionDigits: 8 })
+                              : '—';
+                          const avgLabel =
+                            r.kind === 'asset' && r.avgPaid != null
+                              ? formatMoney(r.avgPaid, r.currency, { maximumFractionDigits: 8 })
+                              : '—';
+                          const priceLabel =
+                            r.kind === 'asset' && r.currentPrice != null
+                              ? formatMoney(r.currentPrice, r.currency, { maximumFractionDigits: 8 })
+                              : '—';
+                          let investedLabelMain: string;
+                          let investedLabelSub: string | null = null;
+                          if (r.kind === 'asset' && r.currency !== 'EUR' && r.investedAsset != null && Number.isFinite(r.investedAsset)) {
+                            investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
+                            if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                              const fxRate = r.investedAsset / r.investedEur;
+                              if (fxRate > 0) investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
+                            }
+                          } else {
+                            if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
+                              investedLabelMain = formatCurrency(r.investedEur);
+                            } else if (r.kind === 'asset' && r.investedEur != null) {
+                              investedLabelMain = formatCurrency(r.investedEur);
+                            } else {
+                              investedLabelMain = '—';
+                            }
+                          }
+                          const pnlColor = r.pnl == null ? '#111827' : r.pnl >= 0 ? '#10b981' : '#ef4444';
+                          let pnlLabelMain: string;
+                          let pnlLabelSub: string | null = null;
+                          if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
+                            pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                          } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
+                            if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null &&
+                                Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
+                              pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                              const fxRate = r.investedAsset / r.investedEur;
+                              if (fxRate > 0) {
+                                const pnlEur = r.pnl / fxRate;
+                                pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
+                              }
+                            } else {
+                              pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                            }
+                          } else {
+                            pnlLabelMain = '—';
+                          }
+                          return (
+                            <div key={r.key} className="platform-portfolioHoldingCard">
+                              <div className="platform-portfolioHoldingCardHeader">
+                                {r.logoUrl ? (
+                                  <img
+                                    src={r.logoUrl}
+                                    alt=""
+                                    className="platform-portfolioHoldingCardLogo"
+                                    style={{
+                                      objectFit: r.kind === 'product' ? 'cover' : 'contain',
+                                      background: r.kind === 'product' ? 'transparent' : 'rgba(255,255,255,0.9)',
+                                    }}
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="platform-portfolioHoldingCardLogoPlaceholder" />
+                                )}
+                                <div className="platform-portfolioHoldingCardHeaderText">
+                                  <div
+                                    onClick={() => {
+                                      const id = r.key.split('-').slice(1).join('-');
+                                      navigate(`/platform/product/${id}`);
+                                    }}
+                                    className="platform-portfolioLink platform-portfolioHoldingCardName"
+                                  >
+                                    {r.name}
+                                  </div>
+                                  <div className="platform-portfolioHoldingCardType">{r.type || '—'}</div>
+                                </div>
+                              </div>
+                              <div className="platform-portfolioHoldingCardMain">
+                                <div className="platform-portfolioHoldingCardMainItem">
+                                  <span className="platform-portfolioHoldingCardLabel">Valeur investie</span>
+                                  <span className="platform-portfolioHoldingCardValue">
+                                    {investedLabelMain}
+                                    {investedLabelSub && (
+                                      <span className="platform-portfolioMuted"> {investedLabelSub}</span>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="platform-portfolioHoldingCardMainItem">
+                                  <span className="platform-portfolioHoldingCardLabel">P&L</span>
+                                  <span className="platform-portfolioHoldingCardValue" style={{ color: pnlColor }}>
+                                    {pnlLabelMain}
+                                    {pnlLabelSub && (
+                                      <span className="platform-portfolioMuted"> {pnlLabelSub}</span>
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="platform-portfolioHoldingCardSecondary">
+                                <div className="platform-portfolioHoldingCardSecondaryItem">
+                                  <span>Réf</span>
+                                  <span>{r.reference || '—'}</span>
+                                </div>
+                                <div className="platform-portfolioHoldingCardSecondaryItem">
+                                  <span>Dernière ouverture</span>
+                                  <span>{r.lastIso ? formatDateTime(r.lastIso) : '—'}</span>
+                                </div>
+                                <div className="platform-portfolioHoldingCardSecondaryItem">
+                                  <span>Quantité</span>
+                                  <span>{qtyLabel}</span>
+                                </div>
+                                <div className="platform-portfolioHoldingCardSecondaryItem">
+                                  <span>Prix moyen</span>
+                                  <span>{avgLabel}</span>
+                                </div>
+                                <div className="platform-portfolioHoldingCardSecondaryItem">
+                                  <span>Prix</span>
+                                  <span>{priceLabel}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
@@ -1429,77 +1545,173 @@ export function PlatformPortfolio() {
                 <p>Aucune transaction</p>
               ) : (
                 <>
-                  <div className="platform-portfolioTableWrap">
-                    <table className="platform-portfolioTable">
-                    <thead>
-                      <tr className="platform-portfolioTheadRow">
-                        <th className="platform-portfolioTh">Date</th>
-                        <th className="platform-portfolioTh">Type</th>
-                        <th className="platform-portfolioTh">Produit</th>
-                        <th className="platform-portfolioTh">Description</th>
-                        <th className="platform-portfolioTh platform-portfolioAlignRight">Montant</th>
-                        <th className="platform-portfolioTh">Statut</th>
-                        <th className="platform-portfolioTh platform-portfolioAlignRight">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {transactionsPagination.items.map((t: any) => {
-                        const isTradingTransfer =
-                          t.type === 'transfert' &&
-                          (t.to === 'trading' || t.to_field === 'trading' || t.transfer_to === 'trading');
-                        
-                        const isTransferToBalance =
-                          t.type === 'transfert' &&
-                          (t.to === 'solde' || t.to_field === 'solde' || t.transfer_to === 'solde');
+                  {/* Desktop: tableau (visible >= 768px) */}
+                  <div className="platform-portfolioTableDesktop">
+                    <div className="platform-portfolioTableWrap">
+                      <table className="platform-portfolioTable">
+                        <thead>
+                          <tr className="platform-portfolioTheadRow">
+                            <th className="platform-portfolioTh">Date</th>
+                            <th className="platform-portfolioTh">Type</th>
+                            <th className="platform-portfolioTh">Produit</th>
+                            <th className="platform-portfolioTh">Description</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Montant</th>
+                            <th className="platform-portfolioTh">Statut</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {transactionsPagination.items.map((t: any) => {
+                            const isTradingTransfer =
+                              t.type === 'transfert' &&
+                              (t.to === 'trading' || t.to_field === 'trading' || t.transfer_to === 'trading');
+                            const isTransferToBalance =
+                              t.type === 'transfert' &&
+                              (t.to === 'solde' || t.to_field === 'solde' || t.transfer_to === 'solde');
+                            const typeLabel =
+                              t.type === 'depot'
+                                ? 'Dépôt'
+                                : t.type === 'retrait'
+                                  ? 'Retrait'
+                                  : t.type === 'achat'
+                                    ? 'Achat'
+                                    : t.type === 'vente'
+                                      ? 'Vente'
+                                      : t.type === 'transfert'
+                                        ? (isTradingTransfer ? (t.assetType || 'Trading') : isTransferToBalance ? 'Transfert' : 'Investissement')
+                                        : t.type === 'bonus'
+                                          ? 'Bonus'
+                                          : t.type === 'interets'
+                                            ? 'Intérêts'
+                                            : t.type;
+                            const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
+                            const amountColor = Number.isFinite(amountNum) ? (amountNum >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                            const productLabel =
+                              t.assetName ||
+                              t.productName ||
+                              (isTradingTransfer ? (t.assetType || 'Trading') : '-');
+                            const statusLabel = formatTransactionStatus(t.status, t.type);
+                            const statusColor = getStatusColor(t.status);
+                            const contractDocs = transactionDocuments[String(t.id)] || [];
+                            const hasContract = contractDocs.length > 0;
+                            return (
+                              <tr key={t.id} className="platform-portfolioTbodyRow">
+                                <td className="platform-portfolioTd platform-portfolioNowrap">{formatDateTime(t.datetime)}</td>
+                                <td className="platform-portfolioTd">{typeLabel}</td>
+                                <td className="platform-portfolioTd">{productLabel}</td>
+                                <td className="platform-portfolioTd">{t.description || '—'}</td>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: amountColor }}>
+                                  {formatCurrency(t.amount)}
+                                </td>
+                                <td className="platform-portfolioTd">
+                                  <span
+                                    className="platform-portfolioStatus"
+                                    style={{ color: statusColor }}
+                                    data-status={String(t?.status || '').trim().toLowerCase()}
+                                  >
+                                    {statusLabel}
+                                  </span>
+                                </td>
+                                <td className="platform-portfolioTd platform-portfolioAlignRight">
+                                  {hasContract ? (
+                                    <a
+                                      href={contractDocs[0]?.fileUrl || '#'}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => {
+                                        if (!contractDocs[0]?.fileUrl) {
+                                          e.preventDefault();
+                                        }
+                                      }}
+                                      className="platform-portfolioLink"
+                                      style={{ fontSize: 12, fontWeight: 800 }}
+                                    >
+                                      Voir le contrat
+                                    </a>
+                                  ) : (
+                                    <span className="platform-portfolioMuted" style={{ fontSize: 12 }}>—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
 
-                        const typeLabel =
-                          t.type === 'depot'
-                            ? 'Dépôt'
-                            : t.type === 'retrait'
-                              ? 'Retrait'
-                              : t.type === 'achat'
-                                ? 'Achat'
-                                : t.type === 'vente'
-                                  ? 'Vente'
-                                  : t.type === 'transfert'
-                                    ? (isTradingTransfer ? (t.assetType || 'Trading') : isTransferToBalance ? 'Transfert' : 'Investissement')
+                  {/* Mobile: cartes (visible < 768px) */}
+                  <div className="platform-portfolioTransactionsCards">
+                    {transactionsPagination.items.map((t: any) => {
+                      const isTradingTransfer =
+                        t.type === 'transfert' &&
+                        (t.to === 'trading' || t.to_field === 'trading' || t.transfer_to === 'trading');
+                      const isTransferToBalance =
+                        t.type === 'transfert' &&
+                        (t.to === 'solde' || t.to_field === 'solde' || t.transfer_to === 'solde');
+                      const typeLabel =
+                        t.type === 'depot'
+                          ? 'Dépôt'
+                          : t.type === 'retrait'
+                            ? 'Retrait'
+                            : t.type === 'achat'
+                              ? 'Achat'
+                              : t.type === 'vente'
+                                ? 'Vente'
+                                : t.type === 'transfert'
+                                  ? (isTradingTransfer ? (t.assetType || 'Trading') : isTransferToBalance ? 'Transfert' : 'Investissement')
                                   : t.type === 'bonus'
                                     ? 'Bonus'
                                     : t.type === 'interets'
                                       ? 'Intérêts'
                                       : t.type;
-                        const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
-                        const amountColor = Number.isFinite(amountNum) ? (amountNum >= 0 ? '#10b981' : '#ef4444') : '#111827';
-                        const productLabel =
-                          t.assetName ||
-                          t.productName ||
-                          (isTradingTransfer ? (t.assetType || 'Trading') : '-');
-                        const statusLabel = formatTransactionStatus(t.status, t.type);
-                        const statusColor = getStatusColor(t.status);
-                        
-                        // Show contract action whenever a contract document exists for this transaction
-                        const contractDocs = transactionDocuments[String(t.id)] || [];
-                        const hasContract = contractDocs.length > 0;
-                        
-                        return (
-                          <tr key={t.id} className="platform-portfolioTbodyRow">
-                            <td className="platform-portfolioTd platform-portfolioNowrap">{formatDateTime(t.datetime)}</td>
-                            <td className="platform-portfolioTd">{typeLabel}</td>
-                            <td className="platform-portfolioTd">{productLabel}</td>
-                            <td className="platform-portfolioTd">{t.description || '—'}</td>
-                            <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: amountColor }}>
-                              {formatCurrency(t.amount)}
-                            </td>
-                            <td className="platform-portfolioTd">
+                      const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
+                      const amountColor = Number.isFinite(amountNum) ? (amountNum >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                      const productLabel =
+                        t.assetName ||
+                        t.productName ||
+                        (isTradingTransfer ? (t.assetType || 'Trading') : '-');
+                      const statusLabel = formatTransactionStatus(t.status, t.type);
+                      const statusColor = getStatusColor(t.status);
+                      const contractDocs = transactionDocuments[String(t.id)] || [];
+                      const hasContract = contractDocs.length > 0;
+                      return (
+                        <div key={t.id} className="platform-portfolioTransactionCard">
+                          <div className="platform-portfolioTransactionCardHeader">
+                            <span className="platform-portfolioTransactionCardType">{typeLabel}</span>
+                            <span className="platform-portfolioTransactionCardDate">{formatDateTime(t.datetime)}</span>
+                          </div>
+                          <div className="platform-portfolioTransactionCardMain">
+                            <div className="platform-portfolioTransactionCardMainItem">
+                              <span className="platform-portfolioTransactionCardLabel">Montant</span>
+                              <span className="platform-portfolioTransactionCardValue" style={{ color: amountColor }}>
+                                {formatCurrency(t.amount)}
+                              </span>
+                            </div>
+                            <div className="platform-portfolioTransactionCardMainItem">
+                              <span className="platform-portfolioTransactionCardLabel">Statut</span>
                               <span
-                                className="platform-portfolioStatus"
+                                className="platform-portfolioStatus platform-portfolioTransactionCardValue"
                                 style={{ color: statusColor }}
                                 data-status={String(t?.status || '').trim().toLowerCase()}
                               >
                                 {statusLabel}
                               </span>
-                            </td>
-                            <td className="platform-portfolioTd platform-portfolioAlignRight">
+                            </div>
+                          </div>
+                          <div className="platform-portfolioTransactionCardSecondary">
+                            <div className="platform-portfolioTransactionCardSecondaryItem">
+                              <span>Produit</span>
+                              <span>{productLabel}</span>
+                            </div>
+                            {t.description && (
+                              <div className="platform-portfolioTransactionCardSecondaryItem platform-portfolioTransactionCardDescription">
+                                <span>Description</span>
+                                <span>{t.description}</span>
+                              </div>
+                            )}
+                            <div className="platform-portfolioTransactionCardSecondaryItem platform-portfolioTransactionCardActions">
+                              <span>Actions</span>
                               {hasContract ? (
                                 <a
                                   href={contractDocs[0]?.fileUrl || '#'}
@@ -1511,19 +1723,18 @@ export function PlatformPortfolio() {
                                     }
                                   }}
                                   className="platform-portfolioLink"
-                                  style={{ fontSize: 12, fontWeight: 800 }}
+                                  style={{ fontWeight: 800 }}
                                 >
                                   Voir le contrat
                                 </a>
                               ) : (
-                                <span className="platform-portfolioMuted" style={{ fontSize: 12 }}>—</span>
+                                <span className="platform-portfolioMuted">—</span>
                               )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    </table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {transactions.length > TRANSACTIONS_PAGE_SIZE && (
@@ -1596,22 +1807,24 @@ export function PlatformPortfolio() {
                 <p>Aucun ordre</p>
               ) : (
                 <>
-                  <div className="platform-portfolioTableWrap">
-                    <table className="platform-portfolioTable">
-                    <thead>
-                      <tr className="platform-portfolioTheadRow">
-                        <th className="platform-portfolioTh">Actif</th>
-                        <th className="platform-portfolioTh">Type</th>
-                        <th className="platform-portfolioTh">Réf</th>
-                        <th className="platform-portfolioTh">Date d'ouverture</th>
-                        <th className="platform-portfolioTh">Date de fermeture</th>
-                        <th className="platform-portfolioTh platform-portfolioAlignRight">Investi</th>
-                        <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
-                        <th className="platform-portfolioTh">Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ordersPagination.items.map((p: any) => {
+                  {/* Desktop: tableau (visible >= 768px) */}
+                  <div className="platform-portfolioTableDesktop">
+                    <div className="platform-portfolioTableWrap">
+                      <table className="platform-portfolioTable">
+                        <thead>
+                          <tr className="platform-portfolioTheadRow">
+                            <th className="platform-portfolioTh">Actif</th>
+                            <th className="platform-portfolioTh">Type</th>
+                            <th className="platform-portfolioTh">Réf</th>
+                            <th className="platform-portfolioTh">Date d'ouverture</th>
+                            <th className="platform-portfolioTh">Date de fermeture</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">Investi</th>
+                            <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
+                            <th className="platform-portfolioTh">Statut</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ordersPagination.items.map((p: any) => {
                         const investedNum =
                           typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
                         const pnlNum =
@@ -1724,12 +1937,12 @@ export function PlatformPortfolio() {
                           pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
                             ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                             : null;
-                          finalPnlColor = pnlEur >= 0 ? '#10b981' : '#ef4444';
+                          finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
                           // P&L temps réel : devise actif principal, EUR secondaire
                           pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
                           pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
-                          finalPnlColor = pnlAsset >= 0 ? '#10b981' : '#ef4444';
+                          finalPnlColor = pnlAsset != null && Number.isFinite(pnlAsset) ? (pnlAsset >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         } else {
                           pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
                           finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
@@ -1801,8 +2014,179 @@ export function PlatformPortfolio() {
                           </tr>
                         );
                       })}
-                    </tbody>
-                    </table>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Mobile: cartes (visible < 768px) */}
+                  <div className="platform-portfolioOrdersCards">
+                    {ordersPagination.items.map((p: any) => {
+                      const investedNum =
+                        typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+                      const pnlNum =
+                        p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+                      const hasAsset = Boolean(p.assetName || p.assetReference || p.assetId || p.asset_id || p.asset?.id);
+                      const assetId = p.assetId || p.asset_id || p.asset?.id || null;
+                      const asset = assetId ? assetsById.get(String(assetId)) : null;
+                      const positionAssetType = p.assetType || p.asset_type || p.asset?.type || '';
+                      let productTypeLabel = '';
+                      if (hasAsset) {
+                        productTypeLabel = positionAssetType || asset?.type || asset?.category || asset?.subcategory || 'Trading';
+                      } else if (p.productId) {
+                        const product = productsById.get(String(p.productId));
+                        productTypeLabel = p.productType || p.product_type || product?.type || product?.subcategory || product?.categoryName || product?.category || '-';
+                      } else {
+                        productTypeLabel = '-';
+                      }
+                      const assetLabel = p.assetName || p.assetReference || p.assetId || '-';
+                      let refLabel = '-';
+                      if (hasAsset && asset) {
+                        refLabel = asset?.reference || asset?.symbol || p.assetReference || p.asset_reference || '-';
+                      } else if (p.productId) {
+                        const product = productsById.get(String(p.productId));
+                        refLabel = p.productReference || p.product_reference || product?.reference || '-';
+                      }
+                      const assetCurrency = (p.assetCurrency || p.asset_currency || asset?.currency || 'EUR').trim().toUpperCase();
+                      const fxNum =
+                        p?.fx_rate_eur_to_asset == null
+                          ? null
+                          : typeof p.fx_rate_eur_to_asset === 'string'
+                            ? parseFloat(p.fx_rate_eur_to_asset)
+                            : Number(p.fx_rate_eur_to_asset);
+                      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
+                      let pnlAsset: number | null = null;
+                      let pnlEur: number | null = pnlNum;
+                      const entryPriceNum =
+                        p.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
+                      const qtyNum =
+                        p.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
+                      if (pnlNum != null && Number.isFinite(pnlNum)) {
+                        if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                          pnlEur = pnlNum;
+                          pnlAsset = pnlNum * fxRate;
+                        } else {
+                          pnlEur = pnlNum;
+                          pnlAsset = null;
+                        }
+                      } else if (p?.status === 'open' && hasAsset && asset && entryPriceNum != null && qtyNum != null && qtyNum > 0) {
+                        const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
+                        const currentPriceNum =
+                          currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
+                        const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
+                        if (currentPrice != null && entryPriceNum > 0) {
+                          const marketValue = qtyNum * currentPrice;
+                          const costBasis = qtyNum * entryPriceNum;
+                          pnlAsset = marketValue - costBasis;
+                          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
+                            pnlEur = pnlAsset / fxRate;
+                          } else {
+                            pnlEur = pnlAsset;
+                            pnlAsset = null;
+                          }
+                        }
+                      }
+                      const hasStoredProfitLoss = pnlNum != null && Number.isFinite(pnlNum);
+                      let pnlLabelMain: string;
+                      let pnlLabelSub: string | null = null;
+                      let finalPnlColor: string;
+                      if (assetCurrency === 'EUR') {
+                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                        finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                      } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
+                        pnlLabelMain = formatCurrency(pnlEur);
+                        pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
+                          ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
+                          : null;
+                        finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                      } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
+                        pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
+                        pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
+                        finalPnlColor = pnlAsset != null && Number.isFinite(pnlAsset) ? (pnlAsset >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                      } else {
+                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                        finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
+                      }
+                      const investedAssetNum =
+                        p?.invested_amount_asset_currency == null
+                          ? null
+                          : typeof p.invested_amount_asset_currency === 'string'
+                            ? parseFloat(p.invested_amount_asset_currency)
+                            : Number(p.invested_amount_asset_currency);
+                      let investedLabelMain: string;
+                      let investedLabelSub: string | null = null;
+                      if (assetCurrency !== 'EUR' && investedAssetNum != null && Number.isFinite(investedAssetNum)) {
+                        investedLabelMain = formatMoney(investedAssetNum, assetCurrency, { maximumFractionDigits: 2 });
+                        if (fxRate != null && fxRate > 0) {
+                          const investedEurEstimate = investedAssetNum / fxRate;
+                          investedLabelSub = `≈ ${formatCurrency(investedEurEstimate)}`;
+                        }
+                      } else {
+                        investedLabelMain = investedNum != null && Number.isFinite(investedNum)
+                          ? formatCurrency(investedNum)
+                          : '-';
+                      }
+                      const openedLabel = p.opened_at
+                        ? formatDateTime(p.opened_at)
+                        : p.period_date
+                          ? formatDateTime(p.period_date)
+                          : '-';
+                      const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
+                      const statusLabel =
+                        p.status === 'open'
+                          ? 'Ouverte'
+                          : p.status === 'done'
+                            ? 'Fermée'
+                            : p.status === 'cancelled'
+                              ? 'Annulée'
+                              : p.status || '-';
+                      return (
+                        <div key={p.id} className="platform-portfolioOrderCard">
+                          <div className="platform-portfolioOrderCardHeader">
+                            <span className="platform-portfolioOrderCardAsset">{assetLabel}</span>
+                            <span className="platform-portfolioOrderCardType">{productTypeLabel}</span>
+                          </div>
+                          <div className="platform-portfolioOrderCardMain">
+                            <div className="platform-portfolioOrderCardMainItem">
+                              <span className="platform-portfolioOrderCardLabel">Investi</span>
+                              <span className="platform-portfolioOrderCardValue">
+                                {investedLabelMain}
+                                {investedLabelSub && (
+                                  <span className="platform-portfolioMuted"> {investedLabelSub}</span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="platform-portfolioOrderCardMainItem">
+                              <span className="platform-portfolioOrderCardLabel">P&L</span>
+                              <span className="platform-portfolioOrderCardValue" style={{ color: finalPnlColor }}>
+                                {pnlLabelMain}
+                                {pnlLabelSub && (
+                                  <span className="platform-portfolioMuted"> {pnlLabelSub}</span>
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="platform-portfolioOrderCardSecondary">
+                            <div className="platform-portfolioOrderCardSecondaryItem">
+                              <span>Réf</span>
+                              <span>{refLabel}</span>
+                            </div>
+                            <div className="platform-portfolioOrderCardSecondaryItem">
+                              <span>Date d'ouverture</span>
+                              <span>{openedLabel}</span>
+                            </div>
+                            <div className="platform-portfolioOrderCardSecondaryItem">
+                              <span>Date de fermeture</span>
+                              <span>{closedLabel}</span>
+                            </div>
+                            <div className="platform-portfolioOrderCardSecondaryItem">
+                              <span>Statut</span>
+                              <span>{statusLabel}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {visiblePositions.length > ORDERS_PAGE_SIZE && (

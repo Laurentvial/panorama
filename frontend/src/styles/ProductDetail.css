@@ -1,0 +1,82 @@
+/* Simulateur: détail par période - tableau desktop / cartes mobile */
+.product-simulatorPeriodTableDesktop {
+  display: block;
+}
+
+.product-simulatorPeriodCards {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .product-simulatorPeriodTableDesktop {
+    display: none;
+  }
+
+  .product-simulatorPeriodCards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+}
+
+/* Cartes mobile - Détail par période */
+.product-simulatorPeriodCard {
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.product-simulatorPeriodCardHeader {
+  font-size: 14px;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+  margin-bottom: 12px;
+}
+
+.product-simulatorPeriodCardMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.product-simulatorPeriodCardMainItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-simulatorPeriodCardLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.product-simulatorPeriodCardValue {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.product-simulatorPeriodCardSecondary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.product-simulatorPeriodCardSecondaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.product-simulatorPeriodCardSecondaryItem span:first-child {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}

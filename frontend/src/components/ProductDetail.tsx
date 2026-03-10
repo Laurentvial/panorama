@@ -9,6 +9,7 @@ import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, Check, ExternalLink, X } from 'lucide-react';
 import '../styles/Modal.css';
+import '../styles/ProductDetail.css';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
@@ -1402,7 +1403,9 @@ export function ProductDetail() {
                       <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 13, color: '#374151', fontWeight: 600 }}>
                         Détail par période
                       </div>
-                      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', width: '100%', minWidth: 0 }}>
+                      {/* Desktop: tableau (visible >= 768px) */}
+                      <div className="product-simulatorPeriodTableDesktop">
+                        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'thin', width: '100%', minWidth: 0 }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: isPhone ? 320 : 720, fontSize: isPhone ? 11 : undefined }}>
                           <thead>
                             <tr style={{ backgroundColor: 'white', borderBottom: '1px solid #e5e7eb' }}>
@@ -1435,6 +1438,43 @@ export function ProductDetail() {
                             ))}
                           </tbody>
                         </table>
+                        </div>
+                      </div>
+                      {/* Mobile: cartes (visible < 768px) */}
+                      <div className="product-simulatorPeriodCards">
+                        {sim.rows.map((r) => (
+                          <div key={r.index} className="product-simulatorPeriodCard">
+                            <div className="product-simulatorPeriodCardHeader">Période #{r.index}</div>
+                            <div className="product-simulatorPeriodCardMain">
+                              <div className="product-simulatorPeriodCardMainItem">
+                                <span className="product-simulatorPeriodCardLabel">Profit</span>
+                                <span className="product-simulatorPeriodCardValue" style={{ color: '#0f766e' }}>
+                                  +{r.profit.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                </span>
+                              </div>
+                              <div className="product-simulatorPeriodCardMainItem">
+                                <span className="product-simulatorPeriodCardLabel">Fin</span>
+                                <span className="product-simulatorPeriodCardValue">
+                                  {r.end.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                </span>
+                              </div>
+                            </div>
+                            <div className="product-simulatorPeriodCardSecondary">
+                              <div className="product-simulatorPeriodCardSecondaryItem">
+                                <span>Mois</span>
+                                <span>{r.months}</span>
+                              </div>
+                              <div className="product-simulatorPeriodCardSecondaryItem">
+                                <span>Base</span>
+                                <span>{r.base.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                              </div>
+                              <div className="product-simulatorPeriodCardSecondaryItem">
+                                <span>Taux</span>
+                                <span>{r.ratePct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                       <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', fontSize: 12, color: '#6b7280' }}>
                         Le calcul utilise la rentabilité “par période” (mensuelle/trimestrielle/…) et applique la capitalisation si elle est activée sur le produit.

@@ -1,0 +1,90 @@
+/* Historique fonds: tableau desktop / cartes mobile */
+.platform-fundsHistoryTableDesktop {
+  display: block;
+}
+
+.platform-fundsHistoryCards {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .platform-fundsHistoryTableDesktop {
+    display: none;
+  }
+
+  .platform-fundsHistoryCards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/* Cartes mobile - Historique fonds */
+.platform-fundsHistoryCard {
+  border: 1px solid color-mix(in srgb, var(--accent-foreground) 12%, transparent);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.platform-fundsHistoryCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.platform-fundsHistoryCardType {
+  font-size: 14px;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--accent-foreground) 90%, transparent);
+}
+
+.platform-fundsHistoryCardDate {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-fundsHistoryCardMain {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.platform-fundsHistoryCardMainItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.platform-fundsHistoryCardLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+}
+
+.platform-fundsHistoryCardValue {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.platform-fundsHistoryCardSecondary {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-foreground) 8%, transparent);
+}
+
+.platform-fundsHistoryCardSecondaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+}
+
+.platform-fundsHistoryCardSecondaryItem span:first-child {
+  color: color-mix(in srgb, var(--accent-foreground) 45%, transparent);
+}
