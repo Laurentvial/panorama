@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path, include
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseRedirect
 from django.views.decorators.csrf import csrf_exempt
 from api.views import UserCreateView, SafeTokenRefreshView
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -28,6 +28,8 @@ urlpatterns = [
     path('api/token/refresh/', SafeTokenRefreshView.as_view(), name='refresh'),
     path("api-auth/", include('rest_framework.urls')),
     path('api/', include('api.urls')),
+    # Redirect /api (no trailing slash) to /api/ for clients that omit the slash
+    path('api', lambda r: HttpResponseRedirect(r.path + '/')),
 ]
 
 # Media files are served directly from S3/MinIO - no local file serving
