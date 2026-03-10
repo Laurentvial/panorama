@@ -23,7 +23,8 @@ export function LoginPage() {
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -122,7 +123,7 @@ export function LoginPage() {
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
         ) : (
-          <div className="login-banner-title">{platformName}</div>
+          <div className="login-banner-title">{platformName || 'Plateforme'}</div>
         )}
       </header>
 

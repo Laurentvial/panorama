@@ -15,7 +15,8 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
   const { settings, loading: settingsLoading } = useTheme();
-  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const [signupData, setSignupData] = useState({
     firstName: '',
     lastName: '',
@@ -79,7 +80,7 @@ export function RegisterPage() {
           <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl flex items-center justify-center mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <CardTitle>{platformName}</CardTitle>
+          <CardTitle>{platformName || 'Plateforme'}</CardTitle>
           <CardDescription>
             Créez votre compte administrateur
           </CardDescription>
