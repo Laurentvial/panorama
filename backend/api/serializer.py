@@ -1033,6 +1033,7 @@ class PositionSerializer(serializers.ModelSerializer):
     assetType = serializers.CharField(source='asset.type', read_only=True, allow_null=True)
     assetReference = serializers.CharField(source='asset.reference', read_only=True, allow_null=True)
     assetCurrency = serializers.SerializerMethodField()
+    amountCurrency = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
 
@@ -1043,7 +1044,7 @@ class PositionSerializer(serializers.ModelSerializer):
             'clientId', 'clientName',
             'productId', 'productName', 'productType', 'productReference',
             'transactionId',
-            'assetId', 'assetName', 'assetType', 'assetReference', 'assetCurrency',
+            'assetId', 'assetName', 'assetType', 'assetReference', 'assetCurrency', 'amountCurrency',
             'period_index', 'period_date',
             'invested_amount',
             'entry_price', 'quantity',
@@ -1089,6 +1090,12 @@ class PositionSerializer(serializers.ModelSerializer):
             return obj.asset.currency if obj.asset else None
         except Exception:
             return None
+
+    def get_amountCurrency(self, obj):
+        try:
+            return (obj.transaction.amount_currency or 'EUR').strip().upper() if obj.transaction else 'EUR'
+        except Exception:
+            return 'EUR'
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):

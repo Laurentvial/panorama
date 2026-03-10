@@ -813,6 +813,7 @@ export function EditTransactionModal({
       {showPositionModal && (
         <PositionGenerationModal
           isOpen={showPositionModal}
+          accountCurrency={accountCurrencyProp}
           transaction={{
             ...transaction,
             subscription_interest_period:

@@ -1563,6 +1563,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
           isOpen={isPositionGenerationModalOpen}
           transaction={transactionForPositionGeneration}
           clientId={clientId}
+          accountCurrency={accountCurrency}
           onClose={() => {
             const isValidate = positionModalSource === 'validate';
             setIsPositionGenerationModalOpen(false);

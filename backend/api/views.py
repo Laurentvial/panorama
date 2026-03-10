@@ -288,6 +288,19 @@ def _profitability_text_for_product(product: Product) -> str:
     return f"{base} {period}".strip()
 
 
+def _format_amount_for_contract(amount: float, currency: str | None) -> str:
+    """Format amount for contract PDF (French locale: 1 234,56 € / 1 234,56 CHF / 1 234,56 $)."""
+    ccy = (currency or 'EUR').strip().upper()
+    if ccy not in ('EUR', 'USD', 'CHF'):
+        ccy = 'EUR'
+    formatted = f"{float(amount):,.2f}".replace(',', ' ').replace('.', ',')
+    if ccy == 'USD':
+        return f"{formatted} $"
+    if ccy == 'CHF':
+        return f"{formatted} CHF"
+    return f"{formatted} €"
+
+
 def _profitability_rate_for_calc(product: Product) -> Decimal:
     """
     Best-effort rate for profits estimation (keeps consistency with existing frontend simulator).
@@ -7901,7 +7914,10 @@ def _client_transaction_create_impl(request, client_id):
         manager_user = _resolve_client_manager_user(client)
         if manager_user:
             client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
-            amount_str = f"{transaction_amount:,.2f}".replace(',', ' ').replace('.', ',') + " €"
+            notif_ccy = (getattr(transaction, 'amount_currency', None) or client.account_currency or 'EUR').strip().upper()
+            if notif_ccy not in ('EUR', 'USD', 'CHF'):
+                notif_ccy = 'EUR'
+            amount_str = _format_amount_for_contract(transaction_amount, notif_ccy)
             if transaction_type == 'depot':
                 create_app_notification(
                     recipient_type=AppNotification.RECIPIENT_CRM_USER,
@@ -8006,8 +8022,13 @@ def _client_transaction_create_impl(request, client_id):
             duration = subscription_details_data.get('duration', '') if subscription_details_data else (product.duration or '30')
             duration_days = _parse_days_from_duration(duration)
             
-            # Amount
+            # Amount and currency (for contract display)
             amount = float(transaction.amount)
+            contract_currency = (
+                getattr(transaction, 'amount_currency', None) or client.account_currency or 'EUR'
+            ).strip().upper()
+            if contract_currency not in ('EUR', 'USD', 'CHF'):
+                contract_currency = 'EUR'
             
             # Profitability
             is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
@@ -8307,7 +8328,7 @@ def _client_transaction_create_impl(request, client_id):
                 ['TITRE', product_name],
                 ['DURÉE', duration_display],
                 ['RENTABILITÉ', profitability_text],
-                ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+                ['TOTAL NET', _format_amount_for_contract(amount, contract_currency)],
             ]
             summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
             summary_table.setStyle(TableStyle([
@@ -8386,7 +8407,7 @@ def _client_transaction_create_impl(request, client_id):
             # Interest table
             interest_data = [
                 ['Date', 'Intérêts payés', 'Performance'],
-                [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+                [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
             ]
             interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
             interest_table.setStyle(TableStyle([
@@ -8470,7 +8491,10 @@ def _client_transaction_create_impl(request, client_id):
                         if getattr(transaction, 'datetime', None)
                         else datetime.now().strftime('%d/%m/%Y %H:%M')
                     )
-                    amount_display = f"{float(transaction.amount):,.2f} EUR".replace(',', ' ')
+                    fb_ccy = (getattr(transaction, 'amount_currency', None) or getattr(client, 'account_currency', None) or 'EUR').strip().upper()
+                    if fb_ccy not in ('EUR', 'USD', 'CHF'):
+                        fb_ccy = 'EUR'
+                    amount_display = _format_amount_for_contract(float(transaction.amount), fb_ccy)
 
                     fallback_content = None
                     fallback_filename = f"contrat_{re.sub(r'[^a-zA-Z0-9_-]', '_', safe_product_name)[:50]}_{transaction_id}.pdf"
@@ -10281,6 +10305,11 @@ def product_contract_pdf(request, product_id):
     subscription_amount = request.GET.get('amount', '')
     subscription_interest_period = request.GET.get('interestPeriod', '')
     subscription_signature = request.GET.get('signature', '')  # Base64 encoded signature image
+    # Currency for contract amounts (EUR, USD, CHF)
+    contract_currency_raw = request.GET.get('currency', '').strip().upper()
+    if not contract_currency_raw and current_client:
+        contract_currency_raw = (getattr(current_client, 'account_currency', None) or '').strip().upper()
+    contract_currency = contract_currency_raw if contract_currency_raw in ('EUR', 'USD', 'CHF') else 'EUR'
     
     # Get user/client data for defaults
     if current_client:
@@ -10659,7 +10688,7 @@ def product_contract_pdf(request, product_id):
         ['TITRE', product_name],
         ['DURÉE', duration_display],
         ['RENTABILITÉ', profitability_text],
-        ['TOTAL NET', f"{amount:,.2f} €".replace(',', ' ')],
+        ['TOTAL NET', _format_amount_for_contract(amount, contract_currency)],
     ]
     summary_table = Table(summary_data, colWidths=[50*mm, 120*mm])
     summary_table.setStyle(TableStyle([
@@ -10738,7 +10767,7 @@ def product_contract_pdf(request, product_id):
     # Interest table
     interest_data = [
         ['Date', 'Intérêts payés', 'Performance'],
-        [contract_end_date_str, f"{interest_amount:,.2f} €".replace(',', ' '), f"{profitability_rate:.2f} %"],
+        [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
     ]
     interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
     interest_table.setStyle(TableStyle([

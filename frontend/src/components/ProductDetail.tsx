@@ -19,6 +19,7 @@ import { formatSubcategoryForDisplay } from './transactionUtils';
 import { StockChart } from './StockChart';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { formatAmount, getCurrencySymbol } from '../utils/currency';
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -94,6 +95,7 @@ export function ProductDetail() {
     acceptConditions: false,
   });
   const [clientIP, setClientIP] = useState('');
+  const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
@@ -712,11 +714,11 @@ export function ProductDetail() {
     const minInvestment = parseFinancialValue(productData.minEntryValue);
     const maxInvestment = parseFinancialValue(productData.maxEntryValue);
     if (minInvestment > 0 && amount < minInvestment) {
-      setSubscriptionError(`Le montant minimum est de ${minInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      setSubscriptionError(`Le montant minimum est de ${formatAmount(minInvestment, 'EUR')}`);
       return;
     }
     if (maxInvestment > 0 && amount > maxInvestment) {
-      setSubscriptionError(`Le montant maximum est de ${maxInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`);
+      setSubscriptionError(`Le montant maximum est de ${formatAmount(maxInvestment, 'EUR')}`);
       return;
     }
 
@@ -892,6 +894,7 @@ export function ProductDetail() {
     if (signature) {
       params.append('signature', signature);
     }
+    params.append('currency', accountCurrency);
     
     // Build URL
     const pdfUrl = `${apiUrl}/api/products/${product.id}/contract-pdf/?${params.toString()}`;
@@ -1170,14 +1173,14 @@ export function ProductDetail() {
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Investissement minimum</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {minInvestment > 0 ? `${minInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'Aucun'}
+                      {minInvestment > 0 ? formatAmount(minInvestment, 'EUR') : 'Aucun'}
                     </div>
                   </div>
                   
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Plafond de souscription</div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                      {maxInvestment > 0 ? `${maxInvestment.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : 'Aucun'}
+                      {maxInvestment > 0 ? formatAmount(maxInvestment, 'EUR') : 'Aucun'}
                     </div>
                   </div>
                   
@@ -1244,7 +1247,7 @@ export function ProductDetail() {
                     minWidth: 0,
                     gap: 8,
                   }}>
-                    <span style={{ fontSize: '14px', color: '#374151', fontWeight: '500' }}>Montant</span>
+                    <span style={{ fontSize: '14px', color: '#374151', fontWeight: '500' }}>Montant ({getCurrencySymbol(accountCurrency)})</span>
                     <Input
                       type="number"
                       value={simulatorBasePrice}
@@ -1361,7 +1364,7 @@ export function ProductDetail() {
                         textAlign: 'right',
                         wordBreak: 'break-word',
                       }}>
-                        {calculatedGains.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
+                        {formatAmount(calculatedGains, accountCurrency)}
                       </span>
                     </div>
                     
@@ -1391,7 +1394,7 @@ export function ProductDetail() {
                         textAlign: 'right',
                         wordBreak: 'break-word',
                       }}>
-                        {total.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
+                        {formatAmount(total, accountCurrency)}
                       </span>
                     </div>
 
@@ -1423,16 +1426,16 @@ export function ProductDetail() {
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#111827', fontWeight: 600 }}>#{r.index}</td>
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>{r.months}</td>
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>
-                                  {r.base.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                  {formatAmount(r.base, accountCurrency)}
                                 </td>
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#374151', textAlign: 'right' }}>
                                   {r.ratePct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                                 </td>
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#0f766e', textAlign: 'right', fontWeight: 700 }}>
-                                  +{r.profit.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                  +{formatAmount(r.profit, accountCurrency)}
                                 </td>
                                 <td style={{ padding: isPhone ? '8px 6px' : '10px 12px', fontSize: isPhone ? 12 : 13, color: '#111827', textAlign: 'right', fontWeight: 800 }}>
-                                  {r.end.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                  {formatAmount(r.end, accountCurrency)}
                                 </td>
                               </tr>
                             ))}
@@ -1449,13 +1452,13 @@ export function ProductDetail() {
                               <div className="product-simulatorPeriodCardMainItem">
                                 <span className="product-simulatorPeriodCardLabel">Profit</span>
                                 <span className="product-simulatorPeriodCardValue" style={{ color: '#0f766e' }}>
-                                  +{r.profit.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                  +{formatAmount(r.profit, accountCurrency)}
                                 </span>
                               </div>
                               <div className="product-simulatorPeriodCardMainItem">
                                 <span className="product-simulatorPeriodCardLabel">Fin</span>
                                 <span className="product-simulatorPeriodCardValue">
-                                  {r.end.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                  {formatAmount(r.end, accountCurrency)}
                                 </span>
                               </div>
                             </div>
@@ -1466,7 +1469,7 @@ export function ProductDetail() {
                               </div>
                               <div className="product-simulatorPeriodCardSecondaryItem">
                                 <span>Base</span>
-                                <span>{r.base.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                                <span>{formatAmount(r.base, accountCurrency)}</span>
                               </div>
                               <div className="product-simulatorPeriodCardSecondaryItem">
                                 <span>Taux</span>

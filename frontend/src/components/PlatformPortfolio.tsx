@@ -170,18 +170,16 @@ export function PlatformPortfolio() {
     }
   };
 
-  const formatCurrency = (value: any) => {
+  const formatAccountAmount = (value: any) => {
     const n = typeof value === 'string' ? parseFloat(value) : Number(value);
     if (!Number.isFinite(n)) return '-';
-    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+    return formatAmount(n, accountCurrency);
   };
 
   const formatMoney = (value: any, currency: string | undefined, opts?: Intl.NumberFormatOptions) => {
     const n = typeof value === 'string' ? parseFloat(value) : Number(value);
     if (!Number.isFinite(n)) return '-';
-    const cur = String(currency || '').trim().toUpperCase();
-    if (!cur || cur === 'EUR') return formatCurrency(n);
-    return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 8, ...opts })} ${cur}`;
+    return formatAmount(n, currency || 'EUR', opts);
   };
 
   const formatDateTime = (iso: string) => {
@@ -1296,13 +1294,13 @@ export function PlatformPortfolio() {
                                   investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
                                   if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
                                     const fxRate = r.investedAsset / r.investedEur;
-                                    if (fxRate > 0) investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
+                                    if (fxRate > 0) investedLabelSub = `≈ ${formatAccountAmount(r.investedEur)}`;
                                   }
                                 } else {
                                   if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
-                                    investedLabelMain = formatCurrency(r.investedEur);
+                                    investedLabelMain = formatAccountAmount(r.investedEur);
                                   } else if (r.kind === 'asset' && r.investedEur != null) {
-                                    investedLabelMain = formatCurrency(r.investedEur);
+                                    investedLabelMain = formatAccountAmount(r.investedEur);
                                   } else {
                                     investedLabelMain = '—';
                                   }
@@ -1311,7 +1309,7 @@ export function PlatformPortfolio() {
                                 let pnlLabelMain: string;
                                 let pnlLabelSub: string | null = null;
                                 if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
-                                  pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                                  pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatAccountAmount(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
                                 } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
                                   if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null &&
                                       Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
@@ -1319,7 +1317,7 @@ export function PlatformPortfolio() {
                                     const fxRate = r.investedAsset / r.investedEur;
                                     if (fxRate > 0) {
                                       const pnlEur = r.pnl / fxRate;
-                                      pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
+                                      pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatAccountAmount(pnlEur)}`;
                                     }
                                   } else {
                                     pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
@@ -1422,13 +1420,13 @@ export function PlatformPortfolio() {
                             investedLabelMain = formatMoney(r.investedAsset, r.currency, { maximumFractionDigits: 2 });
                             if (r.investedEur != null && Number.isFinite(r.investedEur) && r.investedEur > 0) {
                               const fxRate = r.investedAsset / r.investedEur;
-                              if (fxRate > 0) investedLabelSub = `≈ ${formatCurrency(r.investedEur)}`;
+                              if (fxRate > 0) investedLabelSub = `≈ ${formatAccountAmount(r.investedEur)}`;
                             }
                           } else {
                             if (r.kind === 'product' && r.investedEur != null && Number.isFinite(r.investedEur)) {
-                              investedLabelMain = formatCurrency(r.investedEur);
+                              investedLabelMain = formatAccountAmount(r.investedEur);
                             } else if (r.kind === 'asset' && r.investedEur != null) {
-                              investedLabelMain = formatCurrency(r.investedEur);
+                              investedLabelMain = formatAccountAmount(r.investedEur);
                             } else {
                               investedLabelMain = '—';
                             }
@@ -1437,7 +1435,7 @@ export function PlatformPortfolio() {
                           let pnlLabelMain: string;
                           let pnlLabelSub: string | null = null;
                           if (r.kind === 'product' && r.pnl != null && Number.isFinite(r.pnl)) {
-                            pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatCurrency(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
+                            pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatAccountAmount(r.pnl)}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
                           } else if (r.kind === 'asset' && r.pnl != null && Number.isFinite(r.pnl)) {
                             if (r.currency !== 'EUR' && r.investedAsset != null && r.investedEur != null &&
                                 Number.isFinite(r.investedAsset) && Number.isFinite(r.investedEur) && r.investedEur > 0) {
@@ -1445,7 +1443,7 @@ export function PlatformPortfolio() {
                               const fxRate = r.investedAsset / r.investedEur;
                               if (fxRate > 0) {
                                 const pnlEur = r.pnl / fxRate;
-                                pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatCurrency(pnlEur)}`;
+                                pnlLabelSub = `≈ ${pnlEur >= 0 ? '+' : ''}${formatAccountAmount(pnlEur)}`;
                               }
                             } else {
                               pnlLabelMain = `${r.pnl >= 0 ? '+' : ''}${formatMoney(r.pnl, r.currency, { maximumFractionDigits: 2 })}${r.pnlPct != null ? ` (${(r.pnlPct >= 0 ? '+' : '') + r.pnlPct.toFixed(2)}%)` : ''}`;
@@ -1605,7 +1603,7 @@ export function PlatformPortfolio() {
                                 <td className="platform-portfolioTd">{productLabel}</td>
                                 <td className="platform-portfolioTd">{t.description || '—'}</td>
                                 <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: amountColor }}>
-                                  {formatCurrency(t.amount)}
+                                  {formatAmount(amountNum, t.amountCurrency || t.amount_currency || accountCurrency)}
                                 </td>
                                 <td className="platform-portfolioTd">
                                   <span
@@ -1689,7 +1687,7 @@ export function PlatformPortfolio() {
                             <div className="platform-portfolioTransactionCardMainItem">
                               <span className="platform-portfolioTransactionCardLabel">Montant</span>
                               <span className="platform-portfolioTransactionCardValue" style={{ color: amountColor }}>
-                                {formatCurrency(t.amount)}
+                                {formatAmount(amountNum, t.amountCurrency || t.amount_currency || accountCurrency)}
                               </span>
                             </div>
                             <div className="platform-portfolioTransactionCardMainItem">
@@ -1933,11 +1931,11 @@ export function PlatformPortfolio() {
                         let finalPnlColor: string;
 
                         if (assetCurrency === 'EUR') {
-                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAccountAmount(pnlEur) : '-';
                           finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
                           // profit_loss stocké : EUR principal, devise actif secondaire
-                          pnlLabelMain = formatCurrency(pnlEur);
+                          pnlLabelMain = formatAccountAmount(pnlEur);
                           pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
                             ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                             : null;
@@ -1945,10 +1943,10 @@ export function PlatformPortfolio() {
                         } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
                           // P&L temps réel : devise actif principal, EUR secondaire
                           pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
-                          pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
+                          pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatAccountAmount(pnlEur)}` : null;
                           finalPnlColor = pnlAsset != null && Number.isFinite(pnlAsset) ? (pnlAsset >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         } else {
-                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                          pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAccountAmount(pnlEur) : '-';
                           finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                         }
                         
@@ -1969,12 +1967,12 @@ export function PlatformPortfolio() {
                           // EUR en secondaire (estimation avec taux actuel)
                           if (fxRate != null && fxRate > 0) {
                             const investedEurEstimate = investedAssetNum / fxRate;
-                            investedLabelSub = `≈ ${formatCurrency(investedEurEstimate)}`;
+                            investedLabelSub = `≈ ${formatAccountAmount(investedEurEstimate)}`;
                           }
                         } else {
                           // Position EUR : EUR uniquement
                           investedLabelMain = investedNum != null && Number.isFinite(investedNum)
-                            ? formatCurrency(investedNum)
+                            ? formatAccountAmount(investedNum)
                             : '-';
                         }
                         const entryPriceLabel =
@@ -2095,20 +2093,20 @@ export function PlatformPortfolio() {
                       let pnlLabelSub: string | null = null;
                       let finalPnlColor: string;
                       if (assetCurrency === 'EUR') {
-                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAccountAmount(pnlEur) : '-';
                         finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                       } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
-                        pnlLabelMain = formatCurrency(pnlEur);
+                        pnlLabelMain = formatAccountAmount(pnlEur);
                         pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
                           ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                           : null;
                         finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                       } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
                         pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
-                        pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatCurrency(pnlEur)}` : null;
+                        pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatAccountAmount(pnlEur)}` : null;
                         finalPnlColor = pnlAsset != null && Number.isFinite(pnlAsset) ? (pnlAsset >= 0 ? '#10b981' : '#ef4444') : '#111827';
                       } else {
-                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatCurrency(pnlEur) : '-';
+                        pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAccountAmount(pnlEur) : '-';
                         finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? '#10b981' : '#ef4444') : '#111827';
                       }
                       const investedAssetNum =
@@ -2123,11 +2121,11 @@ export function PlatformPortfolio() {
                         investedLabelMain = formatMoney(investedAssetNum, assetCurrency, { maximumFractionDigits: 2 });
                         if (fxRate != null && fxRate > 0) {
                           const investedEurEstimate = investedAssetNum / fxRate;
-                          investedLabelSub = `≈ ${formatCurrency(investedEurEstimate)}`;
+                          investedLabelSub = `≈ ${formatAccountAmount(investedEurEstimate)}`;
                         }
                       } else {
                         investedLabelMain = investedNum != null && Number.isFinite(investedNum)
-                          ? formatCurrency(investedNum)
+                          ? formatAccountAmount(investedNum)
                           : '-';
                       }
                       const openedLabel = p.opened_at
