@@ -34,6 +34,7 @@ urlpatterns = [
     path('user/profile/', api_views.update_own_profile, name='update-own-profile'),
     # Notifications (CRM user)
     path('notifications/', api_views.notification_list, name='notification-list'),
+    path('notifications/unread-messages-count/', api_views.notification_unread_messages_count, name='notification-unread-messages-count'),
     path('notifications/read-all/', api_views.notification_mark_all_read, name='notification-mark-all-read'),
     path('notifications/<str:notification_id>/read/', api_views.notification_mark_read, name='notification-mark-read'),
     # Client authentication endpoints
@@ -52,6 +53,7 @@ urlpatterns = [
     path('client/notifications/', api_views.client_notification_list, name='client-notification-list'),
     path('client/notifications/read-all/', api_views.client_notification_mark_all_read, name='client-notification-mark-all-read'),
     path('client/notifications/<str:notification_id>/read/', api_views.client_notification_mark_read, name='client-notification-mark-read'),
+    path('client/messages/unread-count/', api_views.client_messages_unread_count, name='client-messages-unread-count'),
     path('client/useful-links/', api_views.client_useful_links_current, name='client-useful-links-current'),
     # Client chat (client <-> manager)
     path('clients/<str:client_id>/chat/', api_views.client_chat, name='client-chat'),
@@ -62,6 +64,7 @@ urlpatterns = [
         api_views.client_conversation_messages,
         name='client-conversation-messages',
     ),
+    path('messages/reformulate/', api_views.message_reformulate, name='message-reformulate'),
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),

@@ -33,7 +33,7 @@ export function ClientMiscTab({
   const [isAddLinkDialogOpen, setIsAddLinkDialogOpen] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
-  const [tradingEnabled, setTradingEnabled] = useState<boolean>(true);
+  const [tradingEnabled, setTradingEnabled] = useState<boolean>(false);
   const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
   const [contractPreviewEnabled, setContractPreviewEnabled] = useState<boolean>(true);
   const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
@@ -54,7 +54,7 @@ export function ClientMiscTab({
     if (client?.tradingEnabled !== undefined) {
       setTradingEnabled(client.tradingEnabled);
     } else {
-      setTradingEnabled(true); // Default to true
+      setTradingEnabled(false); // Default to false
     }
   }, [client]);
 

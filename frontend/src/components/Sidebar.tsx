@@ -1,5 +1,6 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { apiCall } from '../utils/api';
 import { Button } from './ui/button';
 import { 
   HiOutlineViewGrid as LayoutDashboard,
@@ -45,6 +46,25 @@ const validRoles = ['admin', 'teamleader', 'gestionnaire'];
 function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+
+  const fetchUnreadMessagesCount = useCallback(async () => {
+    try {
+      const data = await apiCall(`/api/notifications/unread-messages-count/?_=${Date.now()}`) as { unreadCount?: number };
+      setUnreadMessagesCount(data?.unreadCount ?? 0);
+    } catch {
+      setUnreadMessagesCount(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUnreadMessagesCount();
+  }, [fetchUnreadMessagesCount]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchUnreadMessagesCount, 10000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadMessagesCount]);
 
   // Memoize normalized user role
   const normalizedUserRole = useMemo(() => userRole?.toLowerCase()?.trim() || '', [userRole]);
@@ -133,9 +153,18 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
                 data-active={isActive ? 'true' : 'false'}
                 aria-current={isActive ? 'page' : undefined}
                 type="button"
+                style={{ position: 'relative' }}
               >
                 <Icon className="sidebar-icon" />
                 {item.label}
+                {item.id === 'messagerie' && unreadMessagesCount > 0 && (
+                  <span
+                    className="sidebar-messagerie-badge"
+                    aria-label={`${unreadMessagesCount} message(s) non lu(s)`}
+                  >
+                    {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                  </span>
+                )}
               </Button>
             </div>
           );

@@ -934,8 +934,17 @@ export function PlatformDashboard() {
                 <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '22px' : '28px' }}>
                   {portfolioValue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                 </div>
-                <div style={{ marginTop: 6, fontSize: isMobile ? '12px' : '13px', color: isProfit ? '#10b981' : '#ef4444' }}>
+                <div style={{ marginTop: 8, fontSize: isMobile ? '16px' : '18px', fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
                   {isProfit ? '+' : ''}{profitLoss.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  {(() => {
+                    const costBasis = portfolioValue - profitLoss;
+                    const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+                    return (
+                      <span style={{ marginLeft: 6 }}>
+                        ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {allocationByType.total > 0 && (

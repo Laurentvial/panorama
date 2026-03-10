@@ -39,10 +39,12 @@ export function Header({ user }: HeaderProps) {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
-  const fetchNotifications = useCallback(async (markAllReadOnOpen = false) => {
-    setNotificationsLoading(true);
+  const fetchNotifications = useCallback(async (markAllReadOnOpen = false, options?: { bypassCache?: boolean; silent?: boolean }) => {
+    const { bypassCache = false, silent = false } = options ?? {};
+    const url = bypassCache ? `/api/notifications/?limit=20&_=${Date.now()}` : '/api/notifications/?limit=20';
+    if (!silent) setNotificationsLoading(true);
     try {
-      const data = await apiCall('/api/notifications/?limit=20') as {
+      const data = await apiCall(url) as {
         notifications?: AppNotification[];
         unreadCount?: number;
       };
@@ -61,9 +63,25 @@ export function Header({ user }: HeaderProps) {
       setNotifications([]);
       setUnreadCount(0);
     } finally {
-      setNotificationsLoading(false);
+      if (!silent) setNotificationsLoading(false);
     }
   }, []);
+
+  // Charger les notifications au montage pour afficher le badge (uniquement si utilisateur connecté)
+  useEffect(() => {
+    if (user?.id) {
+      fetchNotifications(false, { bypassCache: true });
+    }
+  }, [user?.id, fetchNotifications]);
+
+  // Polling pour recevoir les nouvelles notifications en temps réel (ex: message client)
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(() => {
+      fetchNotifications(false, { bypassCache: true, silent: true });
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [user?.id, fetchNotifications]);
 
   useEffect(() => {
     if (!notificationsOpen) return;
@@ -89,7 +107,8 @@ export function Header({ user }: HeaderProps) {
     const clientId = n.payload?.client_id as string | undefined;
     if (clientId) {
       setNotificationsOpen(false);
-      navigate(`/admin/clients/${clientId}`);
+      const conversationId = (n.payload?.conversation_id as string | undefined) || 'legacy';
+      navigate(`/admin/messagerie?clientId=${clientId}&conversationId=${conversationId}`);
     }
   };
 

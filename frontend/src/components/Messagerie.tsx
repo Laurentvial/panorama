@@ -3,8 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { Send, RefreshCw, MessageCircle } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { Send, RefreshCw, Sparkles } from 'lucide-react';
+import { apiCall, clearApiCache } from '../utils/api';
+import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
 import '../styles/PageHeader.css';
 
@@ -54,6 +55,7 @@ export function Messagerie() {
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [sending, setSending] = useState(false);
+  const [reformulating, setReformulating] = useState(false);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -142,12 +144,36 @@ export function Messagerie() {
     }
   }
 
+  async function reformulateDraft() {
+    const text = draft.trim();
+    if (!text) return;
+    setReformulating(true);
+    try {
+      const res = await apiCall('/api/messages/reformulate/', {
+        method: 'POST',
+        body: JSON.stringify({ message: text }),
+      });
+      const reformed = res?.text;
+      if (reformed && typeof reformed === 'string') {
+        setDraft(reformed);
+      } else if (res?.error) {
+        console.error('Reformulation error:', res.error);
+        alert(res.error);
+      }
+    } catch (error) {
+      console.error('Error reformulating message:', error);
+      alert('Erreur lors de la reformulation.');
+    } finally {
+      setReformulating(false);
+    }
+  }
+
   async function sendChatMessage() {
     const text = draft.trim();
     if (!selectedRequest || !text) return;
     setSending(true);
     try {
-      await apiCall(
+      const res = await apiCall(
         `/api/clients/${selectedRequest.clientId}/conversations/${selectedRequest.conversationId}/messages/`,
         {
           method: 'POST',
@@ -155,9 +181,16 @@ export function Messagerie() {
         },
       );
       setDraft('');
-      // Always reload after send to avoid response-shape issues (admin/manager/client).
-      await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
-      await loadRequests(); // keep ordering up-to-date
+      // Invalider le cache pour forcer un rechargement frais
+      clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
+      // Ajouter le nouveau message immédiatement (réponse API) ou recharger en secours
+      const newMsg = res?.message as ChatMessage | undefined;
+      if (newMsg) {
+        setChatMessages((prev) => [...prev, newMsg]);
+      } else {
+        await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
+      }
+      await loadRequests(); // met à jour l'ordre dans la liste
     } catch (error) {
       console.error('Error sending chat message:', error);
     } finally {
@@ -286,11 +319,13 @@ export function Messagerie() {
                 {selectedRequest ? `${selectedRequest.clientName} — ${selectedRequest.subject}` : 'Sélectionnez une demande'}
               </div>
 
-              <div ref={listRef} className="p-3 bg-slate-50" style={{ flex: 1, overflowY: 'auto' }}>
+              <div ref={listRef} className="p-3 bg-slate-50" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                 {!selectedRequest ? (
                   <div className="text-sm text-slate-500">Sélectionnez une demande à gauche.</div>
                 ) : loadingChat ? (
-                  <div className="text-sm text-slate-500">Chargement…</div>
+                  <div className="flex-1 flex items-center justify-center min-h-[200px]">
+                    <LoadingIndicator />
+                  </div>
                 ) : chatMessages.length === 0 ? (
                   <div className="text-sm text-slate-500">Aucun message pour le moment.</div>
                 ) : (
@@ -335,6 +370,20 @@ export function Messagerie() {
                   disabled={!selectedRequest || sending}
                   rows={2}
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    reformulateDraft();
+                  }}
+                  disabled={!draft.trim() || reformulating}
+                  title="Reformuler et corriger le message avec l'IA"
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  {reformulating ? 'Reformulation…' : 'Reformuler'}
+                </Button>
                 <Button type="submit" disabled={!selectedRequest || sending || !draft.trim()}>
                   <Send className="w-4 h-4 mr-2" />
                   Envoyer

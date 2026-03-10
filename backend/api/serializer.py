@@ -434,7 +434,7 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['paymentMethods'] = ret.get('payment_methods', []) or []
         
         # Fonctionnalités diverses
-        ret['tradingEnabled'] = bool(ret.get('trading_enabled', True))
+        ret['tradingEnabled'] = bool(ret.get('trading_enabled', False))
         ret['bannerMessage'] = ret.get('banner_message', '') or ''
         ret['contractPreviewEnabled'] = bool(ret.get('contract_preview_enabled', True))
         

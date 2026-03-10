@@ -129,7 +129,7 @@ class Client(models.Model):
     payment_methods = models.JSONField(default=list, blank=True)  # ex: ["virement", "carte_bancaire"]
     
     # Fonctionnalités diverses
-    trading_enabled = models.BooleanField(default=True)  # Activer le trading (afficher le bouton Trader dans les assets)
+    trading_enabled = models.BooleanField(default=False)  # Activer le trading (afficher le bouton Trader dans les assets)
     banner_message = models.TextField(default="", blank=True)  # Message de bannière à afficher sur la plateforme client
     contract_preview_enabled = models.BooleanField(default=True)  # Prévisualisation du contrat
     

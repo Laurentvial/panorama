@@ -329,6 +329,20 @@ If the Clients page returns `GET /api/clients/ 500 (Internal Server Error)`:
 - Coolify uses Traefik with Let's Encrypt. Ensure DNS is correct before enabling HTTPS.
 - If certificates fail, check Traefik logs and DNS propagation.
 
+### ERR_CERT_AUTHORITY_INVALID (Mixed Content / invalid certificate)
+
+If the frontend (HTTPS) calls the backend and you see `net::ERR_CERT_AUTHORITY_INVALID`:
+
+- **Cause**: The backend URL (e.g. `xsok4ksco...sslip.io`) uses a self-signed or invalid certificate. sslip.io domains often don't get valid Let's Encrypt certs.
+- **Fix**: Use a **proper domain** with Let's Encrypt:
+  1. Add DNS: `api.syzonline.com` (or `api.yourdomain.com`) → A record → your server IP (e.g. `93.113.25.122`)
+  2. Backend in Coolify → Domains → **remove** the sslip.io domain, **add** `api.syzonline.com`
+  3. Enable HTTPS (Let's Encrypt) for this domain
+  4. Frontend env: set `VITE_URL=https://api.syzonline.com` (or your API domain)
+  5. Redeploy both backend and frontend
+
+After this, the browser will trust the Let's Encrypt certificate for `api.syzonline.com`.
+
 ## 11. Cost Comparison
 
 | | Render | Coolify on VPS |

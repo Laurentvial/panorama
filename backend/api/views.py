@@ -1043,7 +1043,7 @@ def client_create(request):
         'compliance_family_flags': compliance_family_flags,
         'funds_sources': funds_sources,
         # Miscellaneous features
-        'trading_enabled': bool(request.data.get('tradingEnabled', True)) if not isinstance(request.data.get('tradingEnabled'), str) else request.data.get('tradingEnabled', 'true').lower() == 'true',
+        'trading_enabled': bool(request.data.get('tradingEnabled', False)) if not isinstance(request.data.get('tradingEnabled'), str) else request.data.get('tradingEnabled', 'false').lower() == 'true',
         'banner_message': request.data.get('bannerMessage', '') or '',
     })
     
@@ -2465,10 +2465,11 @@ def client_notification_list(request):
     except (ValueError, TypeError):
         page = 1
         limit = 20
+    # Exclure les notifications de type message (affichées dans la bulle messagerie)
     qs = AppNotification.objects.filter(
         recipient_type=AppNotification.RECIPIENT_CLIENT,
         recipient_client=client,
-    ).order_by('-created_at')
+    ).exclude(notification_type=AppNotification.TYPE_MESSAGE_FROM_MANAGER).order_by('-created_at')
     total = qs.count()
     offset = (page - 1) * limit
     items = qs[offset:offset + limit]
@@ -2504,7 +2505,7 @@ def client_notification_mark_all_read(request):
         recipient_type=AppNotification.RECIPIENT_CLIENT,
         recipient_client=client,
         read=False,
-    ).update(read=True)
+    ).exclude(notification_type=AppNotification.TYPE_MESSAGE_FROM_MANAGER).update(read=True)
     return Response({'ok': True, 'updated': updated})
 
 
@@ -2533,6 +2534,29 @@ def client_notification_mark_read(request, notification_id):
     notification.read = True
     notification.save(update_fields=['read'])
     return Response({'ok': True})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def client_messages_unread_count(request):
+    """Nombre de messages non lus par le client (envoyés par le gestionnaire)."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if not token or not token.startswith('client_'):
+        return Response({'error': 'Token invalide'}, status=status.HTTP_401_UNAUTHORIZED)
+    client_id = token.replace('client_', '')
+    try:
+        client = Client.objects.get(id=client_id)
+    except Client.DoesNotExist:
+        return Response({'error': 'Client non trouvé'}, status=status.HTTP_404_NOT_FOUND)
+    if not client.active:
+        return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    count = ClientChatMessage.objects.filter(
+        client=client,
+        sender='manager',
+        read_by_client=False,
+    ).count()
+    return Response({'unreadCount': count})
 
 
 @api_view(['PATCH'])
@@ -3027,6 +3051,19 @@ def notification_list(request):
             'totalPages': (total + limit - 1) // limit if limit > 0 else 1,
         },
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def notification_unread_messages_count(request):
+    """Count of unread message_from_client notifications for the current CRM user."""
+    count = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CRM_USER,
+        recipient_user=request.user,
+        notification_type=AppNotification.TYPE_MESSAGE_FROM_CLIENT,
+        read=False,
+    ).count()
+    return Response({'unreadCount': count})
 
 
 @api_view(['PATCH'])
@@ -7053,6 +7090,14 @@ def client_conversation_messages(request, client_id, conversation_id):
             qs = ClientChatMessage.objects.filter(client=client, conversation__isnull=True).order_by('created_at')
         else:
             qs = ClientChatMessage.objects.filter(client=client, conversation=conversation).order_by('created_at')
+        # Marquer les messages du gestionnaire comme lus quand le client consulte la conversation
+        if is_client_token:
+            ClientChatMessage.objects.filter(
+                client=client,
+                sender='manager',
+                read_by_client=False,
+                conversation=None if is_legacy else conversation,
+            ).update(read_by_client=True)
         serializer = ClientChatMessageSerializer(qs, many=True)
         
         # Get manager status, availability schedule, and phone from UserDetails
@@ -11200,6 +11245,61 @@ Description:"""
             {'error': f'Error generating description: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def message_reformulate(request):
+    """Reformuler et corriger un message avant envoi avec l'IA Gemini"""
+    try:
+        from google import genai
+
+        if not settings.GEMINI_API_KEY:
+            return Response(
+                {'error': 'GEMINI_API_KEY not configured'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        message = (request.data.get('message') or '').strip()
+        if not message:
+            return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        prompt = f"""Tu es un assistant qui aide à reformuler et corriger des messages professionnels en français.
+
+Le message suivant doit être reformulé et corrigé (orthographe, grammaire, ponctuation, clarté).
+Conserve le sens et le ton du message. Garde un style professionnel et courtois adapté à une messagerie client/gestionnaire.
+
+Message à reformuler:
+---
+{message}
+---
+
+Réponds UNIQUEMENT avec le texte reformulé, sans introduction ni commentaire. Pas de guillemets autour du résultat."""
+
+        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        text = (response.text or '').strip()
+
+        # Nettoyer les guillemets éventuels autour du résultat
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        if text.startswith("'") and text.endswith("'"):
+            text = text[1:-1]
+
+        return Response({'text': text})
+
+    except ImportError:
+        return Response(
+            {'error': 'google-genai package not installed. Run: pip install google-genai'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Erreur lors de la reformulation: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

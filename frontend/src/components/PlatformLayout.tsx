@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp, Bell, LinkIcon } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -187,9 +187,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     };
   }, [currentUser?.id]);
 
-  const fetchClientNotifications = React.useCallback(async (markAllReadOnOpen = false) => {
+  const fetchClientNotifications = React.useCallback(async (markAllReadOnOpen = false, options?: { bypassCache?: boolean; silent?: boolean }) => {
     if (!currentUser?.id) return;
-    setClientNotificationsLoading(true);
+    const { bypassCache = false, silent = false } = options ?? {};
+    if (bypassCache) {
+      clearApiCache('/api/client/notifications');
+    }
+    if (!silent) setClientNotificationsLoading(true);
     try {
       const data = await apiCall('/api/client/notifications/?limit=20') as {
         notifications?: typeof clientNotifications;
@@ -210,9 +214,25 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
       setClientNotifications([]);
       setClientUnreadCount(0);
     } finally {
-      setClientNotificationsLoading(false);
+      if (!silent) setClientNotificationsLoading(false);
     }
   }, [currentUser?.id]);
+
+  // Charger les notifications au montage pour afficher le badge
+  React.useEffect(() => {
+    if (currentUser?.userType === 'client' && currentUser?.id) {
+      fetchClientNotifications(false, { bypassCache: true });
+    }
+  }, [currentUser?.userType, currentUser?.id, fetchClientNotifications]);
+
+  // Polling pour recevoir les nouvelles notifications en temps réel (ex: message du gestionnaire)
+  React.useEffect(() => {
+    if (currentUser?.userType !== 'client' || !currentUser?.id) return;
+    const interval = setInterval(() => {
+      fetchClientNotifications(false, { bypassCache: true, silent: true });
+    }, 30000); // toutes les 30 secondes
+    return () => clearInterval(interval);
+  }, [currentUser?.userType, currentUser?.id, fetchClientNotifications]);
 
   React.useEffect(() => {
     if (!clientNotificationsOpen) return;
@@ -532,7 +552,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   position: 'relative',
                   width: 40,
                   height: 40,
-                  borderRadius: 12,
+                  borderRadius: 9999,
                   border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
                   background: 'transparent',
                   color: 'var(--accent-foreground)',
@@ -879,8 +899,9 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     marginRight: isMobile ? 20 : 20,
                   }}
                 >
-                  <button
-                    onClick={() => handleFundsAction('depot')}
+                  <Link
+                    to="/platform/funds?movement=depot"
+                    onClick={() => showBottomNav && setSidebarOpen(false)}
                     className="platform-hoverable platform-action-btn"
                     style={{
                       flex: isMobile ? 'none' : 1,
@@ -900,13 +921,15 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       fontWeight: 500,
                       borderRadius: 9999,
                       whiteSpace: 'nowrap',
+                      textDecoration: 'none',
                     }}
                   >
                     <ArrowDown size={isMobile ? 18 : 20} />
                     Déposer des fonds
-                  </button>
-                  <button
-                    onClick={() => handleFundsAction('retrait')}
+                  </Link>
+                  <Link
+                    to="/platform/funds?movement=retrait"
+                    onClick={() => showBottomNav && setSidebarOpen(false)}
                     className="platform-hoverable platform-action-icon"
                     style={{
                       width: isMobile ? '100%' : 55,
@@ -925,12 +948,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                       fontWeight: 500,
                       borderRadius: 9999,
                       whiteSpace: 'nowrap',
+                      textDecoration: 'none',
                     }}
                     aria-label="Retrait"
                   >
                     <ArrowUp size={isMobile ? 18 : 20} />
                     {isMobile && <span>Retirer des fonds</span>}
-                  </button>
+                  </Link>
 
                   <button
                     onClick={async () => {

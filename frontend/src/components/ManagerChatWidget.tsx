@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Send, X } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { ArrowLeft, ChevronLeft, Send, X } from 'lucide-react';
+import { apiCall, clearApiCache } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
+import { useIsPhone } from './ui/use-mobile';
 import { Button } from './ui/button';
+import LoadingIndicator from './LoadingIndicator';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 
@@ -31,6 +33,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
   const managerNameFallback = currentUser?.managerName || 'Votre conseiller';
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'select' | 'thread'>('select');
@@ -45,8 +48,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
   const [managerPhoto, setManagerPhoto] = useState<string>('');
   const [managerStatus, setManagerStatus] = useState<'online' | 'away' | 'offline'>('offline');
   const [managerPhone, setManagerPhone] = useState<string>('');
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  const isPhone = useIsPhone();
   const bottomCss = useMemo(() => {
     // Keep above bottom nav and cookie banner.
     return `calc(${bottomOffsetPx}px + var(--cookie-banner-height, 0px) + 16px)`;
@@ -83,9 +88,20 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
     }
   }
 
+  async function fetchUnreadCount() {
+    if (!clientId || currentUser?.userType !== 'client') return;
+    clearApiCache('/api/client/messages');
+    try {
+      const data = await apiCall('/api/client/messages/unread-count/') as { unreadCount?: number };
+      setUnreadMessagesCount(data?.unreadCount ?? 0);
+    } catch {
+      setUnreadMessagesCount(0);
+    }
+  }
+
   async function loadMessages(conversationId: string) {
     if (!clientId || !conversationId) return;
-    setLoading(true);
+    setLoadingMessages(true);
     try {
       const data = await apiCall(`/api/clients/${clientId}/conversations/${conversationId}/messages/`);
       setMessages((data?.messages || []) as ChatMessage[]);
@@ -103,10 +119,12 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
       }
       const phone = data?.manager?.phone;
       if (typeof phone === 'string') setManagerPhone(phone);
+      // Rafraîchir le badge après consultation (le backend a marqué les messages comme lus)
+      fetchUnreadCount();
     } catch (e) {
       console.error('Error loading conversation messages:', e);
     } finally {
-      setLoading(false);
+      setLoadingMessages(false);
     }
   }
 
@@ -115,6 +133,22 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
     loadConversations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, clientId, view, selectedConversationId]);
+
+  // Charger le nombre de messages non lus au montage
+  useEffect(() => {
+    if (clientId && currentUser?.userType === 'client') {
+      fetchUnreadCount();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, currentUser?.userType]);
+
+  // Polling pour le badge de nouveaux messages
+  useEffect(() => {
+    if (!clientId || currentUser?.userType !== 'client') return;
+    const interval = setInterval(() => fetchUnreadCount(), 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, currentUser?.userType]);
 
   // Preload manager photo/name/phone for the floating chat bubble.
   useEffect(() => {
@@ -167,6 +201,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
         if (firstMsg) {
           setMessages([firstMsg]);
         } else {
+          setLoadingMessages(true);
+          setMessages([]);
           await loadMessages(createdConv.id);
         }
       }
@@ -207,6 +243,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
   const goBackToSelect = async () => {
     setView('select');
     setMessages([]);
+    setLoadingMessages(false);
     setDraft('');
     setNewSubject('');
     setNewMessage('');
@@ -214,69 +251,163 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
     await loadConversations();
   };
 
+  const openChat = () => {
+    setView('select');
+    setMessages([]);
+    setLoadingMessages(false);
+    setDraft('');
+    setNewSubject('');
+    setNewMessage('');
+    setShowNewRequestForm(false);
+    setOpen(true);
+  };
+
   return (
-    <div style={{ position: 'fixed', right: 16, bottom: bottomCss, zIndex: 350 }}>
+    <div
+      style={{
+        position: 'fixed',
+        right: isPhone && !open ? 0 : isPhone ? 8 : 16,
+        bottom: open ? bottomCss : isPhone ? undefined : bottomCss,
+        top: !open && isPhone ? '50%' : undefined,
+        transform: !open && isPhone ? 'translateY(-50%)' : undefined,
+        zIndex: 600,
+      }}
+    >
       {!open ? (
-        <button
-          type="button"
-          onClick={() => {
-            setView('select');
-            setMessages([]);
-            setDraft('');
-            setNewSubject('');
-            setNewMessage('');
-            setShowNewRequestForm(false);
-            setOpen(true);
-          }}
-          aria-label="Ouvrir le chat"
-          style={{
-            width: managerPhoto ? 80 : 'auto',
-            height: managerPhoto ? 80 : 'auto',
-            minWidth: managerPhoto ? undefined : 140,
-            padding: managerPhoto ? 0 : '12px 16px',
-            borderRadius: managerPhoto ? 9999 : 16,
-            border: '1px solid rgba(2, 6, 23, 0.12)',
-            background: 'white',
-            boxShadow: '0 10px 24px rgba(2, 6, 23, 0.12)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            overflow: 'hidden',
-          }}
-        >
-          {managerPhoto ? (
-            <img
-              src={managerPhoto}
-              alt={managerName}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onError={() => setManagerPhoto('')}
-            />
-          ) : (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 2,
-                textAlign: 'center',
-              }}
-            >
-              <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 500 }}>
-                Votre conseiller
+        isPhone ? (
+          /* Languette sur téléphone : visible sur le bord, clic pour ouvrir */
+          <button
+            type="button"
+            onClick={openChat}
+            aria-label="Ouvrir la messagerie"
+            title="Messagerie"
+            style={{
+              width: unreadMessagesCount > 0 ? 56 : 44,
+              padding: '16px 10px',
+              borderRadius: '14px 0 0 14px',
+              border: '1px solid rgba(2, 6, 23, 0.12)',
+              borderRight: 'none',
+              background: 'white',
+              boxShadow: '-4px 0 12px rgba(2, 6, 23, 0.08)',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 2,
+              cursor: 'pointer',
+              overflow: 'visible',
+            }}
+          >
+            <ChevronLeft size={24} color="#374151" style={{ flexShrink: 0 }} />
+            {unreadMessagesCount > 0 && (
+              <span
+                aria-label={`${unreadMessagesCount} nouveau(x) message(s)`}
+                style={{
+                  flexShrink: 0,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9999,
+                  background: '#dc2626',
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 4px',
+                }}
+              >
+                {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+              </span>
+            )}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={openChat}
+            aria-label="Ouvrir le chat"
+            style={{
+              position: 'relative',
+              width: managerPhoto ? 80 : 'auto',
+              height: managerPhoto ? 80 : 'auto',
+              minWidth: managerPhoto ? undefined : 140,
+              padding: managerPhoto ? 0 : '12px 16px',
+              borderRadius: managerPhoto ? 9999 : 16,
+              border: '1px solid rgba(2, 6, 23, 0.12)',
+              background: 'white',
+              boxShadow: '0 10px 24px rgba(2, 6, 23, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              overflow: 'visible',
+            }}
+          >
+            {unreadMessagesCount > 0 && (
+              <span
+                aria-label={`${unreadMessagesCount} nouveau(x) message(s)`}
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  minWidth: 20,
+                  height: 20,
+                  borderRadius: 9999,
+                  background: '#dc2626',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 5px',
+                }}
+              >
+                {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+              </span>
+            )}
+            {managerPhoto ? (
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: '50%',
+                  overflow: 'hidden',
+                }}
+              >
+                <img
+                  src={managerPhoto}
+                  alt={managerName}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={() => setManagerPhoto('')}
+                />
               </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
-                {managerName}
-              </div>
-              {managerPhone && (
-                <div style={{ fontSize: 12, color: '#2563eb', fontWeight: 500 }}>
-                  {managerPhone}
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 2,
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 500 }}>
+                  Votre conseiller
                 </div>
-              )}
-            </div>
-          )}
-        </button>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
+                  {managerName}
+                </div>
+                {managerPhone && (
+                  <div style={{ fontSize: 12, color: '#2563eb', fontWeight: 500 }}>
+                    {managerPhone}
+                  </div>
+                )}
+              </div>
+            )}
+          </button>
+        )
       ) : (
         <div
           style={{
@@ -327,28 +458,26 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                   <ArrowLeft size={18} />
                 </button>
               )}
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 9999,
-                  background: '#f3f4f6',
-                  border: '1px solid rgba(2, 6, 23, 0.10)',
-                  overflow: 'hidden',
-                  flexShrink: 0,
-                }}
-              >
-                {managerPhoto ? (
+              {managerPhoto && (
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 9999,
+                    background: '#f3f4f6',
+                    border: '1px solid rgba(2, 6, 23, 0.10)',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                  }}
+                >
                   <img
                     src={managerPhoto}
                     alt={managerName}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
+                    onError={() => setManagerPhoto('')}
                   />
-                ) : null}
-              </div>
+                </div>
+              )}
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -404,6 +533,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                 setOpen(false);
                 setView('select');
                 setMessages([]);
+                setLoadingMessages(false);
                 setDraft('');
                 setNewSubject('');
                 setNewMessage('');
@@ -520,6 +650,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                           onClick={async () => {
                             setSelectedConversationId(c.id);
                             setView('thread');
+                            setLoadingMessages(true);
+                            setMessages([]);
                             await loadMessages(c.id);
                           }}
                           style={{
@@ -561,8 +693,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0 }: ManagerChatWidgetProps
                   background: 'rgba(2, 6, 23, 0.02)',
                 }}
               >
-                {loading ? (
-                  <div style={{ fontSize: 13, color: '#6b7280' }}>Chargement…</div>
+                {loadingMessages ? (
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 120 }}>
+                    <LoadingIndicator />
+                  </div>
                 ) : messages.length === 0 ? (
                   <div style={{ fontSize: 13, color: '#6b7280' }}>
                     Aucun message pour le moment.
