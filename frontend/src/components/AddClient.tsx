@@ -80,6 +80,7 @@ export function AddClient() {
     taxOptimization: false,
     taxOptimizationComment: '',
     annualHouseholdIncome: 0,
+    accountCurrency: 'EUR',
   });
 
   function generateEasyPassword() {
@@ -240,6 +241,7 @@ export function AddClient() {
         formDataToSend.append('taxOptimization', formData.taxOptimization.toString());
         formDataToSend.append('taxOptimizationComment', formData.taxOptimizationComment || '');
         formDataToSend.append('annualHouseholdIncome', formData.annualHouseholdIncome.toString());
+        formDataToSend.append('accountCurrency', formData.accountCurrency || 'EUR');
 
         const response = await apiCall('/api/clients/create/', {
           method: 'POST',
@@ -289,6 +291,7 @@ export function AddClient() {
           taxOptimization: formData.taxOptimization || false,
           taxOptimizationComment: formData.taxOptimizationComment || '',
           annualHouseholdIncome: formData.annualHouseholdIncome || 0,
+          accountCurrency: formData.accountCurrency || 'EUR',
         };
 
         // Utilise apiCall (fetch-based) et non axios
@@ -446,6 +449,23 @@ export function AddClient() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="accountCurrency">Devise du compte</Label>
+                <Select
+                  value={formData.accountCurrency}
+                  onValueChange={(value) => setFormData({ ...formData, accountCurrency: value })}
+                >
+                  <SelectTrigger id="accountCurrency">
+                    <SelectValue placeholder="EUR" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EUR">Euro (€)</SelectItem>
+                    <SelectItem value="USD">Dollar US ($)</SelectItem>
+                    <SelectItem value="CHF">Franc suisse (CHF)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Les dépôts en EUR seront convertis automatiquement</p>
+              </div>
             </div>
 
 

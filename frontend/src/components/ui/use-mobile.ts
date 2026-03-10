@@ -4,6 +4,8 @@ import * as React from "react";
 const MOBILE_BREAKPOINT = 1000;
 // Phone breakpoint for extra compact layouts (<= 640px).
 const PHONE_BREAKPOINT = 640;
+// Use stacked layout for article/news cards when viewport is narrow (<= 1200px).
+export const CARD_STACK_BREAKPOINT = 1200;
 
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(
@@ -39,4 +41,23 @@ export function useIsPhone() {
   }, []);
 
   return !!isPhone;
+}
+
+/** Use stacked (column) layout for article/news cards when viewport <= 1200px. */
+export function useIsNarrowForCards() {
+  const [isNarrow, setIsNarrow] = React.useState<boolean>(
+    typeof window !== "undefined" && window.innerWidth <= CARD_STACK_BREAKPOINT,
+  );
+
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${CARD_STACK_BREAKPOINT}px)`);
+    const onChange = () => {
+      setIsNarrow(window.innerWidth <= CARD_STACK_BREAKPOINT);
+    };
+    mql.addEventListener("change", onChange);
+    setIsNarrow(window.innerWidth <= CARD_STACK_BREAKPOINT);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  return isNarrow;
 }

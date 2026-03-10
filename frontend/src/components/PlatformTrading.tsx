@@ -184,13 +184,26 @@ export function PlatformTrading() {
     let investedCapital = 0;
     let tradingPortfolio = 0;
     let bonus = 0;
+    let effectiveCurrency: string | null = null;
 
     const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
-    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
+    const completedTransactions = (transactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status))
+      .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
 
     completedTransactions.forEach((transaction: any) => {
       const amountNum = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
       const amt = Number.isFinite(amountNum) ? amountNum : 0;
+      const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR').toString().trim().toUpperCase();
+
+      if (transaction.type === 'conversion') {
+        investedCapital = amt;
+        tradingPortfolio = 0;
+        effectiveCurrency = txnCcy;
+        return;
+      }
+      if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+      if (txnCcy !== effectiveCurrency) return;
 
       switch (transaction.type) {
         case 'depot':
@@ -204,7 +217,6 @@ export function PlatformTrading() {
           investedCapital += amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash solde (same as PlatformPortfolio)
           investedCapital += amt;
           break;
         case 'achat':

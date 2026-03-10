@@ -178,8 +178,18 @@ class ClientSerializer(serializers.ModelSerializer):
             )
         
         calculated_invested_capital = 0
-        for txn in transactions:
+        effective_currency = None
+        for txn in transactions.order_by('datetime'):
             amount = float(txn.amount) if txn.amount else 0
+            txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
+            if txn.type == 'conversion':
+                calculated_invested_capital = amount
+                effective_currency = txn_ccy
+                continue
+            if effective_currency is None:
+                effective_currency = txn_ccy
+            if txn_ccy != effective_currency:
+                continue
             if txn.type == 'depot':
                 calculated_invested_capital += amount
             elif txn.type == 'retrait':
@@ -187,7 +197,6 @@ class ClientSerializer(serializers.ModelSerializer):
             elif txn.type == 'bonus':
                 calculated_invested_capital += amount
             elif txn.type == 'interets':
-                # Interest transactions credit gains to cash solde
                 calculated_invested_capital += amount
         
         # Use calculated value if transactions exist, otherwise fallback to stored value
@@ -222,8 +231,18 @@ class ClientSerializer(serializers.ModelSerializer):
             )
         
         calculated_invested_capital = 0
-        for txn in transactions:
+        effective_currency = None
+        for txn in transactions.order_by('datetime'):
             amount = float(txn.amount) if txn.amount else 0
+            txn_ccy = (getattr(txn, 'amount_currency', None) or 'EUR').strip().upper()
+            if txn.type == 'conversion':
+                calculated_invested_capital = amount
+                effective_currency = txn_ccy
+                continue
+            if effective_currency is None:
+                effective_currency = txn_ccy
+            if txn_ccy != effective_currency:
+                continue
             if txn.type == 'depot':
                 calculated_invested_capital += amount
             elif txn.type == 'retrait':
@@ -231,7 +250,6 @@ class ClientSerializer(serializers.ModelSerializer):
             elif txn.type == 'bonus':
                 calculated_invested_capital += amount
             elif txn.type == 'interets':
-                # Interest transactions credit gains to cash solde
                 calculated_invested_capital += amount
         
         # Use calculated value if transactions exist, otherwise fallback to stored value
@@ -239,6 +257,7 @@ class ClientSerializer(serializers.ModelSerializer):
             ret['capital'] = calculated_invested_capital
         else:
             ret['capital'] = float(instance.invested_capital) if instance.invested_capital else 0
+        ret['accountCurrency'] = (instance.account_currency or 'EUR').strip().upper()
         ret['source'] = instance.source or ''
         ret['teamId'] = instance.team.id if instance.team else None
         ret['teamName'] = instance.team.name if instance.team else ''
@@ -954,7 +973,7 @@ class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = [
-            'id', 'clientId', 'type', 'amount', 'description', 'status', 'datetime', 
+            'id', 'clientId', 'type', 'amount', 'amount_currency', 'description', 'status', 'datetime', 
             'createdAt', 'updatedAt', 'productId', 'assetId', 'assetType', 'from_field', 'to_field',
             'fx_rate_eur_to_asset', 'amount_in_asset_currency',
             'subscription_details', 'subscription_first_name', 'subscription_last_name',
@@ -984,6 +1003,7 @@ class TransactionSerializer(serializers.ModelSerializer):
             ret['datetime'] = local_dt.strftime('%Y-%m-%dT%H:%M:%S')
         ret['from'] = instance.transfer_from
         ret['to'] = instance.transfer_to
+        ret['amountCurrency'] = (getattr(instance, 'amount_currency', None) or 'EUR').strip().upper()
         if instance.product:
             ret['productId'] = instance.product.id
             ret['productName'] = instance.product.name

@@ -69,11 +69,22 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
 
     const dateMap = new Map<string, number>();
 
+    let effectiveCurrency: string | null = null;
+
     sortedTransactions.forEach((transaction: any) => {
       const amountNum = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
       const amount = Number.isFinite(amountNum) ? amountNum : 0;
+      const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR').toString().trim().toUpperCase();
 
-      // Update running totals based on transaction type
+      if (transaction.type === 'conversion') {
+        runningInvestedCapital = amount;
+        runningTradingPortfolio = 0;
+        effectiveCurrency = txnCcy;
+        return;
+      }
+      if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+      if (txnCcy !== effectiveCurrency) return;
+
       switch (transaction.type) {
         case 'depot':
           runningInvestedCapital += amount;
@@ -92,11 +103,7 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           runningTradingPortfolio -= amount;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash solde
-          // They increase investedCapital (available funds) because they add money to the cash solde
           runningInvestedCapital += amount;
-          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           runningProfitLoss -= amount;
           break;
         case 'frais':

@@ -23,6 +23,7 @@ import '../styles/Modal.css';
 interface ClientTransactionsTabProps {
   onRefresh: () => void;
   clientId: string;
+  client?: any;
 }
 
 // Transaction types with their allowed statuses
@@ -62,6 +63,10 @@ const TRANSACTION_TYPES = {
   perte: {
     label: 'Perte',
     statuses: ['valide', 'annule']
+  },
+  conversion: {
+    label: 'Conversion',
+    statuses: ['valide', 'annule']
   }
 };
 
@@ -74,7 +79,7 @@ const STATUS_LABELS: { [key: string]: string } = {
   annule: 'Annulé'
 };
 
-export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransactionsTabProps) {
+export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTransactionsTabProps) {
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [contractDocumentsByTransaction, setContractDocumentsByTransaction] = useState<Record<string, any[]>>({});
@@ -333,6 +338,8 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
     to_field: 'solde',
     productId: '',
     interestPeriod: '',
+    // conversion fields
+    to_currency: '',
     // kept for backward compatibility with existing UI resets
     visibleByClient: true
   });
@@ -476,8 +483,15 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       return;
     }
 
-    if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
+    const isConversion = transactionForm.type === 'conversion';
+    if (!isConversion && (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0)) {
       toast.error('Le montant doit être supérieur à 0');
+      setIsCreatingTransaction(false);
+      return;
+    }
+
+    if (isConversion && !transactionForm.to_currency) {
+      toast.error('Veuillez sélectionner la devise cible');
       setIsCreatingTransaction(false);
       return;
     }
@@ -556,20 +570,19 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
       // This prevents transactions from being stuck in "en_cours" status
       const transactionStatus = shouldShowModal ? 'en_cours' : transactionForm.status;
       
-      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
-        method: 'POST',
-        body: JSON.stringify({
-          type: transactionForm.type,
-          amount: parseFloat(transactionForm.amount),
-          description: transactionForm.description,
-          status: transactionStatus, // Use temporary status only if modal will be shown
-          datetime: datetimeISO,
-          skip_position_generation: shouldShowModal, // Skip auto-generation only if showing modal
-          ...(transactionForm.type === 'transfert'
+      const payload: Record<string, any> = {
+        type: transactionForm.type,
+        amount: isConversion ? 0 : parseFloat(transactionForm.amount),
+        description: transactionForm.description,
+        status: isConversion ? 'valide' : transactionStatus,
+        datetime: datetimeISO,
+        skip_position_generation: shouldShowModal,
+        ...(isConversion
+          ? { to_currency: transactionForm.to_currency }
+          : transactionForm.type === 'transfert'
             ? {
                 from_field: transactionForm.from_field || 'solde',
                 to_field: transactionForm.to_field || undefined,
-                // help backend reliably resolve product
                 subscription_details: transactionForm.productId
                   ? {
                       productId: transactionForm.productId,
@@ -578,7 +591,11 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   : undefined,
               }
             : {}),
-        })
+      };
+
+      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
       });
       
       // If we should show the modal, open it instead of closing the dialog
@@ -844,6 +861,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             to_field: 'solde',
             productId: '',
             interestPeriod: '',
+            to_currency: '',
             visibleByClient: true
           });
         }}>
@@ -984,6 +1002,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
             to_field: 'solde',
             productId: '',
             interestPeriod: '',
+            to_currency: '',
             visibleByClient: true
           });
         }}>
@@ -1008,6 +1027,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     to_field: 'solde',
                     productId: '',
                     interestPeriod: '',
+                    to_currency: '',
                     visibleByClient: true
                   });
                 }}
@@ -1129,6 +1149,32 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                 </>
               )}
 
+              {transactionForm.type === 'conversion' && (
+                <div className="modal-form-field col-span-2">
+                  <Label>Devise cible</Label>
+                  <Select
+                    value={transactionForm.to_currency}
+                    onValueChange={(value) => setTransactionForm({ ...transactionForm, to_currency: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sélectionner la devise" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[1050]" style={{ zIndex: 1050 }}>
+                      {['EUR', 'USD', 'CHF']
+                        .filter((ccy) => ccy !== (client?.accountCurrency || client?.account_currency || 'EUR'))
+                        .map((ccy) => (
+                          <SelectItem key={ccy} value={ccy}>
+                            {ccy === 'EUR' ? 'Euro (€)' : ccy === 'USD' ? 'Dollar US ($)' : 'Franc suisse (CHF)'}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Conversion du solde entier ({client?.accountCurrency || client?.account_currency || 'EUR'}) vers la devise cible. Aucun fonds investi dans des produits.
+                  </p>
+                </div>
+              )}
+
               <div className="modal-form-field">
                 <Label>Date et heure</Label>
                 <Input
@@ -1138,17 +1184,19 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                   required
                 />
               </div>
-              <div className="modal-form-field">
-                <Label>Montant (€)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={transactionForm.amount}
-                  onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-                  required
-                />
-              </div>
+              {transactionForm.type !== 'conversion' && (
+                <div className="modal-form-field">
+                  <Label>Montant (€)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={transactionForm.amount}
+                    onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
               <div className="modal-form-field col-span-2">
                 <Label>Description</Label>
                 <Textarea
@@ -1191,7 +1239,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
               </div>
               </div>
               <div className="modal-form-actions mt-4">
-                <Button type="button" variant="outline" disabled={isCreatingTransaction} onClick={() => {
+                <Button type="button" variant="outline" disabled={isCreatingTransaction}                 onClick={() => {
                   setIsTransactionDialogOpen(false);
                   setIsCreatingTransaction(false);
                   setTransactionForm({
@@ -1204,6 +1252,7 @@ export function ClientTransactionsTab({ onRefresh, clientId }: ClientTransaction
                     to_field: 'solde',
                     productId: '',
                     interestPeriod: '',
+                    to_currency: '',
                     visibleByClient: true
                   });
                 }}>

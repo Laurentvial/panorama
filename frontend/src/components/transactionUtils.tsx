@@ -43,6 +43,7 @@ export const getTypeLabel = (type: string): string => {
     'frais': 'Frais',
     'transfert': 'Transfert',
     'perte': 'Perte',
+    'conversion': 'Conversion',
   };
   return typeMap[type] || type;
 };
@@ -91,6 +92,7 @@ export const getTypeColors = (type: string): { bg: string; text: string } => {
     'frais': { bg: '#fee2e2', text: '#991b1b' }, // red
     'transfert': { bg: '#fce7f3', text: '#9f1239' }, // pink
     'perte': { bg: '#fee2e2', text: '#991b1b' }, // red
+    'conversion': { bg: '#e0e7ff', text: '#3730a3' }, // indigo
   };
   return colorMap[type] || { bg: '#f1f5f9', text: '#475569' }; // default gray
 };
@@ -166,6 +168,10 @@ export const TRANSACTION_TYPES = {
   },
   perte: {
     label: 'Perte',
+    statuses: ['valide', 'annule']
+  },
+  conversion: {
+    label: 'Conversion',
     statuses: ['valide', 'annule']
   }
 };

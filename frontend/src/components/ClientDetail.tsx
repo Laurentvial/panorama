@@ -351,6 +351,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           <ClientTransactionsTab 
             onRefresh={loadClientData}
             clientId={clientId}
+            client={client}
           />
         </TabsContent>
 

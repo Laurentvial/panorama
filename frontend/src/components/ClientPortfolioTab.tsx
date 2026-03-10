@@ -95,53 +95,50 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     let calculatedProfitLoss = 0;
     let calculatedTotalInvesti = 0; // achat + transfert (solde → product) - transfert (product → solde) when status is 'valide'
 
-    // Only consider completed transactions (status === 'valide')
-    const completedTransactions = transactions.filter((transaction: any) => 
-      transaction.status === 'valide'
-    );
+    const completedTransactions = transactions
+      .filter((t: any) => t.status === 'valide')
+      .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+
+    let effectiveCurrency: string | null = null;
 
     completedTransactions.forEach((transaction: any) => {
       const amount = parseFloat(transaction.amount) || 0;
-      
+      const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR').toString().trim().toUpperCase();
+
+      if (transaction.type === 'conversion') {
+        calculatedInvestedCapital = amount;
+        calculatedTradingPortfolio = 0;
+        calculatedTotalInvesti = 0;
+        effectiveCurrency = txnCcy;
+        return;
+      }
+      if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+      if (txnCcy !== effectiveCurrency) return;
+
       switch (transaction.type) {
         case 'depot':
-          // Deposits increase invested capital
           calculatedInvestedCapital += amount;
           break;
         case 'retrait':
-          // Withdrawals decrease invested capital
           calculatedInvestedCapital -= amount;
           break;
         case 'bonus':
-          // Bonus increases bonus and invested capital
           calculatedBonus += amount;
           calculatedInvestedCapital += amount;
           break;
         case 'achat':
-          // Purchases increase trading portfolio (money invested in assets)
           calculatedTradingPortfolio += amount;
-          // Don't affect profit/loss - investments start at 0 profit/loss
-          // Profit/loss will only change when position values change (future feature)
-          // Count as investment for "Total Investi"
           calculatedTotalInvesti += amount;
           break;
         case 'vente':
-          // Sales decrease trading portfolio (money withdrawn from assets)
           calculatedTradingPortfolio -= amount;
-          // Note: Sales profit/loss will be calculated based on position values when that feature is implemented
-          // For now, we don't adjust profit/loss for sales since we don't track cost basis
           break;
         case 'interets':
-          // Interest transactions credit gains to cash solde
-          // They increase investedCapital (available funds) because they add money to the cash solde
           calculatedInvestedCapital += amount;
-          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           calculatedProfitLoss -= amount;
           break;
         case 'frais':
         case 'perte':
-          // Fees and losses reduce profit
           calculatedProfitLoss -= amount;
           break;
         case 'transfert':

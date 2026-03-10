@@ -1013,8 +1013,14 @@ def client_create(request):
     else:
         client_data['managed_by'] = ''
     
+    # Validate account_currency
+    account_currency_raw = (request.data.get('accountCurrency') or 'EUR').strip().upper()
+    if account_currency_raw not in ('EUR', 'USD', 'CHF'):
+        account_currency_raw = 'EUR'
+    
     client_data.update({
         # Fiche patrimoniale
+        'account_currency': account_currency_raw,
         'professional_activity_status': request.data.get('professionalActivityStatus') or '',
         'professional_activity_comment': request.data.get('professionalActivityComment') or '',
         'professions': professions,
@@ -1231,6 +1237,10 @@ def client_detail(request, client_id):
             if not isinstance(prefs, list):
                 prefs = []
             client.preferences = prefs
+        if 'accountCurrency' in request.data:
+            ac = (request.data.get('accountCurrency') or 'EUR').strip().upper()
+            if ac in ('EUR', 'USD', 'CHF'):
+                client.account_currency = ac
         if 'tradingObjective' in request.data:
             client.trading_objective = request.data.get('tradingObjective', '') or ''
         if 'plannedInvestment12m' in request.data:
@@ -4546,6 +4556,39 @@ def alpha_vantage_quote(request, symbol):
     except Exception as e:
         return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+def _get_fx_rate(from_currency: str, to_currency: str) -> float | None:
+    """Get FX rate from_currency -> to_currency. Returns None on failure."""
+    from_ccy = (from_currency or '').strip().upper()
+    to_ccy = (to_currency or '').strip().upper()
+    if not from_ccy or not to_ccy:
+        return None
+    if from_ccy == to_ccy:
+        return 1.0
+    av_service = get_alpha_vantage_service()
+    if av_service:
+        try:
+            quote = av_service.get_forex_quote(from_currency=from_ccy, to_currency=to_ccy)
+            if quote and quote.get('exchange_rate'):
+                return float(quote['exchange_rate'])
+        except Exception:
+            pass
+    try:
+        import requests
+        r = requests.get(
+            "https://api.frankfurter.app/latest",
+            params={"from": from_ccy, "to": to_ccy},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            payload = r.json() or {}
+            rate = (payload.get("rates") or {}).get(to_ccy)
+            if rate is not None:
+                return float(rate)
+    except Exception:
+        pass
+    return None
+
+
 @api_view(['GET'])
 @authentication_classes([])  # public endpoint (rate doesn't require auth)
 @permission_classes([AllowAny])
@@ -7357,7 +7400,7 @@ def client_transaction_create(request, client_id):
     # Validate required fields
     if not request.data.get('type'):
         return Response({'error': 'Le type de transaction est requis'}, status=status.HTTP_400_BAD_REQUEST)
-    if not request.data.get('amount'):
+    if request.data.get('type') != 'conversion' and not request.data.get('amount'):
         return Response({'error': 'Le montant est requis'}, status=status.HTTP_400_BAD_REQUEST)
     if not request.data.get('datetime'):
         return Response({'error': 'La date et heure sont requises'}, status=status.HTTP_400_BAD_REQUEST)
@@ -7411,6 +7454,98 @@ def client_transaction_create(request, client_id):
     transfer_from = request.data.get('from_field') or request.data.get('transfer_from')
     transfer_to = request.data.get('to_field') or request.data.get('transfer_to')
     transaction_amount = float(request.data.get('amount', 0))
+    
+    # --- Conversion transaction: handle before main flow ---
+    if transaction_type == 'conversion':
+        to_currency = (request.data.get('to_currency') or (subscription_details_data or {}).get('to_currency') or '').strip().upper()
+        if to_currency not in ('EUR', 'USD', 'CHF'):
+            return Response({'error': 'Devise cible invalide (EUR, USD ou CHF requis)'}, status=status.HTTP_400_BAD_REQUEST)
+        current_currency = (client.account_currency or 'EUR').strip().upper()
+        if to_currency == current_currency:
+            return Response({'error': 'La devise cible doit être différente de la devise actuelle du compte'}, status=status.HTTP_400_BAD_REQUEST)
+        # Calculate current balance from completed transactions
+        completed_txns = Transaction.objects.filter(client=client, status__in=COMPLETED_TRANSACTION_STATUSES).order_by('datetime')
+        invested_cap = Decimal('0')
+        trading_port = Decimal('0')
+        for t in completed_txns:
+            amt = Decimal(str(t.amount or 0))
+            ccy = (getattr(t, 'amount_currency', None) or 'EUR').strip().upper()
+            if ccy != current_currency:
+                continue  # Skip txns in other currency (before/after conversion)
+            if t.type == 'depot':
+                invested_cap += amt
+            elif t.type == 'retrait':
+                invested_cap -= amt
+            elif t.type == 'bonus':
+                invested_cap += amt
+            elif t.type == 'interets':
+                invested_cap += amt
+            elif t.type == 'conversion':
+                invested_cap = amt  # Replace balance with converted amount
+            elif t.type == 'achat':
+                trading_port += amt
+            elif t.type == 'vente':
+                trading_port -= amt
+            elif t.type == 'transfert':
+                tf_to = t.transfer_to or ''
+                if tf_to and tf_to != 'solde':
+                    trading_port += amt
+                elif tf_to == 'solde' or t.transfer_from and t.transfer_from != 'solde':
+                    trading_port -= amt
+        available = invested_cap - trading_port
+        if available <= 0:
+            return Response({'error': 'Solde insuffisant pour effectuer une conversion'}, status=status.HTTP_400_BAD_REQUEST)
+        if trading_port > 0:
+            return Response({'error': 'Impossible de convertir : des fonds sont investis dans des produits. Effectuez d\'abord un retrait vers le solde.'}, status=status.HTTP_400_BAD_REQUEST)
+        fx_rate = _get_fx_rate(current_currency, to_currency)
+        if fx_rate is None:
+            return Response({'error': f'Impossible d\'obtenir le taux de change {current_currency}/{to_currency}'}, status=status.HTTP_502_BAD_GATEWAY)
+        from_amount = float(available)
+        to_amount = from_amount * fx_rate
+        conv_subscription = {
+            'from_currency': current_currency,
+            'from_amount': from_amount,
+            'to_currency': to_currency,
+            'to_amount': round(to_amount, 2),
+            'fx_rate': fx_rate,
+        }
+        subscription_details_data = (subscription_details_data or {}) | conv_subscription
+        # Create conversion transaction and update client
+        with db_transaction.atomic():
+            conv_txn = Transaction(
+                id=transaction_id,
+                client=client,
+                type='conversion',
+                amount=round(to_amount, 2),
+                amount_currency=to_currency,
+                description=request.data.get('description') or f'Conversion {current_currency} → {to_currency}',
+                status=request.data.get('status', 'valide'),
+                datetime=transaction_datetime,
+                subscription_details=subscription_details_data,
+                validated_at=transaction_datetime if request.data.get('status') == 'valide' else None,
+            )
+            conv_txn.save()
+            client.account_currency = to_currency
+            client.save(update_fields=['account_currency'])
+        from .serializer import TransactionSerializer
+        return Response({'transaction': TransactionSerializer(conv_txn).data}, status=status.HTTP_201_CREATED)
+    
+    # --- Deposit/bonus: convert EUR to account currency if needed ---
+    final_amount = transaction_amount
+    amount_currency = (request.data.get('amount_currency') or (client.account_currency or 'EUR')).strip().upper()
+    if amount_currency not in ('EUR', 'USD', 'CHF'):
+        amount_currency = (client.account_currency or 'EUR').strip().upper()
+    if transaction_type in ('depot', 'bonus') and amount_currency != 'EUR':
+        # Deposits arrive in EUR; convert to account currency
+        fx_rate = _get_fx_rate('EUR', amount_currency)
+        if fx_rate is not None:
+            final_amount = round(float(transaction_amount) * fx_rate, 2)
+            if isinstance(subscription_details_data, dict):
+                subscription_details_data = dict(subscription_details_data)
+                subscription_details_data['deposit_eur_amount'] = transaction_amount
+                subscription_details_data['fx_rate_eur_to_account'] = fx_rate
+        else:
+            return Response({'error': f'Impossible d\'obtenir le taux de change EUR/{amount_currency} pour créditer le dépôt'}, status=status.HTTP_502_BAD_GATEWAY)
     
     # Auto-set transfer_to for subscription transactions (transfert with product)
     # We only need transfer_to: if it's a product ID, it's an investment (solde → product)
@@ -7497,7 +7632,8 @@ def client_transaction_create(request, client_id):
             id=transaction_id,
             client=client,
             type=request.data.get('type'),
-            amount=request.data.get('amount'),
+            amount=final_amount if transaction_type in ('depot', 'bonus') else request.data.get('amount'),
+            amount_currency=amount_currency,
             description=request.data.get('description', ''),
             status=transaction_status,
             datetime=transaction_datetime,

@@ -125,6 +125,10 @@ class Client(models.Model):
     # Note: available_funds is calculated on frontend (invested_capital - trading_portfolio - bonus)
     # Note: Le "portefeuille" d'actifs est géré via ClientAsset, pas ici
     
+    # Devise du compte (une seule devise par compte - pas de fonds multi-devises)
+    ACCOUNT_CURRENCY_CHOICES = [('EUR', 'Euro'), ('USD', 'Dollar US'), ('CHF', 'Franc suisse')]
+    account_currency = models.CharField(max_length=3, choices=ACCOUNT_CURRENCY_CHOICES, default='EUR')
+    
     # Méthodes de paiement disponibles pour le dépôt des fonds
     payment_methods = models.JSONField(default=list, blank=True)  # ex: ["virement", "carte_bancaire"]
     
@@ -483,6 +487,7 @@ class Transaction(models.Model):
         ('frais', 'Frais'),
         ('transfert', 'Transfert'),
         ('perte', 'Perte'),
+        ('conversion', 'Conversion'),
     ]
     
     STATUS_CHOICES = [
@@ -498,6 +503,7 @@ class Transaction(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='transactions')
     type = models.CharField(max_length=50, choices=TRANSACTION_TYPES, default='depot')
     amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    amount_currency = models.CharField(max_length=3, default='EUR')  # Devise du montant (EUR, USD, CHF)
     description = models.TextField(default="", blank=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='en_cours')
     datetime = models.DateTimeField()  # Date et heure de la transaction

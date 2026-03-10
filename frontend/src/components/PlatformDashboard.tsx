@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { TrendingUp, TrendingDown, Check, PieChart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../utils/api';
-import { useIsMobile, useIsPhone } from './ui/use-mobile';
+import { useIsMobile, useIsPhone, useIsNarrowForCards } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatSubcategoryForDisplay } from './transactionUtils';
@@ -16,6 +16,7 @@ export function PlatformDashboard() {
   const { settings } = useTheme();
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
+  const isNarrowForCards = useIsNarrowForCards();
   const navigate = useNavigate();
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
@@ -306,12 +307,25 @@ export function PlatformDashboard() {
     let calculatedInvestedCapital = 0;
     let calculatedTradingPortfolio = 0;
     let calculatedProfitLoss = 0;
+    let effectiveCurrency: string | null = null;
 
-    const completedTransactions = (allTransactions || []).filter((t: any) => isCompletedStatus(t?.status));
+    const completedTransactions = (allTransactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status))
+      .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
 
     completedTransactions.forEach((transaction: any) => {
       const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
       const amt = Number.isFinite(amount) ? amount : 0;
+      const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR').toString().trim().toUpperCase();
+
+      if (transaction.type === 'conversion') {
+        calculatedInvestedCapital = amt;
+        calculatedTradingPortfolio = 0;
+        effectiveCurrency = txnCcy;
+        return;
+      }
+      if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+      if (txnCcy !== effectiveCurrency) return;
 
       switch (transaction.type) {
         case 'depot':
@@ -324,7 +338,6 @@ export function PlatformDashboard() {
           calculatedInvestedCapital += amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash solde; subtract from P&L to avoid double-counting with positions
           calculatedInvestedCapital += amt;
           calculatedProfitLoss -= amt;
           break;
@@ -1477,9 +1490,9 @@ export function PlatformDashboard() {
                           borderRadius: 16,
                           backgroundColor: 'white',
                           display: 'flex',
-                          flexDirection: isMobile ? 'column' : 'row',
+                          flexDirection: isNarrowForCards ? 'column' : 'row',
                           alignItems: 'stretch',
-                          gap: isMobile ? 10 : 12,
+                          gap: isNarrowForCards ? 10 : 12,
                           boxShadow: '0 10px 26px rgba(2, 6, 23, 0.04)',
                           transition: 'transform 160ms ease, box-shadow 160ms ease',
                           cursor: post.articleUrl ? 'pointer' : 'default',
@@ -1498,15 +1511,15 @@ export function PlatformDashboard() {
                         {post.imageUrl ? (
                           <div
                             style={{
-                              width: isMobile ? '100%' : 200,
-                              height: isMobile ? 180 : '100%',
-                              minHeight: isMobile ? 180 : 140,
+                              width: isNarrowForCards ? '100%' : 200,
+                              height: isNarrowForCards ? 180 : '100%',
+                              minHeight: isNarrowForCards ? 180 : 140,
                               borderRadius: 14,
                               overflow: 'hidden',
                               background: 'rgba(2, 6, 23, 0.06)',
                               flexShrink: 0,
                               position: 'relative',
-                              alignSelf: isMobile ? undefined : 'stretch',
+                              alignSelf: isNarrowForCards ? undefined : 'stretch',
                             }}
                           >
                             <img
@@ -1526,7 +1539,7 @@ export function PlatformDashboard() {
                           </div>
                         ) : null}
 
-                        <div style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden' }}>
                           <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>
                             {new Date(post.createdAt).toLocaleDateString('fr-FR', {
                               day: '2-digit',
@@ -1537,7 +1550,7 @@ export function PlatformDashboard() {
 
                           <h3
                             style={{
-                              fontSize: isMobile ? '14px' : '15px',
+                              fontSize: isNarrowForCards ? '14px' : '15px',
                               fontWeight: 600,
                               margin: 0,
                               color: '#111827',
@@ -1558,7 +1571,7 @@ export function PlatformDashboard() {
                                 overflowWrap: 'break-word',
                                 display: '-webkit-box',
                                 WebkitBoxOrient: 'vertical',
-                                WebkitLineClamp: isMobile ? 3 : 2,
+                                WebkitLineClamp: isNarrowForCards ? 3 : 2,
                                 overflow: 'hidden',
                               } as any
                             }

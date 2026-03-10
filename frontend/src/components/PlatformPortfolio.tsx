@@ -772,13 +772,27 @@ export function PlatformPortfolio() {
     let calculatedTradingPortfolio = 0;
     let calculatedBonus = 0;
     let calculatedProfitLoss = 0;
-    let calculatedTotalInvesti = 0; // achat + transfert (solde -> product) - transfert (product -> solde) when status is 'valide'
+    let calculatedTotalInvesti = 0;
+    let effectiveCurrency: string | null = null;
 
-    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
+    const completedTransactions = (transactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status))
+      .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
 
     completedTransactions.forEach((transaction: any) => {
       const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
       const amt = Number.isFinite(amount) ? amount : 0;
+      const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR').toString().trim().toUpperCase();
+
+      if (transaction.type === 'conversion') {
+        calculatedInvestedCapital = amt;
+        calculatedTradingPortfolio = 0;
+        calculatedTotalInvesti = 0;
+        effectiveCurrency = txnCcy;
+        return;
+      }
+      if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+      if (txnCcy !== effectiveCurrency) return;
 
       switch (transaction.type) {
         case 'depot':
@@ -799,11 +813,7 @@ export function PlatformPortfolio() {
           calculatedTradingPortfolio -= amt;
           break;
         case 'interets':
-          // Interest transactions credit gains to cash solde
-          // They increase investedCapital (available funds) because they add money to the cash solde
           calculatedInvestedCapital += amt;
-          // We subtract them from profitLoss because positions are counted separately in profitLoss calculation
-          // This avoids double-counting: positions show the gains, interets transactions credit them to cash solde
           calculatedProfitLoss -= amt;
           break;
         case 'frais':
@@ -815,16 +825,12 @@ export function PlatformPortfolio() {
           const hasProductId = transaction.productId || null;
 
           if (transferTo && transferTo !== 'solde') {
-            // solde -> product
             calculatedTotalInvesti += amt;
             calculatedTradingPortfolio += amt;
           } else if (transferTo === 'solde') {
-            // product -> solde
-            // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
             calculatedTotalInvesti -= amt;
             calculatedTradingPortfolio -= amt;
           } else if (hasProductId) {
-            // Fallback: assume subscription (solde -> product)
             calculatedTotalInvesti += amt;
             calculatedTradingPortfolio += amt;
           }
