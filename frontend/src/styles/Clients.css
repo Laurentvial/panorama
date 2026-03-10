@@ -254,6 +254,11 @@
 
 /* Client Detail and Add Client Styles */
 
+/* Force uppercase on block titles in client info */
+.client-info-block-title {
+  text-transform: uppercase !important;
+}
+
 /* Checkbox styles */
 .client-checkbox {
   height: 1rem;

@@ -488,6 +488,7 @@ class Transaction(models.Model):
     STATUS_CHOICES = [
         ('en_attente_paiement', 'En attente de paiement'),
         ('en_cours', 'En cours'),
+        ('en_verification', 'En vérification'),
         ('valide', 'Validé'),
         ('conteste', 'Contesté'),
         ('annule', 'Annulé'),

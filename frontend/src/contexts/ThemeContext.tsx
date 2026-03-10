@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
+import LoadingIndicator from '../components/LoadingIndicator';
+import '../styles/AppSettingsLoader.css';
 
 interface AppSettings {
   id: string;
@@ -149,6 +151,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     loadSettings();
   }, []);
+
+  if (loading) {
+    return (
+      <ThemeContext.Provider value={{ settings, loading, loadSettings, updateSettings }}>
+        <div className="app-settings-loader" aria-live="polite" aria-busy="true">
+          <LoadingIndicator />
+          <p className="app-settings-loader-text">Chargement...</p>
+        </div>
+      </ThemeContext.Provider>
+    );
+  }
 
   return (
     <ThemeContext.Provider value={{ settings, loading, loadSettings, updateSettings }}>

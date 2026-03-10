@@ -33,7 +33,7 @@ const TRANSACTION_TYPES = {
   },
   retrait: {
     label: 'Retrait',
-    statuses: ['en_cours', 'valide', 'annule']
+    statuses: ['en_cours', 'en_verification', 'valide', 'annule']
   },
   bonus: {
     label: 'Bonus',
@@ -68,6 +68,7 @@ const TRANSACTION_TYPES = {
 const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
+  en_verification: 'En vérification',
   valide: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'

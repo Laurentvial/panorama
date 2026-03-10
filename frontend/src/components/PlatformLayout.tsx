@@ -5,7 +5,7 @@ import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
 import { apiCall, clearApiCache } from '../utils/api';
-import { Home, Wallet, DollarSign, LogOut, User, Compass, Search, Menu, X, ArrowDown, ArrowUp, Bell, LinkIcon } from '../utils/iconMapping';
+import { LogOut, User, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import {
@@ -258,11 +258,11 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
 
   const menuItems = useMemo(() => {
     const items = [
-      { id: 'dashboard', label: 'Tableau de bord', icon: Home, path: '/platform' },
-      { id: 'portfolio', label: 'Portefeuille', icon: Wallet, path: '/platform/portfolio' },
-      { id: 'funds', label: 'Fonds', icon: DollarSign, path: '/platform/funds' },
-      { id: 'discover', label: 'Découvrir', icon: Compass, path: '/platform/discover' },
-      { id: 'useful-links', label: 'Liens utiles', icon: LinkIcon, path: '/platform/useful-links' },
+      { id: 'dashboard', label: 'Tableau de bord', iconChar: '\uE88A', path: '/platform' },
+      { id: 'portfolio', label: 'Portefeuille', iconChar: '\uE850', path: '/platform/portfolio' },
+      { id: 'funds', label: 'Fonds', iconChar: '\uE8A1', path: '/platform/funds' },
+      { id: 'discover', label: 'Découvrir', iconChar: '\uE87B', path: '/platform/discover' },
+      { id: 'useful-links', label: 'Liens utiles', iconChar: '\uE157', path: '/platform/useful-links' },
     ];
     if (currentUser?.userType === 'client' && currentUser?.hasUsefulLinks === false) {
       return items.filter((item) => item.id !== 'useful-links');
@@ -656,7 +656,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Sidebar */}
         <aside style={{
           // Narrower to avoid horizontal overflow on some screens.
-          width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '360px',
+          width: showBottomNav ? (sidebarOpen ? '280px' : '0') : '340px',
           height: sidebarHeight,
           padding: 0,
           // Keep drawer behavior on mobile bottom nav.
@@ -691,7 +691,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                         position: 'fixed',
                         top: stickyTopOffset,
                         left: 0,
-                        width: 360,
+                        width: 340,
                         height: sidebarHeight,
                         backgroundColor: 'var(--primary)',
                         color: 'var(--accent-foreground)',
@@ -760,6 +760,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               <div style={{ 
                 paddingLeft: isMobile ? '12px' : '20px',
                 paddingRight: isMobile ? '12px' : '20px',
+                marginRight: isMobile ? '8px' : '16px',
                 marginBottom: '20px',
                 minWidth: 0,
               }}>
@@ -848,7 +849,6 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               
               <nav className="platform-sidebar-nav">
                 {menuItems.map((item) => {
-                  const Icon = item.icon;
                   const isActive = location.pathname === item.path;
                   return (
                     <button
@@ -870,7 +870,13 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                         fontSize: isMobile ? '16px' : '18px',
                       }}
                     >
-                      <Icon size={isMobile ? 20 : 24} />
+                      <span
+                        className="material-symbols-outlined"
+                        style={{ fontSize: isMobile ? 20 : 24 }}
+                        aria-hidden
+                      >
+                        {item.iconChar}
+                      </span>
                       {item.label}
                     </button>
                   );
@@ -1025,7 +1031,6 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           aria-label="Navigation mobile"
         >
           {menuItems.map((item) => {
-            const Icon = item.icon;
             const isActive =
               location.pathname === item.path ||
               (item.path !== '/platform' && location.pathname.startsWith(`${item.path}/`));
@@ -1048,11 +1053,16 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   justifyContent: 'center',
                   gap: '4px',
                   color: isActive ? '#111827' : '#6b7280',
-                  fontWeight: isActive ? 600 : 400,
                 }}
                 aria-current={isActive ? 'page' : undefined}
               >
-                <Icon size={22} />
+                <span
+                  className="material-symbols-outlined"
+                  style={{ fontSize: 22 }}
+                  aria-hidden
+                >
+                  {item.iconChar}
+                </span>
                 <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>
                   {item.label}
                 </span>

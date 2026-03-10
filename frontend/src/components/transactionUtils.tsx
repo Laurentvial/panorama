@@ -57,6 +57,7 @@ export const getStatusLabel = (status: string, transactionType?: string): string
   const statusMap: { [key: string]: string } = {
     'en_attente_paiement': 'En attente de paiement',
     'en_cours': 'En cours',
+    'en_verification': 'En vérification',
     'valide': 'Validé',
     'validé': 'Validé',
     'conteste': 'Contesté',
@@ -73,7 +74,7 @@ export const getStatusColors = (status: string, transactionType?: string): { bg:
   const s = String(status || '').trim().toLowerCase();
   const type = String(transactionType || '').toLowerCase();
   if (s === 'valide' || s === 'validé') return { bg: '#dcfce7', text: '#15803d' }; // green
-  if (s === 'en_cours' || s === 'en_attente_paiement') return { bg: '#fed7aa', text: '#c2410c' }; // orange
+  if (s === 'en_cours' || s === 'en_attente_paiement' || s === 'en_verification') return { bg: '#fed7aa', text: '#c2410c' }; // orange
   if (s === 'conteste') return { bg: '#fee2e2', text: '#991b1b' }; // red
   if (s === 'annule') return { bg: '#e5e7eb', text: '#6b7280' }; // gray
   return { bg: '#f1f5f9', text: '#475569' };
@@ -137,7 +138,7 @@ export const TRANSACTION_TYPES = {
   },
   retrait: {
     label: 'Retrait',
-    statuses: ['en_cours', 'valide', 'annule']
+    statuses: ['en_cours', 'en_verification', 'valide', 'annule']
   },
   bonus: {
     label: 'Bonus',
@@ -172,6 +173,7 @@ export const TRANSACTION_TYPES = {
 export const STATUS_LABELS: { [key: string]: string } = {
   en_attente_paiement: 'En attente de paiement',
   en_cours: 'En cours',
+  en_verification: 'En vérification',
   valide: 'Validé',
   conteste: 'Contesté',
   annule: 'Annulé'

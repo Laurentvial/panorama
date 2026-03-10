@@ -1,0 +1,28 @@
+/* Full-screen loading overlay while app settings (logo, colors) are fetched */
+.app-settings-loader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  background-color: #f8fafc;
+  z-index: 9999;
+}
+
+.app-settings-loader .loader-container {
+  min-height: auto;
+}
+
+.app-settings-loader .loader {
+  border-color: #e2e8f0;
+  border-top-color: #030213;
+}
+
+.app-settings-loader-text {
+  font-family: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+  color: #64748b;
+  margin: 0;
+}

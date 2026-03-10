@@ -3,11 +3,59 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
-import { Pencil, ChevronDown } from 'lucide-react';
+import { Pencil, ChevronDown, Copy } from 'lucide-react';
 import { ClientManagementInfo } from './ClientManagementInfo';
 import { EditClientManagementModal } from './EditClientManagementModal';
+import { toast } from 'sonner';
+import { cn } from './ui/utils';
 
 import '../styles/Clients.css';
+
+function CopyableField({
+  label,
+  value,
+  display,
+  valueClassName,
+}: {
+  label: string;
+  value?: string | number; // value to copy (raw or formatted)
+  display?: React.ReactNode; // optional custom display
+  valueClassName?: string;
+}) {
+  const displayVal = display ?? value ?? '-';
+  const copyVal = value != null && value !== '' ? String(value) : null;
+  const canCopy = copyVal && copyVal !== '-';
+
+  async function handleCopy() {
+    if (!copyVal) return;
+    try {
+      await navigator.clipboard.writeText(copyVal);
+      toast.success('Copié dans le presse-papiers');
+    } catch {
+      toast.error('Impossible de copier');
+    }
+  }
+
+  return (
+    <div>
+      <Label className="text-slate-600">{label}</Label>
+      <div className="flex items-center gap-2">
+        <p className={cn('text-lg font-bold text-slate-900', valueClassName)}>{displayVal}</p>
+        {canCopy && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={handleCopy}
+            title="Copier"
+          >
+            <Copy className="w-4 h-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface ClientInfoTabProps {
   client: any;
@@ -30,7 +78,7 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
       {/* Personal Info */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Informations personnelles</CardTitle>
+          <CardTitle className="client-info-block-title font-bold">Informations personnelles</CardTitle>
           <Button
             size="sm"
             variant="outline"
@@ -41,76 +89,32 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-slate-600">Civilité</Label>
-              <p>{client.civility || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Prénom / Nom</Label>
-              <p>{client.firstName} {client.lastName}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Mot de passe</Label>
-              <p className="font-mono text-sm">{client.password || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Téléphone</Label>
-              <p>{client.phone || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Portable</Label>
-              <p>{client.mobile || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">E-mail</Label>
-              <p>{client.email || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Date de naissance</Label>
-              <p>{(() => {
-                if (!client.birthDate) return '-';
+          <div className="grid grid-cols-3 gap-4">
+            <CopyableField label="Civilité" value={client.civility} />
+            <CopyableField label="Prénom / Nom" value={client.firstName || client.lastName ? `${client.firstName || ''} ${client.lastName || ''}`.trim() : undefined} />
+            <CopyableField label="Mot de passe" value={client.password} valueClassName="font-mono text-sm" />
+            <CopyableField label="Téléphone" value={client.phone} />
+            <CopyableField label="Portable" value={client.mobile} />
+            <CopyableField label="E-mail" value={client.email} />
+            <CopyableField
+              label="Date de naissance"
+              value={(() => {
+                if (!client.birthDate) return undefined;
                 const date = new Date(client.birthDate);
-                if (isNaN(date.getTime())) return '-';
-                return date.toLocaleDateString('fr-FR', { 
-                  day: '2-digit', 
-                  month: '2-digit', 
-                  year: 'numeric'
-                });
-              })()}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Lieu de naissance</Label>
-              <p>{client.birthPlace || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Adresse</Label>
-              <p>{client.address || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Code postal</Label>
-              <p>{client.postalCode || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Ville</Label>
-              <p>{client.city || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Nationalité</Label>
-              <p>{client.nationality || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Successeur</Label>
-              <p>{client.successor || '-'}</p>
-            </div>
-            <div>
-              <Label className="text-slate-600">Date d'inscription</Label>
-              <p>{new Date(client.createdAt).toLocaleDateString('fr-FR', { 
-                day: '2-digit', 
-                month: '2-digit', 
-                year: 'numeric'
-              })}</p>
-            </div>
+                if (isNaN(date.getTime())) return undefined;
+                return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+              })()}
+            />
+            <CopyableField label="Lieu de naissance" value={client.birthPlace} />
+            <CopyableField label="Adresse" value={client.address} />
+            <CopyableField label="Code postal" value={client.postalCode} />
+            <CopyableField label="Ville" value={client.city} />
+            <CopyableField label="Nationalité" value={client.nationality} />
+            <CopyableField label="Successeur" value={client.successor} />
+            <CopyableField
+              label="Date d'inscription"
+              value={new Date(client.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+            />
           </div>
         </CardContent>
       </Card>
@@ -129,7 +133,7 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
         {/* RIB Section */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>RIB</CardTitle>
+            <CardTitle className="client-info-block-title font-bold">RIB</CardTitle>
             <Button
               size="sm"
               variant="outline"
@@ -145,58 +149,31 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
             ) : (
               <div className="grid grid-cols-1 gap-3">
                 {client?.ribBankName && (
-                  <div>
-                    <Label className="text-slate-600">Banque</Label>
-                    <p>{client.ribBankName}</p>
-                  </div>
+                  <CopyableField label="Banque" value={client.ribBankName} />
                 )}
                 {client?.ribAccountHolder && (
-                  <div>
-                    <Label className="text-slate-600">Titulaire</Label>
-                    <p>{client.ribAccountHolder}</p>
-                  </div>
+                  <CopyableField label="Titulaire" value={client.ribAccountHolder} />
                 )}
                 {client?.ribBankCode && (
-                  <div>
-                    <Label className="text-slate-600">Code banque</Label>
-                    <p className="font-mono text-sm">{client.ribBankCode}</p>
-                  </div>
+                  <CopyableField label="Code banque" value={client.ribBankCode} valueClassName="font-mono text-sm" />
                 )}
                 {client?.ribBranchCode && (
-                  <div>
-                    <Label className="text-slate-600">Code guichet</Label>
-                    <p className="font-mono text-sm">{client.ribBranchCode}</p>
-                  </div>
+                  <CopyableField label="Code guichet" value={client.ribBranchCode} valueClassName="font-mono text-sm" />
                 )}
                 {client?.ribAccountNumber && (
-                  <div>
-                    <Label className="text-slate-600">N° compte</Label>
-                    <p className="font-mono text-sm">{client.ribAccountNumber}</p>
-                  </div>
+                  <CopyableField label="N° compte" value={client.ribAccountNumber} valueClassName="font-mono text-sm" />
                 )}
                 {client?.ribKey && (
-                  <div>
-                    <Label className="text-slate-600">Clé RIB</Label>
-                    <p className="font-mono text-sm">{client.ribKey}</p>
-                  </div>
+                  <CopyableField label="Clé RIB" value={client.ribKey} valueClassName="font-mono text-sm" />
                 )}
                 {client?.ribIban && (
-                  <div>
-                    <Label className="text-slate-600">IBAN</Label>
-                    <p className="font-mono text-sm break-all">{client.ribIban}</p>
-                  </div>
+                  <CopyableField label="IBAN" value={client.ribIban} valueClassName="font-mono text-sm break-all" />
                 )}
                 {client?.ribBic && (
-                  <div>
-                    <Label className="text-slate-600">BIC</Label>
-                    <p className="font-mono text-sm">{client.ribBic}</p>
-                  </div>
+                  <CopyableField label="BIC" value={client.ribBic} valueClassName="font-mono text-sm" />
                 )}
                 {client?.ribDomiciliation && (
-                  <div>
-                    <Label className="text-slate-600">Domiciliation</Label>
-                    <p>{client.ribDomiciliation}</p>
-                  </div>
+                  <CopyableField label="Domiciliation" value={client.ribDomiciliation} />
                 )}
               </div>
             )}
@@ -210,7 +187,7 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
           <CollapsibleTrigger asChild>
             <CardHeader className="cursor-pointer hover:bg-slate-50 transition-colors">
               <div className="flex items-center justify-between pb-6">
-                <CardTitle>Fiche patrimoniale</CardTitle>
+                <CardTitle className="client-info-block-title font-bold">Fiche patrimoniale</CardTitle>
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
@@ -232,160 +209,186 @@ export function ClientInfoTab({ client, onOpenEditPersonalInfo, onOpenEditPatrim
             <CardContent className="space-y-6">
               {/* Activité professionnelle */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Activité professionnelle</h3>
-                <div>
-                  <Label className="text-slate-600">Statut</Label>
-                  <p>{client.professionalActivityStatus || '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.professionalActivityComment || '-'}</p>
-                </div>
+                <h3 className="client-info-block-title text-lg font-bold">Activité professionnelle</h3>
+                <CopyableField label="Statut" value={client.professionalActivityStatus} />
+                <CopyableField label="Commentaire" value={client.professionalActivityComment} />
               </div>
 
               {/* Métiers */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Métiers</h3>
+                <h3 className="client-info-block-title text-lg font-bold">Métiers</h3>
                 <div>
                   <Label className="text-slate-600">Métier(s)</Label>
-                  <div className="flex flex-wrap gap-2 mt-2">
+                  <div className="flex flex-wrap gap-2 mt-2 items-center">
                     {client.professions && client.professions.length > 0 ? (
-                      client.professions.map((profession: string, index: number) => (
-                        <div key={index} className="client-profession-badge">
-                          <span>{profession}</span>
-                        </div>
-                      ))
+                      <>
+                        {client.professions.map((profession: string, index: number) => (
+                          <div key={index} className="client-profession-badge">
+                            <span>{profession}</span>
+                          </div>
+                        ))}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(client.professions.join(', '));
+                              toast.success('Copié dans le presse-papiers');
+                            } catch { toast.error('Impossible de copier'); }
+                          }}
+                          title="Copier"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </>
                     ) : (
                       <span className="text-slate-500">-</span>
                     )}
                   </div>
                 </div>
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.professionsComment || '-'}</p>
-                </div>
+                <CopyableField label="Commentaire" value={client.professionsComment} />
               </div>
 
               {/* Patrimoine */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Patrimoine</h3>
-                <div>
-                  <Label className="text-slate-600">Banque</Label>
-                  <p>{client.bankName || '-'}</p>
-                </div>
+                <h3 className="client-info-block-title text-lg font-bold">Patrimoine</h3>
+                <CopyableField label="Banque" value={client.bankName} />
                 
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-slate-600">Compte courant (€)</Label>
-                    <p>{(client.currentAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <Label className="text-slate-600">Livret A/B (€)</Label>
-                    <p>{(client.livretAB || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <Label className="text-slate-600">PEA (€)</Label>
-                    <p>{(client.pea || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <Label className="text-slate-600">PEL (€)</Label>
-                    <p>{(client.pel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <Label className="text-slate-600">LDD (€)</Label>
-                    <p>{(client.ldd || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
+                  <CopyableField
+                    label="Compte courant (€)"
+                    value={(client.currentAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  />
+                  <CopyableField
+                    label="Livret A/B (€)"
+                    value={(client.livretAB || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  />
+                  <CopyableField
+                    label="PEA (€)"
+                    value={(client.pea || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  />
+                  <CopyableField
+                    label="PEL (€)"
+                    value={(client.pel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  />
+                  <CopyableField
+                    label="LDD (€)"
+                    value={(client.ldd || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  />
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="font-semibold">Épargne</Label>
+                  <Label className="client-info-block-title font-semibold">Épargne</Label>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-slate-600">CEL (€)</Label>
-                      <p>{(client.cel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600">CSL (€)</Label>
-                      <p>{(client.csl || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600">Compte titre (€)</Label>
-                      <p>{(client.securitiesAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div>
-                      <Label className="text-slate-600">Assurance-vie (€)</Label>
-                      <p>{(client.lifeInsurance || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
+                    <CopyableField
+                      label="CEL (€)"
+                      value={(client.cel || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    />
+                    <CopyableField
+                      label="CSL (€)"
+                      value={(client.csl || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    />
+                    <CopyableField
+                      label="Compte titre (€)"
+                      value={(client.securitiesAccount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    />
+                    <CopyableField
+                      label="Assurance-vie (€)"
+                      value={(client.lifeInsurance || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    />
                   </div>
                 </div>
 
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.savingsComment || '-'}</p>
-                </div>
+                <CopyableField label="Commentaire" value={client.savingsComment} />
 
-                <div>
-                  <Label className="font-semibold">Total du patrimoine (€)</Label>
-                  <p className="text-lg font-bold">{(client.totalWealth || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                </div>
+                <CopyableField
+                  label="Total du patrimoine (€)"
+                  value={(client.totalWealth || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  valueClassName="text-lg font-bold"
+                />
               </div>
 
               {/* Objectifs et expérience */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Objectifs et expérience</h3>
+                <h3 className="client-info-block-title text-lg font-bold">Objectifs et expérience</h3>
                 <div>
                   <Label className="text-slate-600">Objectifs</Label>
-                  <div className="flex flex-wrap gap-2 mt-2">
+                  <div className="flex flex-wrap gap-2 mt-2 items-center">
                     {client.objectives && client.objectives.length > 0 ? (
-                      client.objectives.map((obj: string, index: number) => (
-                        <div key={index} className="client-badge">
-                          {obj}
-                        </div>
-                      ))
+                      <>
+                        {client.objectives.map((obj: string, index: number) => (
+                          <div key={index} className="client-badge">
+                            {obj}
+                          </div>
+                        ))}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(client.objectives.join(', '));
+                              toast.success('Copié dans le presse-papiers');
+                            } catch { toast.error('Impossible de copier'); }
+                          }}
+                          title="Copier"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </>
                     ) : (
                       <span className="text-slate-500">-</span>
                     )}
                   </div>
                 </div>
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.objectivesComment || '-'}</p>
-                </div>
+                <CopyableField label="Commentaire" value={client.objectivesComment} />
                 <div>
                   <Label className="text-slate-600">Expérience</Label>
-                  <div className="flex flex-wrap gap-2 mt-2">
+                  <div className="flex flex-wrap gap-2 mt-2 items-center">
                     {client.experience && client.experience.length > 0 ? (
-                      client.experience.map((exp: string, index: number) => (
-                        <div key={index} className="client-badge">
-                          {exp}
-                        </div>
-                      ))
+                      <>
+                        {client.experience.map((exp: string, index: number) => (
+                          <div key={index} className="client-badge">
+                            {exp}
+                          </div>
+                        ))}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(client.experience.join(', '));
+                              toast.success('Copié dans le presse-papiers');
+                            } catch { toast.error('Impossible de copier'); }
+                          }}
+                          title="Copier"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      </>
                     ) : (
                       <span className="text-slate-500">-</span>
                     )}
                   </div>
                 </div>
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.experienceComment || '-'}</p>
-                </div>
+                <CopyableField label="Commentaire" value={client.experienceComment} />
               </div>
 
               {/* Informations financières */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Informations financières</h3>
-                <div>
-                  <Label className="text-slate-600">Défiscalisation</Label>
-                  <p>{client.taxOptimization !== undefined ? (client.taxOptimization ? 'Oui' : 'Non') : '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Commentaire</Label>
-                  <p>{client.taxOptimizationComment || '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Revenu annuel du foyer (€)</Label>
-                  <p>{(client.annualHouseholdIncome || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                </div>
+                <h3 className="client-info-block-title text-lg font-bold">Informations financières</h3>
+                <CopyableField
+                  label="Défiscalisation"
+                  value={client.taxOptimization !== undefined ? (client.taxOptimization ? 'Oui' : 'Non') : undefined}
+                  display={client.taxOptimization !== undefined ? (client.taxOptimization ? 'Oui' : 'Non') : '-'}
+                />
+                <CopyableField label="Commentaire" value={client.taxOptimizationComment} />
+                <CopyableField
+                  label="Revenu annuel du foyer (€)"
+                  value={(client.annualHouseholdIncome || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                />
               </div>
             </CardContent>
           </CollapsibleContent>
