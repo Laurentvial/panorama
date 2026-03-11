@@ -288,9 +288,27 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Configuration
 # Note: CORS_ALLOW_ALL_ORIGINS and CORS_ALLOWED_ORIGINS are mutually exclusive
-# For development, we allow all origins
-CORS_ALLOW_ALL_ORIGINS = True
+# For production, use explicit allowlist from FRONTEND_PUBLIC_URL; for dev, allow all
 CORS_ALLOW_CREDENTIALS = True
+
+# Build allowed origins: dev defaults + FRONTEND_PUBLIC_URL from env
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+frontend_url = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
+if frontend_url:
+    if not frontend_url.startswith(('http://', 'https://')):
+        frontend_url = f'https://{frontend_url}'
+    CORS_ALLOWED_ORIGINS.append(frontend_url)
+    # Add www variant if applicable
+    if frontend_url.startswith('https://') and not frontend_url.startswith('https://www.'):
+        CORS_ALLOWED_ORIGINS.append(frontend_url.replace('https://', 'https://www.'))
+
+# Use allowlist in production, allow all in dev (when FRONTEND_PUBLIC_URL not set)
+CORS_ALLOW_ALL_ORIGINS = not bool(frontend_url)
 
 CORS_ALLOW_METHODS = [
     'DELETE',

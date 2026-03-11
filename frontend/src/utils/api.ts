@@ -266,7 +266,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   } catch (error: any) {
     // Handle network errors gracefully - don't treat as auth failure
     if (isNetworkError(error)) {
-      const errorObj = new Error('Server is restarting. Please try again in a moment.');
+      const errorObj = new Error('Unable to connect to server. Please check your connection or try again later.');
       (errorObj as any).isNetworkError = true;
       (errorObj as any).status = 0;
       throw errorObj;
@@ -336,7 +336,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
       } catch (error: any) {
         // Handle network errors during retry
         if (isNetworkError(error)) {
-          const errorObj = new Error('Server is restarting. Please try again in a moment.');
+          const errorObj = new Error('Unable to connect to server. Please check your connection or try again later.');
           (errorObj as any).isNetworkError = true;
           (errorObj as any).status = 0;
           throw errorObj;
