@@ -86,7 +86,7 @@ export function PlatformPortfolio() {
     if (currentUser && currentUser.id) {
       loadPortfolioData();
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser?.id) return;

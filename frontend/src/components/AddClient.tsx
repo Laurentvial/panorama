@@ -10,7 +10,7 @@ import { Checkbox } from './ui/checkbox';
 import { DateInput } from './ui/date-input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { ArrowLeft, Save, Key, Upload, ChevronDown, Plus, Trash2, User, Loader2 } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
 import { toast } from 'sonner';
@@ -302,6 +302,8 @@ export function AddClient() {
       }
 
       toast.success('Client créé avec succès');
+      clearApiCache('/api/clients');
+      clearApiCache('/api/teams');
       navigate('/admin/clients', { state: { clientCreated: true } });
     } catch (error: any) {
       console.error('Error creating client:', error);
