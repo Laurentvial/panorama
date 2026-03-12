@@ -866,8 +866,10 @@ class ClientAssetSerializer(serializers.ModelSerializer):
 class RIBSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    iban = serializers.CharField(required=True, allow_blank=False)
+    bic = serializers.CharField(required=True, allow_blank=False)
     bankName = serializers.CharField(source='bank_name', required=False, allow_blank=True)
-    accountHolder = serializers.CharField(source='account_holder', required=False, allow_blank=True)
+    accountHolder = serializers.CharField(source='account_holder', required=True, allow_blank=False)
     bankCode = serializers.CharField(source='bank_code', required=False, allow_blank=True)
     branchCode = serializers.CharField(source='branch_code', required=False, allow_blank=True)
     accountNumber = serializers.CharField(source='account_number', required=False, allow_blank=True)
@@ -890,6 +892,13 @@ class RIBSerializer(serializers.ModelSerializer):
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret
+
+class ReferralProspectCreateSerializer(serializers.Serializer):
+    code = serializers.CharField(required=True, allow_blank=False)
+    fname = serializers.CharField(required=True, allow_blank=False, max_length=50)
+    lname = serializers.CharField(required=True, allow_blank=False, max_length=50)
+    email = serializers.EmailField(required=True)
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
 
 class ClientRIBSerializer(serializers.ModelSerializer):
     rib = RIBSerializer(read_only=True)

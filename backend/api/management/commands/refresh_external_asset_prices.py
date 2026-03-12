@@ -104,10 +104,11 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.save(update_fields=["last_price", "last_price_update", "price_change", "price_change_percent"])
             return True, None
 
-        # Stocks / ETFs: tries Finnhub, Alpha Vantage, and symbol variants (e.g. HAG.DE->HAG.DEX)
-        quote = get_stock_quote_with_fallback(symbol_upper)
-        if not quote and not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+        # Stocks / ETFs: tries FMP, Finnhub, Alpha Vantage, and symbol variants (e.g. HAG.DE->HAG.DEX)
+        # Check API config first so we give a clear error when no provider is configured
+        if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
             return False, "FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis"
+        quote = get_stock_quote_with_fallback(symbol_upper)
         if not quote:
             return False, "quote not found"
 

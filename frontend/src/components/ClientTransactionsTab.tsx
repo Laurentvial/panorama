@@ -345,6 +345,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     to_currency: '',
     // depot/bonus for non-EUR account: amount in EUR, optional fx rate
     fx_rate_eur_to_account: '',
+    // depot: optional bonus shortcut - creates a parallel bonus transaction when filled
+    bonus_amount: '',
     // interets: surperformance (intérêts supplémentaires, exclus du calcul paid_interests)
     is_surperformance: false,
     // kept for backward compatibility with existing UI resets
@@ -654,6 +656,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         ...((transactionForm.type === 'depot' || transactionForm.type === 'bonus') && needsEurAndRate && transactionForm.fx_rate_eur_to_account
           ? { subscription_details: { fx_rate_eur_to_account: parseFloat(transactionForm.fx_rate_eur_to_account) } }
           : {}),
+        ...(transactionForm.type === 'depot' && transactionForm.bonus_amount && parseFloat(transactionForm.bonus_amount) > 0
+          ? { bonus_amount: parseFloat(transactionForm.bonus_amount) }
+          : {}),
         ...(transactionForm.type === 'interets'
           ? { subscription_details: { is_surperformance: !!transactionForm.is_surperformance } }
           : {}),
@@ -720,6 +725,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            bonus_amount: '',
             is_surperformance: false,
             visibleByClient: true
           });
@@ -770,6 +776,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         interestPeriod: '',
         to_currency: '',
         fx_rate_eur_to_account: '',
+        bonus_amount: '',
         is_surperformance: false,
         visibleByClient: true
       });
@@ -937,6 +944,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            bonus_amount: '',
             is_surperformance: false,
             visibleByClient: true
           });
@@ -1080,6 +1088,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            bonus_amount: '',
             is_surperformance: false,
             visibleByClient: true
           });
@@ -1107,6 +1116,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                     interestPeriod: '',
                     to_currency: '',
                     fx_rate_eur_to_account: '',
+                    bonus_amount: '',
                     is_surperformance: false,
                     visibleByClient: true
                   });
@@ -1279,6 +1289,22 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                       required
                     />
                   </div>
+                  {transactionForm.type === 'depot' && (
+                    <div className="modal-form-field">
+                      <Label>Bonus (optionnel)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Ex. 50"
+                        value={transactionForm.bonus_amount}
+                        onChange={(e) => setTransactionForm({ ...transactionForm, bonus_amount: e.target.value })}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Crée une transaction bonus en parallèle si rempli
+                      </p>
+                    </div>
+                  )}
                   {needsEurInputAndConversion && (
                     <div className="modal-form-field">
                       <Label>Taux de conversion EUR → {accountCurrency}</Label>
@@ -1321,16 +1347,18 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 {transactionForm.type === 'depot' && (
                   <div className="flex flex-col gap-1 mt-1.5 p-2 rounded bg-slate-100">
                     <span className="text-[11px] text-slate-500">Suggestion</span>
-                    <div className="flex flex-wrap gap-1">
-                      {['Virement SEPA', 'CB'].map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          className="text-[11px] px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors"
-                          onClick={() => setTransactionForm({ ...transactionForm, description: suggestion })}
-                        >
-                          {suggestion}
-                        </button>
+                    <div className="flex flex-wrap gap-1 items-center">
+                      {['Virement SEPA', 'CB'].map((suggestion, i) => (
+                        <React.Fragment key={suggestion}>
+                          {i > 0 && <span className="text-slate-400 text-[10px]">|</span>}
+                          <button
+                            type="button"
+                            className="text-[11px] px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors"
+                            onClick={() => setTransactionForm({ ...transactionForm, description: suggestion })}
+                          >
+                            {suggestion}
+                          </button>
+                        </React.Fragment>
                       ))}
                     </div>
                   </div>
@@ -1356,23 +1384,24 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 <Button type="button" variant="outline" disabled={isCreatingTransaction}                 onClick={() => {
                   setIsTransactionDialogOpen(false);
                   setIsCreatingTransaction(false);
-                  setTransactionForm({
-                    type: 'depot',
-                    amount: '',
-                    description: '',
-                    status: 'en_attente_paiement',
-                    datetime: '',
-                    from_field: 'solde',
-                    to_field: 'solde',
-                    productId: '',
-                    interestPeriod: '',
-                    to_currency: '',
-                    fx_rate_eur_to_account: '',
-                    is_surperformance: false,
-                    visibleByClient: true
-                  });
-                }}>
-                  Annuler
+          setTransactionForm({
+            type: 'depot',
+            amount: '',
+            description: '',
+            status: 'en_attente_paiement',
+            datetime: '',
+            from_field: 'solde',
+            to_field: 'solde',
+            productId: '',
+            interestPeriod: '',
+            to_currency: '',
+            fx_rate_eur_to_account: '',
+            bonus_amount: '',
+            is_surperformance: false,
+            visibleByClient: true
+          });
+        }}>
+          Annuler
                 </Button>
                 <Button type="submit" disabled={isCreatingTransaction}>
                   {isCreatingTransaction ? 'Création...' : 'Créer'}

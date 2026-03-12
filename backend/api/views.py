@@ -9,6 +9,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework.response import Response
 from .models import Client
+from .models import ReferralProspect
 from .models import ClientSuccessor
 from .models import ClientConversation
 from .models import ClientChatMessage
@@ -38,6 +39,7 @@ from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
+    ReferralProspectCreateSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
     ClientSuccessorSerializer,
@@ -2101,6 +2103,79 @@ def client_password_reset_request(request):
         {'message': "Si un compte existe pour cet email, un lien de reinitialisation a ete envoye."},
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def referral_prospect_create(request):
+    """
+    Public endpoint: create a referral prospect (invited by a client).
+    Body: { code, fname, lname, email, phone }
+    """
+    serializer = ReferralProspectCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    code = (serializer.validated_data.get('code') or '').strip()
+    if not code:
+        return Response({'error': 'Code d\'invitation invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        referrer = Client.objects.get(id=code, active=True)
+    except Client.DoesNotExist:
+        return Response({'error': 'Lien d\'invitation invalide ou expiré'}, status=status.HTTP_400_BAD_REQUEST)
+
+    prospect_id = uuid.uuid4().hex[:12]
+    fname_val = (serializer.validated_data.get('fname') or '').strip()
+    lname_val = (serializer.validated_data.get('lname') or '').strip()
+    email_val = (serializer.validated_data.get('email') or '').strip().lower()
+    phone_val = (serializer.validated_data.get('phone') or '').strip()
+    ReferralProspect.objects.create(
+        id=prospect_id,
+        referrer=referrer,
+        fname=fname_val,
+        lname=lname_val,
+        email=email_val,
+        phone=phone_val,
+    )
+
+    # Notifications : admin + conseiller gestionnaire du client parrain
+    prospect_name = f"{fname_val} {lname_val}".strip() or email_val
+    referrer_name = f"{referrer.fname or ''} {referrer.lname or ''}".strip() or referrer.email or referrer.id
+    notif_title = "Nouvelle inscription parrainage"
+    notif_message = f"{prospect_name} s'est inscrit via l'invitation de {referrer_name}."
+    notif_payload = {
+        "prospect_id": prospect_id,
+        "referrer_id": referrer.id,
+        "prospect_email": email_val,
+    }
+
+    # Notification à tous les admins
+    admin_user_ids = list(UserDetails.objects.filter(role='admin').values_list('django_user_id', flat=True))
+    for admin_django_user in DjangoUser.objects.filter(id__in=admin_user_ids):
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=admin_django_user,
+            notification_type=AppNotification.TYPE_REFERRAL_INSCRIPTION,
+            title=notif_title,
+            message=notif_message,
+            payload=notif_payload,
+        )
+
+    # Notification au conseiller gestionnaire du client parrain
+    manager_user = _resolve_client_manager_user(referrer)
+    if manager_user and manager_user.id not in admin_user_ids:
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_REFERRAL_INSCRIPTION,
+            title=notif_title,
+            message=notif_message,
+            payload=notif_payload,
+        )
+
+    return Response({'message': 'Merci ! Nous vous contacterons rapidement.'}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
@@ -4732,26 +4807,36 @@ def asset_chart_data(request, asset_id):
     try:
         # Use Alpha Vantage for cryptos and stocks/ETFs
         if asset.type.lower() == 'crypto':
+            from api.alpha_vantage_service import get_crypto_candles_finnhub, FINNHUB_API_KEY
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            chart_data = av_service.get_crypto_daily_data(asset.alpha_vantage_symbol, market=(asset.currency or 'USD').strip().upper() or 'USD')
+            if not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            # Finnhub first (60 req/min) to avoid Alpha Vantage rate limit (25/day)
+            chart_data = None
+            if FINNHUB_API_KEY:
+                chart_data = get_crypto_candles_finnhub(
+                    asset.alpha_vantage_symbol,
+                    resolution='D',
+                    days=365 if outputsize == 'full' else 120
+                )
+            if not chart_data and av_service:
+                chart_data = av_service.get_crypto_daily_data(asset.alpha_vantage_symbol, market=(asset.currency or 'USD').strip().upper() or 'USD')
             if chart_data and chart_data.get('data'):
-                # Alpha Vantage returns ~1000 days; compact=100 days, full=keep all for 1Y/3Y/MAX
+                # compact=100 days, full=keep all for 1Y/3Y/MAX
                 if outputsize == 'compact':
                     chart_data['data'] = chart_data['data'][-100:]
             if not chart_data or not chart_data.get('data'):
                 return Response({
-                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             return Response(chart_data, status=status.HTTP_200_OK)
         else:
-            # Use Finnhub for stocks/ETFs (preferred) or Alpha Vantage
-            from api.alpha_vantage_service import get_stock_candles_finnhub, FINNHUB_API_KEY
+            # Use FMP, Finnhub, or Alpha Vantage for stocks/ETFs
+            from api.alpha_vantage_service import get_stock_candles_finnhub, FINNHUB_API_KEY, FMP_API_KEY
             av_service = get_alpha_vantage_service()
-            if not FINNHUB_API_KEY and not av_service:
-                return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             # Spot commodities / FX pairs (e.g., XAU/USD, XAG/USD) use FX_DAILY.
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
@@ -4782,11 +4867,13 @@ def asset_chart_data(request, asset_id):
                         out.sort(key=lambda x: x['date'])
                         chart_data = {'data': out, 'meta_data': {'from_symbol': symbol_upper, 'to_symbol': to_ccy}}
             else:
-                from api.alpha_vantage_service import _get_symbol_variants_for_fallback
+                from api.alpha_vantage_service import _get_symbol_variants_for_fallback, get_stock_candles_fmp, FMP_API_KEY
                 chart_data = None
                 days = 365 if outputsize == 'full' else 120
                 for sym in _get_symbol_variants_for_fallback(asset.alpha_vantage_symbol):
-                    if FINNHUB_API_KEY:
+                    if FMP_API_KEY:
+                        chart_data = get_stock_candles_fmp(sym, days=days)
+                    if not chart_data and FINNHUB_API_KEY:
                         chart_data = get_stock_candles_finnhub(sym, resolution='D', days=days)
                     if not chart_data and av_service:
                         chart_data = av_service.get_daily_data(sym, outputsize=outputsize)
@@ -4795,7 +4882,7 @@ def asset_chart_data(request, asset_id):
             
             if not chart_data:
                 return Response({
-                    'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
@@ -5238,7 +5325,7 @@ def asset_update_price(request, asset_id):
             
             if not quote:
                 return Response({
-                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
@@ -5280,7 +5367,7 @@ def asset_update_price(request, asset_id):
                         }
                 if not fx_quote or not fx_quote.get('exchange_rate'):
                     return Response({
-                        'error': f'FX quote {symbol_upper}/{to_ccy} not found or API rate limit reached',
+                        'error': 'Données indisponibles pour le moment',
                         'rate_limit_reached': True
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -5320,7 +5407,7 @@ def asset_update_price(request, asset_id):
                 
                 if not quote:
                     return Response({
-                        'error': f'Symbol {asset.alpha_vantage_symbol} not found',
+                        'error': 'Données indisponibles pour le moment',
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 
                 # Update asset price data
@@ -7747,6 +7834,44 @@ def _client_transaction_create_impl(request, client_id):
         
         # Now save the transaction (signal will see the skip flag)
         transaction.save()
+        
+        # Depot shortcut: create parallel bonus transaction when bonus_amount is provided
+        if transaction_type == 'depot':
+            bonus_amount_raw = request.data.get('bonus_amount')
+            if bonus_amount_raw is not None:
+                try:
+                    bonus_amount_eur = float(bonus_amount_raw)
+                except (TypeError, ValueError):
+                    bonus_amount_eur = 0
+                if bonus_amount_eur > 0:
+                    bonus_final_amount = bonus_amount_eur
+                    bonus_subscription = dict(subscription_details_data or {})
+                    if amount_currency != 'EUR':
+                        fx_rate = bonus_subscription.get('fx_rate_eur_to_account')
+                        if fx_rate is None or fx_rate <= 0:
+                            fx_rate = _get_fx_rate('EUR', amount_currency)
+                        if fx_rate is not None and fx_rate > 0:
+                            bonus_final_amount = round(bonus_amount_eur * fx_rate, 2)
+                            bonus_subscription['deposit_eur_amount'] = bonus_amount_eur
+                            bonus_subscription['fx_rate_eur_to_account'] = fx_rate
+                        else:
+                            bonus_final_amount = round(bonus_amount_eur, 2)
+                    bonus_id = uuid.uuid4().hex[:12]
+                    while Transaction.objects.filter(id=bonus_id).exists():
+                        bonus_id = uuid.uuid4().hex[:12]
+                    bonus_txn = Transaction(
+                        id=bonus_id,
+                        client=client,
+                        type='bonus',
+                        amount=bonus_final_amount,
+                        amount_currency=amount_currency,
+                        description=request.data.get('bonus_description', '') or 'Bonus (dépôt)',
+                        status=transaction_status,
+                        datetime=transaction_datetime,
+                        subscription_details=bonus_subscription,
+                    )
+                    bonus_txn._skip_auto_position_generation = True
+                    bonus_txn.save()
         
         # If this is an investment transaction with status 'valide', generate positions NOW
         # This happens BEFORE the transaction is committed, ensuring positions are ready

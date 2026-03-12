@@ -45,6 +45,7 @@ const PlatformLayout = lazy(() => import('./components/PlatformLayout').then(m =
 const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => ({ default: m.ProductDetail })));
 const MonProfil = lazy(() => import('./components/MonProfil').then(m => ({ default: m.MonProfil })));
 const ClientImpersonate = lazy(() => import('./components/ClientImpersonate').then(m => ({ default: m.ClientImpersonate })));
+const ReferralLandingPage = lazy(() => import('./components/ReferralLandingPage').then(m => ({ default: m.ReferralLandingPage })));
 const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
 
 // Role constants for route protection (must match Sidebar menuItems)
@@ -141,6 +142,11 @@ function App() {
                         </Suspense>
                     } />
                     <Route path="/logout" element={<Logout />} />
+                    <Route path="/invite/:code" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <ReferralLandingPage />
+                        </Suspense>
+                    } />
                     
                     {/* Admin/CRM Routes - All under /admin */}
                     <Route path="/admin" element={

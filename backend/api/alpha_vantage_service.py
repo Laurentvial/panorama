@@ -236,10 +236,16 @@ class AlphaVantageService:
             
             if not quote_data:
                 return None
-            
-            price = float(quote_data.get('05. price', 0) or 0)
-            if not price or price <= 0:
-                return None  # Reject invalid/empty quotes
+
+            raw_price = quote_data.get('05. price')
+            if raw_price is None or raw_price == '':
+                return None  # Missing price - no valid quote
+            try:
+                price = float(raw_price)
+            except (TypeError, ValueError):
+                return None  # Invalid price format
+            if price < 0:
+                return None  # Negative prices are invalid (allow 0 and penny stocks)
             
             return {
                 'symbol': quote_data.get('01. symbol', symbol),
@@ -344,7 +350,8 @@ class AlphaVantageService:
             if 'Information' in data:
                 info_msg = data['Information']
                 logger.warning(f"Alpha Vantage API information: {info_msg}")
-                if 'rate limit' in info_msg.lower():
+                # Only bail if we don't have actual data (rate limit hit = no time series)
+                if 'rate limit' in info_msg.lower() and 'Time Series (Daily)' not in data:
                     return None
             
             # Extract time series data
@@ -1071,7 +1078,7 @@ def _infer_exchange_from_symbol(symbol: str) -> str:
 def _get_symbol_variants_for_fallback(symbol: str) -> List[str]:
     """
     Return alternative symbol formats to try when primary fails.
-    Finnhub uses .DE for XETRA, Alpha Vantage uses .DEX. etc.
+    Finnhub uses .DE for XETRA/Frankfurt, Alpha Vantage uses .DEX, .FRK, etc.
     """
     s = (symbol or '').strip().upper()
     variants = [s]
@@ -1081,8 +1088,10 @@ def _get_symbol_variants_for_fallback(symbol: str) -> List[str]:
         variants.append(s[:-4] + '.DE')   # HAG.DEX -> HAG.DE (Finnhub)
     if s.endswith('.F'):
         variants.append(s[:-2] + '.FRK')  # HAG.F -> HAG.FRK (Alpha Vantage Frankfurt)
+        variants.append(s[:-2] + '.DE')   # HAG.F -> HAG.DE (Finnhub Frankfurt/XETRA)
     elif s.endswith('.FRK'):
         variants.append(s[:-4] + '.F')
+        variants.append(s[:-4] + '.DE')   # HAG.FRK -> HAG.DE (Finnhub Frankfurt/XETRA)
     # UK London (.L): Finnhub uses .L, Alpha Vantage sometimes .LON
     if s.endswith('.L') and len(s) > 2:
         variants.append(s[:-2] + '.LON')  # RR.L -> RR.LON
@@ -1133,6 +1142,63 @@ def get_stock_quote_fmp(symbol: str) -> Optional[Dict]:
         }
     except Exception as e:
         logger.debug(f"FMP stock quote failed for {symbol}: {e}")
+        return None
+
+
+def get_stock_candles_fmp(symbol: str, days: int = 365) -> Optional[Dict]:
+    """
+    Get stock/ETF daily candles from FMP. Returns format compatible with get_daily_data.
+    Uses stable endpoint: /stable/historical-price-eod/full
+    """
+    if not FMP_API_KEY:
+        return None
+    try:
+        # FMP v3 historical-price-full is legacy (deprecated Aug 2025). Use stable endpoint.
+        response = requests.get(
+            "https://financialmodelingprep.com/stable/historical-price-eod/full",
+            params={'symbol': symbol, 'apikey': FMP_API_KEY},
+            timeout=15
+        )
+        if response.status_code != 200:
+            return None
+        raw = response.json()
+        if isinstance(raw, dict) and (raw.get('Error Message') or raw.get('error')):
+            return None
+        # FMP stable: list of objects, or dict with 'historical', or list of one dict with 'historical'
+        data = raw[0] if isinstance(raw, list) and len(raw) > 0 and isinstance(raw[0], dict) else (raw if isinstance(raw, dict) else {})
+        hist = (data.get('historical') or data.get('historicalPrices') or []) if isinstance(data, dict) else []
+        if not hist and isinstance(raw, list) and raw and isinstance(raw[0], dict) and 'date' in (raw[0] or {}):
+            hist = raw  # Flat array of price objects
+        if not hist:
+            return None
+        chart_data = []
+        for h in hist:
+            date_val = h.get('date') or h.get('timestamp')
+            if not date_val:
+                continue
+            if isinstance(date_val, (int, float)):
+                from datetime import datetime
+                date_str = datetime.fromtimestamp(date_val / 1000 if date_val > 1e12 else date_val).strftime('%Y-%m-%d')
+            else:
+                date_str = str(date_val)[:10]
+            chart_data.append({
+                'date': date_str,
+                'open': float(h.get('open', 0) or 0),
+                'high': float(h.get('high', 0) or 0),
+                'low': float(h.get('low', 0) or 0),
+                'close': float(h.get('close', 0) or 0),
+                'volume': int(h.get('volume', 0) or 0)
+            })
+        chart_data.sort(key=lambda x: x['date'])
+        # Limit to requested days (FMP returns all history)
+        if len(chart_data) > days:
+            chart_data = chart_data[-days:]
+        return {
+            'data': chart_data,
+            'meta_data': {'symbol': data.get('symbol', symbol) if isinstance(data, dict) else symbol, 'last_refreshed': '', 'timezone': ''}
+        }
+    except Exception as e:
+        logger.debug(f"FMP stock candles failed for {symbol}: {e}")
         return None
 
 

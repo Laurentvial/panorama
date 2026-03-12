@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
@@ -267,6 +268,7 @@ class AppNotification(models.Model):
     TYPE_MESSAGE_FROM_MANAGER = 'message_from_manager'
     TYPE_CLIENT_DEPOT = 'client_depot'
     TYPE_CLIENT_RETRAIT = 'client_retrait'
+    TYPE_REFERRAL_INSCRIPTION = 'referral_inscription'
 
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     recipient_type = models.CharField(max_length=20, choices=RECIPIENT_CHOICES, default=RECIPIENT_CRM_USER)
@@ -474,6 +476,26 @@ class ClientUsefulLink(models.Model):
 
     def __str__(self):
         return f"{self.client.fname} {self.client.lname} - {self.useful_link.name}"
+
+class ReferralProspect(models.Model):
+    """Prospect invité par parrainage - coordonnées pour rappel"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    referrer = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='referral_prospects')
+    fname = models.CharField(max_length=50)
+    lname = models.CharField(max_length=50)
+    email = models.EmailField()
+    phone = models.CharField(max_length=20, default="", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.id or self.id.strip() == "":
+            self.id = uuid.uuid4().hex[:12]
+            while ReferralProspect.objects.filter(id=self.id).exists():
+                self.id = uuid.uuid4().hex[:12]
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.fname} {self.lname} - référé par {self.referrer.fname} {self.referrer.lname}"
 
 class Transaction(models.Model):
     """Table des transactions clients"""
