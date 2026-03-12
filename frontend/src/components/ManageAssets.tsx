@@ -7,12 +7,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } from '../utils/iconMapping';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import { BulkImportFromIndexModal } from './BulkImportFromIndexModal';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
+
+const ASSETS_PAGE_SIZE = 25;
+
+// Liste des bourses disponibles pour le champ Exchange
+const EXCHANGE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'NASDAQ', label: 'NASDAQ' },
+  { value: 'NYSE', label: 'NYSE (Bourse de New York)' },
+  { value: 'AMEX', label: 'AMEX (American Stock Exchange)' },
+  { value: 'NYSEARCA', label: 'NYSEARCA (ETF)' },
+  { value: 'BATS', label: 'BATS' },
+  { value: 'EURONEXT', label: 'EURONEXT (Paris, Amsterdam, Bruxelles)' },
+  { value: 'LSE', label: 'LSE (Bourse de Londres)' },
+  { value: 'XETR', label: 'XETR (Deutsche Börse)' },
+  { value: 'FWB', label: 'FWB (Frankfurt)' },
+  { value: 'SWX', label: 'SWX (Bourse suisse)' },
+  { value: 'TSE', label: 'TSE (Tokyo)' },
+  { value: 'HKEX', label: 'HKEX (Hong Kong)' },
+  { value: 'SSE', label: 'SSE (Shanghai)' },
+  { value: 'SZSE', label: 'SZSE (Shenzhen)' },
+  { value: 'TSX', label: 'TSX (Toronto)' },
+  { value: 'ASX', label: 'ASX (Australie)' },
+  { value: 'BINANCE', label: 'BINANCE (Crypto)' },
+];
 
 // Helper function to get currency symbol
 function getCurrencySymbol(currency?: string): string {
@@ -54,6 +78,7 @@ export function ManageAssets() {
   const [filterExchange, setFilterExchange] = useState<string>('all');
   const [filterIndex, setFilterIndex] = useState<string>('all');
   const [activeTypeTab, setActiveTypeTab] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
@@ -790,11 +815,9 @@ export function ManageAssets() {
     const isSpotForex = result.type === 'Spot' || result.exchange === 'FOREX';
     if (!logoUrl && result.symbol && !isSpotForex) {
       try {
-        // Extract base symbol (remove exchange suffix like .PA, .DE, .L, etc.)
-        const baseSymbol = result.symbol.split('.')[0];
-        
+        // Use full symbol (RR.L, HAG.DE, etc.) so Finnhub returns the correct company
         const logoResponse = await apiCall(
-          `/api/assets/get-logo/?symbol=${encodeURIComponent(baseSymbol)}&type=${assetType.toLowerCase()}`
+          `/api/assets/get-logo/?symbol=${encodeURIComponent(result.symbol)}&type=${assetType.toLowerCase()}`
         );
         if (logoResponse.logo_url) {
           logoUrl = logoResponse.logo_url;
@@ -838,9 +861,9 @@ export function ManageAssets() {
       loadAssets();
     } catch (error: any) {
       console.error('Error updating asset:', error);
-      // Check if it's a rate limit issue (503 status or rate_limit_reached in response)
+      // 503 = service unavailable (symbol not found, API down, or rate limit)
       if (error?.status === 503 || error?.response?.rate_limit_reached) {
-        toast.warning('Limite de requêtes API atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain.');
+        toast.warning('Prix non disponible. Le symbole n\'a pas été trouvé ou les APIs (FMP/Finnhub) n\'ont pas retourné de données.');
       } else {
         toast.error(error?.message || 'Erreur lors de l\'actualisation des données');
       }
@@ -914,6 +937,21 @@ export function ManageAssets() {
       asset.subcategory?.toLowerCase().includes(searchLower)
     );
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredAssets.length / ASSETS_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const paginatedAssets = useMemo(() => {
+    const start = (safePage - 1) * ASSETS_PAGE_SIZE;
+    return filteredAssets.slice(start, start + ASSETS_PAGE_SIZE);
+  }, [filteredAssets, safePage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterExchange, filterIndex, activeTypeTab]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
 
   if (loading) {
     return (
@@ -1048,7 +1086,7 @@ export function ManageAssets() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAssets.map((asset) => (
+                  {paginatedAssets.map((asset) => (
                     <tr key={asset.id} className="border-b hover:bg-slate-50">
                       <td className="p-2">
                         {asset.logoUrl ? (
@@ -1155,6 +1193,83 @@ export function ManageAssets() {
               </table>
             </div>
           )}
+          {/* Pagination Controls */}
+          {filteredAssets.length > ASSETS_PAGE_SIZE && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t border-slate-200">
+                <div className="text-sm text-slate-600">
+                  Page {safePage} sur {totalPages} ({filteredAssets.length} actifs)
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(1)}
+                    disabled={safePage <= 1}
+                    title="Première page"
+                  >
+                    {/* @ts-ignore - react-icons accepts className at runtime */}
+                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-4 h-4 -ml-2" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                  >
+                    {/* @ts-ignore - react-icons accepts className at runtime */}
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Précédent
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum: number;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (safePage <= 3) {
+                        pageNum = i + 1;
+                      } else if (safePage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = safePage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={safePage === pageNum ? 'default' : 'outline'}
+                          size="sm"
+                          className="min-w-[2.5rem]"
+                          onClick={() => setPage(pageNum)}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                  >
+                    Suivant
+                    {/* @ts-ignore - react-icons accepts className at runtime */}
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(totalPages)}
+                    disabled={safePage >= totalPages}
+                    title="Dernière page"
+                  >
+                    {/* @ts-ignore - react-icons accepts className at runtime */}
+                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-4 h-4 -ml-2" />
+                  </Button>
+                </div>
+              </div>
+            )}
         </CardContent>
       </Card>
 
@@ -1522,15 +1637,28 @@ export function ManageAssets() {
               {!hideExchangeField && (
                 <div className="modal-form-field">
                   <Label htmlFor="exchange">Exchange (Bourse) *</Label>
-                  <Input
-                    id="exchange"
-                    value={formData.exchange}
-                    onChange={(e) => setFormData({ ...formData, exchange: e.target.value.toUpperCase() })}
-                    placeholder="Ex: NASDAQ, NYSE, BINANCE, EURONEXT..."
-                    required
-                  />
+                  <Select
+                    value={formData.exchange || ''}
+                    onValueChange={(value) => setFormData({ ...formData, exchange: value })}
+                  >
+                    <SelectTrigger id="exchange">
+                      <SelectValue placeholder="Sélectionner une bourse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {EXCHANGE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                      {formData.exchange?.trim() && !EXCHANGE_OPTIONS.some((o) => o.value === (formData.exchange || '').trim()) && (
+                        <SelectItem value={formData.exchange.trim()}>
+                          {formData.exchange.trim()} (actuel)
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs text-slate-500 mt-1">
-                    Pour les cryptos, utilisez généralement "BINANCE". Pour les actions US: "NASDAQ" ou "NYSE". Pour l'Europe: "EURONEXT", "LSE", etc.
+                    Bourse sur laquelle l'actif est coté. Pour les cryptos: BINANCE. Pour les actions US: NASDAQ ou NYSE. Pour l'Europe: EURONEXT, LSE, etc.
                   </p>
                 </div>
               )}

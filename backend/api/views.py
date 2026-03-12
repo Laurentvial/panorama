@@ -4498,38 +4498,48 @@ def alpha_vantage_search(request):
 
         return Response({'results': matches[:10], 'count': len(matches[:10])}, status=status.HTTP_200_OK)
     
-    # Use Alpha Vantage for stocks, ETFs, etc.
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    # Use Finnhub for stocks/ETFs (preferred, no rate limits) or Alpha Vantage as fallback
+    from api.alpha_vantage_service import (
+        search_stock_finnhub,
+        FINNHUB_API_KEY,
+    )
+    
+    if not FINNHUB_API_KEY and not get_alpha_vantage_service():
+        return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis pour la recherche'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     try:
-        # Use SYMBOL_SEARCH to find multiple matches by name or symbol
-        results = av_service.search_symbol(keywords)
+        results = []
+        if FINNHUB_API_KEY:
+            results = search_stock_finnhub(keywords)
+        if not results:
+            av_service = get_alpha_vantage_service()
+            if av_service:
+                results = av_service.search_symbol(keywords)
         
         if not results:
-            # Check if it's actually a rate limit by making a test call
-            # Only return rate_limit_reached if we're certain it's a rate limit
-            # For now, return empty results without assuming it's a rate limit
-            # The user might just have searched for something that doesn't exist
             return Response({
-                'results': [], 
+                'results': [],
                 'message': 'Aucun résultat trouvé. Vérifiez l\'orthographe ou essayez un autre terme de recherche.',
                 'rate_limit_reached': False
             }, status=status.HTTP_200_OK)
         
-        # Optionally fetch current price for each result
+        # Fetch current price for each result (tries Finnhub, Alpha Vantage, symbol variants)
+        import time
+        from api.alpha_vantage_service import get_stock_quote_with_fallback
         results_with_prices = []
-        for result in results[:10]:  # Limit to first 10 results
+        for i, result in enumerate(results[:10]):
             try:
-                quote = av_service.get_quote(result['symbol'])
+                if i > 0:
+                    time.sleep(1.0)  # 1 req/s to respect Alpha Vantage 75/min limit
+                else:
+                    time.sleep(0.3)  # Brief pause before first request (spacing from prior searches)
+                quote = get_stock_quote_with_fallback(result['symbol'])
                 if quote:
                     result['price'] = quote['price']
-                    result['change'] = quote['change']
-                    result['change_percent'] = quote['change_percent']
-            except:
-                pass  # If quote fails, just include the search result without price
-            
+                    result['change'] = quote.get('change')
+                    result['change_percent'] = quote.get('change_percent')
+            except Exception:
+                pass
             results_with_prices.append(result)
         
         return Response({
@@ -4537,37 +4547,26 @@ def alpha_vantage_search(request):
             'count': len(results_with_prices)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        error_str = str(e).lower()
-        # Only treat as rate limit if the error message explicitly mentions rate limit
-        # Don't treat generic "Information" messages as rate limits
-        if ("rate limit" in error_str or "api call frequency" in error_str) and "information" not in error_str:
-            return Response({
-                'error': 'Limite de requêtes API Alpha Vantage atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain ou passer à un plan premium.',
-                'rate_limit_reached': True
-            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({'error': f'Erreur lors de la recherche: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def alpha_vantage_quote(request, symbol):
     """
-    Get live quote for a symbol
+    Get live quote for a symbol (Finnhub preferred, Alpha Vantage fallback)
     """
     symbol = symbol.strip().upper()
     
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    from api.alpha_vantage_service import get_stock_quote_with_fallback, FMP_API_KEY, FINNHUB_API_KEY
+    quote = get_stock_quote_with_fallback(symbol)
+
+    if not FMP_API_KEY and not FINNHUB_API_KEY and not get_alpha_vantage_service():
+        return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
-    try:
-        quote = av_service.get_quote(symbol)
-        
-        if not quote:
-            return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        return Response(quote, status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    if not quote:
+        return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response(quote, status=status.HTTP_200_OK)
 
 def _get_fx_rate(from_currency: str, to_currency: str) -> float | None:
     """Get FX rate from_currency -> to_currency. Returns None on failure."""
@@ -4748,10 +4747,11 @@ def asset_chart_data(request, asset_id):
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             return Response(chart_data, status=status.HTTP_200_OK)
         else:
-            # Use Alpha Vantage for stocks/ETFs
+            # Use Finnhub for stocks/ETFs (preferred) or Alpha Vantage
+            from api.alpha_vantage_service import get_stock_candles_finnhub, FINNHUB_API_KEY
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             # Spot commodities / FX pairs (e.g., XAU/USD, XAG/USD) use FX_DAILY.
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
@@ -4782,7 +4782,16 @@ def asset_chart_data(request, asset_id):
                         out.sort(key=lambda x: x['date'])
                         chart_data = {'data': out, 'meta_data': {'from_symbol': symbol_upper, 'to_symbol': to_ccy}}
             else:
-                chart_data = av_service.get_daily_data(asset.alpha_vantage_symbol, outputsize=outputsize)
+                from api.alpha_vantage_service import _get_symbol_variants_for_fallback
+                chart_data = None
+                days = 365 if outputsize == 'full' else 120
+                for sym in _get_symbol_variants_for_fallback(asset.alpha_vantage_symbol):
+                    if FINNHUB_API_KEY:
+                        chart_data = get_stock_candles_finnhub(sym, resolution='D', days=days)
+                    if not chart_data and av_service:
+                        chart_data = av_service.get_daily_data(sym, outputsize=outputsize)
+                    if chart_data:
+                        break
             
             if not chart_data:
                 return Response({
@@ -4810,14 +4819,12 @@ def asset_get_logo(request):
     try:
         logo_url = None
         
-        # Use crypto logo function for cryptos, company logo for stocks
         if asset_type == 'crypto':
             from api.alpha_vantage_service import get_crypto_logo
             logo_url = get_crypto_logo(symbol)
         else:
-            av_service = get_alpha_vantage_service()
-            if av_service:
-                logo_url = av_service.get_company_logo(symbol)
+            from api.alpha_vantage_service import get_company_logo
+            logo_url = get_company_logo(symbol)
         
         if logo_url:
             return Response({'logo_url': logo_url}, status=status.HTTP_200_OK)
@@ -4955,9 +4962,15 @@ def asset_create_from_alpha_vantage(request):
             if not currency:
                 currency = 'USD'
         else:
+            from api.alpha_vantage_service import (
+                get_stock_profile_finnhub,
+                get_company_logo,
+                FINNHUB_API_KEY,
+                FMP_API_KEY,
+            )
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             # Spot metals / FX (XAU/XAG) use forex quote instead of stock quotes.
             if symbol in ['XAU', 'XAG'] or (exchange or '').strip().upper() == 'FOREX':
@@ -4996,19 +5009,34 @@ def asset_create_from_alpha_vantage(request):
                     # Don't rely on mutability; we set name in create() below.
                     pass
             else:
-                # Fetch quote to get current price and validate symbol
-                quote = av_service.get_quote(symbol)
-                
+                # Fetch quote (tries Finnhub, Alpha Vantage, and symbol variants like HAG.DE->HAG.DEX, RR.L->RR.LON)
+                from api.alpha_vantage_service import get_stock_quote_with_fallback, get_stock_profile_finnhub, _get_symbol_variants_for_fallback
+                quote = get_stock_quote_with_fallback(symbol)
                 if not quote:
-                    return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+                    # Quote failed. If user selected from search (has name) or profile exists, allow creation without price.
+                    has_name = bool((request.data.get('name') or '').strip())
+                    profile = None
+                    for sym in _get_symbol_variants_for_fallback(symbol):
+                        profile = get_stock_profile_finnhub(sym)
+                        if profile and profile.get('Name'):
+                            break
+                    if has_name or (profile and profile.get('Name')):
+                        quote = {'symbol': symbol, 'price': None, 'change': None, 'change_percent': None}
+                    else:
+                        return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
             
             # Get logo URL if not provided (skip for spot FX)
             if not logo_url and symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
-                logo_url = av_service.get_company_logo(symbol) or ''
+                logo_url = get_company_logo(symbol) or ''
+                if not logo_url and av_service:
+                    logo_url = av_service.get_company_logo(symbol) or ''
 
             # Best-effort company info (persisted on import) - equities/ETFs only.
+            overview = {}
+            overview_currency = ''
+            overview_country = ''
             if symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
-                overview = av_service.get_company_overview(symbol) or {}
+                overview = (get_stock_profile_finnhub(symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(symbol) if av_service else None) or {}
                 overview_name = (overview.get('Name') or '').strip()
                 overview_description = (overview.get('Description') or '').strip()
                 overview_sector = (overview.get('Sector') or '').strip()
@@ -5152,10 +5180,10 @@ Entrée (JSON):
             currency=currency,
             region=region,
             logo_url=logo_url,
-            last_price=quote['price'],
+            last_price=quote.get('price'),
             last_price_update=timezone.now() if quote.get('price') is not None else None,
-            price_change=quote['change'] if quote.get('price') is not None else None,
-            price_change_percent=float(quote['change_percent']) if (quote.get('price') is not None and quote.get('change_percent')) else None,
+            price_change=quote.get('change') if quote.get('price') is not None else None,
+            price_change_percent=float(quote['change_percent']) if (quote.get('price') is not None and quote.get('change_percent') is not None) else None,
             description=manual_description or overview_description,
             sector=overview_sector,
             industry=overview_industry,
@@ -5228,10 +5256,15 @@ def asset_update_price(request, asset_id):
             
             asset.save()
         else:
-            # Use Alpha Vantage for stocks/ETFs
+            from api.alpha_vantage_service import (
+                get_stock_profile_finnhub,
+                get_company_logo,
+                FINNHUB_API_KEY,
+                FMP_API_KEY,
+            )
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
             if symbol_upper in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
@@ -5282,12 +5315,12 @@ def asset_update_price(request, asset_id):
 
                 asset.save()
             else:
-                quote = av_service.get_quote(asset.alpha_vantage_symbol)
+                from api.alpha_vantage_service import get_stock_quote_with_fallback
+                quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
                 
                 if not quote:
                     return Response({
-                        'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
-                        'rate_limit_reached': True
+                        'error': f'Symbol {asset.alpha_vantage_symbol} not found',
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 
                 # Update asset price data
@@ -5310,13 +5343,11 @@ def asset_update_price(request, asset_id):
                 )
                 
                 if needs_details:
-                    # Get company overview for additional details
-                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    overview = (get_stock_profile_finnhub(asset.alpha_vantage_symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(asset.alpha_vantage_symbol) if av_service else None)
                     
                     if overview:
-                        # Update logo if missing
                         if not asset.logo_url:
-                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            logo_url = get_company_logo(asset.alpha_vantage_symbol) or (av_service.get_company_logo(asset.alpha_vantage_symbol) if av_service else None)
                             if logo_url:
                                 asset.logo_url = logo_url
                         
@@ -5426,6 +5457,12 @@ def assets_bulk_update_prices(request):
     if not assets.exists():
         return Response({'error': 'No valid assets found with symbols configured'}, status=status.HTTP_404_NOT_FOUND)
     
+    from api.alpha_vantage_service import (
+        get_stock_profile_finnhub,
+        get_company_logo,
+        FINNHUB_API_KEY,
+        FMP_API_KEY,
+    )
     av_service = get_alpha_vantage_service()
     
     updated_count = 0
@@ -5433,13 +5470,13 @@ def assets_bulk_update_prices(request):
     
     for idx, asset in enumerate(assets):
         try:
-            # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
-            if idx > 0 and idx % 5 == 0:
-                time.sleep(12)  # 12 seconds = 5 requests per minute
+            # Delay only when using Alpha Vantage (Finnhub has no strict rate limits)
+            if not FINNHUB_API_KEY and av_service and idx > 0 and idx % 5 == 0:
+                time.sleep(12)
             
             updated = False
             
-            # Use Alpha Vantage for cryptos and stocks/ETFs
+            # Use Finnhub/Alpha Vantage for cryptos and stocks/ETFs
             if asset.type.lower() == 'crypto':
                 quote = get_crypto_quote_alpha_vantage(asset.alpha_vantage_symbol)
                 
@@ -5457,12 +5494,12 @@ def assets_bulk_update_prices(request):
                         asset.logo_url = logo_url
                         updated = True
             else:
-                if not av_service:
-                    errors.append(f'{asset.alpha_vantage_symbol}: Alpha Vantage API key not configured')
+                if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                    errors.append(f'{asset.alpha_vantage_symbol}: FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis')
                     continue
                 
-                # Get quote for price update
-                quote = av_service.get_quote(asset.alpha_vantage_symbol)
+                from api.alpha_vantage_service import get_stock_quote_with_fallback
+                quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
                 
                 if quote:
                     asset.last_price = quote['price']
@@ -5471,7 +5508,6 @@ def assets_bulk_update_prices(request):
                     asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
                     updated = True
                 
-                # Check if we need to fetch additional details
                 needs_details = (
                     not asset.logo_url or 
                     not asset.description or 
@@ -5485,13 +5521,11 @@ def assets_bulk_update_prices(request):
                 )
                 
                 if needs_details:
-                    # Get company overview for additional details
-                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    overview = (get_stock_profile_finnhub(asset.alpha_vantage_symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(asset.alpha_vantage_symbol) if av_service else None)
                     
                     if overview:
-                        # Update logo if missing
                         if not asset.logo_url:
-                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            logo_url = get_company_logo(asset.alpha_vantage_symbol) or (av_service.get_company_logo(asset.alpha_vantage_symbol) if av_service else None)
                             if logo_url:
                                 asset.logo_url = logo_url
                                 updated = True
@@ -5635,7 +5669,7 @@ def assets_bulk_import_from_index(request):
         skipped = 0
         errors = []
         
-        av_service = get_alpha_vantage_service() if fetch_full_details else None
+        av_service = get_alpha_vantage_service()
         
         for idx, constituent in enumerate(constituents):
             symbol = constituent.get('symbol', '').strip().upper()
@@ -5713,15 +5747,19 @@ def assets_bulk_import_from_index(request):
                     'subcategory': asset_type,
                 }
                 
-                if av_service:
-                    # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
-                    # Only add delay if we've imported at least one asset
-                    if imported > 0 and imported % 5 == 0:
-                        time.sleep(12)  # 12 seconds = 5 requests per minute
+                from api.alpha_vantage_service import (
+                    get_stock_quote_finnhub,
+                    get_stock_profile_finnhub,
+                    get_company_logo,
+                    FINNHUB_API_KEY,
+                )
+                if FINNHUB_API_KEY or av_service:
+                    if not FINNHUB_API_KEY and av_service and imported > 0 and imported % 5 == 0:
+                        time.sleep(12)
                     
                     try:
-                        # Always fetch quote to get current price, regardless of fetch_full_details
-                        quote = av_service.get_quote(symbol)
+                        from api.alpha_vantage_service import get_stock_quote_with_fallback
+                        quote = get_stock_quote_with_fallback(symbol)
                         
                         if quote:
                             asset_data['last_price'] = quote.get('price')
@@ -5729,10 +5767,8 @@ def assets_bulk_import_from_index(request):
                             asset_data['price_change'] = quote.get('change')
                             asset_data['price_change_percent'] = float(quote.get('change_percent', 0)) if quote.get('change_percent') else None
                             
-                            # Only fetch detailed company information if requested
                             if fetch_full_details:
-                                # Fetch company overview for additional details
-                                overview = av_service.get_company_overview(symbol) or {}
+                                overview = (get_stock_profile_finnhub(symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(symbol) if av_service else None) or {}
                                 if overview:
                                     asset_data['name'] = overview.get('Name') or name or symbol
                                     asset_data['description'] = overview.get('Description', '').strip()
@@ -5764,8 +5800,7 @@ def assets_bulk_import_from_index(request):
                                     except Exception:
                                         pass
                                 
-                                # Fetch logo
-                                logo_url = av_service.get_company_logo(symbol) or ''
+                                logo_url = get_company_logo(symbol) or (av_service.get_company_logo(symbol) if av_service else '') or ''
                                 if logo_url:
                                     asset_data['logo_url'] = logo_url
                                 

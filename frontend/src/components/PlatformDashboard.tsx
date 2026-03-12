@@ -343,7 +343,11 @@ export function PlatformDashboard() {
           break;
         case 'interets':
           calculatedInvestedCapital += amt;
-          calculatedProfitLoss -= amt;
+          // Surperformances = intérêts supplémentaires (hors renta initiale) → ne pas soustraire du P&L
+          const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
+          if (!subDetails?.is_surperformance) {
+            calculatedProfitLoss -= amt;
+          }
           break;
         case 'frais':
         case 'perte':

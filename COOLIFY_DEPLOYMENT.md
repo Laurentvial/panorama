@@ -174,6 +174,7 @@ Add these in the project or application environment:
 | `GEMINI_API_KEY` | No | For AI features |
 | `ALPHA_VANTAGE_API_KEY` | No | For price refresh |
 | `FINNHUB_API_KEY` | No | For price refresh |
+| `FMP_API_KEY` | No | For price refresh (FMP preferred for stocks/ETFs) |
 | `NEWS_API_KEY` | No | For news |
 | `RESEND_API_KEY` | No | For email |
 | `RESEND_FROM_EMAIL` | No | Sender email |

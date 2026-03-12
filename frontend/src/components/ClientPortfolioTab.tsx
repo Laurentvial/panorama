@@ -137,7 +137,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
           break;
         case 'interets':
           calculatedInvestedCapital += amount;
-          calculatedProfitLoss -= amount;
+          // Surperformances = intérêts supplémentaires (hors renta initiale) → ne pas soustraire du P&L
+          const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
+          if (!subDetails?.is_surperformance) {
+            calculatedProfitLoss -= amount;
+          }
           break;
         case 'frais':
         case 'perte':

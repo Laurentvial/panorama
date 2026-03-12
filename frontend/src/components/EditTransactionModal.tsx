@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Checkbox } from './ui/checkbox';
 import { ProductTransferSelect } from './ProductTransferSelect';
 import { X, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
@@ -65,6 +66,7 @@ export function EditTransactionModal({
     to_field: 'solde',
     productId: '',
     interestPeriod: '',
+    is_surperformance: false,
   });
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
@@ -211,7 +213,8 @@ export function EditTransactionModal({
           transaction.subscription_interest_period ||
           transaction.subscription_details?.interestPeriod ||
           transaction.subscription_details?.interest_period ||
-          ''
+          '',
+        is_surperformance: !!transaction?.subscription_details?.is_surperformance,
       });
     }
   }, [isOpen, transaction]);
@@ -337,6 +340,7 @@ export function EditTransactionModal({
       to_field: 'solde',
       productId: '',
       interestPeriod: '',
+      is_surperformance: false,
     });
     setTransferProduct(null);
     onClose();
@@ -396,6 +400,16 @@ export function EditTransactionModal({
             to_field: transactionForm.to_field || 'solde',
             subscription_details: buildSubscriptionDetailsForUpdate(),
             interestPeriod: transactionForm.interestPeriod || '',
+          }
+        : {}),
+      ...(transactionForm.type === 'interets'
+        ? {
+            subscription_details: {
+              ...(transaction?.subscription_details && typeof transaction.subscription_details === 'object'
+                ? transaction.subscription_details
+                : {}),
+              is_surperformance: !!transactionForm.is_surperformance,
+            },
           }
         : {}),
     };
@@ -767,6 +781,19 @@ export function EditTransactionModal({
                 required
               />
             </div>
+            {transactionForm.type === 'interets' && (
+              <div className="modal-form-field flex items-start gap-2">
+                <Checkbox
+                  id="edit-is_surperformance"
+                  checked={!!transactionForm.is_surperformance}
+                  onCheckedChange={(checked) =>
+                    setTransactionForm({ ...transactionForm, is_surperformance: !!checked })
+                  }
+                  className="mt-0.5 shrink-0"
+                />
+                <Label htmlFor="edit-is_surperformance" className="cursor-pointer leading-tight text-sm">Surperformance (intérêts supplémentaires)</Label>
+              </div>
+            )}
             <div className="modal-form-field col-span-2">
               <Label>Description</Label>
               <Textarea

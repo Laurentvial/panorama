@@ -326,14 +326,12 @@ export function ViewTransactionModal({
         description,
         datetime: datetimeISO,
         status: 'valide',
-        subscription_details: {},
+        subscription_details: {
+          ...(linkedProductId && { productId: linkedProductId }),
+          ...(linkedAssetId && { assetId: linkedAssetId }),
+          is_surperformance: true,
+        },
       };
-      if (linkedProductId) {
-        (payload.subscription_details as Record<string, unknown>).productId = linkedProductId;
-      }
-      if (linkedAssetId) {
-        (payload.subscription_details as Record<string, unknown>).assetId = linkedAssetId;
-      }
       await apiCall(`/api/clients/${clientId}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify(payload),

@@ -345,6 +345,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     to_currency: '',
     // depot/bonus for non-EUR account: amount in EUR, optional fx rate
     fx_rate_eur_to_account: '',
+    // interets: surperformance (intérêts supplémentaires, exclus du calcul paid_interests)
+    is_surperformance: false,
     // kept for backward compatibility with existing UI resets
     visibleByClient: true
   });
@@ -652,6 +654,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         ...((transactionForm.type === 'depot' || transactionForm.type === 'bonus') && needsEurAndRate && transactionForm.fx_rate_eur_to_account
           ? { subscription_details: { fx_rate_eur_to_account: parseFloat(transactionForm.fx_rate_eur_to_account) } }
           : {}),
+        ...(transactionForm.type === 'interets'
+          ? { subscription_details: { is_surperformance: !!transactionForm.is_surperformance } }
+          : {}),
       };
 
       const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
@@ -715,6 +720,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            is_surperformance: false,
             visibleByClient: true
           });
           // Don't call onRefresh yet - wait for modal to complete
@@ -764,6 +770,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         interestPeriod: '',
         to_currency: '',
         fx_rate_eur_to_account: '',
+        is_surperformance: false,
         visibleByClient: true
       });
       // Reload first page to guarantee visibility of the newly created transaction.
@@ -930,6 +937,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            is_surperformance: false,
             visibleByClient: true
           });
         }}>
@@ -1072,6 +1080,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             interestPeriod: '',
             to_currency: '',
             fx_rate_eur_to_account: '',
+            is_surperformance: false,
             visibleByClient: true
           });
         }}>
@@ -1098,6 +1107,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                     interestPeriod: '',
                     to_currency: '',
                     fx_rate_eur_to_account: '',
+                    is_surperformance: false,
                     visibleByClient: true
                   });
                 }}
@@ -1286,6 +1296,19 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                       </p>
                     </div>
                   )}
+                  {transactionForm.type === 'interets' && (
+                    <div className="modal-form-field flex items-start gap-2">
+                      <Checkbox
+                        id="is_surperformance"
+                        checked={!!transactionForm.is_surperformance}
+                        onCheckedChange={(checked) =>
+                          setTransactionForm({ ...transactionForm, is_surperformance: !!checked })
+                        }
+                        className="mt-0.5 shrink-0"
+                      />
+                      <Label htmlFor="is_surperformance" className="cursor-pointer leading-tight text-sm">Surperformance (intérêts supplémentaires)</Label>
+                    </div>
+                  )}
                 </>
               )}
               <div className="modal-form-field col-span-2">
@@ -1345,6 +1368,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                     interestPeriod: '',
                     to_currency: '',
                     fx_rate_eur_to_account: '',
+                    is_surperformance: false,
                     visibleByClient: true
                   });
                 }}>
