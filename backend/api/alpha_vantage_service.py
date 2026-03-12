@@ -1029,10 +1029,14 @@ def _infer_region_from_symbol(symbol: str) -> str:
         return 'Europe'
     if s.endswith('.DE') or s.endswith('.F') or s.endswith('.HM'):
         return 'Germany'
-    if s.endswith('.L') or s.endswith('.SW'):
-        return 'United Kingdom' if '.L' in s else 'Switzerland'
-    if s.endswith('.T') or s.endswith('.KS'):
-        return 'Japan' if '.T' in s else 'South Korea'
+    if s.endswith('.L'):
+        return 'United Kingdom'
+    if s.endswith('.SW'):
+        return 'Switzerland'
+    if s.endswith('.T'):
+        return 'Japan'
+    if s.endswith('.KS'):
+        return 'South Korea'
     if '.' not in s or s.endswith('.US'):
         return 'United States'
     return 'Global'

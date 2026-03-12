@@ -11340,12 +11340,19 @@ def product_generate_description(request):
         
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
+        product_type = request.data.get('type', '')
+        reference = request.data.get('reference', '')
+        subcategory = request.data.get('subcategory', [])
         min_entry_value = request.data.get('minEntryValue', '')
         max_entry_value = request.data.get('maxEntryValue', '')
         profitability = request.data.get('profitability', '')
         no_profitability = request.data.get('noProfitability', True)
         if isinstance(no_profitability, str):
             no_profitability = no_profitability.lower() in ('oui', 'true', '1', 'yes')
+        is_variable_profitability = request.data.get('isVariableProfitability', 'Non').strip()
+        profitability_rate = request.data.get('profitabilityRate', '')
+        profitability_min = request.data.get('profitabilityMin', '')
+        profitability_max = request.data.get('profitabilityMax', '')
         duration = request.data.get('duration', '')
         profitability_period = request.data.get('profitabilityPeriod', '')
         interest_period = request.data.get('interestPeriod', [])
@@ -11354,6 +11361,8 @@ def product_generate_description(request):
             available_funds = available_funds.lower() in ('oui', 'true', '1', 'yes')
         availability_start = request.data.get('availabilityStart', '')
         availability_end = request.data.get('availabilityEnd', '')
+        existing_description = (request.data.get('existingDescription') or request.data.get('description') or '').strip()
+        is_improve_mode = bool(existing_description)
         
         # Get category name if available
         category_name = ''
@@ -11367,23 +11376,34 @@ def product_generate_description(request):
         # Format interest period (périodes de rentabilité disponibles)
         interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else '')
         
-        # Format duration with months equivalent
-        duration_str = duration or 'Non spécifiée'
-        if duration and str(duration).isdigit():
-            days = int(duration)
-            months = round(days / 30)
-            duration_str = f"{days} jours ({months} mois)"
+        # Format duration (vide = durée indéterminée)
+        duration_clean = (str(duration) or '').strip()
+        duration_str = 'durée indéterminée' if not duration_clean else (
+            f"{int(duration_clean)} jours ({round(int(duration_clean) / 30)} mois)" if duration_clean.isdigit() else duration_clean
+        )
         
-        rentability_str = "non applicable" if no_profitability else (profitability or "Non spécifiée")
+        # Rentabilité: variable ou fixe
+        if no_profitability:
+            rentability_str = "non applicable"
+        elif is_variable_profitability == 'Oui' and profitability_min and profitability_max:
+            rentability_str = f"{profitability_min}% à {profitability_max}%"
+        elif profitability_rate:
+            rentability_str = f"{profitability_rate}%"
+        else:
+            rentability_str = profitability or "à définir"
+        
+        subcategory_str = ', '.join(subcategory) if isinstance(subcategory, list) and subcategory else (subcategory if isinstance(subcategory, str) else '')
         max_invest_str = f"{max_entry_value}€" if max_entry_value else "sans plafond"
         funds_str = "Oui" if available_funds else "Non"
         availability_str = ""
         if availability_start or availability_end:
             availability_str = f"Disponible du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
-        prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
-- Nom: {name or 'Non spécifié'}
+        product_info_block = f"""- Nom: {name or 'Non spécifié'}
+- Type: {product_type or 'Non spécifié'}
+- Référence: {reference or 'Non spécifiée'}
 - Catégorie: {category_name or 'Non spécifiée'}
+- Sous-catégories: {subcategory_str or 'Non spécifiées'}
 - Investissement minimum: {min_entry_value or 'Non spécifié'}€
 - Plafond de souscription: {max_invest_str}
 - Durée: {duration_str}
@@ -11391,7 +11411,24 @@ def product_generate_description(request):
 - Période de rentabilité: {profitability_period or 'Non spécifiée'}
 - Périodes d'intérêt disponibles: {interest_period_str or 'Non spécifiées'}
 - Fonds disponibles: {funds_str}
-{f'- Période de disponibilité: {availability_str}' if availability_str else ''}
+{f'- Période de disponibilité: {availability_str}' if availability_str else ''}"""
+
+        if is_improve_mode:
+            prompt = f"""Tu dois AMÉLIORER la description de produit existante ci-dessous en utilisant TOUTES les informations produit fournies. Mets à jour les valeurs (durée, rentabilité, plafonds, etc.) avec les données exactes. Conserve le ton professionnel. Pas de #, *, - ou puces. Texte pur.
+
+{product_info_block}
+
+--- DESCRIPTION EXISTANTE À AMÉLIORER ---
+
+{existing_description}
+
+--- FIN DE LA DESCRIPTION EXISTANTE ---
+
+Génère la description améliorée (remplace entièrement par la version améliorée):"""
+        else:
+            prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
+
+{product_info_block}
 
 La description doit être:
 - Professionnelle et rassurante
@@ -11620,12 +11657,11 @@ def product_generate_cgv(request):
         else:
             rentability_text = "à définir"
         
-        # Format duration with months
-        duration_str = duration or 'à définir'
-        if duration and str(duration).isdigit():
-            days = int(duration)
-            months = round(days / 30)
-            duration_str = f"{days} jours ({months} mois)"
+        # Format duration with months (vide = durée indéterminée)
+        duration_clean = (str(duration) or '').strip()
+        duration_str = 'durée indéterminée' if not duration_clean else (
+            f"{int(duration_clean)} jours ({round(int(duration_clean) / 30)} mois)" if duration_clean.isdigit() else duration_clean
+        )
         
         # Format interest period (périodes de rentabilité disponibles)
         interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else 'à définir')
@@ -11635,10 +11671,10 @@ def product_generate_cgv(request):
         if availability_start or availability_end:
             availability_str = f"Du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
-        # Prompt avec toutes les informations
-        prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
-
-Informations du produit:
+        existing_cgv = (request.data.get('existingCgv') or request.data.get('cgv') or '').strip()
+        is_improve_mode = bool(existing_cgv)
+        
+        product_info_block = f"""Informations du produit:
 - Investissement minimum: {min_entry_value or 'à définir'}€
 - Plafond de souscription (investissement maximum): {max_entry_value or 'à définir'}€ (ou "sans plafond" si vide)
 - Durée du contrat: {duration_str}
@@ -11666,14 +11702,33 @@ Structure (14 sections obligatoires, toutes complètes):
 
 Règles:
 - Utiliser EXACTEMENT les valeurs fournies ci-dessus (durée, rentabilité, périodes, fonds disponibles, plafond) dans les sections concernées
-- Section 3 Durée: mentionner la durée en jours et mois
+- Section 3 Durée: si "durée indéterminée", préciser que la durée du contrat est indéterminée; sinon mentionner la durée en jours et mois
 - Section 4 Rémunération: intégrer la période de rentabilité et les périodes d'intérêt disponibles
 - Mentionner si les fonds sont disponibles ou non selon l'information fournie
 - Chaque sous-section: 2-3 phrases minimum
 - Pas de placeholders [ ], pas de symboles #, *, -
 - Texte professionnel et juridique français
 - Document complet et utilisable directement
-- Environ 500-700 mots au total
+- Environ 500-700 mots au total"""
+
+        if is_improve_mode:
+            prompt = f"""Tu dois AMÉLIORER et COMPLÉTER le texte de Conditions Générales de Vente existant ci-dessous pour le produit "{name}".
+
+Utilise les informations produit fournies pour corriger, enrichir et aligner le texte existant. Conserve la structure et le style du document, mais mets à jour toutes les valeurs (durée, rentabilité, plafonds, etc.) avec les données exactes fournies. Ajoute les sections manquantes si nécessaire.
+
+{product_info_block}
+
+--- TEXTE EXISTANT À AMÉLIORER ---
+
+{existing_cgv}
+
+--- FIN DU TEXTE EXISTANT ---
+
+Génère le document CGV complet et amélioré (remplace entièrement le texte existant par la version améliorée):"""
+        else:
+            prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
+
+{product_info_block}
 
 Génère le document complet:"""
         
