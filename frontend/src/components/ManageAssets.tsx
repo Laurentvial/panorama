@@ -71,6 +71,20 @@ function getCurrencySymbol(currency?: string): string {
   return currencyMap[currencyUpper] || currencyUpper;
 }
 
+function formatLastPriceUpdate(isoDate: string): string {
+  const date = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 1) return 'À l\'instant';
+  if (diffMins < 60) return `Il y a ${diffMins} min`;
+  if (diffHours < 24) return `Il y a ${diffHours} h`;
+  if (diffDays < 7) return `Il y a ${diffDays} j`;
+  return date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
 export function ManageAssets() {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -863,7 +877,11 @@ export function ManageAssets() {
       console.error('Error updating asset:', error);
       // 503 = service unavailable (symbol not found, API down, or rate limit)
       if (error?.status === 503 || error?.response?.rate_limit_reached) {
-        toast.warning('Prix non disponible. Le symbole n\'a pas été trouvé ou les APIs (FMP/Finnhub) n\'ont pas retourné de données.');
+        const sym = error?.response?.symbol;
+        const msg = sym
+          ? `Prix non disponible pour ${sym}. Les APIs (FMP/Finnhub/Metals-API/Alpha Vantage) n'ont pas retourné de données.`
+          : 'Prix non disponible. Le symbole n\'a pas été trouvé ou les APIs (FMP/Finnhub/Metals-API/Alpha Vantage) n\'ont pas retourné de données.';
+        toast.warning(msg);
       } else {
         toast.error(error?.message || 'Erreur lors de l\'actualisation des données');
       }
@@ -1079,6 +1097,7 @@ export function ManageAssets() {
                     <th className="text-left p-2 font-medium text-slate-700">Symbole Ticker</th>
                     <th className="text-left p-2 font-medium text-slate-700">Prix</th>
                     <th className="text-left p-2 font-medium text-slate-700">Variation</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Dernière MAJ</th>
                     <th className="text-left p-2 font-medium text-slate-700">Catégorie</th>
                     <th className="text-left p-2 font-medium text-slate-700">Sous-catégorie</th>
                     <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
@@ -1142,6 +1161,15 @@ export function ManageAssets() {
                               )}
                             </span>
                           </div>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-sm text-slate-600">
+                        {asset.lastPriceUpdate ? (
+                          <span title={new Date(asset.lastPriceUpdate).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })}>
+                            {formatLastPriceUpdate(asset.lastPriceUpdate)}
+                          </span>
                         ) : (
                           <span className="text-slate-400">-</span>
                         )}

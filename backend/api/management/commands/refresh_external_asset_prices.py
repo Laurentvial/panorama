@@ -10,9 +10,10 @@ from django.utils import timezone
 from api.alpha_vantage_service import (
     get_alpha_vantage_service,
     get_crypto_quote_alpha_vantage,
+    get_forex_metal_quote_with_fallback,
     get_oanda_candles_finnhub,
-    get_oanda_quote_finnhub,
     get_stock_quote_with_fallback,
+    _normalize_metal_symbol,
     FINNHUB_API_KEY,
     FMP_API_KEY,
 )
@@ -45,22 +46,12 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.save(update_fields=["last_price", "last_price_update", "price_change", "price_change_percent"])
             return True, None
 
-        # FX / metals (or explicit FOREX exchange): Finnhub OANDA endpoints
-        if symbol_upper in ["XAU", "XAG"] or (asset.exchange or "").strip().upper() == "FOREX":
+        # FX / metals (or explicit FOREX exchange): Finnhub OANDA first, Metals-API second
+        symbol_normalized = _normalize_metal_symbol(symbol_upper)
+        if symbol_normalized in ["XAU", "XAG"] or (asset.exchange or "").strip().upper() == "FOREX":
             to_ccy = (asset.currency or "USD").strip().upper() or "USD"
 
-            fx_quote = get_oanda_quote_finnhub(symbol_upper, to_ccy)
-            if (not fx_quote or not fx_quote.get("exchange_rate")) and to_ccy != "USD":
-                metal_usd = get_oanda_quote_finnhub(symbol_upper, "USD")
-                usd_to = get_oanda_quote_finnhub("USD", to_ccy)
-                if (
-                    metal_usd
-                    and usd_to
-                    and metal_usd.get("exchange_rate")
-                    and usd_to.get("exchange_rate")
-                ):
-                    fx_quote = {"exchange_rate": float(metal_usd["exchange_rate"]) * float(usd_to["exchange_rate"])}
-
+            fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
             if not fx_quote or not fx_quote.get("exchange_rate"):
                 return False, f"fx quote {symbol_upper}/{to_ccy} not found / rate limited"
 
@@ -68,9 +59,9 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.last_price_update = timezone.now()
 
             # Best-effort change from last 2 daily closes (same as your API view)
-            fx_daily = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution="D", days=30)
+            fx_daily = get_oanda_candles_finnhub(symbol_normalized, to_ccy, resolution="D", days=30)
             if not fx_daily and to_ccy != "USD":
-                metal_usd = get_oanda_candles_finnhub(symbol_upper, "USD", resolution="D", days=30)
+                metal_usd = get_oanda_candles_finnhub(symbol_normalized, "USD", resolution="D", days=30)
                 usd_to = get_oanda_candles_finnhub("USD", to_ccy, resolution="D", days=30)
                 if metal_usd and usd_to:
                     usd_to_by_date = {p["date"]: p for p in (usd_to.get("data") or []) if p.get("date")}
@@ -140,14 +131,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--scope",
             choices=["product-assets", "all"],
-            default="product-assets",
-            help="Which assets to refresh. 'product-assets' = only assets linked to products. 'all' = all assets with symbols.",
+            default=os.getenv("PRICE_REFRESH_SCOPE", "all"),
+            help="Which assets to refresh. 'product-assets' = only assets linked to products. 'all' = all assets with symbols (default).",
         )
         parser.add_argument(
             "--limit",
             type=int,
-            default=int(os.getenv("PRICE_REFRESH_LIMIT", "20")),
-            help="Max number of assets to refresh per run (default: PRICE_REFRESH_LIMIT or 20).",
+            default=int(os.getenv("PRICE_REFRESH_LIMIT", "0")),
+            help="Max number of assets to refresh per run. 0 = all (default).",
         )
         parser.add_argument(
             "--min-age-seconds",
@@ -158,7 +149,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         scope = options["scope"]
-        limit = max(int(options["limit"]), 1)
+        limit = max(int(options["limit"]), 0)  # 0 = no limit (all)
         min_age_seconds = max(int(options["min_age_seconds"]), 0)
 
         now = timezone.now()
@@ -203,7 +194,9 @@ class Command(BaseCommand):
                     f"needs_update={age_seconds is None or (age_seconds is not None and age_seconds >= min_age_seconds)}"
                 )
         
-        qs = qs.order_by(models.F("last_price_update").asc(nulls_first=True), "id")[:limit]
+        qs = qs.order_by(models.F("last_price_update").asc(nulls_first=True), "id")
+        if limit > 0:
+            qs = qs[:limit]
 
         av_service = get_alpha_vantage_service()
 
@@ -211,7 +204,7 @@ class Command(BaseCommand):
         errors = 0
 
         self.stdout.write(
-            f"Refreshing asset prices (scope={scope}, limit={limit}, min_age_seconds={min_age_seconds})..."
+            f"Refreshing asset prices (scope={scope}, limit={'all' if limit == 0 else limit}, min_age_seconds={min_age_seconds})..."
         )
         self.stdout.write(f"Found {total_eligible} assets eligible for update (cutoff: {cutoff})")
 

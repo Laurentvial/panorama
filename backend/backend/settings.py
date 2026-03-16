@@ -131,7 +131,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "0"))  # Default 0 seconds (close immediately)
 
 if DATABASE_URL:
-    # Heroku/Scalingo/Render: require SSL. Coolify/internal Docker: often no SSL.
+    # Scalingo/Render: require SSL. Coolify/internal Docker: often no SSL.
     # Set DB_SSL_REQUIRE=false for Coolify or other internal Postgres without SSL.
     ssl_require = os.getenv("DB_SSL_REQUIRE", "true").lower() in ("true", "1", "yes")
     db_config = dj_database_url.config(

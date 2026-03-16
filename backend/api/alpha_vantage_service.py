@@ -36,6 +36,9 @@ FINNHUB_BASE_URL = 'https://finnhub.io/api/v1'
 FMP_API_KEY = os.getenv('FMP_API_KEY', '')
 FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3'
 
+# Metals-API (optional) - gold/silver when Finnhub OANDA fails. Alpha Vantage FX_DAILY does not support XAU/XAG.
+METALS_API_KEY = os.getenv('METALS_API_KEY', '')
+
 
 class AlphaVantageService:
     """Service class for interacting with Alpha Vantage API"""
@@ -1240,12 +1243,11 @@ def get_stock_quote_finnhub(symbol: str) -> Optional[Dict]:
 def get_stock_quote_with_fallback(symbol: str) -> Optional[Dict]:
     """
     Get stock quote trying FMP, Finnhub, and Alpha Vantage with symbol variants.
-    Order: FMP (if key) -> Finnhub -> Alpha Vantage.
-    When FMP or Finnhub is configured, Alpha Vantage is skipped to avoid rate limit (25/jour gratuit).
+    Order: FMP (if key) -> Finnhub -> Alpha Vantage (fallback when others fail).
+    Alpha Vantage is used as fallback when FMP/Finnhub return no data (premium subscription recommended).
     """
     import time
     variants = _get_symbol_variants_for_fallback(symbol)
-    has_fmp_or_finnhub = bool(FMP_API_KEY or FINNHUB_API_KEY)
     for i, sym in enumerate(variants):
         if i > 0:
             time.sleep(0.5)  # Throttle to avoid rate limit
@@ -1261,14 +1263,13 @@ def get_stock_quote_with_fallback(symbol: str) -> Optional[Dict]:
             if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
                 q['symbol'] = symbol
                 return q
-        # Alpha Vantage only when no FMP/Finnhub (évite rate limit 25/jour)
-        if not has_fmp_or_finnhub:
-            av = get_alpha_vantage_service()
-            if av:
-                q = av.get_quote(sym)
-                if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
-                    q['symbol'] = symbol
-                    return q
+        # Alpha Vantage as fallback when FMP/Finnhub failed (premium subscription has higher limits)
+        av = get_alpha_vantage_service()
+        if av:
+            q = av.get_quote(sym)
+            if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
+                q['symbol'] = symbol
+                return q
     return None
 
 
@@ -1485,6 +1486,120 @@ def get_oanda_quote_finnhub(from_symbol: str, to_symbol: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error fetching OANDA quote from Finnhub for {from_symbol}/{to_symbol}: {str(e)}")
         return None
+
+
+def _normalize_metal_symbol(s: str) -> str:
+    """Normalize metal symbol: XAU SPOT, XAUUSD, XAU/USD -> XAU."""
+    s = (s or '').strip().upper()
+    if not s:
+        return s
+    if s in ['XAU', 'XAG']:
+        return s
+    # XAUUSD, XAU USD, XAU SPOT, XAU/USD, etc.
+    if s.startswith('XAU') and len(s) <= 10:
+        return 'XAU'
+    if s.startswith('XAG') and len(s) <= 10:
+        return 'XAG'
+    return s
+
+
+def _get_metal_quote_metals_api(from_ccy: str, to_ccy: str) -> Optional[Dict]:
+    """Get XAU/XAG quote from metals-api.com (requires METALS_API_KEY)."""
+    if not METALS_API_KEY or from_ccy not in ['XAU', 'XAG']:
+        return None
+    try:
+        # metals-api: base=USD&symbols=XAU returns 1 USD = rate XAU. We need 1 XAU = ? USD, so use 1/rate.
+        url = f"https://api.metals-api.com/api/latest?access_key={METALS_API_KEY}&base=USD&symbols={from_ccy}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not data.get('success') or from_ccy not in (data.get('rates') or {}):
+            return None
+        raw_rate = float(data['rates'][from_ccy])
+        if raw_rate <= 0:
+            return None
+        # 1 USD = raw_rate XAU => 1 XAU = 1/raw_rate USD
+        rate_usd = 1.0 / raw_rate
+        if to_ccy == 'USD':
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': rate_usd,
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': data.get('date', ''),
+            }
+        # Cross-rate: XAU/EUR = (1 XAU in USD) * (1 USD in EUR)
+        url2 = f"https://api.metals-api.com/api/latest?access_key={METALS_API_KEY}&base=USD&symbols={to_ccy}"
+        resp2 = requests.get(url2, timeout=10)
+        if resp2.status_code != 200:
+            return None
+        data2 = resp2.json()
+        if not data2.get('success') or to_ccy not in (data2.get('rates') or {}):
+            return None
+        usd_to_ccy = float(data2['rates'][to_ccy])
+        if usd_to_ccy <= 0:
+            return None
+        return {
+            'from_currency': from_ccy,
+            'to_currency': to_ccy,
+            'exchange_rate': rate_usd * usd_to_ccy,
+            'bid_price': 0.0,
+            'ask_price': 0.0,
+            'last_refreshed': data.get('date', ''),
+        }
+    except Exception as e:
+        logger.debug(f"Metals-API quote failed for {from_ccy}/{to_ccy}: {e}")
+        return None
+
+
+def get_forex_metal_quote_with_fallback(from_symbol: str, to_symbol: str) -> Optional[Dict]:
+    """
+    Get forex/metal quote (e.g. XAU/USD, XAG/USD, EUR/USD).
+    Tries: Finnhub OANDA -> Metals-API (XAU/XAG only) -> Alpha Vantage FX (fiat only; XAU/XAG not supported).
+    """
+    from_ccy = _normalize_metal_symbol(from_symbol)
+    to_ccy = (to_symbol or '').strip().upper() or 'USD'
+    if not from_ccy:
+        return None
+
+    # 1. Try Finnhub OANDA first
+    fx_quote = get_oanda_quote_finnhub(from_ccy, to_ccy)
+    if fx_quote and fx_quote.get('exchange_rate'):
+        return fx_quote
+
+    # 2. Cross-rate for metals (XAU/EUR = XAU/USD * USD/EUR)
+    if to_ccy != 'USD' and from_ccy in ['XAU', 'XAG']:
+        metal_usd = get_oanda_quote_finnhub(from_ccy, 'USD')
+        usd_to = get_oanda_quote_finnhub('USD', to_ccy)
+        if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate']),
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': '',
+                'change': metal_usd.get('change'),
+                'change_percent': metal_usd.get('change_percent'),
+            }
+
+    # 3. Metals-API fallback for XAU/XAG (Alpha Vantage FX_DAILY does not support gold/silver)
+    if from_ccy in ['XAU', 'XAG']:
+        mq = _get_metal_quote_metals_api(from_ccy, to_ccy)
+        if mq:
+            return mq
+
+    # 4. Alpha Vantage for fiat forex (EUR/USD, etc.) - not for XAU/XAG
+    if from_ccy not in ['XAU', 'XAG']:
+        av = get_alpha_vantage_service()
+        if av:
+            av_quote = av.get_forex_quote_with_fallback(from_ccy, to_ccy)
+            if av_quote and av_quote.get('exchange_rate'):
+                return av_quote
+
+    return None
 
 
 def get_oanda_candles_finnhub(from_symbol: str, to_symbol: str, resolution: str = 'D', days: int = 365) -> Optional[Dict]:

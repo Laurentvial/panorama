@@ -167,7 +167,7 @@ railway run python manage.py shell
 - Vérifiez que `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, et `AWS_STORAGE_BUCKET_NAME` sont définis
 - Vérifiez vos identifiants S3/MinIO
 
-## Avantages de Railway vs Heroku
+## Avantages de Railway
 
 - ✅ **Gratuit** : Plan gratuit généreux avec 500$ de crédit par mois
 - ✅ **Plus fiable** : Infrastructure moderne et stable

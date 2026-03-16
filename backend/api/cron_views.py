@@ -35,8 +35,8 @@ def cron_refresh_prices(request):
     if not _validate_cron_token(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
 
-    scope = request.GET.get("scope", "product-assets")
-    limit = int(request.GET.get("limit", os.getenv("PRICE_REFRESH_LIMIT", "20")))
+    scope = request.GET.get("scope", os.getenv("PRICE_REFRESH_SCOPE", "all"))
+    limit = int(request.GET.get("limit", os.getenv("PRICE_REFRESH_LIMIT", "0")))
     min_age_seconds = int(
         request.GET.get("min_age_seconds", os.getenv("PRICE_REFRESH_MIN_AGE_SECONDS", "240"))
     )

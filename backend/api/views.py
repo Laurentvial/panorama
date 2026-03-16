@@ -5059,7 +5059,7 @@ def asset_create_from_alpha_vantage(request):
             if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
                 return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-            # Spot metals / FX (XAU/XAG) use forex quote instead of stock quotes.
+            # Spot metals / FX (XAU/XAG) use forex quote: Finnhub OANDA first, Alpha Vantage FX_DAILY fallback.
             if symbol in ['XAU', 'XAG'] or (exchange or '').strip().upper() == 'FOREX':
                 if not currency:
                     currency = 'USD'
@@ -5068,26 +5068,17 @@ def asset_create_from_alpha_vantage(request):
                 if not region:
                     region = 'Global'
 
-                from api.alpha_vantage_service import get_oanda_quote_finnhub
-                fx_quote = get_oanda_quote_finnhub(symbol, currency)
-                # Cross via USD if direct pair isn't available
-                if (not fx_quote or not fx_quote.get('exchange_rate')) and currency != 'USD':
-                    metal_usd = get_oanda_quote_finnhub(symbol, 'USD')
-                    usd_to = get_oanda_quote_finnhub('USD', currency)
-                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
-                        fx_quote = {
-                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
-                        }
+                from api.alpha_vantage_service import get_forex_metal_quote_with_fallback
+                fx_quote = get_forex_metal_quote_with_fallback(symbol, currency)
 
-                # If we can't fetch a quote (e.g. FINNHUB_API_KEY missing), still allow import.
-                # Price will be updated later once the market data provider is configured.
+                # If we can't fetch a quote, still allow import. Price will be updated later.
                 quote_price = float(fx_quote['exchange_rate']) if (fx_quote and fx_quote.get('exchange_rate')) else None
 
                 quote = {
                     'symbol': symbol,
                     'price': quote_price,
-                    'change': 0,
-                    'change_percent': None,
+                    'change': fx_quote.get('change') if fx_quote else 0,
+                    'change_percent': fx_quote.get('change_percent') if fx_quote else None,
                 }
 
                 # If no name provided, set a friendly one.
@@ -5354,30 +5345,25 @@ def asset_update_price(request, asset_id):
                 return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
-            if symbol_upper in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
+            from api.alpha_vantage_service import _normalize_metal_symbol, get_forex_metal_quote_with_fallback, get_oanda_candles_finnhub
+            symbol_normalized = _normalize_metal_symbol(symbol_upper)
+            if symbol_normalized in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
                 to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
-                from api.alpha_vantage_service import get_oanda_quote_finnhub, get_oanda_candles_finnhub
-                fx_quote = get_oanda_quote_finnhub(symbol_upper, to_ccy)
-                if (not fx_quote or not fx_quote.get('exchange_rate')) and to_ccy != 'USD':
-                    metal_usd = get_oanda_quote_finnhub(symbol_upper, 'USD')
-                    usd_to = get_oanda_quote_finnhub('USD', to_ccy)
-                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
-                        fx_quote = {
-                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
-                        }
+                fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
                 if not fx_quote or not fx_quote.get('exchange_rate'):
                     return Response({
                         'error': 'Données indisponibles pour le moment',
-                        'rate_limit_reached': True
+                        'rate_limit_reached': True,
+                        'symbol': symbol_upper,
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
                 asset.last_price = fx_quote['exchange_rate']
                 asset.last_price_update = timezone.now()
 
                 # Best-effort change from last 2 daily closes
-                fx_daily = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution='D', days=30)
+                fx_daily = get_oanda_candles_finnhub(symbol_normalized, to_ccy, resolution='D', days=30)
                 if not fx_daily and to_ccy != 'USD':
-                    metal_usd = get_oanda_candles_finnhub(symbol_upper, 'USD', resolution='D', days=30)
+                    metal_usd = get_oanda_candles_finnhub(symbol_normalized, 'USD', resolution='D', days=30)
                     usd_to = get_oanda_candles_finnhub('USD', to_ccy, resolution='D', days=30)
                     if metal_usd and usd_to:
                         usd_to_by_date = {p['date']: p for p in (usd_to.get('data') or [])}
@@ -5408,6 +5394,7 @@ def asset_update_price(request, asset_id):
                 if not quote:
                     return Response({
                         'error': 'Données indisponibles pour le moment',
+                        'symbol': symbol_upper,
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 
                 # Update asset price data
@@ -5581,19 +5568,37 @@ def assets_bulk_update_prices(request):
                         asset.logo_url = logo_url
                         updated = True
             else:
-                if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
-                    errors.append(f'{asset.alpha_vantage_symbol}: FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis')
-                    continue
-                
-                from api.alpha_vantage_service import get_stock_quote_with_fallback
-                quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
-                
-                if quote:
-                    asset.last_price = quote['price']
-                    asset.last_price_update = timezone.now()
-                    asset.price_change = quote['change']
-                    asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
-                    updated = True
+                symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
+                from api.alpha_vantage_service import _normalize_metal_symbol
+                symbol_normalized = _normalize_metal_symbol(symbol_upper)
+                is_forex_metal = symbol_normalized in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX'
+
+                if is_forex_metal:
+                    # Metals/FOREX: Finnhub OANDA first, Metals-API second, Alpha Vantage for fiat only
+                    to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
+                    from api.alpha_vantage_service import get_forex_metal_quote_with_fallback
+                    fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
+                    if fx_quote and fx_quote.get('exchange_rate'):
+                        asset.last_price = fx_quote['exchange_rate']
+                        asset.last_price_update = timezone.now()
+                        asset.price_change = fx_quote.get('change')
+                        asset.price_change_percent = float(fx_quote['change_percent']) if fx_quote.get('change_percent') is not None else None
+                        updated = True
+                else:
+                    # Stocks/ETFs: FMP, Finnhub, Alpha Vantage fallback
+                    if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                        errors.append(f'{asset.alpha_vantage_symbol}: FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis')
+                        continue
+
+                    from api.alpha_vantage_service import get_stock_quote_with_fallback
+                    quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
+
+                    if quote:
+                        asset.last_price = quote['price']
+                        asset.last_price_update = timezone.now()
+                        asset.price_change = quote['change']
+                        asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                        updated = True
                 
                 needs_details = (
                     not asset.logo_url or 
