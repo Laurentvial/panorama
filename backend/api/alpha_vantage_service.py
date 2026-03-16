@@ -247,8 +247,8 @@ class AlphaVantageService:
                 price = float(raw_price)
             except (TypeError, ValueError):
                 return None  # Invalid price format
-            if price < 0:
-                return None  # Negative prices are invalid (allow 0 and penny stocks)
+            if price <= 0:
+                return None  # Invalid price (0 or negative; consistent with FMP/Finnhub)
             
             return {
                 'symbol': quote_data.get('01. symbol', symbol),

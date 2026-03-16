@@ -131,14 +131,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--scope",
             choices=["product-assets", "all"],
-            default=os.getenv("PRICE_REFRESH_SCOPE", "all"),
-            help="Which assets to refresh. 'product-assets' = only assets linked to products. 'all' = all assets with symbols (default).",
+            default=os.getenv("PRICE_REFRESH_SCOPE", "product-assets"),
+            help="Which assets to refresh. 'product-assets' = only assets linked to products (default). 'all' = all assets with symbols.",
         )
         parser.add_argument(
             "--limit",
             type=int,
-            default=int(os.getenv("PRICE_REFRESH_LIMIT", "0")),
-            help="Max number of assets to refresh per run. 0 = all (default).",
+            default=int(os.getenv("PRICE_REFRESH_LIMIT", "50")),
+            help="Max number of assets to refresh per run (default: 50). Use 0 for unlimited (risky: may exhaust API quotas).",
         )
         parser.add_argument(
             "--min-age-seconds",
@@ -146,14 +146,22 @@ class Command(BaseCommand):
             default=int(os.getenv("PRICE_REFRESH_MIN_AGE_SECONDS", "240")),
             help="Skip assets updated more recently than this many seconds (default: 240).",
         )
+        parser.add_argument(
+            "--failed-retry-hours",
+            type=int,
+            default=int(os.getenv("PRICE_REFRESH_FAILED_RETRY_HOURS", "6")),
+            help="Skip assets that failed to update within this many hours (default: 6). Ensures rotation through all assets.",
+        )
 
     def handle(self, *args, **options):
         scope = options["scope"]
         limit = max(int(options["limit"]), 0)  # 0 = no limit (all)
         min_age_seconds = max(int(options["min_age_seconds"]), 0)
+        failed_retry_hours = max(int(options.get("failed_retry_hours", 6)), 0)
 
         now = timezone.now()
         cutoff = now - timezone.timedelta(seconds=min_age_seconds)
+        failed_cutoff = now - timezone.timedelta(hours=failed_retry_hours) if failed_retry_hours > 0 else None
 
         qs = Asset.objects.filter(alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol="")
 
@@ -164,8 +172,13 @@ class Command(BaseCommand):
         # Debug: show all assets before filtering
         all_assets_before_filter = qs.count()
         self.stdout.write(f"Assets with symbols (before age filter): {all_assets_before_filter}")
-        
+
+        # Eligible: needs update (stale or never updated) AND not recently failed (backoff)
         qs = qs.filter(models.Q(last_price_update__isnull=True) | models.Q(last_price_update__lt=cutoff))
+        if failed_cutoff is not None:
+            qs = qs.filter(
+                models.Q(last_price_update_attempt__isnull=True) | models.Q(last_price_update_attempt__lt=failed_cutoff)
+            )
         total_eligible = qs.count()
         
         # Debug: show some examples
@@ -204,7 +217,8 @@ class Command(BaseCommand):
         errors = 0
 
         self.stdout.write(
-            f"Refreshing asset prices (scope={scope}, limit={'all' if limit == 0 else limit}, min_age_seconds={min_age_seconds})..."
+            f"Refreshing asset prices (scope={scope}, limit={'all' if limit == 0 else limit}, "
+            f"min_age_seconds={min_age_seconds}, failed_retry_hours={failed_retry_hours})..."
         )
         self.stdout.write(f"Found {total_eligible} assets eligible for update (cutoff: {cutoff})")
 
@@ -213,6 +227,10 @@ class Command(BaseCommand):
             old_update = asset.last_price_update
             ok, err = _update_one_asset_price(asset, av_service)
             if ok:
+                # Clear failed-attempt marker on success
+                if asset.last_price_update_attempt is not None:
+                    asset.last_price_update_attempt = None
+                    asset.save(update_fields=["last_price_update_attempt"])
                 # Refresh from DB to get actual saved values
                 asset.refresh_from_db()
                 new_price = asset.last_price
@@ -227,6 +245,9 @@ class Command(BaseCommand):
                 )
             else:
                 errors += 1
+                # Backoff: mark failed attempt so we don't retry this asset every run
+                asset.last_price_update_attempt = timezone.now()
+                asset.save(update_fields=["last_price_update_attempt"])
                 self.stdout.write(f"[ERROR] {asset.id} {asset.alpha_vantage_symbol}: {err}")
 
         self.stdout.write(f"Done. Updated={updated}, Errors={errors}, TotalConsidered={qs.count()}")

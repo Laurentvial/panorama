@@ -240,14 +240,15 @@ Replace `YOUR_CRON_SECRET_TOKEN` with the value you set in the backend env.
 
 ### Optional query params for refresh-prices
 
-- `scope`: `all` (default) or `product-assets` — `all` refreshes every asset with a symbol; `product-assets` only those linked to products
-- `limit`: max assets per run (default 0 = all). Set to a positive number to cap.
+- `scope`: `product-assets` (default) or `all` — `product-assets` only refreshes assets linked to products (safer for API quotas); `all` refreshes every asset with a symbol
+- `limit`: max assets per run (default 50). Use 0 for unlimited (risky: may exhaust API quotas).
 - `min_age_seconds`: skip recently updated assets (default 240)
+- `failed_retry_hours`: skip assets that failed to update within this many hours (default 6). Ensures rotation through all assets instead of retrying the same failing ones every run.
 
 Example:
 
 ```
-http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN&scope=all&min_age_seconds=240
+http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN&scope=product-assets&limit=50&min_age_seconds=240&failed_retry_hours=6
 ```
 
 ## 9. Database Migration from Render

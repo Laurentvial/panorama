@@ -11,4 +11,4 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-$PYTHON manage.py refresh_external_asset_prices --scope all --min-age-seconds 240
+$PYTHON manage.py refresh_external_asset_prices --scope product-assets --limit 50 --min-age-seconds 240

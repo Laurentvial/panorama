@@ -373,7 +373,8 @@ class Asset(models.Model):
     source_index = models.CharField(max_length=50, default="", blank=True)  # Source market index (e.g., "sp500", "cac40", "nasdaq")
     logo_url = models.URLField(max_length=500, default="", blank=True)  # URL of the company logo
     last_price = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Last trading price
-    last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last price update
+    last_price_update = models.DateTimeField(null=True, blank=True)  # Timestamp of last successful price update
+    last_price_update_attempt = models.DateTimeField(null=True, blank=True)  # Last failed attempt; used to backoff retries
     price_change = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)  # Price change from previous close
     price_change_percent = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)  # Percentage change
 
