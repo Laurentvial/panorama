@@ -45,52 +45,32 @@ AWS_S3_USE_SSL=true
 ### MinIO on VPS
 
 1. Install MinIO on your server (see https://min.io/docs/minio/linux/index.html)
-2. Create a bucket (e.g. `panorama-media`)
+2. Create a bucket (e.g. `panorama-media` or `plateformes`)
 3. Create access keys via MinIO Console or `mc admin user` / `mc admin policy`
-4. Configure the bucket for public read access if you want direct URLs (or use presigned URLs)
+4. **Keep the bucket PRIVATE** – Django uses presigned URLs for secure access
 
-### Bucket Policy (Public Read)
+### Security: Keep Bucket Private (Required)
 
-For public image URLs, add a bucket policy. Replace `panorama-media` with your actual bucket name.
+**Do NOT** set a public bucket policy. The app uses presigned URLs so only users who receive URLs from your API can access files.
 
-**Option A: MinIO Console (Web UI)**
+If your bucket is currently public (anyone can browse/download without login), remove anonymous access:
 
-1. Open MinIO Console (e.g. `http://localhost:9001` or `https://minio.yourdomain.com`)
-2. Log in with your admin credentials
-3. Click **Buckets** in the left sidebar
-4. Click your bucket name (e.g. `panorama-media`)
-5. Go to **Access** or **Manage** tab
-6. Find **Access Policy** or **Bucket Policy**
-7. Paste the policy below and save
-
-**Option B: MinIO Client (mc)**
-
-1. Install mc: `curl https://dl.min.io/client/mc/release/linux-amd64/mc -o mc && chmod +x mc`
-2. Add your MinIO server: `./mc alias set myminio http://localhost:9000 ACCESS_KEY SECRET_KEY`
-3. Create a file `policy.json` with the content below
-4. Apply it: `./mc anonymous set-json policy.json myminio/panorama-media`
-
-**Policy JSON:**
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::panorama-media/*"
-    }
-  ]
-}
-```
-
-**Note:** Some MinIO versions use a simpler format. If the above fails, try setting anonymous access to `download`:
+**Using MinIO Client (mc):**
 
 ```bash
-mc anonymous set download myminio/panorama-media
+# Install mc, then add your server
+./mc alias set myminio https://your-minio-endpoint ACCESS_KEY SECRET_KEY
+
+# Remove all anonymous access from the bucket
+./mc anonymous set none myminio/plateformes
 ```
+
+**Using MinIO Console (Web UI):**
+
+1. Open MinIO Console and log in
+2. Go to **Buckets** → your bucket → **Access** or **Manage**
+3. Remove any bucket policy that allows `Principal: "*"` or anonymous access
+4. Ensure no public/anonymous policy is applied
 
 ## Testing
 
@@ -103,9 +83,19 @@ After configuration:
 
 ## Important Notes
 
-- **Public URLs** - Configure bucket policy for public read if you want direct access
+- **Private bucket** - Keep the bucket private; Django generates presigned URLs (valid 1 hour) for each file
 - **CORS** - If uploading from browser, configure CORS on the bucket
 - **Local development** - Use `AWS_S3_USE_SSL=false` if MinIO runs on HTTP
+
+## Migrating External Asset Logos
+
+Asset logos from external APIs (Clearbit, CoinGecko, etc.) may not load because those APIs block or rate-limit server requests. To migrate them to your storage:
+
+```bash
+python manage.py migrate_external_asset_logos
+```
+
+Use `--dry-run` to preview, or `--limit 10` to process a few assets first.
 
 ## Troubleshooting
 
@@ -116,9 +106,9 @@ After configuration:
 - For MinIO: verify `AWS_S3_ENDPOINT_URL` is correct and reachable
 
 ### Images not accessible
-- Check bucket policy allows public read (or use presigned URLs)
+- Ensure the bucket is private (no anonymous policy)
+- Presigned URLs expire after 1 hour; the API generates fresh URLs on each request
 - Verify CORS if accessing from a web app
-- Ensure the URL format is correct (MinIO path-style or virtual-host-style)
 
 ### SSL errors
 - Set `AWS_S3_USE_SSL=true` for HTTPS endpoints

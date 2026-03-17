@@ -179,6 +179,7 @@ urlpatterns = [
     path('news/bulk-import-from-api/', api_views.news_bulk_import_from_api, name='news-bulk-import-from-api'),
     path('news/<str:news_id>/update/', api_views.news_update, name='news-update'),
     path('news/<str:news_id>/delete/', api_views.news_delete, name='news-delete'),
-    # Media proxy endpoint for CORS-compliant image serving
-    path('media/<path:file_path>/', api_views.media_proxy, name='media-proxy'),
+    # Media proxy: ?url= for external URLs, or /media/path/ for storage paths
+    path('media/', api_views.media_proxy, name='media-proxy'),
+    path('media/<path:file_path>/', api_views.media_proxy_path, name='media-proxy-path'),
 ]

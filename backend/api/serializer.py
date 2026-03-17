@@ -1,10 +1,64 @@
 from django.contrib.auth.models import User as DjangoUser
+from django.conf import settings
 from rest_framework import serializers
 from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 import uuid
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
+
+
+def _get_media_url_for_field(request, file_field):
+    """Return URL for a FileField. Uses proxy when S3 is configured to avoid CORS/presigned issues with private buckets."""
+    if not file_field:
+        return None
+    try:
+        if getattr(settings, 'S3_CONFIGURED', False) and request:
+            # Use proxy so images load reliably (avoids CORS, presigned URL issues)
+            path = file_field.name
+            if path:
+                proxy_path = quote(path, safe='/')
+                return request.build_absolute_uri(f'/api/media/{proxy_path}/')
+        # Fallback: direct URL (for local storage or when no request)
+        url = file_field.url
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url
+        if request and url:
+            return request.build_absolute_uri(url)
+        return url
+    except Exception:
+        return None
+
+
+def _get_proxy_url_for_logo(request, logo_url):
+    """Return proxy URL for asset logo. Our MinIO paths use storage proxy; external URLs use ?url= proxy."""
+    if not logo_url or not isinstance(logo_url, str):
+        return logo_url or ''
+    logo_url = logo_url.strip()
+    if not logo_url or not (logo_url.startswith('http://') or logo_url.startswith('https://')):
+        return logo_url
+    if not request:
+        return logo_url
+    try:
+        # Logos already in our bucket: use storage path proxy (works with private bucket)
+        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', '') or ''
+        bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '') or ''
+        if endpoint and bucket and endpoint.rstrip('/') in logo_url and bucket in logo_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(logo_url)
+            path = parsed.path
+            # Path is typically /bucket_name/assets/xxx.png - extract path within bucket
+            prefix = f'/{bucket}/'
+            if path.startswith(prefix):
+                storage_path = path[len(prefix):].lstrip('/')
+                if storage_path:
+                    proxy_path = quote(storage_path, safe='/')
+                    return request.build_absolute_uri(f'/api/media/{proxy_path}/')
+        # External URLs: use ?url= proxy
+        encoded = quote(logo_url, safe='')
+        return request.build_absolute_uri(f'/api/media/?url={encoded}')
+    except Exception:
+        return logo_url
 
 class UserSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -315,20 +369,8 @@ class ClientSerializer(serializers.ModelSerializer):
             ret['managerTeamName'] = ''
         
         # Convertir les champs personnels de snake_case à camelCase
-        if instance.profile_photo:
-            profile_url = instance.profile_photo.url
-            # Cloudinary URLs are public by default, return them directly
-            if profile_url and (profile_url.startswith('http://') or profile_url.startswith('https://')):
-                ret['profilePhoto'] = profile_url
-            else:
-                # Local path - build absolute URI
-                request = self.context.get('request')
-                if request:
-                    ret['profilePhoto'] = request.build_absolute_uri(profile_url) if profile_url else ''
-                else:
-                    ret['profilePhoto'] = profile_url if profile_url else ''
-        else:
-            ret['profilePhoto'] = ''
+        request = self.context.get('request')
+        ret['profilePhoto'] = _get_media_url_for_field(request, instance.profile_photo) or ''
         ret['civility'] = ret.get('civility', '') or ''
         ret['password'] = ret.get('password', '') or ''
         ret['active'] = bool(ret.get('active', True))
@@ -348,57 +390,10 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['totalLiquidities'] = ret.get('total_liquidities', '') or ''
         
         # KYC fields
-        if instance.identity_document:
-            identity_url = instance.identity_document.url
-            if identity_url and (identity_url.startswith('http://') or identity_url.startswith('https://')):
-                ret['identityDocument'] = identity_url
-            else:
-                request = self.context.get('request')
-                if request:
-                    ret['identityDocument'] = request.build_absolute_uri(identity_url) if identity_url else ''
-                else:
-                    ret['identityDocument'] = identity_url if identity_url else ''
-        else:
-            ret['identityDocument'] = ''
-        
-        if instance.identity_document_verso:
-            identity_verso_url = instance.identity_document_verso.url
-            if identity_verso_url and (identity_verso_url.startswith('http://') or identity_verso_url.startswith('https://')):
-                ret['identityDocumentVerso'] = identity_verso_url
-            else:
-                request = self.context.get('request')
-                if request:
-                    ret['identityDocumentVerso'] = request.build_absolute_uri(identity_verso_url) if identity_verso_url else ''
-                else:
-                    ret['identityDocumentVerso'] = identity_verso_url if identity_verso_url else ''
-        else:
-            ret['identityDocumentVerso'] = ''
-        
-        if instance.proof_of_address:
-            address_url = instance.proof_of_address.url
-            if address_url and (address_url.startswith('http://') or address_url.startswith('https://')):
-                ret['proofOfAddress'] = address_url
-            else:
-                request = self.context.get('request')
-                if request:
-                    ret['proofOfAddress'] = request.build_absolute_uri(address_url) if address_url else ''
-                else:
-                    ret['proofOfAddress'] = address_url if address_url else ''
-        else:
-            ret['proofOfAddress'] = ''
-        
-        if instance.selfie_photo:
-            selfie_url = instance.selfie_photo.url
-            if selfie_url and (selfie_url.startswith('http://') or selfie_url.startswith('https://')):
-                ret['selfiePhoto'] = selfie_url
-            else:
-                request = self.context.get('request')
-                if request:
-                    ret['selfiePhoto'] = request.build_absolute_uri(selfie_url) if selfie_url else ''
-                else:
-                    ret['selfiePhoto'] = selfie_url if selfie_url else ''
-        else:
-            ret['selfiePhoto'] = ''
+        ret['identityDocument'] = _get_media_url_for_field(request, instance.identity_document) or ''
+        ret['identityDocumentVerso'] = _get_media_url_for_field(request, instance.identity_document_verso) or ''
+        ret['proofOfAddress'] = _get_media_url_for_field(request, instance.proof_of_address) or ''
+        ret['selfiePhoto'] = _get_media_url_for_field(request, instance.selfie_photo) or ''
         
         ret['kycStatus'] = ret.get('kyc_status', 'pending') or 'pending'
         ret['kycSubmittedAt'] = ret.get('kyc_submitted_at', None)
@@ -484,14 +479,8 @@ class ClientSuccessorSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'createdAt', 'updatedAt']
 
     def get_identityDocument(self, obj):
-        if obj.identity_document:
-            url = obj.identity_document.url
-            if url and not url.startswith('http'):
-                request = self.context.get('request')
-                if request:
-                    return request.build_absolute_uri(url)
-            return url
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.identity_document)
 
 
 class ClientChatMessageSerializer(serializers.ModelSerializer):
@@ -614,16 +603,8 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         return team_member.team.name if team_member else None
 
     def get_profilePhoto(self, obj):
-        if not getattr(obj, 'profile_photo', None):
-            return ''
-        try:
-            url = obj.profile_photo.url
-        except Exception:
-            return ''
-        if url and (url.startswith('http://') or url.startswith('https://')):
-            return url
         request = self.context.get('request')
-        return request.build_absolute_uri(url) if request and url else (url or '')
+        return _get_media_url_for_field(request, getattr(obj, 'profile_photo', None)) or ''
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -790,7 +771,7 @@ class AssetSerializer(serializers.ModelSerializer):
     alphaVantageSymbol = serializers.CharField(source='alpha_vantage_symbol', required=False, allow_blank=True)
     tradingViewSymbol = serializers.CharField(source='trading_view_symbol', required=False, allow_blank=True)
     sourceIndex = serializers.CharField(source='source_index', required=False, allow_blank=True)
-    logoUrl = serializers.URLField(source='logo_url', required=False, allow_blank=True)
+    logoUrl = serializers.SerializerMethodField()
     lastPrice = serializers.DecimalField(source='last_price', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
     lastPriceUpdate = serializers.DateTimeField(source='last_price_update', read_only=True, allow_null=True)
     priceChange = serializers.DecimalField(source='price_change', max_digits=15, decimal_places=4, read_only=True, allow_null=True)
@@ -811,6 +792,11 @@ class AssetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'lastPrice', 'lastPriceUpdate', 'priceChange', 'priceChangePercent']
     
+    def get_logoUrl(self, obj):
+        """Proxy logo URLs so external assets (Clearbit, CoinGecko, etc.) and our MinIO load reliably on platform."""
+        request = self.context.get('request')
+        return _get_proxy_url_for_logo(request, obj.logo_url)
+    
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['default'] = bool(instance.default)
@@ -827,8 +813,6 @@ class AssetSerializer(serializers.ModelSerializer):
                 ret['marketCap'] = int(instance.market_cap)
             except Exception:
                 pass
-        # Ensure logoUrl is included even if empty
-        ret['logoUrl'] = instance.logo_url or ''
         return ret
 
 class ClientAssetSerializer(serializers.ModelSerializer):
@@ -851,7 +835,7 @@ class ClientAssetSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         # Only serialize asset if it exists (handle case where asset was deleted but ClientAsset remains)
         if instance.asset:
-            ret['asset'] = AssetSerializer(instance.asset).data
+            ret['asset'] = AssetSerializer(instance.asset, context=self.context).data
             ret['assetId'] = instance.asset.id
         else:
             ret['asset'] = None
@@ -931,17 +915,8 @@ class UsefulLinkSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
     
     def get_imageUrl(self, obj):
-        if obj.image:
-            image_url = obj.image.url
-            # Cloudinary URLs are public by default, return them directly
-            if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                return image_url
-            # Local path - build absolute URI
-            request = self.context.get('request')
-            if request and image_url:
-                return request.build_absolute_uri(image_url)
-            return image_url
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.image)
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -1146,40 +1121,12 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
     
     def get_imageUrl(self, obj):
-        if obj.image:
-            try:
-                # Get the URL using the storage backend
-                image_url = obj.image.url
-                
-                # S3/MinIO URLs are public by default, return absolute URLs as-is
-                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    return image_url
-                
-                # If URL is relative, try to build absolute URI
-                request = self.context.get('request')
-                if request and image_url:
-                    # If it's a relative path, build absolute URI
-                    if not image_url.startswith('http'):
-                        return request.build_absolute_uri(image_url)
-                    return image_url
-                
-                # If we still don't have a valid URL, log and return None
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Could not generate valid image URL for product {obj.id}: {image_url}")
-                return None
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting image URL for product {obj.id}: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.image)
 
     def get_assetAllocations(self, obj):
+        request = self.context.get('request')
         allocations = ProductAssetAllocation.objects.filter(product=obj).select_related('asset').order_by('created_at')
-        # Include full asset details for frontend display
         return [
             {
                 'id': alloc.id,
@@ -1192,7 +1139,7 @@ class ProductSerializer(serializers.ModelSerializer):
                     'name': alloc.asset.name,
                     'reference': alloc.asset.reference or '',
                     'type': alloc.asset.type,
-                    'logoUrl': alloc.asset.logo_url or '',
+                    'logoUrl': _get_proxy_url_for_logo(request, alloc.asset.logo_url) or '',
                 }
             }
             for alloc in allocations
@@ -1331,84 +1278,20 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_logo_url(self, obj):
-        if obj.logo:
-            try:
-                logo_url = obj.logo.url
-                # Cloudinary URLs are public by default, return them directly
-                if logo_url and (logo_url.startswith('http://') or logo_url.startswith('https://')):
-                    return logo_url
-                # Local path - build absolute URI
-                request = self.context.get('request')
-                if request and logo_url:
-                    return request.build_absolute_uri(logo_url)
-                return logo_url
-            except Exception as e:
-                # Log error but don't fail - return None if URL generation fails
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting logo URL for app settings: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.logo)
 
     def get_favicon_url(self, obj):
-        if obj.favicon:
-            try:
-                favicon_url = obj.favicon.url
-                # Cloudinary URLs are public by default, return them directly
-                if favicon_url and (favicon_url.startswith('http://') or favicon_url.startswith('https://')):
-                    return favicon_url
-                # Local path - build absolute URI
-                request = self.context.get('request')
-                if request and favicon_url:
-                    return request.build_absolute_uri(favicon_url)
-                return favicon_url
-            except Exception as e:
-                # Log error but don't fail - return None if URL generation fails
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting favicon URL for app settings: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.favicon)
 
     def get_login_background_image_url(self, obj):
-        if obj.login_background_image:
-            try:
-                image_url = obj.login_background_image.url
-                # Cloudinary URLs are public by default, return them directly
-                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    return image_url
-                # Local path - build absolute URI
-                request = self.context.get('request')
-                if request and image_url:
-                    return request.build_absolute_uri(image_url)
-                return image_url
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting login background URL for app settings: {str(e)}")
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.login_background_image)
 
     def get_platform_banner_image_url(self, obj):
-        if obj.platform_banner_image:
-            try:
-                image_url = obj.platform_banner_image.url
-                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    return image_url
-                request = self.context.get('request')
-                if request and image_url:
-                    return request.build_absolute_uri(image_url)
-                return image_url
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting platform banner URL for app settings: {str(e)}")
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.platform_banner_image)
 
 class NewsPostSerializer(serializers.ModelSerializer):
     authorName = serializers.SerializerMethodField()
@@ -1429,23 +1312,8 @@ class NewsPostSerializer(serializers.ModelSerializer):
         return "Admin"
     
     def get_imageUrl(self, obj):
-        if obj.image:
-            try:
-                image_url = obj.image.url
-                if image_url and (image_url.startswith('http://') or image_url.startswith('https://')):
-                    return image_url
-                request = self.context.get('request')
-                if request and image_url:
-                    if not image_url.startswith('http'):
-                        return request.build_absolute_uri(image_url)
-                    return image_url
-                return None
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting image URL for news post {obj.id}: {str(e)}")
-                return None
-        return None
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.image)
 
 class ClientVerificationConfigSerializer(serializers.ModelSerializer):
     clientId = serializers.CharField(source='client.id', read_only=True)
@@ -1519,41 +1387,9 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         }
     
     def get_fileUrl(self, obj):
-        """Retourne l'URL du fichier"""
-        if obj.file:
-            try:
-                file_url = obj.file.url
-                # Check if it's a PDF file
-                is_pdf = obj.file.name.lower().endswith('.pdf') if obj.file.name else False
-                
-                # Absolute URLs (S3/MinIO) - return as-is. For PDFs on external URLs, media proxy ensures correct Content-Type.
-                if file_url and (file_url.startswith('http://') or file_url.startswith('https://')):
-                    if is_pdf:
-                        request = self.context.get('request')
-                        if request:
-                            from urllib.parse import quote
-                            encoded_url = quote(file_url, safe='')
-                            return request.build_absolute_uri(f'/api/media/{encoded_url}/')
-                    return file_url
-                else:
-                    # Local path - use media proxy for better CORS support
-                    request = self.context.get('request')
-                    if request and file_url:
-                        # Use media proxy endpoint for better compatibility
-                        # Remove leading slash if present
-                        clean_path = file_url.lstrip('/')
-                        return request.build_absolute_uri(f'/api/media/{clean_path}/')
-                    elif file_url:
-                        # Fallback: return relative path
-                        return file_url
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error getting file URL for document {obj.id}: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return ''
-        return ''
+        """Retourne l'URL du fichier (via proxy quand S3 pour éviter CORS)"""
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.file) or ''
     
     def get_uploadedByName(self, obj):
         """Retourne le nom de l'utilisateur qui a uploadé le document"""

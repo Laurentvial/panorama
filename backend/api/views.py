@@ -3719,7 +3719,7 @@ def asset_list(request):
         )
     
     assets = assets.order_by('type', 'name')
-    serializer = AssetSerializer(assets, many=True)
+    serializer = AssetSerializer(assets, many=True, context={'request': request})
     return Response({'assets': serializer.data})
 
 @api_view(['POST'])
@@ -3733,7 +3733,7 @@ def asset_create(request):
         while Asset.objects.filter(id=asset_id).exists():
             asset_id = uuid.uuid4().hex[:12]
         asset = serializer.save(id=asset_id)
-        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -3836,8 +3836,9 @@ def download_logo_to_storage(logo_url: str, asset_id: str) -> str:
         from api.storage import S3MediaStorage
         from django.core.files.base import ContentFile
         
-        # Download the logo from the external URL
-        response = requests.get(logo_url, timeout=10, stream=True)
+        # Download the logo from the external URL (browser-like headers to avoid blocking)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(logo_url, timeout=15, stream=True, headers=headers)
         response.raise_for_status()
         
         # Get file extension from URL or Content-Type
@@ -3848,6 +3849,8 @@ def download_logo_to_storage(logo_url: str, asset_id: str) -> str:
             ext = '.jpg'
         elif 'image/gif' in content_type:
             ext = '.gif'
+        elif 'image/webp' in content_type:
+            ext = '.webp'
         elif 'image/svg' in content_type:
             ext = '.svg'
         else:
@@ -4009,7 +4012,7 @@ def client_assets(request, client_id):
             Q(availability_end__isnull=True) | Q(availability_end__gte=today)
         )
     
-    serializer = ClientAssetSerializer(client_assets, many=True)
+    serializer = ClientAssetSerializer(client_assets, many=True, context={'request': request})
     return Response({'assets': serializer.data})
 
 @api_view(['POST'])
@@ -4044,7 +4047,7 @@ def client_asset_add(request, client_id):
             asset=asset
         )
         
-        serializer = ClientAssetSerializer(client_asset)
+        serializer = ClientAssetSerializer(client_asset, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except Asset.DoesNotExist:
         return Response({'error': 'Asset not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -4080,7 +4083,7 @@ def client_asset_toggle_featured(request, client_id, asset_id):
         client_asset = ClientAsset.objects.get(client=client, asset=asset)
         client_asset.featured = not client_asset.featured
         client_asset.save()
-        serializer = ClientAssetSerializer(client_asset)
+        serializer = ClientAssetSerializer(client_asset, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
     except ClientAsset.DoesNotExist:
         return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -4101,7 +4104,7 @@ def client_asset_update_availability(request, client_id, asset_id):
         return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
     
     # Use serializer for validation
-    serializer = ClientAssetSerializer(client_asset, data=request.data, partial=True)
+    serializer = ClientAssetSerializer(client_asset, data=request.data, partial=True, context={'request': request})
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
@@ -5016,7 +5019,7 @@ def asset_create_from_alpha_vantage(request):
     if existing_asset:
         return Response({
             'error': f'Asset with symbol {symbol} already exists',
-            'asset': AssetSerializer(existing_asset).data
+            'asset': AssetSerializer(existing_asset, context={'request': request}).data
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
@@ -5292,7 +5295,7 @@ Entrée (JSON):
                         asset=asset
                     )
         
-        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': f'Error creating asset: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -5506,7 +5509,7 @@ def asset_update_price(request, asset_id):
                 
                 asset.save()
         
-        return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': f'Error updating price: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -7054,10 +7057,8 @@ def _get_manager_profile_photo(manager_user: DjangoUser, request):
         user_details = getattr(manager_user, 'user_details', None)
         if not user_details or not getattr(user_details, 'profile_photo', None):
             return ''
-        url = user_details.profile_photo.url
-        if url and (url.startswith('http://') or url.startswith('https://')):
-            return url
-        return request.build_absolute_uri(url) if request and url else (url or '')
+        from .serializer import _get_media_url_for_field
+        return _get_media_url_for_field(request, user_details.profile_photo) or ''
     except Exception:
         return ''
 
@@ -12494,35 +12495,88 @@ def news_delete(request, news_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _proxy_fetch_external_url(url: str):
+    """Fetch external URL and return (content, content_type) or raise."""
+    import requests
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    resp = requests.get(url, timeout=15, stream=True, headers=headers)
+    resp.raise_for_status()
+    content_type = resp.headers.get('Content-Type', 'application/octet-stream')
+    if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
+        content_type = 'application/pdf'
+    return resp.content, content_type
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
-def media_proxy(request, file_path):
-    """Proxy media files (storage URLs or local paths) with proper Content-Type and Content-Disposition for CORS/preview"""
+def media_proxy(request):
+    """Proxy external URLs via ?url= param. Use for asset logos (Clearbit, CoinGecko, etc.) and presigned URLs."""
     from django.http import HttpResponse
     from urllib.parse import unquote
+
+    url = request.GET.get('url')
+    if not url:
+        return HttpResponse(status=400)
+    try:
+        decoded = unquote(url)
+        if not (decoded.startswith('http://') or decoded.startswith('https://')):
+            return HttpResponse(status=400)
+        content, content_type = _proxy_fetch_external_url(decoded)
+        response = HttpResponse(content, content_type=content_type)
+        response['Content-Disposition'] = 'inline'
+        response['Access-Control-Allow-Origin'] = '*'
+        return response
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"media_proxy ?url= error: {e}")
+        return HttpResponse(status=404)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def media_proxy_path(request, file_path):
+    """Proxy storage paths (news/, media/, etc.) from S3/MinIO or local."""
+    from django.http import HttpResponse
+    from urllib.parse import unquote
+    from django.conf import settings
 
     decoded_path = unquote(file_path)
     try:
         if decoded_path.startswith('http://') or decoded_path.startswith('https://'):
-            import requests
-            resp = requests.get(decoded_path, timeout=30, stream=True)
-            resp.raise_for_status()
-            content_type = resp.headers.get('Content-Type', 'application/octet-stream')
-            content_disposition = resp.headers.get('Content-Disposition', 'inline')
-            if 'application/pdf' in content_type or decoded_path.lower().endswith('.pdf'):
-                content_type = 'application/pdf'
-                content_disposition = 'inline'
-            response = HttpResponse(resp.content, content_type=content_type)
-            response['Content-Disposition'] = content_disposition
+            content, content_type = _proxy_fetch_external_url(decoded_path)
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = 'inline'
             response['Access-Control-Allow-Origin'] = '*'
             return response
-        else:
-            from django.conf import settings
-            from django.views.static import serve
-            return serve(request, decoded_path, document_root=settings.MEDIA_ROOT)
+        if getattr(settings, 'S3_CONFIGURED', False):
+            from django.core.files.storage import default_storage
+            if not default_storage.exists(decoded_path):
+                return HttpResponse(status=404)
+            f = default_storage.open(decoded_path, 'rb')
+            try:
+                content = f.read()
+            finally:
+                f.close()
+            content_type = 'application/octet-stream'
+            if decoded_path.lower().endswith(('.jpg', '.jpeg')):
+                content_type = 'image/jpeg'
+            elif decoded_path.lower().endswith('.png'):
+                content_type = 'image/png'
+            elif decoded_path.lower().endswith('.gif'):
+                content_type = 'image/gif'
+            elif decoded_path.lower().endswith('.webp'):
+                content_type = 'image/webp'
+            elif decoded_path.lower().endswith('.pdf'):
+                content_type = 'application/pdf'
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = 'inline'
+            response['Access-Control-Allow-Origin'] = '*'
+            return response
+        from django.views.static import serve
+        return serve(request, decoded_path, document_root=settings.MEDIA_ROOT)
     except Exception as e:
-        logging.getLogger(__name__).warning(f"media_proxy error for {file_path[:100]}: {e}")
+        logging.getLogger(__name__).warning(f"media_proxy_path error for {file_path[:80]}: {e}")
         return HttpResponse(status=404)
 
 

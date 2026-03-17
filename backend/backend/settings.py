@@ -226,7 +226,9 @@ AWS_S3_USE_SSL = os.getenv('AWS_S3_USE_SSL', 'true').lower() in ('true', '1', 'y
 AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '')
 # MinIO does not support object ACLs - use bucket policy for public read instead
 AWS_DEFAULT_ACL = None
-AWS_QUERYSTRING_AUTH = False  # Public URLs without signed query params
+# Use presigned URLs so only authenticated API users can access files (bucket must be private)
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600  # Presigned URL validity: 1 hour
 AWS_S3_ADDRESSING_STYLE = 'path'  # Required for MinIO
 AWS_S3_FILE_OVERWRITE = False
 
