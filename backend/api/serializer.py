@@ -8,18 +8,32 @@ from urllib.parse import urlparse, unquote, quote
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
 
 
+def _get_media_base_url(request):
+    """Return base URL for building absolute media proxy URLs. Prefer BACKEND_PUBLIC_URL in production."""
+    base = getattr(settings, 'BACKEND_PUBLIC_URL', '') or ''
+    if base:
+        return base
+    if request:
+        return request.build_absolute_uri('/').rstrip('/')
+    return ''
+
+
 def _get_media_url_for_field(request, file_field):
     """Return URL for a FileField. Uses proxy when S3 is configured to avoid CORS/presigned issues with private buckets."""
     if not file_field:
         return None
     try:
-        if getattr(settings, 'S3_CONFIGURED', False) and request:
-            # Use proxy so images load reliably (avoids CORS, presigned URL issues)
+        if getattr(settings, 'S3_CONFIGURED', False):
+            # Always use proxy when S3 is configured - never return raw MinIO URLs (Access Denied on private bucket)
             path = file_field.name
             if path:
                 proxy_path = quote(path, safe='/')
-                return request.build_absolute_uri(f'/api/media/{proxy_path}/')
-        # Fallback: direct URL (for local storage or when no request)
+                base = _get_media_base_url(request)
+                if base:
+                    return f'{base}/api/media/{proxy_path}/'
+                if request:
+                    return request.build_absolute_uri(f'/api/media/{proxy_path}/')
+        # Fallback: direct URL (for local storage only)
         url = file_field.url
         if url and (url.startswith('http://') or url.startswith('https://')):
             return url
@@ -37,7 +51,8 @@ def _get_proxy_url_for_logo(request, logo_url):
     logo_url = logo_url.strip()
     if not logo_url or not (logo_url.startswith('http://') or logo_url.startswith('https://')):
         return logo_url
-    if not request:
+    base = _get_media_base_url(request)
+    if not base and not request:
         return logo_url
     try:
         # Logos already in our bucket: use storage path proxy (works with private bucket)
@@ -53,10 +68,15 @@ def _get_proxy_url_for_logo(request, logo_url):
                 storage_path = path[len(prefix):].lstrip('/')
                 if storage_path:
                     proxy_path = quote(storage_path, safe='/')
+                    if base:
+                        return f'{base}/api/media/{proxy_path}/'
                     return request.build_absolute_uri(f'/api/media/{proxy_path}/')
         # External URLs: use ?url= proxy
         encoded = quote(logo_url, safe='')
-        return request.build_absolute_uri(f'/api/media/?url={encoded}')
+        if base:
+            return f'{base}/api/media/?url={encoded}'
+        if request:
+            return request.build_absolute_uri(f'/api/media/?url={encoded}')
     except Exception:
         return logo_url
 

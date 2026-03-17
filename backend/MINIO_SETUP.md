@@ -38,6 +38,11 @@ AWS_S3_REGION_NAME=us-east-1
 
 # SSL (true for HTTPS, false for HTTP)
 AWS_S3_USE_SSL=true
+
+# Backend public URL (REQUIRED in production when behind reverse proxy)
+# Used to build correct /api/media/ proxy URLs. Without this, images may return Access Denied.
+# Examples: https://api.yourdomain.com, https://panorama-backend.onrender.com
+BACKEND_PUBLIC_URL=https://your-backend-domain.com
 ```
 
 ## Getting Your Credentials
@@ -105,9 +110,10 @@ Use `--dry-run` to preview, or `--limit 10` to process a few assets first.
 - Ensure the bucket exists and you have write permissions
 - For MinIO: verify `AWS_S3_ENDPOINT_URL` is correct and reachable
 
-### Images not accessible
+### Images not accessible (Access Denied)
+- **Set `BACKEND_PUBLIC_URL`** in production: your backend's public URL (e.g. `https://api.yourdomain.com`). Required when behind a reverse proxy so the API returns correct proxy URLs instead of direct MinIO URLs.
 - Ensure the bucket is private (no anonymous policy)
-- Presigned URLs expire after 1 hour; the API generates fresh URLs on each request
+- The API serves images via `/api/media/<path>/` proxy; direct MinIO URLs will fail on private buckets
 - Verify CORS if accessing from a web app
 
 ### SSL errors

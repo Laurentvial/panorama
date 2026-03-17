@@ -42,9 +42,13 @@ def get_platform_name() -> str:
 
 def get_platform_logo_url() -> str:
     """
-    Returns an absolute logo URL if configured in AppSettings (Cloudinary URLs are typically absolute).
+    Returns an absolute logo URL if configured in AppSettings.
+    When S3/MinIO is configured, returns proxy URL (required for private bucket).
     """
     try:
+        from django.conf import settings as django_settings
+        from urllib.parse import quote
+
         from .models import AppSettings
 
         settings_obj = AppSettings.objects.first()
@@ -53,9 +57,16 @@ def get_platform_logo_url() -> str:
         logo_field = getattr(settings_obj, "logo", None)
         if not logo_field:
             return ""
+        if getattr(django_settings, "S3_CONFIGURED", False):
+            # Use proxy URL so private MinIO bucket works (emails, PDFs, etc.)
+            path = getattr(logo_field, "name", None) or ""
+            if path:
+                base = getattr(django_settings, "BACKEND_PUBLIC_URL", "") or ""
+                if base:
+                    proxy_path = quote(path, safe="/")
+                    return f"{base}/api/media/{proxy_path}/"
         logo_url = getattr(logo_field, "url", "") or ""
-        logo_url = str(logo_url).strip()
-        return logo_url
+        return str(logo_url).strip()
     except Exception:
         return ""
 

@@ -68,6 +68,19 @@ if backend_public_url:
         backend_public_url = f'https://{backend_public_url}'
     CSRF_TRUSTED_ORIGINS.append(backend_public_url)
 
+# Backend public URL for building absolute media proxy URLs (required when behind reverse proxy)
+# Used when request.build_absolute_uri() would use wrong host (e.g. internal hostname)
+BACKEND_PUBLIC_URL = (
+    os.getenv('BACKEND_PUBLIC_URL') or
+    os.getenv('COOLIFY_EXTERNAL_URL') or
+    os.getenv('RENDER_EXTERNAL_URL') or
+    os.getenv('RAILWAY_STATIC_URL') or
+    ''
+).strip()
+if BACKEND_PUBLIC_URL and not BACKEND_PUBLIC_URL.startswith(('http://', 'https://')):
+    BACKEND_PUBLIC_URL = f'https://{BACKEND_PUBLIC_URL}'
+BACKEND_PUBLIC_URL = BACKEND_PUBLIC_URL.rstrip('/') if BACKEND_PUBLIC_URL else ''
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
