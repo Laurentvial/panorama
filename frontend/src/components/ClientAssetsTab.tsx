@@ -36,6 +36,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  // Add asset modal: search (assetSearchQuery is modal-only)
+  const [assetSearchQuery, setAssetSearchQuery] = useState<string>('');
   // Add product modal: multi-select state (productSearchQuery is modal-only)
   const [selectedProductIdsInModal, setSelectedProductIdsInModal] = useState<Set<string>>(new Set());
   const [productSearchQuery, setProductSearchQuery] = useState<string>('');
@@ -170,13 +172,18 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     setIsProductAvailabilityModalOpen(true);
   };
 
+  function closeAddAssetModal() {
+    setIsAddAssetDialogOpen(false);
+    setAssetSearchQuery('');
+  }
+
   async function handleAddAsset(assetId: string) {
     const asset = availableAssets.find((a: any) => a.id === assetId);
     const tempId = `pending-${assetId}-${Date.now()}`;
     if (asset) {
       setLocalClientAssets((prev) => [...prev, { id: tempId, asset, featured: false }]);
     }
-    setIsAddAssetDialogOpen(false);
+    closeAddAssetModal();
     try {
       await apiCall(`/api/clients/${clientId}/assets/add/`, {
         method: 'POST',
@@ -425,8 +432,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
             </div>
 
             {isAddAssetDialogOpen && (
-              <div className="modal-overlay" onClick={() => setIsAddAssetDialogOpen(false)}>
-                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-overlay" onClick={closeAddAssetModal}>
+                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh' }}>
                   <div className="modal-header">
                     <h2 className="modal-title">Ajouter un actif</h2>
                     <Button
@@ -434,31 +441,57 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                       variant="ghost"
                       size="icon"
                       className="modal-close"
-                      onClick={() => setIsAddAssetDialogOpen(false)}
+                      onClick={closeAddAssetModal}
                     >
                       <X className="planning-icon-md" />
                     </Button>
                   </div>
                   <div className="modal-form">
                     <div className="modal-form-field">
-                      <Label>Actif</Label>
-                      <Select onValueChange={(value) => handleAddAsset(value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sélectionner un actif" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableAssets
-                            .filter((asset: any) => !localClientAssets.some((ca: any) => ca.asset?.id === asset.id))
-                            .map((asset: any) => (
-                              <SelectItem key={asset.id} value={asset.id}>
-                                {asset.name} ({asset.type}) - {asset.reference || 'Aucun'}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Rechercher un actif</Label>
+                      <Input
+                        type="text"
+                        placeholder="Rechercher par nom, type ou référence..."
+                        value={assetSearchQuery}
+                        onChange={(e) => setAssetSearchQuery(e.target.value)}
+                        className="w-full"
+                      />
                     </div>
-                    <div className="modal-form-actions">
-                      <Button type="button" variant="outline" onClick={() => setIsAddAssetDialogOpen(false)}>
+                    <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
+                      {(() => {
+                        const assignedIds = new Set(localClientAssets.map((ca: any) => ca.asset?.id).filter(Boolean));
+                        const q = assetSearchQuery.trim().toLowerCase();
+                        const filteredAssets = availableAssets.filter((asset: any) => {
+                          if (assignedIds.has(asset.id)) return false;
+                          const searchMatch = !q || (asset.name || '').toLowerCase().includes(q) || (asset.type || '').toLowerCase().includes(q) || (asset.reference || '').toLowerCase().includes(q);
+                          return searchMatch;
+                        });
+                        return filteredAssets.length > 0 ? (
+                          <div className="space-y-2">
+                            {filteredAssets.map((asset: any) => (
+                              <div
+                                key={asset.id}
+                                className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer transition-colors"
+                                onClick={() => handleAddAsset(asset.id)}
+                              >
+                                <div className="flex-1">
+                                  <div className="font-medium text-slate-900">{asset.name}</div>
+                                  <div className="text-sm text-slate-500">
+                                    {asset.type || 'Aucun'} • {asset.reference || 'Aucune référence'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-slate-500">
+                            {assetSearchQuery.trim() ? 'Aucun actif trouvé avec cette recherche' : 'Aucun actif disponible à ajouter'}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
+                      <Button type="button" variant="outline" onClick={closeAddAssetModal}>
                         Annuler
                       </Button>
                     </div>

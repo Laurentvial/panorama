@@ -74,6 +74,11 @@ class S3MediaStorage(Storage):
         name = self._normalize_name(name)
         return self._storage.size(name)
 
+    def _open(self, name, mode='rb'):
+        """Open a file from S3. Required for FileField.open() (e.g. product image copy)."""
+        name = self._normalize_name(name)
+        return self._storage._open(name, mode)
+
 
 # Backward compatibility: migrations reference CloudinaryMediaStorage (now S3)
 CloudinaryMediaStorage = S3MediaStorage

@@ -68,6 +68,19 @@ if backend_public_url:
         backend_public_url = f'https://{backend_public_url}'
     CSRF_TRUSTED_ORIGINS.append(backend_public_url)
 
+# Backend public URL for building absolute media proxy URLs (required when behind reverse proxy)
+# Used when request.build_absolute_uri() would use wrong host (e.g. internal hostname)
+BACKEND_PUBLIC_URL = (
+    os.getenv('BACKEND_PUBLIC_URL') or
+    os.getenv('COOLIFY_EXTERNAL_URL') or
+    os.getenv('RENDER_EXTERNAL_URL') or
+    os.getenv('RAILWAY_STATIC_URL') or
+    ''
+).strip()
+if BACKEND_PUBLIC_URL and not BACKEND_PUBLIC_URL.startswith(('http://', 'https://')):
+    BACKEND_PUBLIC_URL = f'https://{BACKEND_PUBLIC_URL}'
+BACKEND_PUBLIC_URL = BACKEND_PUBLIC_URL.rstrip('/') if BACKEND_PUBLIC_URL else ''
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
@@ -131,7 +144,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "0"))  # Default 0 seconds (close immediately)
 
 if DATABASE_URL:
-    # Heroku/Scalingo/Render: require SSL. Coolify/internal Docker: often no SSL.
+    # Scalingo/Render: require SSL. Coolify/internal Docker: often no SSL.
     # Set DB_SSL_REQUIRE=false for Coolify or other internal Postgres without SSL.
     ssl_require = os.getenv("DB_SSL_REQUIRE", "true").lower() in ("true", "1", "yes")
     db_config = dj_database_url.config(
@@ -226,7 +239,9 @@ AWS_S3_USE_SSL = os.getenv('AWS_S3_USE_SSL', 'true').lower() in ('true', '1', 'y
 AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '')
 # MinIO does not support object ACLs - use bucket policy for public read instead
 AWS_DEFAULT_ACL = None
-AWS_QUERYSTRING_AUTH = False  # Public URLs without signed query params
+# Use presigned URLs so only authenticated API users can access files (bucket must be private)
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600  # Presigned URL validity: 1 hour
 AWS_S3_ADDRESSING_STYLE = 'path'  # Required for MinIO
 AWS_S3_FILE_OVERWRITE = False
 
@@ -288,9 +303,27 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Configuration
 # Note: CORS_ALLOW_ALL_ORIGINS and CORS_ALLOWED_ORIGINS are mutually exclusive
-# For development, we allow all origins
-CORS_ALLOW_ALL_ORIGINS = True
+# For production, use explicit allowlist from FRONTEND_PUBLIC_URL; for dev, allow all
 CORS_ALLOW_CREDENTIALS = True
+
+# Build allowed origins: dev defaults + FRONTEND_PUBLIC_URL from env
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+frontend_url = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
+if frontend_url:
+    if not frontend_url.startswith(('http://', 'https://')):
+        frontend_url = f'https://{frontend_url}'
+    CORS_ALLOWED_ORIGINS.append(frontend_url)
+    # Add www variant if applicable
+    if frontend_url.startswith('https://') and not frontend_url.startswith('https://www.'):
+        CORS_ALLOWED_ORIGINS.append(frontend_url.replace('https://', 'https://www.'))
+
+# Use allowlist in production, allow all in dev (when FRONTEND_PUBLIC_URL not set)
+CORS_ALLOW_ALL_ORIGINS = not bool(frontend_url)
 
 CORS_ALLOW_METHODS = [
     'DELETE',

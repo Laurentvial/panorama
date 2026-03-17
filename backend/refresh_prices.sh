@@ -1,5 +1,4 @@
 #!/bin/bash
-# Script wrapper pour Heroku Scheduler
-# Utilise python3 au lieu de python pour éviter l'erreur "command not found"
+# Script pour rafraîchir les prix des assets (cron / Render / Coolify / etc.)
 
-python3 manage.py refresh_external_asset_prices --scope product-assets --limit 20 --min-age-seconds 240
+python3 manage.py refresh_external_asset_prices --scope product-assets --limit 50 --min-age-seconds 240

@@ -35,6 +35,7 @@ export function PlatformTrading() {
   const [withdrawBankName, setWithdrawBankName] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferMotif, setTransferMotif] = useState('');
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [pendingAmount, setPendingAmount] = useState<number>(0);
   const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
@@ -337,15 +338,16 @@ export function PlatformTrading() {
     }
   };
 
-  const confirmTransfer = async () => {
+  const confirmTransfer = async (motif?: string) => {
     try {
       setSubmitting(true);
+      const description = (motif || transferMotif || '').trim() || 'Dépôt de fonds (Virement bancaire)';
       const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
           type: 'depot',
           amount: pendingAmount,
-          description: 'Dépôt de fonds (Virement bancaire)',
+          description,
           subscription_details: { paymentMethod: 'virement' },
           datetime: new Date().toISOString(),
           status: 'en_attente_paiement',
@@ -580,7 +582,7 @@ export function PlatformTrading() {
                   }}
                 >
                   <div style={{ flex: 1, minWidth: isMobile ? '100%' : 240 }}>
-                    <Label htmlFor="amount">Montant ({currencySym})</Label>
+                    <Label htmlFor="amount">Montant ({movementType === 'depot' ? getCurrencySymbol('EUR') : currencySym})</Label>
                     <Input
                       id="amount"
                       type="number"
@@ -726,6 +728,7 @@ export function PlatformTrading() {
                 if (!open) {
                   setTransferSuccess(null);
                   setPendingAmount(0);
+                  setTransferMotif('');
                 }
               }
             }}
@@ -760,7 +763,7 @@ export function PlatformTrading() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                       <span>Montant</span>
                       <strong>
-                        {formatAmount(transferSuccess.amount, accountCurrency)}
+                        {formatAmount(transferSuccess.amount, 'EUR')}
                       </strong>
                     </div>
                     {transferSuccess.transaction && (
@@ -793,6 +796,7 @@ export function PlatformTrading() {
                         setTransferDialogOpen(false);
                         setTransferSuccess(null);
                         setPendingAmount(0);
+                        setTransferMotif('');
                       }}
                       style={{ width: '100%' }}
                     >
@@ -815,7 +819,7 @@ export function PlatformTrading() {
                         <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af', textAlign: 'center' }}>
                           <div style={{ fontWeight: 600, marginBottom: 8 }}>Votre demande de dépôt est en cours de traitement</div>
                           <div style={{ fontSize: 13 }}>
-                            Montant : <strong>{formatAmount(pendingAmount, accountCurrency)}</strong>
+                            Montant : <strong>{formatAmount(pendingAmount, 'EUR')}</strong>
                           </div>
                         </div>
                       </div>
@@ -839,7 +843,7 @@ export function PlatformTrading() {
                       <div style={{ display: 'grid', gap: 12 }}>
                         <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
                           <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
-                            Montant à virer : {formatAmount(pendingAmount, accountCurrency)}
+                            Montant à virer : {formatAmount(pendingAmount, 'EUR')}
                           </div>
                           <div style={{ fontSize: 13, color: '#6b7280' }}>
                             Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
@@ -858,21 +862,41 @@ export function PlatformTrading() {
                                 )}
                                 <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
-                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bankCode || '-'}</span>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Titulaire du compte :</span>
+                                    <span style={{ fontWeight: 600 }}>{rib.accountHolder || '-'}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
-                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.branchCode || '-'}</span>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>IBAN :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600, wordBreak: 'break-all' }}>{rib.iban || '-'}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
-                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.accountNumber || '-'}</span>
+                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>BIC :</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bic || '-'}</span>
                                   </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
-                                    <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.ribKey || '-'}</span>
-                                  </div>
+                                  {rib.bankCode && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.bankCode}</span>
+                                    </div>
+                                  )}
+                                  {rib.branchCode && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.branchCode}</span>
+                                    </div>
+                                  )}
+                                  {rib.accountNumber && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.accountNumber}</span>
+                                    </div>
+                                  )}
+                                  {rib.ribKey && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{rib.ribKey}</span>
+                                    </div>
+                                  )}
                                   {rib.domiciliation && (
                                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
                                       <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>Domiciliation :</div>
@@ -894,6 +918,18 @@ export function PlatformTrading() {
                             <li>Vous recevrez une confirmation une fois le virement traité</li>
                           </ul>
                         </div>
+
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <Label htmlFor="transferMotif" style={{ fontWeight: 600, fontSize: 13 }}>Motif *</Label>
+                          <Textarea
+                            id="transferMotif"
+                            placeholder="Décrivez le motif de ce dépôt (ex: virement mensuel, complément de capital...)"
+                            value={transferMotif}
+                            onChange={(e) => setTransferMotif(e.target.value)}
+                            rows={3}
+                            style={{ resize: 'vertical', minHeight: 60 }}
+                          />
+                        </div>
                       </div>
 
                       <DialogFooter>
@@ -904,6 +940,7 @@ export function PlatformTrading() {
                           onClick={() => {
                             setTransferDialogOpen(false);
                             setPendingAmount(0);
+                            setTransferMotif('');
                           }}
                         >
                           Annuler
@@ -911,8 +948,8 @@ export function PlatformTrading() {
                         <Button 
                           type="button" 
                           variant="platform" 
-                          disabled={submitting} 
-                          onClick={confirmTransfer}
+                          disabled={submitting || !transferMotif.trim()} 
+                          onClick={() => confirmTransfer()}
                         >
                           {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}
                         </Button>
@@ -967,7 +1004,7 @@ export function PlatformTrading() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                       <span>Montant</span>
                       <strong>
-                        {formatAmount(cardDepositSuccess.amount, accountCurrency)}
+                        {formatAmount(cardDepositSuccess.amount, 'EUR')}
                       </strong>
                     </div>
                     {cardDepositSuccess.transaction && (
@@ -1003,7 +1040,7 @@ export function PlatformTrading() {
                   <DialogHeader>
                     <DialogTitle>Confirmation du dépôt par carte bancaire</DialogTitle>
                     <DialogDescription>
-                      Confirmez le dépôt de {formatAmount(pendingAmount, accountCurrency)}
+                      Confirmez le dépôt de {formatAmount(pendingAmount, 'EUR')}
                     </DialogDescription>
                   </DialogHeader>
 

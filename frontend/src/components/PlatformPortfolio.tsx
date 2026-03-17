@@ -86,7 +86,7 @@ export function PlatformPortfolio() {
     if (currentUser && currentUser.id) {
       loadPortfolioData();
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -810,7 +810,11 @@ export function PlatformPortfolio() {
           break;
         case 'interets':
           calculatedInvestedCapital += amt;
-          calculatedProfitLoss -= amt;
+          // Surperformances = intérêts supplémentaires (hors renta initiale) → ne pas soustraire du P&L
+          const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
+          if (!subDetails?.is_surperformance) {
+            calculatedProfitLoss -= amt;
+          }
           break;
         case 'frais':
         case 'perte':

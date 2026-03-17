@@ -32,6 +32,13 @@ ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query'
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY', '')
 FINNHUB_BASE_URL = 'https://finnhub.io/api/v1'
 
+# FMP (Financial Modeling Prep) - stocks/ETFs, good international coverage
+FMP_API_KEY = os.getenv('FMP_API_KEY', '')
+FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3'
+
+# Metals-API (optional) - gold/silver when Finnhub OANDA fails. Alpha Vantage FX_DAILY does not support XAU/XAG.
+METALS_API_KEY = os.getenv('METALS_API_KEY', '')
+
 
 class AlphaVantageService:
     """Service class for interacting with Alpha Vantage API"""
@@ -214,29 +221,41 @@ class AlphaVantageService:
                 logger.error(f"Alpha Vantage API error: {data['Error Message']}")
                 return None
             
-            if 'Note' in data:
-                logger.warning(f"Alpha Vantage API note: {data['Note']}")
-                return None
-            
-            if 'Information' in data:
-                info_msg = data['Information']
-                logger.warning(f"Alpha Vantage API information: {info_msg}")
-                # Check if it's a rate limit message
-                if 'rate limit' in info_msg.lower():
-                    return None
-            
-            # Extract the quote data (Alpha Vantage returns it in a specific format)
+            # Extract the quote data first - use it if present even with Note/Information
             quote_data = data.get('Global Quote', {})
+            if quote_data and quote_data.get('05. price'):
+                # Valid quote - use it (ignore informational Note/Information)
+                pass
+            else:
+                # No valid quote - check for rate limit
+                if 'Note' in data:
+                    logger.warning(f"Alpha Vantage API note: {data['Note']}")
+                    return None
+                if 'Information' in data:
+                    info_msg = data['Information']
+                    logger.warning(f"Alpha Vantage API information: {info_msg}")
+                    if 'rate limit' in info_msg.lower():
+                        return None
             
             if not quote_data:
                 return None
+
+            raw_price = quote_data.get('05. price')
+            if raw_price is None or raw_price == '':
+                return None  # Missing price - no valid quote
+            try:
+                price = float(raw_price)
+            except (TypeError, ValueError):
+                return None  # Invalid price format
+            if price <= 0:
+                return None  # Invalid price (0 or negative; consistent with FMP/Finnhub)
             
             return {
                 'symbol': quote_data.get('01. symbol', symbol),
                 'open': float(quote_data.get('02. open', 0)),
                 'high': float(quote_data.get('03. high', 0)),
                 'low': float(quote_data.get('04. low', 0)),
-                'price': float(quote_data.get('05. price', 0)),
+                'price': price,
                 'volume': int(quote_data.get('06. volume', 0)),
                 'latest_trading_day': quote_data.get('07. latest trading day', ''),
                 'previous_close': float(quote_data.get('08. previous close', 0)),
@@ -334,7 +353,8 @@ class AlphaVantageService:
             if 'Information' in data:
                 info_msg = data['Information']
                 logger.warning(f"Alpha Vantage API information: {info_msg}")
-                if 'rate limit' in info_msg.lower():
+                # Only bail if we don't have actual data (rate limit hit = no time series)
+                if 'rate limit' in info_msg.lower() and 'Time Series (Daily)' not in data:
                     return None
             
             # Extract time series data
@@ -812,6 +832,47 @@ class AlphaVantageService:
         return None
 
 
+def get_company_logo(symbol: str) -> Optional[str]:
+    """
+    Standalone: get company logo URL (Finnhub or clearbit). Use for stocks/ETFs.
+    Uses full symbol (RR.L, HAG.DE) so Finnhub returns the correct company, not a US ticker match.
+    """
+    variants = _get_symbol_variants_for_fallback(symbol)
+    for sym in variants:
+        if FINNHUB_API_KEY:
+            try:
+                r = requests.get(
+                    f"{FINNHUB_BASE_URL}/stock/profile2",
+                    params={'symbol': sym, 'token': FINNHUB_API_KEY},
+                    timeout=5
+                )
+                if r.status_code == 200 and r.json().get('logo'):
+                    return r.json()['logo']
+            except Exception:
+                pass
+        try:
+            r = requests.get(
+                f"{FINNHUB_BASE_URL}/stock/profile2",
+                params={'symbol': sym},
+                timeout=5
+            )
+            if r.status_code == 200 and r.json().get('logo'):
+                return r.json()['logo']
+        except Exception:
+            pass
+    # Clearbit fallback: use base symbol only (risky for international - may match wrong company)
+    base = (symbol or '').split('.')[0]
+    if base:
+        try:
+            for domain in [f"{base.lower()}.com", f"www.{base.lower()}.com"]:
+                test = requests.head(f"https://logo.clearbit.com/{domain}", timeout=2, allow_redirects=True)
+                if test.status_code == 200:
+                    return f"https://logo.clearbit.com/{domain}"
+        except Exception:
+            pass
+    return None
+
+
 def get_crypto_logo(symbol: str) -> Optional[str]:
     """
     Get cryptocurrency logo URL
@@ -926,6 +987,378 @@ def get_crypto_logo(symbol: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.debug(f"Error fetching crypto logo for {symbol}: {str(e)}")
+        return None
+
+
+def search_stock_finnhub(keywords: str) -> List[Dict]:
+    """
+    Search for stocks/ETFs using Finnhub API.
+    Returns format compatible with Alpha Vantage search_symbol (symbol, name, type, region, currency, exchange).
+    """
+    if not FINNHUB_API_KEY:
+        return []
+    try:
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/search",
+            params={'q': keywords, 'token': FINNHUB_API_KEY},
+            timeout=10
+        )
+        if response.status_code != 200:
+            return []
+        data = response.json() or {}
+        results = []
+        for item in data.get('result', [])[:15]:
+            itype = (item.get('type') or '').strip()
+            if itype not in ('Common Stock', 'ETF', 'EQS', 'REIT', 'Fund', 'ADR', 'Unit'):
+                continue
+            symbol = item.get('symbol', '')
+            desc = item.get('description', '') or symbol
+            display = item.get('displaySymbol', symbol)
+            region = _infer_region_from_symbol(symbol)
+            currency = _infer_currency_from_region(region)
+            exchange = _infer_exchange_from_symbol(symbol)
+            r = {
+                'symbol': display,
+                'name': desc,
+                'type': itype,
+                'region': region,
+                'exchange': exchange,
+                'currency': currency,
+                'match_score': 1.0
+            }
+            results.append(r)
+        return results
+    except Exception as e:
+        logger.error(f"Finnhub stock search failed: {e}")
+        return []
+
+
+def _infer_region_from_symbol(symbol: str) -> str:
+    s = (symbol or '').upper()
+    if s.endswith('.PA') or s.endswith('.MC') or s.endswith('.AS') or s.endswith('.BR'):
+        return 'Europe'
+    if s.endswith('.DE') or s.endswith('.F') or s.endswith('.HM'):
+        return 'Germany'
+    if s.endswith('.L'):
+        return 'United Kingdom'
+    if s.endswith('.SW'):
+        return 'Switzerland'
+    if s.endswith('.T'):
+        return 'Japan'
+    if s.endswith('.KS'):
+        return 'South Korea'
+    if '.' not in s or s.endswith('.US'):
+        return 'United States'
+    return 'Global'
+
+
+def _infer_currency_from_region(region: str) -> str:
+    r = (region or '').lower()
+    if 'germany' in r or 'france' in r or 'europe' in r or 'netherlands' in r:
+        return 'EUR'
+    if 'united kingdom' in r or 'uk' in r:
+        return 'GBP'
+    if 'japan' in r:
+        return 'JPY'
+    if 'switzerland' in r:
+        return 'CHF'
+    return 'USD'
+
+
+def _infer_exchange_from_symbol(symbol: str) -> str:
+    s = (symbol or '').upper()
+    if s.endswith('.DE') or s.endswith('.F'):
+        return 'XETR'
+    if s.endswith('.PA'):
+        return 'EURONEXT'
+    if s.endswith('.L'):
+        return 'LSE'
+    if '.' not in s or s.endswith('.US'):
+        return 'NASDAQ'
+    return ''
+
+
+def _get_symbol_variants_for_fallback(symbol: str) -> List[str]:
+    """
+    Return alternative symbol formats to try when primary fails.
+    Finnhub uses .DE for XETRA/Frankfurt, Alpha Vantage uses .DEX, .FRK, etc.
+    """
+    s = (symbol or '').strip().upper()
+    variants = [s]
+    if s.endswith('.DE'):
+        variants.append(s[:-3] + '.DEX')  # HAG.DE -> HAG.DEX (Alpha Vantage XETRA)
+    elif s.endswith('.DEX'):
+        variants.append(s[:-4] + '.DE')   # HAG.DEX -> HAG.DE (Finnhub)
+    if s.endswith('.F'):
+        variants.append(s[:-2] + '.FRK')  # HAG.F -> HAG.FRK (Alpha Vantage Frankfurt)
+        variants.append(s[:-2] + '.DE')   # HAG.F -> HAG.DE (Finnhub Frankfurt/XETRA)
+    elif s.endswith('.FRK'):
+        variants.append(s[:-4] + '.F')
+        variants.append(s[:-4] + '.DE')   # HAG.FRK -> HAG.DE (Finnhub Frankfurt/XETRA)
+    # UK London (.L): Finnhub uses .L, Alpha Vantage sometimes .LON
+    if s.endswith('.L') and len(s) > 2:
+        variants.append(s[:-2] + '.LON')  # RR.L -> RR.LON
+    elif s.endswith('.LON'):
+        variants.append(s[:-4] + '.L')   # RR.LON -> RR.L
+    # Swiss (.SW): Roche uses RO.SW in some feeds, ROG.SW in others
+    if s.endswith('.SW') and len(s) == 5 and s[2] == '.':
+        base = s[:2]
+        variants.append(base + 'G.SW')  # RO.SW -> ROG.SW
+    return variants
+
+
+def get_stock_quote_fmp(symbol: str) -> Optional[Dict]:
+    """
+    Get stock/ETF quote from FMP (Financial Modeling Prep).
+    Returns format compatible with Alpha Vantage get_quote.
+    Supports international symbols (RR.L, HAG.DE, etc.).
+    """
+    if not FMP_API_KEY:
+        return None
+    try:
+        response = requests.get(
+            f"{FMP_BASE_URL}/quote/{symbol}",
+            params={'apikey': FMP_API_KEY},
+            timeout=10
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        if not isinstance(data, list) or len(data) == 0:
+            return None
+        d = data[0]
+        price_val = float(d.get('price') or 0)
+        if price_val <= 0:
+            return None
+        change_pct = d.get('changesPercentage') or d.get('changePercentage') or 0
+        return {
+            'symbol': symbol,
+            'open': float(d.get('open', 0) or 0),
+            'high': float(d.get('dayHigh', d.get('high', 0)) or 0),
+            'low': float(d.get('dayLow', d.get('low', 0)) or 0),
+            'price': price_val,
+            'volume': int(d.get('volume', 0) or 0),
+            'latest_trading_day': '',
+            'previous_close': float(d.get('previousClose', 0) or 0),
+            'change': float(d.get('change', 0) or 0),
+            'change_percent': str(change_pct).replace('%', '') if change_pct is not None else '0'
+        }
+    except Exception as e:
+        logger.debug(f"FMP stock quote failed for {symbol}: {e}")
+        return None
+
+
+def get_stock_candles_fmp(symbol: str, days: int = 365) -> Optional[Dict]:
+    """
+    Get stock/ETF daily candles from FMP. Returns format compatible with get_daily_data.
+    Uses stable endpoint: /stable/historical-price-eod/full
+    """
+    if not FMP_API_KEY:
+        return None
+    try:
+        # FMP v3 historical-price-full is legacy (deprecated Aug 2025). Use stable endpoint.
+        response = requests.get(
+            "https://financialmodelingprep.com/stable/historical-price-eod/full",
+            params={'symbol': symbol, 'apikey': FMP_API_KEY},
+            timeout=15
+        )
+        if response.status_code != 200:
+            return None
+        raw = response.json()
+        if isinstance(raw, dict) and (raw.get('Error Message') or raw.get('error')):
+            return None
+        # FMP stable: list of objects, or dict with 'historical', or list of one dict with 'historical'
+        data = raw[0] if isinstance(raw, list) and len(raw) > 0 and isinstance(raw[0], dict) else (raw if isinstance(raw, dict) else {})
+        hist = (data.get('historical') or data.get('historicalPrices') or []) if isinstance(data, dict) else []
+        if not hist and isinstance(raw, list) and raw and isinstance(raw[0], dict) and 'date' in (raw[0] or {}):
+            hist = raw  # Flat array of price objects
+        if not hist:
+            return None
+        chart_data = []
+        for h in hist:
+            date_val = h.get('date') or h.get('timestamp')
+            if not date_val:
+                continue
+            if isinstance(date_val, (int, float)):
+                from datetime import datetime
+                date_str = datetime.fromtimestamp(date_val / 1000 if date_val > 1e12 else date_val).strftime('%Y-%m-%d')
+            else:
+                date_str = str(date_val)[:10]
+            chart_data.append({
+                'date': date_str,
+                'open': float(h.get('open', 0) or 0),
+                'high': float(h.get('high', 0) or 0),
+                'low': float(h.get('low', 0) or 0),
+                'close': float(h.get('close', 0) or 0),
+                'volume': int(h.get('volume', 0) or 0)
+            })
+        chart_data.sort(key=lambda x: x['date'])
+        # Limit to requested days (FMP returns all history)
+        if len(chart_data) > days:
+            chart_data = chart_data[-days:]
+        return {
+            'data': chart_data,
+            'meta_data': {'symbol': data.get('symbol', symbol) if isinstance(data, dict) else symbol, 'last_refreshed': '', 'timezone': ''}
+        }
+    except Exception as e:
+        logger.debug(f"FMP stock candles failed for {symbol}: {e}")
+        return None
+
+
+def get_stock_quote_finnhub(symbol: str) -> Optional[Dict]:
+    """
+    Get stock/ETF quote from Finnhub. Returns format compatible with Alpha Vantage get_quote.
+    """
+    if not FINNHUB_API_KEY:
+        return None
+    try:
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/quote",
+            params={'symbol': symbol, 'token': FINNHUB_API_KEY},
+            timeout=10
+        )
+        if response.status_code != 200:
+            return None
+        d = response.json() or {}
+        price_val = float(d.get('c') or 0)
+        if price_val <= 0:
+            return None
+        return {
+            'symbol': symbol,
+            'open': float(d.get('o', 0) or 0),
+            'high': float(d.get('h', 0) or 0),
+            'low': float(d.get('l', 0) or 0),
+            'price': price_val,
+            'volume': 0,
+            'latest_trading_day': '',
+            'previous_close': float(d.get('pc', 0) or 0),
+            'change': float(d.get('d', 0) or 0),
+            'change_percent': str(d.get('dp', 0) or 0)
+        }
+    except Exception as e:
+        logger.error(f"Finnhub stock quote failed for {symbol}: {e}")
+        return None
+
+
+def get_stock_quote_with_fallback(symbol: str) -> Optional[Dict]:
+    """
+    Get stock quote trying FMP, Finnhub, and Alpha Vantage with symbol variants.
+    Order: FMP (if key) -> Finnhub -> Alpha Vantage (fallback when others fail).
+    Alpha Vantage is used as fallback when FMP/Finnhub return no data (premium subscription recommended).
+    """
+    import time
+    variants = _get_symbol_variants_for_fallback(symbol)
+    for i, sym in enumerate(variants):
+        if i > 0:
+            time.sleep(0.5)  # Throttle to avoid rate limit
+        # FMP first (good coverage, user may have key)
+        if FMP_API_KEY:
+            q = get_stock_quote_fmp(sym)
+            if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
+                q['symbol'] = symbol
+                return q
+        # Finnhub
+        if FINNHUB_API_KEY:
+            q = get_stock_quote_finnhub(sym)
+            if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
+                q['symbol'] = symbol
+                return q
+        # Alpha Vantage as fallback when FMP/Finnhub failed (premium subscription has higher limits)
+        av = get_alpha_vantage_service()
+        if av:
+            q = av.get_quote(sym)
+            if q and q.get('price') and float(q.get('price', 0) or 0) > 0:
+                q['symbol'] = symbol
+                return q
+    return None
+
+
+def get_stock_profile_finnhub(symbol: str) -> Optional[Dict]:
+    """
+    Get stock/ETF company profile from Finnhub. Returns format compatible with Alpha Vantage get_company_overview.
+    """
+    if not FINNHUB_API_KEY:
+        return None
+    try:
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/stock/profile2",
+            params={'symbol': symbol, 'token': FINNHUB_API_KEY},
+            timeout=10
+        )
+        if response.status_code != 200:
+            return None
+        d = response.json() or {}
+        if not d:
+            return None
+        return {
+            'Symbol': d.get('ticker', symbol),
+            'Name': d.get('name', ''),
+            'Description': d.get('weburl', '') or '',
+            'Sector': d.get('finnhubIndustry', ''),
+            'Industry': d.get('finnhubIndustry', ''),
+            'Exchange': d.get('exchange', ''),
+            'Currency': d.get('currency', 'USD'),
+            'Country': d.get('country', ''),
+            'Address': '',
+            'Website': d.get('weburl', ''),
+            'MarketCapitalization': str(int(d.get('marketCapitalization', 0) or 0)),
+        }
+    except Exception as e:
+        logger.error(f"Finnhub stock profile failed for {symbol}: {e}")
+        return None
+
+
+def get_stock_candles_finnhub(symbol: str, resolution: str = 'D', days: int = 120) -> Optional[Dict]:
+    """
+    Get stock/ETF daily candles from Finnhub. Returns format compatible with get_daily_data.
+    """
+    if not FINNHUB_API_KEY:
+        return None
+    try:
+        import time
+        from datetime import datetime, timedelta
+        end_time = int(time.time())
+        start_time = int((datetime.now() - timedelta(days=days)).timestamp())
+        response = requests.get(
+            f"{FINNHUB_BASE_URL}/stock/candle",
+            params={
+                'symbol': symbol,
+                'resolution': resolution,
+                'from': start_time,
+                'to': end_time,
+                'token': FINNHUB_API_KEY
+            },
+            timeout=15
+        )
+        if response.status_code != 200:
+            return None
+        cd = response.json() or {}
+        if cd.get('s') != 'ok' or not cd.get('c'):
+            return None
+        closes = cd.get('c', [])
+        opens = cd.get('o', [])
+        highs = cd.get('h', [])
+        lows = cd.get('l', [])
+        vols = cd.get('v', [])
+        ts = cd.get('t', [])
+        chart_data = []
+        for i in range(len(closes)):
+            date_str = datetime.fromtimestamp(ts[i]).strftime('%Y-%m-%d')
+            chart_data.append({
+                'date': date_str,
+                'open': float(opens[i]) if i < len(opens) else float(closes[i]),
+                'high': float(highs[i]) if i < len(highs) else float(closes[i]),
+                'low': float(lows[i]) if i < len(lows) else float(closes[i]),
+                'close': float(closes[i]),
+                'volume': int(vols[i]) if i < len(vols) else 0
+            })
+        chart_data.sort(key=lambda x: x['date'])
+        return {
+            'data': chart_data,
+            'meta_data': {'symbol': symbol, 'last_refreshed': '', 'timezone': ''}
+        }
+    except Exception as e:
+        logger.error(f"Finnhub stock candles failed for {symbol}: {e}")
         return None
 
 
@@ -1053,6 +1486,120 @@ def get_oanda_quote_finnhub(from_symbol: str, to_symbol: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error fetching OANDA quote from Finnhub for {from_symbol}/{to_symbol}: {str(e)}")
         return None
+
+
+def _normalize_metal_symbol(s: str) -> str:
+    """Normalize metal symbol: XAU SPOT, XAUUSD, XAU/USD -> XAU."""
+    s = (s or '').strip().upper()
+    if not s:
+        return s
+    if s in ['XAU', 'XAG']:
+        return s
+    # XAUUSD, XAU USD, XAU SPOT, XAU/USD, etc.
+    if s.startswith('XAU') and len(s) <= 10:
+        return 'XAU'
+    if s.startswith('XAG') and len(s) <= 10:
+        return 'XAG'
+    return s
+
+
+def _get_metal_quote_metals_api(from_ccy: str, to_ccy: str) -> Optional[Dict]:
+    """Get XAU/XAG quote from metals-api.com (requires METALS_API_KEY)."""
+    if not METALS_API_KEY or from_ccy not in ['XAU', 'XAG']:
+        return None
+    try:
+        # metals-api: base=USD&symbols=XAU returns 1 USD = rate XAU. We need 1 XAU = ? USD, so use 1/rate.
+        url = f"https://api.metals-api.com/api/latest?access_key={METALS_API_KEY}&base=USD&symbols={from_ccy}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not data.get('success') or from_ccy not in (data.get('rates') or {}):
+            return None
+        raw_rate = float(data['rates'][from_ccy])
+        if raw_rate <= 0:
+            return None
+        # 1 USD = raw_rate XAU => 1 XAU = 1/raw_rate USD
+        rate_usd = 1.0 / raw_rate
+        if to_ccy == 'USD':
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': rate_usd,
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': data.get('date', ''),
+            }
+        # Cross-rate: XAU/EUR = (1 XAU in USD) * (1 USD in EUR)
+        url2 = f"https://api.metals-api.com/api/latest?access_key={METALS_API_KEY}&base=USD&symbols={to_ccy}"
+        resp2 = requests.get(url2, timeout=10)
+        if resp2.status_code != 200:
+            return None
+        data2 = resp2.json()
+        if not data2.get('success') or to_ccy not in (data2.get('rates') or {}):
+            return None
+        usd_to_ccy = float(data2['rates'][to_ccy])
+        if usd_to_ccy <= 0:
+            return None
+        return {
+            'from_currency': from_ccy,
+            'to_currency': to_ccy,
+            'exchange_rate': rate_usd * usd_to_ccy,
+            'bid_price': 0.0,
+            'ask_price': 0.0,
+            'last_refreshed': data.get('date', ''),
+        }
+    except Exception as e:
+        logger.debug(f"Metals-API quote failed for {from_ccy}/{to_ccy}: {e}")
+        return None
+
+
+def get_forex_metal_quote_with_fallback(from_symbol: str, to_symbol: str) -> Optional[Dict]:
+    """
+    Get forex/metal quote (e.g. XAU/USD, XAG/USD, EUR/USD).
+    Tries: Finnhub OANDA -> Metals-API (XAU/XAG only) -> Alpha Vantage FX (fiat only; XAU/XAG not supported).
+    """
+    from_ccy = _normalize_metal_symbol(from_symbol)
+    to_ccy = (to_symbol or '').strip().upper() or 'USD'
+    if not from_ccy:
+        return None
+
+    # 1. Try Finnhub OANDA first
+    fx_quote = get_oanda_quote_finnhub(from_ccy, to_ccy)
+    if fx_quote and fx_quote.get('exchange_rate'):
+        return fx_quote
+
+    # 2. Cross-rate for metals (XAU/EUR = XAU/USD * USD/EUR)
+    if to_ccy != 'USD' and from_ccy in ['XAU', 'XAG']:
+        metal_usd = get_oanda_quote_finnhub(from_ccy, 'USD')
+        usd_to = get_oanda_quote_finnhub('USD', to_ccy)
+        if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
+            return {
+                'from_currency': from_ccy,
+                'to_currency': to_ccy,
+                'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate']),
+                'bid_price': 0.0,
+                'ask_price': 0.0,
+                'last_refreshed': '',
+                'change': metal_usd.get('change'),
+                'change_percent': metal_usd.get('change_percent'),
+            }
+
+    # 3. Metals-API fallback for XAU/XAG (Alpha Vantage FX_DAILY does not support gold/silver)
+    if from_ccy in ['XAU', 'XAG']:
+        mq = _get_metal_quote_metals_api(from_ccy, to_ccy)
+        if mq:
+            return mq
+
+    # 4. Alpha Vantage for fiat forex (EUR/USD, etc.) - not for XAU/XAG
+    if from_ccy not in ['XAU', 'XAG']:
+        av = get_alpha_vantage_service()
+        if av:
+            av_quote = av.get_forex_quote_with_fallback(from_ccy, to_ccy)
+            if av_quote and av_quote.get('exchange_rate'):
+                return av_quote
+
+    return None
 
 
 def get_oanda_candles_finnhub(from_symbol: str, to_symbol: str, resolution: str = 'D', days: int = 365) -> Optional[Dict]:

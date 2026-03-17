@@ -6,6 +6,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
 import { apiCall, clearApiCache } from '../utils/api';
 import { LogOut, User, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
+import { HiOutlineShare } from 'react-icons/hi';
+import { Copy } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import {
@@ -21,10 +23,12 @@ import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
+import { toast } from 'sonner';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformButtons.css';
 import '../styles/PlatformInputs.css';
 import '../styles/PlatformNotifications.css';
+import '../styles/Modal.css';
 
 interface PlatformLayoutProps {
   children: React.ReactNode;
@@ -70,6 +74,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const [clientUnreadCount, setClientUnreadCount] = useState(0);
   const [clientNotificationsLoading, setClientNotificationsLoading] = useState(false);
   const [clientNotificationsOpen, setClientNotificationsOpen] = useState(false);
+  const [referralModalOpen, setReferralModalOpen] = useState(false);
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);
@@ -990,6 +995,47 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   </button>
                 </div>
               </div>
+
+              {/* Referral block - at bottom of sidebar */}
+              <div
+                style={{
+                  flexShrink: 0,
+                  padding: isMobile ? '12px 20px' : '16px 20px',
+                  borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--accent-foreground)',
+                }}
+              >
+                <div style={{ fontSize: isMobile ? '13px' : '14px', fontWeight: 500, color: 'color-mix(in srgb, var(--accent-foreground) 90%, white)', marginBottom: 8, lineHeight: 1.35 }}>
+                  Parrainez un ami : jusqu&apos;à 500€ pour vous, et lui aussi à l&apos;inscription
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReferralModalOpen(true);
+                    if (showBottomNav) setSidebarOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    fontSize: isMobile ? '13px' : '14px',
+                    fontWeight: 500,
+                    color: 'var(--accent-foreground)',
+                    backgroundColor: 'color-mix(in srgb, var(--accent-foreground) 15%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    width: '100%',
+                    justifyContent: 'center',
+                  }}
+                  className="platform-hoverable"
+                >
+                  <HiOutlineShare size={18} />
+                  Partager mon invitation
+                </button>
+              </div>
               </div>
             </>
           )}
@@ -1010,6 +1056,57 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           {children}
         </main>
       </div>
+
+      {/* Referral share modal */}
+      {referralModalOpen && (
+        <div className="modal-overlay" onClick={() => setReferralModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '28rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Partager mon invitation</h2>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="modal-close"
+                onClick={() => setReferralModalOpen(false)}
+              >
+                <X className="planning-icon-md" />
+              </Button>
+            </div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <p style={{ fontSize: 14, color: '#6b7280' }}>
+                Partagez ce lien avec un ami. Vous recevrez jusqu&apos;à 500€ et lui aussi à l&apos;inscription.
+              </p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Input
+                  readOnly
+                  value={typeof window !== 'undefined' && currentUser?.id ? `${window.location.origin}/invite/${currentUser.id}` : ''}
+                  style={{ fontFamily: 'monospace', fontSize: 13 }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={async () => {
+                    const url = typeof window !== 'undefined' && currentUser?.id ? `${window.location.origin}/invite/${currentUser.id}` : '';
+                    if (url) {
+                      try {
+                        await navigator.clipboard.writeText(url);
+                        toast.success('Lien copié !');
+                      } catch {
+                        toast.error('Impossible de copier le lien');
+                      }
+                    }
+                  }}
+                  title="Copier le lien"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Bottom Navigation */}
       {showBottomNav && (

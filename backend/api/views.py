@@ -9,6 +9,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework.response import Response
 from .models import Client
+from .models import ReferralProspect
 from .models import ClientSuccessor
 from .models import ClientConversation
 from .models import ClientChatMessage
@@ -38,6 +39,7 @@ from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
+    ReferralProspectCreateSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
     ClientSuccessorSerializer,
@@ -2106,6 +2108,79 @@ def client_password_reset_request(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @authentication_classes([])
+def referral_prospect_create(request):
+    """
+    Public endpoint: create a referral prospect (invited by a client).
+    Body: { code, fname, lname, email, phone }
+    """
+    serializer = ReferralProspectCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    code = (serializer.validated_data.get('code') or '').strip()
+    if not code:
+        return Response({'error': 'Code d\'invitation invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        referrer = Client.objects.get(id=code, active=True)
+    except Client.DoesNotExist:
+        return Response({'error': 'Lien d\'invitation invalide ou expiré'}, status=status.HTTP_400_BAD_REQUEST)
+
+    prospect_id = uuid.uuid4().hex[:12]
+    fname_val = (serializer.validated_data.get('fname') or '').strip()
+    lname_val = (serializer.validated_data.get('lname') or '').strip()
+    email_val = (serializer.validated_data.get('email') or '').strip().lower()
+    phone_val = (serializer.validated_data.get('phone') or '').strip()
+    ReferralProspect.objects.create(
+        id=prospect_id,
+        referrer=referrer,
+        fname=fname_val,
+        lname=lname_val,
+        email=email_val,
+        phone=phone_val,
+    )
+
+    # Notifications : admin + conseiller gestionnaire du client parrain
+    prospect_name = f"{fname_val} {lname_val}".strip() or email_val
+    referrer_name = f"{referrer.fname or ''} {referrer.lname or ''}".strip() or referrer.email or referrer.id
+    notif_title = "Nouvelle inscription parrainage"
+    notif_message = f"{prospect_name} s'est inscrit via l'invitation de {referrer_name}."
+    notif_payload = {
+        "prospect_id": prospect_id,
+        "referrer_id": referrer.id,
+        "prospect_email": email_val,
+    }
+
+    # Notification à tous les admins
+    admin_user_ids = list(UserDetails.objects.filter(role='admin').values_list('django_user_id', flat=True))
+    for admin_django_user in DjangoUser.objects.filter(id__in=admin_user_ids):
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=admin_django_user,
+            notification_type=AppNotification.TYPE_REFERRAL_INSCRIPTION,
+            title=notif_title,
+            message=notif_message,
+            payload=notif_payload,
+        )
+
+    # Notification au conseiller gestionnaire du client parrain
+    manager_user = _resolve_client_manager_user(referrer)
+    if manager_user and manager_user.id not in admin_user_ids:
+        create_app_notification(
+            recipient_type=AppNotification.RECIPIENT_CRM_USER,
+            recipient_user=manager_user,
+            notification_type=AppNotification.TYPE_REFERRAL_INSCRIPTION,
+            title=notif_title,
+            message=notif_message,
+            payload=notif_payload,
+        )
+
+    return Response({'message': 'Merci ! Nous vous contacterons rapidement.'}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def client_password_reset_confirm(request):
     """Client platform only: confirm password reset using a signed token."""
     token = (request.data.get('token') or '').strip()
@@ -3644,7 +3719,7 @@ def asset_list(request):
         )
     
     assets = assets.order_by('type', 'name')
-    serializer = AssetSerializer(assets, many=True)
+    serializer = AssetSerializer(assets, many=True, context={'request': request})
     return Response({'assets': serializer.data})
 
 @api_view(['POST'])
@@ -3658,7 +3733,7 @@ def asset_create(request):
         while Asset.objects.filter(id=asset_id).exists():
             asset_id = uuid.uuid4().hex[:12]
         asset = serializer.save(id=asset_id)
-        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -3761,8 +3836,9 @@ def download_logo_to_storage(logo_url: str, asset_id: str) -> str:
         from api.storage import S3MediaStorage
         from django.core.files.base import ContentFile
         
-        # Download the logo from the external URL
-        response = requests.get(logo_url, timeout=10, stream=True)
+        # Download the logo from the external URL (browser-like headers to avoid blocking)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(logo_url, timeout=15, stream=True, headers=headers)
         response.raise_for_status()
         
         # Get file extension from URL or Content-Type
@@ -3773,6 +3849,8 @@ def download_logo_to_storage(logo_url: str, asset_id: str) -> str:
             ext = '.jpg'
         elif 'image/gif' in content_type:
             ext = '.gif'
+        elif 'image/webp' in content_type:
+            ext = '.webp'
         elif 'image/svg' in content_type:
             ext = '.svg'
         else:
@@ -3854,14 +3932,16 @@ def asset_upload_logo(request, asset_id):
         # Upload to storage
         filename = storage.save(custom_filename, content_file)
         
-        # Get the URL
-        logo_url = storage.url(filename)
-        
-        print(f"Logo uploaded successfully. Filename: {filename}, URL: {logo_url}")
-        
-        # Update the asset with the new logo URL
-        asset.logo_url = logo_url
+        # Store raw URL in DB (AssetSerializer converts to proxy when serializing)
+        raw_url = storage.url(filename)
+        asset.logo_url = raw_url
         asset.save(update_fields=['logo_url'])
+        
+        # Return proxy URL to frontend (private MinIO bucket requires proxy)
+        from .serializer import build_media_proxy_url
+        logo_url = build_media_proxy_url(filename, request) or raw_url
+        
+        print(f"Logo uploaded successfully. Filename: {filename}")
         
         return Response({
             'logo_url': logo_url,
@@ -3934,7 +4014,7 @@ def client_assets(request, client_id):
             Q(availability_end__isnull=True) | Q(availability_end__gte=today)
         )
     
-    serializer = ClientAssetSerializer(client_assets, many=True)
+    serializer = ClientAssetSerializer(client_assets, many=True, context={'request': request})
     return Response({'assets': serializer.data})
 
 @api_view(['POST'])
@@ -3969,7 +4049,7 @@ def client_asset_add(request, client_id):
             asset=asset
         )
         
-        serializer = ClientAssetSerializer(client_asset)
+        serializer = ClientAssetSerializer(client_asset, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except Asset.DoesNotExist:
         return Response({'error': 'Asset not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -4005,7 +4085,7 @@ def client_asset_toggle_featured(request, client_id, asset_id):
         client_asset = ClientAsset.objects.get(client=client, asset=asset)
         client_asset.featured = not client_asset.featured
         client_asset.save()
-        serializer = ClientAssetSerializer(client_asset)
+        serializer = ClientAssetSerializer(client_asset, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
     except ClientAsset.DoesNotExist:
         return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -4026,7 +4106,7 @@ def client_asset_update_availability(request, client_id, asset_id):
         return Response({'error': 'Client asset relationship not found'}, status=status.HTTP_404_NOT_FOUND)
     
     # Use serializer for validation
-    serializer = ClientAssetSerializer(client_asset, data=request.data, partial=True)
+    serializer = ClientAssetSerializer(client_asset, data=request.data, partial=True, context={'request': request})
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
@@ -4498,38 +4578,48 @@ def alpha_vantage_search(request):
 
         return Response({'results': matches[:10], 'count': len(matches[:10])}, status=status.HTTP_200_OK)
     
-    # Use Alpha Vantage for stocks, ETFs, etc.
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    # Use Finnhub for stocks/ETFs (preferred, no rate limits) or Alpha Vantage as fallback
+    from api.alpha_vantage_service import (
+        search_stock_finnhub,
+        FINNHUB_API_KEY,
+    )
+    
+    if not FINNHUB_API_KEY and not get_alpha_vantage_service():
+        return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis pour la recherche'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     try:
-        # Use SYMBOL_SEARCH to find multiple matches by name or symbol
-        results = av_service.search_symbol(keywords)
+        results = []
+        if FINNHUB_API_KEY:
+            results = search_stock_finnhub(keywords)
+        if not results:
+            av_service = get_alpha_vantage_service()
+            if av_service:
+                results = av_service.search_symbol(keywords)
         
         if not results:
-            # Check if it's actually a rate limit by making a test call
-            # Only return rate_limit_reached if we're certain it's a rate limit
-            # For now, return empty results without assuming it's a rate limit
-            # The user might just have searched for something that doesn't exist
             return Response({
-                'results': [], 
+                'results': [],
                 'message': 'Aucun résultat trouvé. Vérifiez l\'orthographe ou essayez un autre terme de recherche.',
                 'rate_limit_reached': False
             }, status=status.HTTP_200_OK)
         
-        # Optionally fetch current price for each result
+        # Fetch current price for each result (tries Finnhub, Alpha Vantage, symbol variants)
+        import time
+        from api.alpha_vantage_service import get_stock_quote_with_fallback
         results_with_prices = []
-        for result in results[:10]:  # Limit to first 10 results
+        for i, result in enumerate(results[:10]):
             try:
-                quote = av_service.get_quote(result['symbol'])
+                if i > 0:
+                    time.sleep(1.0)  # 1 req/s to respect Alpha Vantage 75/min limit
+                else:
+                    time.sleep(0.3)  # Brief pause before first request (spacing from prior searches)
+                quote = get_stock_quote_with_fallback(result['symbol'])
                 if quote:
                     result['price'] = quote['price']
-                    result['change'] = quote['change']
-                    result['change_percent'] = quote['change_percent']
-            except:
-                pass  # If quote fails, just include the search result without price
-            
+                    result['change'] = quote.get('change')
+                    result['change_percent'] = quote.get('change_percent')
+            except Exception:
+                pass
             results_with_prices.append(result)
         
         return Response({
@@ -4537,37 +4627,26 @@ def alpha_vantage_search(request):
             'count': len(results_with_prices)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        error_str = str(e).lower()
-        # Only treat as rate limit if the error message explicitly mentions rate limit
-        # Don't treat generic "Information" messages as rate limits
-        if ("rate limit" in error_str or "api call frequency" in error_str) and "information" not in error_str:
-            return Response({
-                'error': 'Limite de requêtes API Alpha Vantage atteinte (25/jour pour le plan gratuit). Veuillez réessayer demain ou passer à un plan premium.',
-                'rate_limit_reached': True
-            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({'error': f'Erreur lors de la recherche: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def alpha_vantage_quote(request, symbol):
     """
-    Get live quote for a symbol
+    Get live quote for a symbol (Finnhub preferred, Alpha Vantage fallback)
     """
     symbol = symbol.strip().upper()
     
-    av_service = get_alpha_vantage_service()
-    if not av_service:
-        return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    from api.alpha_vantage_service import get_stock_quote_with_fallback, FMP_API_KEY, FINNHUB_API_KEY
+    quote = get_stock_quote_with_fallback(symbol)
+
+    if not FMP_API_KEY and not FINNHUB_API_KEY and not get_alpha_vantage_service():
+        return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
-    try:
-        quote = av_service.get_quote(symbol)
-        
-        if not quote:
-            return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        return Response(quote, status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({'error': f'Error fetching quote: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    if not quote:
+        return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response(quote, status=status.HTTP_200_OK)
 
 def _get_fx_rate(from_currency: str, to_currency: str) -> float | None:
     """Get FX rate from_currency -> to_currency. Returns None on failure."""
@@ -4733,25 +4812,36 @@ def asset_chart_data(request, asset_id):
     try:
         # Use Alpha Vantage for cryptos and stocks/ETFs
         if asset.type.lower() == 'crypto':
+            from api.alpha_vantage_service import get_crypto_candles_finnhub, FINNHUB_API_KEY
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            chart_data = av_service.get_crypto_daily_data(asset.alpha_vantage_symbol, market=(asset.currency or 'USD').strip().upper() or 'USD')
+            if not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            # Finnhub first (60 req/min) to avoid Alpha Vantage rate limit (25/day)
+            chart_data = None
+            if FINNHUB_API_KEY:
+                chart_data = get_crypto_candles_finnhub(
+                    asset.alpha_vantage_symbol,
+                    resolution='D',
+                    days=365 if outputsize == 'full' else 120
+                )
+            if not chart_data and av_service:
+                chart_data = av_service.get_crypto_daily_data(asset.alpha_vantage_symbol, market=(asset.currency or 'USD').strip().upper() or 'USD')
             if chart_data and chart_data.get('data'):
-                # Alpha Vantage returns ~1000 days; compact=100 days, full=keep all for 1Y/3Y/MAX
+                # compact=100 days, full=keep all for 1Y/3Y/MAX
                 if outputsize == 'compact':
                     chart_data['data'] = chart_data['data'][-100:]
             if not chart_data or not chart_data.get('data'):
                 return Response({
-                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             return Response(chart_data, status=status.HTTP_200_OK)
         else:
-            # Use Alpha Vantage for stocks/ETFs
+            # Use FMP, Finnhub, or Alpha Vantage for stocks/ETFs
+            from api.alpha_vantage_service import get_stock_candles_finnhub, FINNHUB_API_KEY, FMP_API_KEY
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             # Spot commodities / FX pairs (e.g., XAU/USD, XAG/USD) use FX_DAILY.
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
@@ -4782,11 +4872,22 @@ def asset_chart_data(request, asset_id):
                         out.sort(key=lambda x: x['date'])
                         chart_data = {'data': out, 'meta_data': {'from_symbol': symbol_upper, 'to_symbol': to_ccy}}
             else:
-                chart_data = av_service.get_daily_data(asset.alpha_vantage_symbol, outputsize=outputsize)
+                from api.alpha_vantage_service import _get_symbol_variants_for_fallback, get_stock_candles_fmp, FMP_API_KEY
+                chart_data = None
+                days = 365 if outputsize == 'full' else 120
+                for sym in _get_symbol_variants_for_fallback(asset.alpha_vantage_symbol):
+                    if FMP_API_KEY:
+                        chart_data = get_stock_candles_fmp(sym, days=days)
+                    if not chart_data and FINNHUB_API_KEY:
+                        chart_data = get_stock_candles_finnhub(sym, resolution='D', days=days)
+                    if not chart_data and av_service:
+                        chart_data = av_service.get_daily_data(sym, outputsize=outputsize)
+                    if chart_data:
+                        break
             
             if not chart_data:
                 return Response({
-                    'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
@@ -4810,14 +4911,12 @@ def asset_get_logo(request):
     try:
         logo_url = None
         
-        # Use crypto logo function for cryptos, company logo for stocks
         if asset_type == 'crypto':
             from api.alpha_vantage_service import get_crypto_logo
             logo_url = get_crypto_logo(symbol)
         else:
-            av_service = get_alpha_vantage_service()
-            if av_service:
-                logo_url = av_service.get_company_logo(symbol)
+            from api.alpha_vantage_service import get_company_logo
+            logo_url = get_company_logo(symbol)
         
         if logo_url:
             return Response({'logo_url': logo_url}, status=status.HTTP_200_OK)
@@ -4922,7 +5021,7 @@ def asset_create_from_alpha_vantage(request):
     if existing_asset:
         return Response({
             'error': f'Asset with symbol {symbol} already exists',
-            'asset': AssetSerializer(existing_asset).data
+            'asset': AssetSerializer(existing_asset, context={'request': request}).data
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
@@ -4955,11 +5054,17 @@ def asset_create_from_alpha_vantage(request):
             if not currency:
                 currency = 'USD'
         else:
+            from api.alpha_vantage_service import (
+                get_stock_profile_finnhub,
+                get_company_logo,
+                FINNHUB_API_KEY,
+                FMP_API_KEY,
+            )
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-            # Spot metals / FX (XAU/XAG) use forex quote instead of stock quotes.
+            # Spot metals / FX (XAU/XAG) use forex quote: Finnhub OANDA first, Alpha Vantage FX_DAILY fallback.
             if symbol in ['XAU', 'XAG'] or (exchange or '').strip().upper() == 'FOREX':
                 if not currency:
                     currency = 'USD'
@@ -4968,26 +5073,17 @@ def asset_create_from_alpha_vantage(request):
                 if not region:
                     region = 'Global'
 
-                from api.alpha_vantage_service import get_oanda_quote_finnhub
-                fx_quote = get_oanda_quote_finnhub(symbol, currency)
-                # Cross via USD if direct pair isn't available
-                if (not fx_quote or not fx_quote.get('exchange_rate')) and currency != 'USD':
-                    metal_usd = get_oanda_quote_finnhub(symbol, 'USD')
-                    usd_to = get_oanda_quote_finnhub('USD', currency)
-                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
-                        fx_quote = {
-                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
-                        }
+                from api.alpha_vantage_service import get_forex_metal_quote_with_fallback
+                fx_quote = get_forex_metal_quote_with_fallback(symbol, currency)
 
-                # If we can't fetch a quote (e.g. FINNHUB_API_KEY missing), still allow import.
-                # Price will be updated later once the market data provider is configured.
+                # If we can't fetch a quote, still allow import. Price will be updated later.
                 quote_price = float(fx_quote['exchange_rate']) if (fx_quote and fx_quote.get('exchange_rate')) else None
 
                 quote = {
                     'symbol': symbol,
                     'price': quote_price,
-                    'change': 0,
-                    'change_percent': None,
+                    'change': fx_quote.get('change') if fx_quote else 0,
+                    'change_percent': fx_quote.get('change_percent') if fx_quote else None,
                 }
 
                 # If no name provided, set a friendly one.
@@ -4996,19 +5092,34 @@ def asset_create_from_alpha_vantage(request):
                     # Don't rely on mutability; we set name in create() below.
                     pass
             else:
-                # Fetch quote to get current price and validate symbol
-                quote = av_service.get_quote(symbol)
-                
+                # Fetch quote (tries Finnhub, Alpha Vantage, and symbol variants like HAG.DE->HAG.DEX, RR.L->RR.LON)
+                from api.alpha_vantage_service import get_stock_quote_with_fallback, get_stock_profile_finnhub, _get_symbol_variants_for_fallback
+                quote = get_stock_quote_with_fallback(symbol)
                 if not quote:
-                    return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
+                    # Quote failed. If user selected from search (has name) or profile exists, allow creation without price.
+                    has_name = bool((request.data.get('name') or '').strip())
+                    profile = None
+                    for sym in _get_symbol_variants_for_fallback(symbol):
+                        profile = get_stock_profile_finnhub(sym)
+                        if profile and profile.get('Name'):
+                            break
+                    if has_name or (profile and profile.get('Name')):
+                        quote = {'symbol': symbol, 'price': None, 'change': None, 'change_percent': None}
+                    else:
+                        return Response({'error': f'Symbol {symbol} not found'}, status=status.HTTP_404_NOT_FOUND)
             
             # Get logo URL if not provided (skip for spot FX)
             if not logo_url and symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
-                logo_url = av_service.get_company_logo(symbol) or ''
+                logo_url = get_company_logo(symbol) or ''
+                if not logo_url and av_service:
+                    logo_url = av_service.get_company_logo(symbol) or ''
 
             # Best-effort company info (persisted on import) - equities/ETFs only.
+            overview = {}
+            overview_currency = ''
+            overview_country = ''
             if symbol not in ['XAU', 'XAG'] and (exchange or '').strip().upper() != 'FOREX':
-                overview = av_service.get_company_overview(symbol) or {}
+                overview = (get_stock_profile_finnhub(symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(symbol) if av_service else None) or {}
                 overview_name = (overview.get('Name') or '').strip()
                 overview_description = (overview.get('Description') or '').strip()
                 overview_sector = (overview.get('Sector') or '').strip()
@@ -5152,10 +5263,10 @@ Entrée (JSON):
             currency=currency,
             region=region,
             logo_url=logo_url,
-            last_price=quote['price'],
+            last_price=quote.get('price'),
             last_price_update=timezone.now() if quote.get('price') is not None else None,
-            price_change=quote['change'] if quote.get('price') is not None else None,
-            price_change_percent=float(quote['change_percent']) if (quote.get('price') is not None and quote.get('change_percent')) else None,
+            price_change=quote.get('change') if quote.get('price') is not None else None,
+            price_change_percent=float(quote['change_percent']) if (quote.get('price') is not None and quote.get('change_percent') is not None) else None,
             description=manual_description or overview_description,
             sector=overview_sector,
             industry=overview_industry,
@@ -5186,7 +5297,7 @@ Entrée (JSON):
                         asset=asset
                     )
         
-        return Response(AssetSerializer(asset).data, status=status.HTTP_201_CREATED)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': f'Error creating asset: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -5210,7 +5321,7 @@ def asset_update_price(request, asset_id):
             
             if not quote:
                 return Response({
-                    'error': f'Crypto symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
+                    'error': 'Données indisponibles pour le moment',
                     'rate_limit_reached': True
                 }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
@@ -5228,36 +5339,36 @@ def asset_update_price(request, asset_id):
             
             asset.save()
         else:
-            # Use Alpha Vantage for stocks/ETFs
+            from api.alpha_vantage_service import (
+                get_stock_profile_finnhub,
+                get_company_logo,
+                FINNHUB_API_KEY,
+                FMP_API_KEY,
+            )
             av_service = get_alpha_vantage_service()
-            if not av_service:
-                return Response({'error': 'Alpha Vantage API key not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                return Response({'error': 'FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
             symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
-            if symbol_upper in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
+            from api.alpha_vantage_service import _normalize_metal_symbol, get_forex_metal_quote_with_fallback, get_oanda_candles_finnhub
+            symbol_normalized = _normalize_metal_symbol(symbol_upper)
+            if symbol_normalized in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX':
                 to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
-                from api.alpha_vantage_service import get_oanda_quote_finnhub, get_oanda_candles_finnhub
-                fx_quote = get_oanda_quote_finnhub(symbol_upper, to_ccy)
-                if (not fx_quote or not fx_quote.get('exchange_rate')) and to_ccy != 'USD':
-                    metal_usd = get_oanda_quote_finnhub(symbol_upper, 'USD')
-                    usd_to = get_oanda_quote_finnhub('USD', to_ccy)
-                    if metal_usd and usd_to and metal_usd.get('exchange_rate') and usd_to.get('exchange_rate'):
-                        fx_quote = {
-                            'exchange_rate': float(metal_usd['exchange_rate']) * float(usd_to['exchange_rate'])
-                        }
+                fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
                 if not fx_quote or not fx_quote.get('exchange_rate'):
                     return Response({
-                        'error': f'FX quote {symbol_upper}/{to_ccy} not found or API rate limit reached',
-                        'rate_limit_reached': True
+                        'error': 'Données indisponibles pour le moment',
+                        'rate_limit_reached': True,
+                        'symbol': symbol_upper,
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
                 asset.last_price = fx_quote['exchange_rate']
                 asset.last_price_update = timezone.now()
 
                 # Best-effort change from last 2 daily closes
-                fx_daily = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution='D', days=30)
+                fx_daily = get_oanda_candles_finnhub(symbol_normalized, to_ccy, resolution='D', days=30)
                 if not fx_daily and to_ccy != 'USD':
-                    metal_usd = get_oanda_candles_finnhub(symbol_upper, 'USD', resolution='D', days=30)
+                    metal_usd = get_oanda_candles_finnhub(symbol_normalized, 'USD', resolution='D', days=30)
                     usd_to = get_oanda_candles_finnhub('USD', to_ccy, resolution='D', days=30)
                     if metal_usd and usd_to:
                         usd_to_by_date = {p['date']: p for p in (usd_to.get('data') or [])}
@@ -5282,12 +5393,13 @@ def asset_update_price(request, asset_id):
 
                 asset.save()
             else:
-                quote = av_service.get_quote(asset.alpha_vantage_symbol)
+                from api.alpha_vantage_service import get_stock_quote_with_fallback
+                quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
                 
                 if not quote:
                     return Response({
-                        'error': f'Symbol {asset.alpha_vantage_symbol} not found or API rate limit reached',
-                        'rate_limit_reached': True
+                        'error': 'Données indisponibles pour le moment',
+                        'symbol': symbol_upper,
                     }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 
                 # Update asset price data
@@ -5310,13 +5422,11 @@ def asset_update_price(request, asset_id):
                 )
                 
                 if needs_details:
-                    # Get company overview for additional details
-                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    overview = (get_stock_profile_finnhub(asset.alpha_vantage_symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(asset.alpha_vantage_symbol) if av_service else None)
                     
                     if overview:
-                        # Update logo if missing
                         if not asset.logo_url:
-                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            logo_url = get_company_logo(asset.alpha_vantage_symbol) or (av_service.get_company_logo(asset.alpha_vantage_symbol) if av_service else None)
                             if logo_url:
                                 asset.logo_url = logo_url
                         
@@ -5401,7 +5511,7 @@ def asset_update_price(request, asset_id):
                 
                 asset.save()
         
-        return Response(AssetSerializer(asset).data, status=status.HTTP_200_OK)
+        return Response(AssetSerializer(asset, context={'request': request}).data, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': f'Error updating price: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -5426,6 +5536,12 @@ def assets_bulk_update_prices(request):
     if not assets.exists():
         return Response({'error': 'No valid assets found with symbols configured'}, status=status.HTTP_404_NOT_FOUND)
     
+    from api.alpha_vantage_service import (
+        get_stock_profile_finnhub,
+        get_company_logo,
+        FINNHUB_API_KEY,
+        FMP_API_KEY,
+    )
     av_service = get_alpha_vantage_service()
     
     updated_count = 0
@@ -5433,13 +5549,13 @@ def assets_bulk_update_prices(request):
     
     for idx, asset in enumerate(assets):
         try:
-            # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
-            if idx > 0 and idx % 5 == 0:
-                time.sleep(12)  # 12 seconds = 5 requests per minute
+            # Delay only when using Alpha Vantage (Finnhub has no strict rate limits)
+            if not FINNHUB_API_KEY and av_service and idx > 0 and idx % 5 == 0:
+                time.sleep(12)
             
             updated = False
             
-            # Use Alpha Vantage for cryptos and stocks/ETFs
+            # Use Finnhub/Alpha Vantage for cryptos and stocks/ETFs
             if asset.type.lower() == 'crypto':
                 quote = get_crypto_quote_alpha_vantage(asset.alpha_vantage_symbol)
                 
@@ -5457,21 +5573,38 @@ def assets_bulk_update_prices(request):
                         asset.logo_url = logo_url
                         updated = True
             else:
-                if not av_service:
-                    errors.append(f'{asset.alpha_vantage_symbol}: Alpha Vantage API key not configured')
-                    continue
+                symbol_upper = (asset.alpha_vantage_symbol or '').strip().upper()
+                from api.alpha_vantage_service import _normalize_metal_symbol
+                symbol_normalized = _normalize_metal_symbol(symbol_upper)
+                is_forex_metal = symbol_normalized in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX'
+
+                if is_forex_metal:
+                    # Metals/FOREX: Finnhub OANDA first, Metals-API second, Alpha Vantage for fiat only
+                    to_ccy = (asset.currency or 'USD').strip().upper() or 'USD'
+                    from api.alpha_vantage_service import get_forex_metal_quote_with_fallback
+                    fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
+                    if fx_quote and fx_quote.get('exchange_rate'):
+                        asset.last_price = fx_quote['exchange_rate']
+                        asset.last_price_update = timezone.now()
+                        asset.price_change = fx_quote.get('change')
+                        asset.price_change_percent = float(fx_quote['change_percent']) if fx_quote.get('change_percent') is not None else None
+                        updated = True
+                else:
+                    # Stocks/ETFs: FMP, Finnhub, Alpha Vantage fallback
+                    if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+                        errors.append(f'{asset.alpha_vantage_symbol}: FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis')
+                        continue
+
+                    from api.alpha_vantage_service import get_stock_quote_with_fallback
+                    quote = get_stock_quote_with_fallback(asset.alpha_vantage_symbol)
+
+                    if quote:
+                        asset.last_price = quote['price']
+                        asset.last_price_update = timezone.now()
+                        asset.price_change = quote['change']
+                        asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
+                        updated = True
                 
-                # Get quote for price update
-                quote = av_service.get_quote(asset.alpha_vantage_symbol)
-                
-                if quote:
-                    asset.last_price = quote['price']
-                    asset.last_price_update = timezone.now()
-                    asset.price_change = quote['change']
-                    asset.price_change_percent = float(quote['change_percent']) if quote['change_percent'] else None
-                    updated = True
-                
-                # Check if we need to fetch additional details
                 needs_details = (
                     not asset.logo_url or 
                     not asset.description or 
@@ -5485,13 +5618,11 @@ def assets_bulk_update_prices(request):
                 )
                 
                 if needs_details:
-                    # Get company overview for additional details
-                    overview = av_service.get_company_overview(asset.alpha_vantage_symbol)
+                    overview = (get_stock_profile_finnhub(asset.alpha_vantage_symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(asset.alpha_vantage_symbol) if av_service else None)
                     
                     if overview:
-                        # Update logo if missing
                         if not asset.logo_url:
-                            logo_url = av_service.get_company_logo(asset.alpha_vantage_symbol)
+                            logo_url = get_company_logo(asset.alpha_vantage_symbol) or (av_service.get_company_logo(asset.alpha_vantage_symbol) if av_service else None)
                             if logo_url:
                                 asset.logo_url = logo_url
                                 updated = True
@@ -5635,7 +5766,7 @@ def assets_bulk_import_from_index(request):
         skipped = 0
         errors = []
         
-        av_service = get_alpha_vantage_service() if fetch_full_details else None
+        av_service = get_alpha_vantage_service()
         
         for idx, constituent in enumerate(constituents):
             symbol = constituent.get('symbol', '').strip().upper()
@@ -5713,15 +5844,19 @@ def assets_bulk_import_from_index(request):
                     'subcategory': asset_type,
                 }
                 
-                if av_service:
-                    # Add delay to respect Alpha Vantage rate limits (5 requests per minute)
-                    # Only add delay if we've imported at least one asset
-                    if imported > 0 and imported % 5 == 0:
-                        time.sleep(12)  # 12 seconds = 5 requests per minute
+                from api.alpha_vantage_service import (
+                    get_stock_quote_finnhub,
+                    get_stock_profile_finnhub,
+                    get_company_logo,
+                    FINNHUB_API_KEY,
+                )
+                if FINNHUB_API_KEY or av_service:
+                    if not FINNHUB_API_KEY and av_service and imported > 0 and imported % 5 == 0:
+                        time.sleep(12)
                     
                     try:
-                        # Always fetch quote to get current price, regardless of fetch_full_details
-                        quote = av_service.get_quote(symbol)
+                        from api.alpha_vantage_service import get_stock_quote_with_fallback
+                        quote = get_stock_quote_with_fallback(symbol)
                         
                         if quote:
                             asset_data['last_price'] = quote.get('price')
@@ -5729,10 +5864,8 @@ def assets_bulk_import_from_index(request):
                             asset_data['price_change'] = quote.get('change')
                             asset_data['price_change_percent'] = float(quote.get('change_percent', 0)) if quote.get('change_percent') else None
                             
-                            # Only fetch detailed company information if requested
                             if fetch_full_details:
-                                # Fetch company overview for additional details
-                                overview = av_service.get_company_overview(symbol) or {}
+                                overview = (get_stock_profile_finnhub(symbol) if FINNHUB_API_KEY else None) or (av_service.get_company_overview(symbol) if av_service else None) or {}
                                 if overview:
                                     asset_data['name'] = overview.get('Name') or name or symbol
                                     asset_data['description'] = overview.get('Description', '').strip()
@@ -5764,8 +5897,7 @@ def assets_bulk_import_from_index(request):
                                     except Exception:
                                         pass
                                 
-                                # Fetch logo
-                                logo_url = av_service.get_company_logo(symbol) or ''
+                                logo_url = get_company_logo(symbol) or (av_service.get_company_logo(symbol) if av_service else '') or ''
                                 if logo_url:
                                     asset_data['logo_url'] = logo_url
                                 
@@ -6927,10 +7059,8 @@ def _get_manager_profile_photo(manager_user: DjangoUser, request):
         user_details = getattr(manager_user, 'user_details', None)
         if not user_details or not getattr(user_details, 'profile_photo', None):
             return ''
-        url = user_details.profile_photo.url
-        if url and (url.startswith('http://') or url.startswith('https://')):
-            return url
-        return request.build_absolute_uri(url) if request and url else (url or '')
+        from .serializer import _get_media_url_for_field
+        return _get_media_url_for_field(request, user_details.profile_photo) or ''
     except Exception:
         return ''
 
@@ -7712,6 +7842,44 @@ def _client_transaction_create_impl(request, client_id):
         
         # Now save the transaction (signal will see the skip flag)
         transaction.save()
+        
+        # Depot shortcut: create parallel bonus transaction when bonus_amount is provided
+        if transaction_type == 'depot':
+            bonus_amount_raw = request.data.get('bonus_amount')
+            if bonus_amount_raw is not None:
+                try:
+                    bonus_amount_eur = float(bonus_amount_raw)
+                except (TypeError, ValueError):
+                    bonus_amount_eur = 0
+                if bonus_amount_eur > 0:
+                    bonus_final_amount = bonus_amount_eur
+                    bonus_subscription = dict(subscription_details_data or {})
+                    if amount_currency != 'EUR':
+                        fx_rate = bonus_subscription.get('fx_rate_eur_to_account')
+                        if fx_rate is None or fx_rate <= 0:
+                            fx_rate = _get_fx_rate('EUR', amount_currency)
+                        if fx_rate is not None and fx_rate > 0:
+                            bonus_final_amount = round(bonus_amount_eur * fx_rate, 2)
+                            bonus_subscription['deposit_eur_amount'] = bonus_amount_eur
+                            bonus_subscription['fx_rate_eur_to_account'] = fx_rate
+                        else:
+                            bonus_final_amount = round(bonus_amount_eur, 2)
+                    bonus_id = uuid.uuid4().hex[:12]
+                    while Transaction.objects.filter(id=bonus_id).exists():
+                        bonus_id = uuid.uuid4().hex[:12]
+                    bonus_txn = Transaction(
+                        id=bonus_id,
+                        client=client,
+                        type='bonus',
+                        amount=bonus_final_amount,
+                        amount_currency=amount_currency,
+                        description=request.data.get('bonus_description', '') or 'Bonus (dépôt)',
+                        status=transaction_status,
+                        datetime=transaction_datetime,
+                        subscription_details=bonus_subscription,
+                    )
+                    bonus_txn._skip_auto_position_generation = True
+                    bonus_txn.save()
         
         # If this is an investment transaction with status 'valide', generate positions NOW
         # This happens BEFORE the transaction is committed, ensuring positions are ready
@@ -11305,12 +11473,19 @@ def product_generate_description(request):
         
         name = request.data.get('name', '')
         category_id = request.data.get('categoryId', '')
+        product_type = request.data.get('type', '')
+        reference = request.data.get('reference', '')
+        subcategory = request.data.get('subcategory', [])
         min_entry_value = request.data.get('minEntryValue', '')
         max_entry_value = request.data.get('maxEntryValue', '')
         profitability = request.data.get('profitability', '')
         no_profitability = request.data.get('noProfitability', True)
         if isinstance(no_profitability, str):
             no_profitability = no_profitability.lower() in ('oui', 'true', '1', 'yes')
+        is_variable_profitability = request.data.get('isVariableProfitability', 'Non').strip()
+        profitability_rate = request.data.get('profitabilityRate', '')
+        profitability_min = request.data.get('profitabilityMin', '')
+        profitability_max = request.data.get('profitabilityMax', '')
         duration = request.data.get('duration', '')
         profitability_period = request.data.get('profitabilityPeriod', '')
         interest_period = request.data.get('interestPeriod', [])
@@ -11319,6 +11494,8 @@ def product_generate_description(request):
             available_funds = available_funds.lower() in ('oui', 'true', '1', 'yes')
         availability_start = request.data.get('availabilityStart', '')
         availability_end = request.data.get('availabilityEnd', '')
+        existing_description = (request.data.get('existingDescription') or request.data.get('description') or '').strip()
+        is_improve_mode = bool(existing_description)
         
         # Get category name if available
         category_name = ''
@@ -11332,23 +11509,34 @@ def product_generate_description(request):
         # Format interest period (périodes de rentabilité disponibles)
         interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else '')
         
-        # Format duration with months equivalent
-        duration_str = duration or 'Non spécifiée'
-        if duration and str(duration).isdigit():
-            days = int(duration)
-            months = round(days / 30)
-            duration_str = f"{days} jours ({months} mois)"
+        # Format duration (vide = durée indéterminée)
+        duration_clean = (str(duration) or '').strip()
+        duration_str = 'durée indéterminée' if not duration_clean else (
+            f"{int(duration_clean)} jours ({round(int(duration_clean) / 30)} mois)" if duration_clean.isdigit() else duration_clean
+        )
         
-        rentability_str = "non applicable" if no_profitability else (profitability or "Non spécifiée")
+        # Rentabilité: variable ou fixe
+        if no_profitability:
+            rentability_str = "non applicable"
+        elif is_variable_profitability == 'Oui' and profitability_min and profitability_max:
+            rentability_str = f"{profitability_min}% à {profitability_max}%"
+        elif profitability_rate:
+            rentability_str = f"{profitability_rate}%"
+        else:
+            rentability_str = profitability or "à définir"
+        
+        subcategory_str = ', '.join(subcategory) if isinstance(subcategory, list) and subcategory else (subcategory if isinstance(subcategory, str) else '')
         max_invest_str = f"{max_entry_value}€" if max_entry_value else "sans plafond"
         funds_str = "Oui" if available_funds else "Non"
         availability_str = ""
         if availability_start or availability_end:
             availability_str = f"Disponible du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
-        prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
-- Nom: {name or 'Non spécifié'}
+        product_info_block = f"""- Nom: {name or 'Non spécifié'}
+- Type: {product_type or 'Non spécifié'}
+- Référence: {reference or 'Non spécifiée'}
 - Catégorie: {category_name or 'Non spécifiée'}
+- Sous-catégories: {subcategory_str or 'Non spécifiées'}
 - Investissement minimum: {min_entry_value or 'Non spécifié'}€
 - Plafond de souscription: {max_invest_str}
 - Durée: {duration_str}
@@ -11356,7 +11544,24 @@ def product_generate_description(request):
 - Période de rentabilité: {profitability_period or 'Non spécifiée'}
 - Périodes d'intérêt disponibles: {interest_period_str or 'Non spécifiées'}
 - Fonds disponibles: {funds_str}
-{f'- Période de disponibilité: {availability_str}' if availability_str else ''}
+{f'- Période de disponibilité: {availability_str}' if availability_str else ''}"""
+
+        if is_improve_mode:
+            prompt = f"""Tu dois AMÉLIORER la description de produit existante ci-dessous en utilisant TOUTES les informations produit fournies. Mets à jour les valeurs (durée, rentabilité, plafonds, etc.) avec les données exactes. Conserve le ton professionnel. Pas de #, *, - ou puces. Texte pur.
+
+{product_info_block}
+
+--- DESCRIPTION EXISTANTE À AMÉLIORER ---
+
+{existing_description}
+
+--- FIN DE LA DESCRIPTION EXISTANTE ---
+
+Génère la description améliorée (remplace entièrement par la version améliorée):"""
+        else:
+            prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
+
+{product_info_block}
 
 La description doit être:
 - Professionnelle et rassurante
@@ -11585,12 +11790,11 @@ def product_generate_cgv(request):
         else:
             rentability_text = "à définir"
         
-        # Format duration with months
-        duration_str = duration or 'à définir'
-        if duration and str(duration).isdigit():
-            days = int(duration)
-            months = round(days / 30)
-            duration_str = f"{days} jours ({months} mois)"
+        # Format duration with months (vide = durée indéterminée)
+        duration_clean = (str(duration) or '').strip()
+        duration_str = 'durée indéterminée' if not duration_clean else (
+            f"{int(duration_clean)} jours ({round(int(duration_clean) / 30)} mois)" if duration_clean.isdigit() else duration_clean
+        )
         
         # Format interest period (périodes de rentabilité disponibles)
         interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else 'à définir')
@@ -11600,10 +11804,10 @@ def product_generate_cgv(request):
         if availability_start or availability_end:
             availability_str = f"Du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
-        # Prompt avec toutes les informations
-        prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
-
-Informations du produit:
+        existing_cgv = (request.data.get('existingCgv') or request.data.get('cgv') or '').strip()
+        is_improve_mode = bool(existing_cgv)
+        
+        product_info_block = f"""Informations du produit:
 - Investissement minimum: {min_entry_value or 'à définir'}€
 - Plafond de souscription (investissement maximum): {max_entry_value or 'à définir'}€ (ou "sans plafond" si vide)
 - Durée du contrat: {duration_str}
@@ -11631,14 +11835,33 @@ Structure (14 sections obligatoires, toutes complètes):
 
 Règles:
 - Utiliser EXACTEMENT les valeurs fournies ci-dessus (durée, rentabilité, périodes, fonds disponibles, plafond) dans les sections concernées
-- Section 3 Durée: mentionner la durée en jours et mois
+- Section 3 Durée: si "durée indéterminée", préciser que la durée du contrat est indéterminée; sinon mentionner la durée en jours et mois
 - Section 4 Rémunération: intégrer la période de rentabilité et les périodes d'intérêt disponibles
 - Mentionner si les fonds sont disponibles ou non selon l'information fournie
 - Chaque sous-section: 2-3 phrases minimum
 - Pas de placeholders [ ], pas de symboles #, *, -
 - Texte professionnel et juridique français
 - Document complet et utilisable directement
-- Environ 500-700 mots au total
+- Environ 500-700 mots au total"""
+
+        if is_improve_mode:
+            prompt = f"""Tu dois AMÉLIORER et COMPLÉTER le texte de Conditions Générales de Vente existant ci-dessous pour le produit "{name}".
+
+Utilise les informations produit fournies pour corriger, enrichir et aligner le texte existant. Conserve la structure et le style du document, mais mets à jour toutes les valeurs (durée, rentabilité, plafonds, etc.) avec les données exactes fournies. Ajoute les sections manquantes si nécessaire.
+
+{product_info_block}
+
+--- TEXTE EXISTANT À AMÉLIORER ---
+
+{existing_cgv}
+
+--- FIN DU TEXTE EXISTANT ---
+
+Génère le document CGV complet et amélioré (remplace entièrement le texte existant par la version améliorée):"""
+        else:
+            prompt = f"""Génère des Conditions Générales de Vente en français pour le produit "{name}".
+
+{product_info_block}
 
 Génère le document complet:"""
         
@@ -12274,35 +12497,88 @@ def news_delete(request, news_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _proxy_fetch_external_url(url: str):
+    """Fetch external URL and return (content, content_type) or raise."""
+    import requests
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    resp = requests.get(url, timeout=15, stream=True, headers=headers)
+    resp.raise_for_status()
+    content_type = resp.headers.get('Content-Type', 'application/octet-stream')
+    if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
+        content_type = 'application/pdf'
+    return resp.content, content_type
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
-def media_proxy(request, file_path):
-    """Proxy media files (storage URLs or local paths) with proper Content-Type and Content-Disposition for CORS/preview"""
+def media_proxy(request):
+    """Proxy external URLs via ?url= param. Use for asset logos (Clearbit, CoinGecko, etc.) and presigned URLs."""
     from django.http import HttpResponse
     from urllib.parse import unquote
+
+    url = request.GET.get('url')
+    if not url:
+        return HttpResponse(status=400)
+    try:
+        decoded = unquote(url)
+        if not (decoded.startswith('http://') or decoded.startswith('https://')):
+            return HttpResponse(status=400)
+        content, content_type = _proxy_fetch_external_url(decoded)
+        response = HttpResponse(content, content_type=content_type)
+        response['Content-Disposition'] = 'inline'
+        response['Access-Control-Allow-Origin'] = '*'
+        return response
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"media_proxy ?url= error: {e}")
+        return HttpResponse(status=404)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def media_proxy_path(request, file_path):
+    """Proxy storage paths (news/, media/, etc.) from S3/MinIO or local."""
+    from django.http import HttpResponse
+    from urllib.parse import unquote
+    from django.conf import settings
 
     decoded_path = unquote(file_path)
     try:
         if decoded_path.startswith('http://') or decoded_path.startswith('https://'):
-            import requests
-            resp = requests.get(decoded_path, timeout=30, stream=True)
-            resp.raise_for_status()
-            content_type = resp.headers.get('Content-Type', 'application/octet-stream')
-            content_disposition = resp.headers.get('Content-Disposition', 'inline')
-            if 'application/pdf' in content_type or decoded_path.lower().endswith('.pdf'):
-                content_type = 'application/pdf'
-                content_disposition = 'inline'
-            response = HttpResponse(resp.content, content_type=content_type)
-            response['Content-Disposition'] = content_disposition
+            content, content_type = _proxy_fetch_external_url(decoded_path)
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = 'inline'
             response['Access-Control-Allow-Origin'] = '*'
             return response
-        else:
-            from django.conf import settings
-            from django.views.static import serve
-            return serve(request, decoded_path, document_root=settings.MEDIA_ROOT)
+        if getattr(settings, 'S3_CONFIGURED', False):
+            from django.core.files.storage import default_storage
+            if not default_storage.exists(decoded_path):
+                return HttpResponse(status=404)
+            f = default_storage.open(decoded_path, 'rb')
+            try:
+                content = f.read()
+            finally:
+                f.close()
+            content_type = 'application/octet-stream'
+            if decoded_path.lower().endswith(('.jpg', '.jpeg')):
+                content_type = 'image/jpeg'
+            elif decoded_path.lower().endswith('.png'):
+                content_type = 'image/png'
+            elif decoded_path.lower().endswith('.gif'):
+                content_type = 'image/gif'
+            elif decoded_path.lower().endswith('.webp'):
+                content_type = 'image/webp'
+            elif decoded_path.lower().endswith('.pdf'):
+                content_type = 'application/pdf'
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = 'inline'
+            response['Access-Control-Allow-Origin'] = '*'
+            return response
+        from django.views.static import serve
+        return serve(request, decoded_path, document_root=settings.MEDIA_ROOT)
     except Exception as e:
-        logging.getLogger(__name__).warning(f"media_proxy error for {file_path[:100]}: {e}")
+        logging.getLogger(__name__).warning(f"media_proxy_path error for {file_path[:80]}: {e}")
         return HttpResponse(status=404)
 
 

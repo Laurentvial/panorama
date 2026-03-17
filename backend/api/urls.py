@@ -45,6 +45,7 @@ urlpatterns = [
     # Client OTP login (email one-time code)
     path('client/login/otp/request/', api_views.client_login_otp_request, name='client-login-otp-request'),
     path('client/login/otp/verify/', api_views.client_login_otp_verify, name='client-login-otp-verify'),
+    path('referral-prospects/', api_views.referral_prospect_create, name='referral-prospect-create'),
     path('client/current/', api_views.get_current_client, name='get-current-client'),
     path('client/identity/', api_views.client_update_identity, name='client-update-identity'),
     path('client/successors/', api_views.client_successors_list, name='client-successors-list'),
@@ -178,6 +179,7 @@ urlpatterns = [
     path('news/bulk-import-from-api/', api_views.news_bulk_import_from_api, name='news-bulk-import-from-api'),
     path('news/<str:news_id>/update/', api_views.news_update, name='news-update'),
     path('news/<str:news_id>/delete/', api_views.news_delete, name='news-delete'),
-    # Media proxy endpoint for CORS-compliant image serving
-    path('media/<path:file_path>/', api_views.media_proxy, name='media-proxy'),
+    # Media proxy: ?url= for external URLs, or /media/path/ for storage paths
+    path('media/', api_views.media_proxy, name='media-proxy'),
+    path('media/<path:file_path>/', api_views.media_proxy_path, name='media-proxy-path'),
 ]

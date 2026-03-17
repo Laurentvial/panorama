@@ -35,10 +35,13 @@ def cron_refresh_prices(request):
     if not _validate_cron_token(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
 
-    scope = request.GET.get("scope", "product-assets")
-    limit = int(request.GET.get("limit", os.getenv("PRICE_REFRESH_LIMIT", "20")))
+    scope = request.GET.get("scope", os.getenv("PRICE_REFRESH_SCOPE", "product-assets"))
+    limit = int(request.GET.get("limit", os.getenv("PRICE_REFRESH_LIMIT", "50")))
     min_age_seconds = int(
         request.GET.get("min_age_seconds", os.getenv("PRICE_REFRESH_MIN_AGE_SECONDS", "240"))
+    )
+    failed_retry_hours = int(
+        request.GET.get("failed_retry_hours", os.getenv("PRICE_REFRESH_FAILED_RETRY_HOURS", "6"))
     )
 
     out = StringIO()
@@ -48,6 +51,7 @@ def cron_refresh_prices(request):
             scope=scope,
             limit=limit,
             min_age_seconds=min_age_seconds,
+            failed_retry_hours=failed_retry_hours,
             stdout=out,
         )
         return JsonResponse({"status": "ok", "output": out.getvalue()})

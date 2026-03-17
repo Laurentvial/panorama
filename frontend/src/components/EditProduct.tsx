@@ -436,17 +436,25 @@ export function EditProduct() {
         method: 'POST',
         body: JSON.stringify({
           name: formData.name,
+          type: formData.type,
+          reference: formData.reference,
           categoryId: formData.categoryId,
+          subcategory: Array.isArray(formData.subcategory) ? formData.subcategory : [],
           minEntryValue: formData.minEntryValue,
           maxEntryValue: formData.maxEntryValue,
           profitability: profitabilityText,
           noProfitability: formData.noProfitability,
+          isVariableProfitability: formData.isVariableProfitability,
+          profitabilityRate: formData.profitabilityRate,
+          profitabilityMin: formData.profitabilityMin,
+          profitabilityMax: formData.profitabilityMax,
           profitabilityPeriod: formData.profitabilityPeriod,
           interestPeriod: Array.isArray(formData.interestPeriod) ? formData.interestPeriod : [],
           duration: formData.duration,
           availableFunds: formData.availableFunds,
           availabilityStart: formData.availabilityStart,
-          availabilityEnd: formData.availabilityEnd
+          availabilityEnd: formData.availabilityEnd,
+          existingDescription: (formData.description || '').trim()
         })
       });
       return response?.description || response?.text || '';
@@ -516,7 +524,9 @@ export function EditProduct() {
         // Options du produit
         linkToAssets: formData.linkToAssets,
         default: formData.default,
-        availableFunds: formData.availableFunds
+        availableFunds: formData.availableFunds,
+        // Texte existant pour amélioration (si non vide)
+        existingCgv: (formData.cgv || '').trim()
       };
 
       const response = await apiCall('/api/products/generate-cgv/', {

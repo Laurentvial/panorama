@@ -106,11 +106,8 @@ export function RichTextEditor({
       const generatedText = await onGenerateAI();
       
       if (generatedText) {
-        const currentValue = value.trim();
-        const newValue = currentValue 
-          ? `${currentValue}\n\n${generatedText}`
-          : generatedText;
-        onChange(newValue);
+        // Toujours remplacer par le texte généré (génération from scratch ou amélioration)
+        onChange(generatedText);
         toast.success('Texte généré avec succès', { id: 'ai-generate' });
       } else {
         toast.error('Aucun texte généré', { id: 'ai-generate' });

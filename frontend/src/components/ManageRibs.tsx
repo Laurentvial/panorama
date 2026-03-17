@@ -204,6 +204,9 @@ export function ManageRibs() {
                 <thead>
                   <tr className="border-b">
                     <th className="text-left p-2 font-medium text-slate-700">Nom</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Titulaire du compte</th>
+                    <th className="text-left p-2 font-medium text-slate-700">IBAN</th>
+                    <th className="text-left p-2 font-medium text-slate-700">BIC</th>
                     <th className="text-left p-2 font-medium text-slate-700">Code banque</th>
                     <th className="text-left p-2 font-medium text-slate-700">Code guichet</th>
                     <th className="text-left p-2 font-medium text-slate-700">N° compte</th>
@@ -217,6 +220,9 @@ export function ManageRibs() {
                   {filteredRibs.map((rib) => (
                     <tr key={rib.id} className="border-b hover:bg-slate-50">
                       <td className="p-2">{rib.name}</td>
+                      <td className="p-2">{rib.accountHolder || '-'}</td>
+                      <td className="p-2 font-mono text-sm break-all max-w-[140px]">{rib.iban || '-'}</td>
+                      <td className="p-2 font-mono text-sm">{rib.bic || '-'}</td>
                       <td className="p-2 font-mono text-sm">{rib.bankCode}</td>
                       <td className="p-2 font-mono text-sm">{rib.branchCode}</td>
                       <td className="p-2 font-mono text-sm">{rib.accountNumber}</td>
@@ -286,47 +292,73 @@ export function ManageRibs() {
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="bankCode">Code banque *</Label>
+                <Label htmlFor="accountHolder">Titulaire du compte *</Label>
+                <Input
+                  id="accountHolder"
+                  value={formData.accountHolder}
+                  onChange={(e) => setFormData({ ...formData, accountHolder: e.target.value })}
+                  placeholder="Nom du titulaire"
+                  required
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="iban">IBAN *</Label>
+                <Input
+                  id="iban"
+                  value={formData.iban}
+                  onChange={(e) => setFormData({ ...formData, iban: e.target.value })}
+                  placeholder="FR76..."
+                  required
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="bic">BIC *</Label>
+                <Input
+                  id="bic"
+                  value={formData.bic}
+                  onChange={(e) => setFormData({ ...formData, bic: e.target.value })}
+                  placeholder="Code BIC"
+                  required
+                />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="bankCode">Code banque</Label>
                 <Input
                   id="bankCode"
                   value={formData.bankCode}
                   onChange={(e) => setFormData({ ...formData, bankCode: e.target.value })}
                   placeholder="5 chiffres"
                   maxLength={5}
-                  required
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="branchCode">Code guichet *</Label>
+                <Label htmlFor="branchCode">Code guichet</Label>
                 <Input
                   id="branchCode"
                   value={formData.branchCode}
                   onChange={(e) => setFormData({ ...formData, branchCode: e.target.value })}
                   placeholder="5 chiffres"
                   maxLength={5}
-                  required
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="accountNumber">Numéro de compte *</Label>
+                <Label htmlFor="accountNumber">Numéro de compte</Label>
                 <Input
                   id="accountNumber"
                   value={formData.accountNumber}
                   onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
                   placeholder="11 caractères"
                   maxLength={11}
-                  required
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="ribKey">Clé RIB *</Label>
+                <Label htmlFor="ribKey">Clé RIB</Label>
                 <Input
                   id="ribKey"
                   value={formData.ribKey}
                   onChange={(e) => setFormData({ ...formData, ribKey: e.target.value })}
                   placeholder="2 chiffres"
                   maxLength={2}
-                  required
                 />
               </div>
               <div className="modal-form-field">
@@ -339,37 +371,11 @@ export function ManageRibs() {
                 />
               </div>
               <div className="modal-form-field">
-                <Label htmlFor="iban">IBAN (optionnel)</Label>
-                <Input
-                  id="iban"
-                  value={formData.iban}
-                  onChange={(e) => setFormData({ ...formData, iban: e.target.value })}
-                  placeholder="FR76..."
-                />
-              </div>
-              <div className="modal-form-field">
-                <Label htmlFor="bic">BIC (optionnel)</Label>
-                <Input
-                  id="bic"
-                  value={formData.bic}
-                  onChange={(e) => setFormData({ ...formData, bic: e.target.value })}
-                  placeholder="Code BIC"
-                />
-              </div>
-              <div className="modal-form-field">
-                <Label htmlFor="bankName">Nom de la banque (optionnel)</Label>
+                <Label htmlFor="bankName">Nom de la banque</Label>
                 <Input
                   id="bankName"
                   value={formData.bankName}
                   onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                />
-              </div>
-              <div className="modal-form-field">
-                <Label htmlFor="accountHolder">Titulaire du compte (optionnel)</Label>
-                <Input
-                  id="accountHolder"
-                  value={formData.accountHolder}
-                  onChange={(e) => setFormData({ ...formData, accountHolder: e.target.value })}
                 />
               </div>
               <div className="modal-form-field">

@@ -4,8 +4,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Search, Eye, LogIn, Trash2, Users, UserCheck, X } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { Plus, Search, Eye, LogIn, Trash2, Users, UserCheck, X, RefreshCw } from 'lucide-react';
+import { apiCall, clearApiCache } from '../utils/api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
@@ -50,16 +50,21 @@ export function Clients({ onSelectClient }: ClientsProps) {
 
   // Refetch when navigating to clients page (e.g. after creating or returning from add)
   useEffect(() => {
-    loadData();
+    const forceRefresh = !!(location.state as { clientCreated?: boolean })?.clientCreated;
+    loadData(forceRefresh);
     // Clear clientCreated state after handling (avoids stale state in history)
     if (location.state?.clientCreated) {
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.pathname, location.key]);
 
-  async function loadData() {
+  async function loadData(forceRefresh = false) {
     try {
       setLoading(true);
+      if (forceRefresh) {
+        clearApiCache('/api/clients');
+        clearApiCache('/api/teams');
+      }
       const [clientsData, teamsData] = await Promise.all([
         apiCall('/api/clients/'),
         apiCall('/api/teams/')
@@ -94,7 +99,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
   async function handleToggleActive(clientId: string) {
     try {
       await apiCall(`/api/clients/${clientId}/toggle-active/`, { method: 'POST' });
-      loadData();
+      loadData(true);
     } catch (error) {
       console.error('Error toggling client status:', error);
     }
@@ -162,7 +167,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
         })
       );
       await Promise.all(promises);
-      loadData();
+      loadData(true);
       handleClearSelection();
       setBulkTeamId('');
     } catch (error) {
@@ -183,7 +188,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
         })
       );
       await Promise.all(promises);
-      loadData();
+      loadData(true);
       handleClearSelection();
       setBulkManagerId('');
     } catch (error) {
@@ -200,7 +205,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
         apiCall(`/api/clients/${clientId}/toggle-active/`, { method: 'POST' })
       );
       await Promise.all(promises);
-      loadData();
+      loadData(true);
       handleClearSelection();
     } catch (error) {
       console.error('Error toggling active status:', error);
@@ -216,7 +221,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
         apiCall(`/api/clients/${clientId}/delete/`, { method: 'DELETE' })
       );
       await Promise.all(promises);
-      loadData();
+      loadData(true);
       handleClearSelection();
     } catch (error) {
       console.error('Error deleting clients:', error);
@@ -248,7 +253,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
     try {
       await apiCall(`/api/clients/${clientId}/delete/`, { method: 'DELETE' });
       toast.success('Client supprimé');
-      loadData();
+      loadData(true);
     } catch (error) {
       console.error('Error deleting client:', error);
       toast.error('Erreur lors de la suppression du client');
@@ -263,10 +268,16 @@ export function Clients({ onSelectClient }: ClientsProps) {
           <p className="page-subtitle">Gestion de vos clients</p>
         </div>
         
-        <Button onClick={() => navigate('/admin/clients/add')}>
-          <Plus className="w-4 h-4 mr-2" />
-          Ajouter un client
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => loadData(true)} disabled={loading} className="gap-2">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Actualiser
+          </Button>
+          <Button onClick={() => navigate('/admin/clients/add')}>
+            <Plus className="w-4 h-4 mr-2" />
+            Ajouter un client
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

@@ -10,8 +10,12 @@ from django.utils import timezone
 from api.alpha_vantage_service import (
     get_alpha_vantage_service,
     get_crypto_quote_alpha_vantage,
+    get_forex_metal_quote_with_fallback,
     get_oanda_candles_finnhub,
-    get_oanda_quote_finnhub,
+    get_stock_quote_with_fallback,
+    _normalize_metal_symbol,
+    FINNHUB_API_KEY,
+    FMP_API_KEY,
 )
 from api.models import Asset, ProductAssetAllocation
 
@@ -42,22 +46,12 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.save(update_fields=["last_price", "last_price_update", "price_change", "price_change_percent"])
             return True, None
 
-        # FX / metals (or explicit FOREX exchange): Finnhub OANDA endpoints
-        if symbol_upper in ["XAU", "XAG"] or (asset.exchange or "").strip().upper() == "FOREX":
+        # FX / metals (or explicit FOREX exchange): Finnhub OANDA first, Metals-API second
+        symbol_normalized = _normalize_metal_symbol(symbol_upper)
+        if symbol_normalized in ["XAU", "XAG"] or (asset.exchange or "").strip().upper() == "FOREX":
             to_ccy = (asset.currency or "USD").strip().upper() or "USD"
 
-            fx_quote = get_oanda_quote_finnhub(symbol_upper, to_ccy)
-            if (not fx_quote or not fx_quote.get("exchange_rate")) and to_ccy != "USD":
-                metal_usd = get_oanda_quote_finnhub(symbol_upper, "USD")
-                usd_to = get_oanda_quote_finnhub("USD", to_ccy)
-                if (
-                    metal_usd
-                    and usd_to
-                    and metal_usd.get("exchange_rate")
-                    and usd_to.get("exchange_rate")
-                ):
-                    fx_quote = {"exchange_rate": float(metal_usd["exchange_rate"]) * float(usd_to["exchange_rate"])}
-
+            fx_quote = get_forex_metal_quote_with_fallback(symbol_normalized, to_ccy)
             if not fx_quote or not fx_quote.get("exchange_rate"):
                 return False, f"fx quote {symbol_upper}/{to_ccy} not found / rate limited"
 
@@ -65,9 +59,9 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.last_price_update = timezone.now()
 
             # Best-effort change from last 2 daily closes (same as your API view)
-            fx_daily = get_oanda_candles_finnhub(symbol_upper, to_ccy, resolution="D", days=30)
+            fx_daily = get_oanda_candles_finnhub(symbol_normalized, to_ccy, resolution="D", days=30)
             if not fx_daily and to_ccy != "USD":
-                metal_usd = get_oanda_candles_finnhub(symbol_upper, "USD", resolution="D", days=30)
+                metal_usd = get_oanda_candles_finnhub(symbol_normalized, "USD", resolution="D", days=30)
                 usd_to = get_oanda_candles_finnhub("USD", to_ccy, resolution="D", days=30)
                 if metal_usd and usd_to:
                     usd_to_by_date = {p["date"]: p for p in (usd_to.get("data") or []) if p.get("date")}
@@ -101,13 +95,13 @@ def _update_one_asset_price(asset: Asset, av_service) -> Tuple[bool, Optional[st
             asset.save(update_fields=["last_price", "last_price_update", "price_change", "price_change_percent"])
             return True, None
 
-        # Stocks / ETFs: Alpha Vantage GLOBAL_QUOTE
-        if not av_service:
-            return False, "Alpha Vantage API key not configured"
-
-        quote = av_service.get_quote(symbol_upper)
+        # Stocks / ETFs: tries FMP, Finnhub, Alpha Vantage, and symbol variants (e.g. HAG.DE->HAG.DEX)
+        # Check API config first so we give a clear error when no provider is configured
+        if not FMP_API_KEY and not FINNHUB_API_KEY and not av_service:
+            return False, "FMP_API_KEY, FINNHUB_API_KEY ou ALPHA_VANTAGE_API_KEY requis"
+        quote = get_stock_quote_with_fallback(symbol_upper)
         if not quote:
-            return False, "quote not found / rate limited"
+            return False, "quote not found"
 
         new_price = quote["price"]
         old_price = asset.last_price
@@ -137,14 +131,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--scope",
             choices=["product-assets", "all"],
-            default="product-assets",
-            help="Which assets to refresh. 'product-assets' = only assets linked to products. 'all' = all assets with symbols.",
+            default=os.getenv("PRICE_REFRESH_SCOPE", "product-assets"),
+            help="Which assets to refresh. 'product-assets' = only assets linked to products (default). 'all' = all assets with symbols.",
         )
         parser.add_argument(
             "--limit",
             type=int,
-            default=int(os.getenv("PRICE_REFRESH_LIMIT", "20")),
-            help="Max number of assets to refresh per run (default: PRICE_REFRESH_LIMIT or 20).",
+            default=int(os.getenv("PRICE_REFRESH_LIMIT", "50")),
+            help="Max number of assets to refresh per run (default: 50). Use 0 for unlimited (risky: may exhaust API quotas).",
         )
         parser.add_argument(
             "--min-age-seconds",
@@ -152,14 +146,22 @@ class Command(BaseCommand):
             default=int(os.getenv("PRICE_REFRESH_MIN_AGE_SECONDS", "240")),
             help="Skip assets updated more recently than this many seconds (default: 240).",
         )
+        parser.add_argument(
+            "--failed-retry-hours",
+            type=int,
+            default=int(os.getenv("PRICE_REFRESH_FAILED_RETRY_HOURS", "6")),
+            help="Skip assets that failed to update within this many hours (default: 6). Ensures rotation through all assets.",
+        )
 
     def handle(self, *args, **options):
         scope = options["scope"]
-        limit = max(int(options["limit"]), 1)
+        limit = max(int(options["limit"]), 0)  # 0 = no limit (all)
         min_age_seconds = max(int(options["min_age_seconds"]), 0)
+        failed_retry_hours = max(int(options.get("failed_retry_hours", 6)), 0)
 
         now = timezone.now()
         cutoff = now - timezone.timedelta(seconds=min_age_seconds)
+        failed_cutoff = now - timezone.timedelta(hours=failed_retry_hours) if failed_retry_hours > 0 else None
 
         qs = Asset.objects.filter(alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol="")
 
@@ -170,8 +172,13 @@ class Command(BaseCommand):
         # Debug: show all assets before filtering
         all_assets_before_filter = qs.count()
         self.stdout.write(f"Assets with symbols (before age filter): {all_assets_before_filter}")
-        
+
+        # Eligible: needs update (stale or never updated) AND not recently failed (backoff)
         qs = qs.filter(models.Q(last_price_update__isnull=True) | models.Q(last_price_update__lt=cutoff))
+        if failed_cutoff is not None:
+            qs = qs.filter(
+                models.Q(last_price_update_attempt__isnull=True) | models.Q(last_price_update_attempt__lt=failed_cutoff)
+            )
         total_eligible = qs.count()
         
         # Debug: show some examples
@@ -200,7 +207,9 @@ class Command(BaseCommand):
                     f"needs_update={age_seconds is None or (age_seconds is not None and age_seconds >= min_age_seconds)}"
                 )
         
-        qs = qs.order_by(models.F("last_price_update").asc(nulls_first=True), "id")[:limit]
+        qs = qs.order_by(models.F("last_price_update").asc(nulls_first=True), "id")
+        if limit > 0:
+            qs = qs[:limit]
 
         av_service = get_alpha_vantage_service()
 
@@ -208,7 +217,8 @@ class Command(BaseCommand):
         errors = 0
 
         self.stdout.write(
-            f"Refreshing asset prices (scope={scope}, limit={limit}, min_age_seconds={min_age_seconds})..."
+            f"Refreshing asset prices (scope={scope}, limit={'all' if limit == 0 else limit}, "
+            f"min_age_seconds={min_age_seconds}, failed_retry_hours={failed_retry_hours})..."
         )
         self.stdout.write(f"Found {total_eligible} assets eligible for update (cutoff: {cutoff})")
 
@@ -217,6 +227,10 @@ class Command(BaseCommand):
             old_update = asset.last_price_update
             ok, err = _update_one_asset_price(asset, av_service)
             if ok:
+                # Clear failed-attempt marker on success
+                if asset.last_price_update_attempt is not None:
+                    asset.last_price_update_attempt = None
+                    asset.save(update_fields=["last_price_update_attempt"])
                 # Refresh from DB to get actual saved values
                 asset.refresh_from_db()
                 new_price = asset.last_price
@@ -231,6 +245,9 @@ class Command(BaseCommand):
                 )
             else:
                 errors += 1
+                # Backoff: mark failed attempt so we don't retry this asset every run
+                asset.last_price_update_attempt = timezone.now()
+                asset.save(update_fields=["last_price_update_attempt"])
                 self.stdout.write(f"[ERROR] {asset.id} {asset.alpha_vantage_symbol}: {err}")
 
         self.stdout.write(f"Done. Updated={updated}, Errors={errors}, TotalConsidered={qs.count()}")

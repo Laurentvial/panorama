@@ -105,7 +105,11 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           break;
         case 'interets':
           runningInvestedCapital += amount;
-          runningProfitLoss -= amount;
+          // Surperformances = intérêts supplémentaires (hors renta initiale) → ne pas soustraire du P&L
+          const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
+          if (!subDetails?.is_surperformance) {
+            runningProfitLoss -= amount;
+          }
           break;
         case 'frais':
         case 'perte':

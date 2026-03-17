@@ -300,71 +300,61 @@ export function ProductDetail() {
         return;
       }
       
-      // Try loading as product first (since smartPortfolios are products)
-      // If that fails with 404, silently try as asset (this is expected behavior)
+      // Only request the endpoint that can succeed: avoid 404 in network tab
+      const isProduct = clientProductIds.includes(id);
+      const isAsset = clientAssetIds.includes(id);
+      
       let productLoaded = false;
-      try {
-        // Suppress console error for 404 on product endpoint (expected when ID is an asset)
-        const productResponse = await apiCall(`/api/products/${id}/`).catch((error: any) => {
-          // If 404, return null to trigger asset fallback without logging error
-          if (error?.status === 404) {
-            return null;
+      
+      if (isProduct) {
+        try {
+          const productResponse = await apiCall(`/api/products/${id}/`);
+          const productData = productResponse.product || productResponse;
+          
+          let categoriesData = categories;
+          if (categoriesData.length === 0) {
+            try {
+              const categoriesResponse = await apiCall('/api/categories/');
+              categoriesData = categoriesResponse?.categories || categoriesResponse || [];
+              setCategories(categoriesData);
+            } catch (error) {
+              console.error('Error loading categories:', error);
+            }
           }
-          throw error;
-        });
-        
-        if (!productResponse) {
-          // 404 on product, try as asset
-          throw { status: 404 };
-        }
-        
-        const productData = productResponse.product || productResponse;
-        
-        // Load categories if not already loaded, then enrich product
-        let categoriesData = categories;
-        if (categoriesData.length === 0) {
-          try {
-            const categoriesResponse = await apiCall('/api/categories/');
-            categoriesData = categoriesResponse?.categories || categoriesResponse || [];
-            setCategories(categoriesData);
-          } catch (error) {
-            console.error('Error loading categories:', error);
+          
+          let enrichedProductData = productData;
+          if (productData.categoryId && categoriesData.length > 0) {
+            const category = categoriesData.find((c: any) => c.id === productData.categoryId);
+            if (category) {
+              enrichedProductData = { ...productData, categoryName: category.title };
+            }
+          }
+          
+          setData(enrichedProductData);
+          setDataType('product');
+          productLoaded = true;
+        } catch (productError: any) {
+          // Only log non-404 errors
+          if (productError?.status && productError.status !== 404) {
+            console.error('Error loading product:', productError);
+            toast.error('Erreur lors du chargement');
+          } else {
+            toast.error('Produit ou actif non trouvé');
           }
         }
-        
-        // Enrich product with category name (similar to PlatformDiscover)
-        let enrichedProductData = productData;
-        if (productData.categoryId && categoriesData.length > 0) {
-          const category = categoriesData.find((c: any) => c.id === productData.categoryId);
-          if (category) {
-            enrichedProductData = { ...productData, categoryName: category.title };
-          }
-        }
-        
-        setData(enrichedProductData);
-        setDataType('product');
-        productLoaded = true;
-      } catch (productError: any) {
-        // If product fails (404), silently try as asset
-        // Only log non-404 errors (404 is expected when ID is an asset, not a product)
-        if (productError?.status && productError.status !== 404) {
-          console.error('Error loading product:', productError);
-        }
-        // Silently continue to try loading as asset - 404 is expected here
-        
-        // Try loading as asset
+      }
+      
+      if (isAsset && !productLoaded) {
         try {
           const assetResponse = await apiCall(`/api/assets/${id}/`);
           setData(assetResponse.asset || assetResponse);
           setDataType('asset');
           productLoaded = true;
         } catch (assetError: any) {
-          // Only show error if both failed and it's not a 404
           if (assetError?.status && assetError.status !== 404) {
             console.error('Error loading asset:', assetError);
             toast.error('Erreur lors du chargement');
-          } else if (productError?.status === 404 && assetError?.status === 404) {
-            // Both returned 404 - item doesn't exist
+          } else {
             toast.error('Produit ou actif non trouvé');
           }
         }

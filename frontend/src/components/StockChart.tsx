@@ -77,8 +77,12 @@ export function StockChart({
           setError('Invalid chart data format');
         }
       } catch (err: any) {
-        console.error('Error fetching chart data:', err);
-        setError(err.message || 'Failed to fetch chart data');
+        const msg = err.message || 'Failed to fetch chart data';
+        // Don't log expected "data unavailable" as error (API rate limit, symbol not found)
+        if (msg !== 'Données indisponibles pour le moment' && !msg.includes('not found') && !msg.includes('rate limit')) {
+          console.error('Error fetching chart data:', err);
+        }
+        setError(msg);
       } finally {
         setLoading(false);
       }
@@ -322,6 +326,9 @@ export function StockChart({
   }
 
   if (error) {
+    const displayMessage = (error.includes('not found') || error.includes('rate limit') || error === 'Données indisponibles pour le moment')
+      ? 'Données indisponibles pour le moment'
+      : error;
     return (
       <div style={{
         width: typeof width === 'number' ? `${width}px` : width,
@@ -335,10 +342,7 @@ export function StockChart({
         padding: '20px',
       }}>
         <div style={{ textAlign: 'center' }}>
-          <p style={{ color: '#ef4444', fontSize: '14px', fontWeight: '600', marginBottom: '4px' }}>
-            Erreur de chargement
-          </p>
-          <p style={{ color: '#991b1b', fontSize: '12px' }}>{error}</p>
+          <p style={{ color: '#991b1b', fontSize: '14px' }}>{displayMessage}</p>
         </div>
       </div>
     );
