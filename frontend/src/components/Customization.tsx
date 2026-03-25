@@ -7,6 +7,7 @@ import { Textarea } from './ui/textarea';
 import { HiOutlineUpload, HiOutlineSave, HiOutlineRefresh } from 'react-icons/hi';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { cn } from './ui/utils';
@@ -82,16 +83,16 @@ export function Customization() {
         accent: settings.accent_color || ''
       });
       if (settings.logo_url) {
-        setLogoPreview(settings.logo_url);
+        setLogoPreview(resolveMediaProxyUrlForBrowser(settings.logo_url));
       }
       if (settings.favicon_url) {
-        setFaviconPreview(settings.favicon_url);
+        setFaviconPreview(resolveMediaProxyUrlForBrowser(settings.favicon_url));
       }
       if (settings.login_background_image_url) {
-        setBgPreview(settings.login_background_image_url);
+        setBgPreview(resolveMediaProxyUrlForBrowser(settings.login_background_image_url));
       }
       if (settings.platform_banner_image_url) {
-        setBannerPreview(settings.platform_banner_image_url);
+        setBannerPreview(resolveMediaProxyUrlForBrowser(settings.platform_banner_image_url));
       } else {
         setBannerPreview(null);
       }
@@ -362,22 +363,22 @@ export function Customization() {
     setBannerFile(null);
     setShouldRemoveBanner(false);
     if (settings?.platform_banner_image_url) {
-      setBannerPreview(settings.platform_banner_image_url);
+      setBannerPreview(resolveMediaProxyUrlForBrowser(settings.platform_banner_image_url));
     } else {
       setBannerPreview(null);
     }
     if (settings?.logo_url) {
-      setLogoPreview(settings.logo_url);
+      setLogoPreview(resolveMediaProxyUrlForBrowser(settings.logo_url));
     } else {
       setLogoPreview(null);
     }
     if (settings?.favicon_url) {
-      setFaviconPreview(settings.favicon_url);
+      setFaviconPreview(resolveMediaProxyUrlForBrowser(settings.favicon_url));
     } else {
       setFaviconPreview(null);
     }
     if (settings?.login_background_image_url) {
-      setBgPreview(settings.login_background_image_url);
+      setBgPreview(resolveMediaProxyUrlForBrowser(settings.login_background_image_url));
     } else {
       setBgPreview(null);
     }

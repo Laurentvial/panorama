@@ -12609,6 +12609,8 @@ def media_proxy_path(request, file_path):
                 content_type = 'image/jpeg'
             elif decoded_path.lower().endswith('.png'):
                 content_type = 'image/png'
+            elif decoded_path.lower().endswith('.ico'):
+                content_type = 'image/x-icon'
             elif decoded_path.lower().endswith('.gif'):
                 content_type = 'image/gif'
             elif decoded_path.lower().endswith('.webp'):

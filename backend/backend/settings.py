@@ -81,6 +81,13 @@ if BACKEND_PUBLIC_URL and not BACKEND_PUBLIC_URL.startswith(('http://', 'https:/
     BACKEND_PUBLIC_URL = f'https://{BACKEND_PUBLIC_URL}'
 BACKEND_PUBLIC_URL = BACKEND_PUBLIC_URL.rstrip('/') if BACKEND_PUBLIC_URL else ''
 
+# Behind nginx/Traefik/Coolify, Django otherwise sees http + internal Host and
+# build_absolute_uri() yields http://... URLs (mixed content) or wrong host for
+# media proxies and favicons. Disable with TRUST_FORWARDED_HEADERS=false.
+if os.getenv('TRUST_FORWARDED_HEADERS', 'true' if not DEBUG else 'false').lower() in ('1', 'true', 'yes'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),

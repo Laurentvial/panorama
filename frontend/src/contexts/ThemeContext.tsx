@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
+import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
 import LoadingIndicator from '../components/LoadingIndicator';
 import '../styles/AppSettingsLoader.css';
 
@@ -124,8 +125,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const platformName = (appSettings.platform_name || '').trim();
     document.title = (platformName && platformName.toLowerCase() !== 'panorama') ? platformName : '';
     
-    // Apply favicon
-    const faviconUrl = appSettings.favicon_url;
+    // Apply favicon (normalize proxy URL for deployed / reverse-proxy setups)
+    const faviconUrl = appSettings.favicon_url
+      ? resolveMediaProxyUrlForBrowser(appSettings.favicon_url)
+      : '';
     // Remove existing favicon links
     const existingFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
     existingFavicons.forEach(link => link.remove());
