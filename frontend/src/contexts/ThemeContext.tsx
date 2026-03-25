@@ -3,7 +3,7 @@ import { apiCall } from '../utils/api';
 import LoadingIndicator from '../components/LoadingIndicator';
 import '../styles/AppSettingsLoader.css';
 
-interface AppSettings {
+export interface AppSettings {
   id: string;
   logo?: string;
   logo_url?: string;
@@ -14,6 +14,24 @@ interface AppSettings {
   platform_banner_image?: string;
   platform_banner_image_url?: string;
   platform_name?: string;
+  /** Siège / adresse de l'éditeur (API GET /api/settings/) */
+  address?: string;
+  website?: string;
+  email?: string;
+  /** Paramètres entreprise / mentions légales (admin) */
+  legal_form?: string;
+  share_capital?: string;
+  siren?: string;
+  siret?: string;
+  rcs?: string;
+  vat_number?: string;
+  publication_director?: string;
+  hosting_provider?: string;
+  dpo_contact?: string;
+  consumer_mediator?: string;
+  regulatory_mentions?: string;
+  /** Pays d'établissement de l'éditeur : FR, BE, LU, CH — affichage droit applicable / juridictions sur les pages légales */
+  company_country?: string;
   primary_color: string;
   secondary_color?: string;
   accent_color?: string;
@@ -72,6 +90,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const defaultSettings: AppSettings = {
         id: 'default',
         platform_name: 'Panorama',
+        address: '',
+        website: '',
+        email: '',
+        legal_form: '',
+        share_capital: '',
+        siren: '',
+        siret: '',
+        rcs: '',
+        vat_number: '',
+        publication_director: '',
+        hosting_provider: '',
+        dpo_contact: '',
+        consumer_mediator: '',
+        regulatory_mentions: '',
+        company_country: 'FR',
         primary_color: '#030213',
         secondary_color: '',
         accent_color: '',

@@ -9,6 +9,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { clientConfirmPasswordReset } from '../utils/auth';
 
 import '../styles/LoginPage.css';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 function useQueryParam(name: string): string {
   const location = useLocation();
@@ -159,6 +160,9 @@ export function ClientResetPasswordPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+      <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+        <LegalFooterLinks variant="login" />
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -238,6 +239,9 @@ export function LoginPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
+      <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+        <LegalFooterLinks variant="login" />
       </div>
     </div>
   );

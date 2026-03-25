@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useIsMobile } from './ui/use-mobile';
 import { Cookie } from 'lucide-react';
@@ -128,7 +129,13 @@ export function CookieBanner({ bottomOffset = 0 }: CookieBannerProps) {
                 lineHeight: 1.5,
               }}
             >
-              Pour l&apos;analyse et la personnalisation. Vous pouvez accepter ou refuser.
+              Pour l&apos;analyse et la personnalisation. Vous pouvez accepter ou refuser.{' '}
+              <Link
+                to="/legal/politique-cookies"
+                style={{ color: '#111827', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: 3 }}
+              >
+                En savoir plus
+              </Link>
             </p>
           </div>
 

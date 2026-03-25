@@ -759,6 +759,28 @@ class AppSettings(models.Model):
     address = models.CharField(max_length=200, default='', blank=True)
     website = models.URLField(max_length=200, default='', blank=True)
     email = models.EmailField(max_length=100, default='', blank=True)
+    # Champs complémentaires pour mentions légales / CGU / politiques (Paramètres admin)
+    legal_form = models.CharField(max_length=120, default='', blank=True)  # ex. SAS, SARL
+    share_capital = models.CharField(max_length=120, default='', blank=True)  # ex. 10 000 €
+    siren = models.CharField(max_length=20, default='', blank=True)
+    siret = models.CharField(max_length=20, default='', blank=True)
+    rcs = models.CharField(max_length=200, default='', blank=True)  # ex. 849 123 456 RCS Paris
+    vat_number = models.CharField(max_length=30, default='', blank=True)  # TVA intracommunautaire
+    publication_director = models.CharField(max_length=200, default='', blank=True)
+    hosting_provider = models.TextField(default='', blank=True)
+    dpo_contact = models.TextField(default='', blank=True)
+    consumer_mediator = models.TextField(default='', blank=True)
+    regulatory_mentions = models.TextField(default='', blank=True)  # ORIAS, AMF, autres agréments
+    company_country = models.CharField(
+        max_length=2,
+        choices=[
+            ('FR', 'France'),
+            ('BE', 'Belgique'),
+            ('LU', 'Luxembourg'),
+            ('CH', 'Suisse'),
+        ],
+        default='FR',
+    )
     logo = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     favicon = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)
     login_background_image = models.ImageField(upload_to='app_settings/', storage=app_settings_storage, null=True, blank=True)

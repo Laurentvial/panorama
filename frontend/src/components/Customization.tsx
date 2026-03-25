@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
 import { HiOutlineUpload, HiOutlineSave, HiOutlineRefresh } from 'react-icons/hi';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
+import { cn } from './ui/utils';
 import '../styles/Customization.css';
 import '../styles/Clients.css';
 
@@ -18,6 +20,18 @@ export function Customization() {
   const [address, setAddress] = useState('');
   const [website, setWebsite] = useState('');
   const [email, setEmail] = useState('');
+  const [legalForm, setLegalForm] = useState('');
+  const [shareCapital, setShareCapital] = useState('');
+  const [siren, setSiren] = useState('');
+  const [siret, setSiret] = useState('');
+  const [rcs, setRcs] = useState('');
+  const [vatNumber, setVatNumber] = useState('');
+  const [publicationDirector, setPublicationDirector] = useState('');
+  const [hostingProvider, setHostingProvider] = useState('');
+  const [dpoContact, setDpoContact] = useState('');
+  const [consumerMediator, setConsumerMediator] = useState('');
+  const [regulatoryMentions, setRegulatoryMentions] = useState('');
+  const [companyCountry, setCompanyCountry] = useState<string>('FR');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [shouldRemoveLogo, setShouldRemoveLogo] = useState(false);
@@ -46,6 +60,22 @@ export function Customization() {
       setAddress(settings.address || '');
       setWebsite(settings.website || '');
       setEmail(settings.email || '');
+      setLegalForm(settings.legal_form || '');
+      setShareCapital(settings.share_capital || '');
+      setSiren(settings.siren || '');
+      setSiret(settings.siret || '');
+      setRcs(settings.rcs || '');
+      setVatNumber(settings.vat_number || '');
+      setPublicationDirector(settings.publication_director || '');
+      setHostingProvider(settings.hosting_provider || '');
+      setDpoContact(settings.dpo_contact || '');
+      setConsumerMediator(settings.consumer_mediator || '');
+      setRegulatoryMentions(settings.regulatory_mentions || '');
+      setCompanyCountry(
+        ['FR', 'BE', 'LU', 'CH'].includes((settings.company_country || 'FR').toUpperCase())
+          ? (settings.company_country || 'FR').toUpperCase()
+          : 'FR'
+      );
       setColors({
         primary: settings.primary_color || '#030213',
         secondary: settings.secondary_color || '',
@@ -221,7 +251,19 @@ export function Customization() {
       formData.append('address', address);
       formData.append('website', website);
       formData.append('email', email);
-      
+      formData.append('legal_form', legalForm);
+      formData.append('share_capital', shareCapital);
+      formData.append('siren', siren);
+      formData.append('siret', siret);
+      formData.append('rcs', rcs);
+      formData.append('vat_number', vatNumber);
+      formData.append('publication_director', publicationDirector);
+      formData.append('hosting_provider', hostingProvider);
+      formData.append('dpo_contact', dpoContact);
+      formData.append('consumer_mediator', consumerMediator);
+      formData.append('regulatory_mentions', regulatoryMentions);
+      formData.append('company_country', companyCountry);
+
       if (logoFile) {
         formData.append('logo', logoFile);
       }
@@ -290,6 +332,22 @@ export function Customization() {
     setAddress(settings?.address || '');
     setWebsite(settings?.website || '');
     setEmail(settings?.email || '');
+    setLegalForm(settings?.legal_form || '');
+    setShareCapital(settings?.share_capital || '');
+    setSiren(settings?.siren || '');
+    setSiret(settings?.siret || '');
+    setRcs(settings?.rcs || '');
+    setVatNumber(settings?.vat_number || '');
+    setPublicationDirector(settings?.publication_director || '');
+    setHostingProvider(settings?.hosting_provider || '');
+    setDpoContact(settings?.dpo_contact || '');
+    setConsumerMediator(settings?.consumer_mediator || '');
+    setRegulatoryMentions(settings?.regulatory_mentions || '');
+    setCompanyCountry(
+      ['FR', 'BE', 'LU', 'CH'].includes((settings?.company_country || 'FR').toUpperCase())
+        ? (settings?.company_country || 'FR').toUpperCase()
+        : 'FR'
+    );
     setColors({
       primary: settings?.primary_color || '#030213',
       secondary: settings?.secondary_color || '',
@@ -386,6 +444,153 @@ export function Customization() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="contact@example.com"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Informations légales de l&apos;éditeur</CardTitle>
+          <CardDescription>
+            Ces champs alimentent les pages « Mentions légales », politiques et CGU côté client. L&apos;éditeur
+            peut être établi en <strong>France</strong>, en <strong>Suisse</strong>, au <strong>Luxembourg</strong>{' '}
+            ou en <strong>Belgique</strong> : renseignez uniquement les identifiants et mentions pertinents pour
+            votre pays (ex. SIREN/SIRET en France, n° IDE/UID en Suisse, BCE en Belgique, RCSL au Luxembourg).
+            Faites valider le texte juridique par un conseil local.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="customization-card-content">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="company-country">Pays d&apos;établissement de l&apos;éditeur</Label>
+              <select
+                id="company-country"
+                value={companyCountry}
+                onChange={(e) => setCompanyCountry(e.target.value)}
+                className={cn(
+                  'border-input flex h-9 w-full min-w-0 rounded-md border bg-input-background px-3 py-1 text-base md:text-sm',
+                  'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
+                )}
+              >
+                <option value="FR">France</option>
+                <option value="BE">Belgique</option>
+                <option value="LU">Luxembourg</option>
+                <option value="CH">Suisse</option>
+              </select>
+              <p className="text-muted-foreground text-sm">
+                Ce choix adapte notamment le paragraphe sur les juridictions compétentes et la clause de for entre
+                professionnels dans les mentions légales.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="legal-form">Forme juridique</Label>
+                <Input
+                  id="legal-form"
+                  value={legalForm}
+                  onChange={(e) => setLegalForm(e.target.value)}
+                  placeholder="ex. SAS / SARL (FR), SA / Sàrl (CH), S.à r.l. (LU), SPRL / SA (BE)"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="share-capital">Capital social / apports</Label>
+                <Input
+                  id="share-capital"
+                  value={shareCapital}
+                  onChange={(e) => setShareCapital(e.target.value)}
+                  placeholder="ex. 10 000 EUR / CHF selon la devise du capital"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="siren">Identifiant d&apos;entreprise (principal)</Label>
+                <Input
+                  id="siren"
+                  value={siren}
+                  onChange={(e) => setSiren(e.target.value)}
+                  placeholder="FR : SIREN (9) · BE : n° BCE · CH : UID (CHE-xxx.xxx.xxx) · LU : matricule"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="siret">N° d&apos;établissement (facultatif)</Label>
+                <Input
+                  id="siret"
+                  value={siret}
+                  onChange={(e) => setSiret(e.target.value)}
+                  placeholder="ex. SIRET France (14 chiffres) ; autre pays si applicable"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="rcs">Immatriculation registre du commerce</Label>
+                <Input
+                  id="rcs"
+                  value={rcs}
+                  onChange={(e) => setRcs(e.target.value)}
+                  placeholder="ex. RCS Paris · RCS Luxembourg · RC du canton (CH) · BCE / KBO (BE)"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="vat-number">Numéro de TVA / identifiant TVA</Label>
+                <Input
+                  id="vat-number"
+                  value={vatNumber}
+                  onChange={(e) => setVatNumber(e.target.value)}
+                  placeholder="ex. FR…, BE…, LU… (TVA intracommunautaire UE) ; CH : mention UID / TVA si reçu"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="publication-director">Directeur de la publication</Label>
+              <Input
+                id="publication-director"
+                value={publicationDirector}
+                onChange={(e) => setPublicationDirector(e.target.value)}
+                placeholder="Nom, prénom et qualité"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="hosting-provider">Hébergeur (mentions légales)</Label>
+              <Textarea
+                id="hosting-provider"
+                value={hostingProvider}
+                onChange={(e) => setHostingProvider(e.target.value)}
+                placeholder="Raison sociale, adresse, téléphone et site web de l&apos;hébergeur"
+                rows={4}
+                className="resize-y min-h-[88px]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dpo-contact">Délégué à la protection des données (DPO)</Label>
+              <Textarea
+                id="dpo-contact"
+                value={dpoContact}
+                onChange={(e) => setDpoContact(e.target.value)}
+                placeholder="Coordonnées si un DPO est désigné — laisser vide sinon"
+                rows={3}
+                className="resize-y min-h-[72px]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="consumer-mediator">Médiateur / résolution des litiges consommateurs</Label>
+              <Textarea
+                id="consumer-mediator"
+                value={consumerMediator}
+                onChange={(e) => setConsumerMediator(e.target.value)}
+                placeholder="FR/BE/LU : médiateur de la consommation ; CH : instance ou procédure équivalente selon votre secteur — sur avis juridique"
+                rows={4}
+                className="resize-y min-h-[88px]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="regulatory-mentions">Mentions réglementaires</Label>
+              <Textarea
+                id="regulatory-mentions"
+                value={regulatoryMentions}
+                onChange={(e) => setRegulatoryMentions(e.target.value)}
+                placeholder="ORIAS, AMF/ACPR (FR), FSMA (BE), CSSF (LU), FINMA (CH) ou autre selon votre activité"
+                rows={4}
+                className="resize-y min-h-[88px]"
               />
             </div>
           </div>

@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { clientRequestOtp, clientVerifyOtp } from '../utils/auth';
 
 import '../styles/LoginPage.css';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 type Step = 'email' | 'code';
 type Channel = 'email' | 'sms';
@@ -158,6 +159,9 @@ export function ClientOtpLoginPage() {
               </Button>
             </CardContent>
           </Card>
+        </div>
+        <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+          <LegalFooterLinks variant="login" />
         </div>
       </div>
     );
@@ -327,6 +331,9 @@ export function ClientOtpLoginPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+      <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+        <LegalFooterLinks variant="login" />
       </div>
     </div>
   );

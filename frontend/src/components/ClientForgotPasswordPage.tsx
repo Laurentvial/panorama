@@ -9,6 +9,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { clientRequestPasswordReset } from '../utils/auth';
 
 import '../styles/LoginPage.css';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 export function ClientForgotPasswordPage() {
   const { settings, loading: settingsLoading } = useTheme();
@@ -115,6 +116,9 @@ export function ClientForgotPasswordPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+      <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+        <LegalFooterLinks variant="login" />
       </div>
     </div>
   );

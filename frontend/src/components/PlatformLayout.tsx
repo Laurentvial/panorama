@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { CookieBanner } from './CookieBanner';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
@@ -1044,6 +1045,8 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         {/* Main Content */}
         <main style={{ 
           flex: 1, 
+          display: 'flex',
+          flexDirection: 'column',
           paddingTop: `calc(${stickyTopOffset} - 12px)`,
           paddingRight: isPhone ? '12px' : isMobile ? '16px' : '30px',
           paddingLeft: isPhone ? '12px' : isMobile ? '16px' : '30px',
@@ -1053,7 +1056,31 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           overflowX: 'hidden',
           scrollMarginTop: `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`, // Account for sticky header height
         }}>
-          {children}
+          <div style={{ flex: '1 1 auto', minHeight: 0 }}>{children}</div>
+          <footer
+            style={{
+              flexShrink: 0,
+              marginTop: isMobile ? 20 : 28,
+              paddingTop: isMobile ? 16 : 20,
+              paddingBottom: isMobile ? 4 : 8,
+              borderTop: '1px solid color-mix(in srgb, var(--foreground) 12%, transparent)',
+            }}
+            aria-label="Pied de page — informations légales"
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                marginBottom: 10,
+                color: 'color-mix(in srgb, var(--foreground) 55%, transparent)',
+              }}
+            >
+              Informations légales
+            </div>
+            <LegalFooterLinks variant="default" layout={isMobile ? 'column' : 'row'} />
+          </footer>
         </main>
       </div>
 

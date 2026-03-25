@@ -8,6 +8,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
+import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 export function ReferralLandingPage() {
   const { code } = useParams<{ code: string }>();
@@ -114,6 +115,9 @@ export function ReferralLandingPage() {
             </CardContent>
           </Card>
         </div>
+        <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+          <LegalFooterLinks variant="login" />
+        </div>
       </div>
     );
   }
@@ -141,6 +145,9 @@ export function ReferralLandingPage() {
               </p>
             </CardContent>
           </Card>
+        </div>
+        <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+          <LegalFooterLinks variant="login" />
         </div>
       </div>
     );
@@ -237,6 +244,9 @@ export function ReferralLandingPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
+      <div style={{ padding: '1.25rem 1rem 2rem', width: '100%' }}>
+        <LegalFooterLinks variant="login" />
       </div>
     </div>
   );

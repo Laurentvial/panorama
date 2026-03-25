@@ -46,6 +46,7 @@ const ProductDetail = lazy(() => import('./components/ProductDetail').then(m => 
 const MonProfil = lazy(() => import('./components/MonProfil').then(m => ({ default: m.MonProfil })));
 const ClientImpersonate = lazy(() => import('./components/ClientImpersonate').then(m => ({ default: m.ClientImpersonate })));
 const ReferralLandingPage = lazy(() => import('./components/ReferralLandingPage').then(m => ({ default: m.ReferralLandingPage })));
+const LegalDocumentPage = lazy(() => import('./components/legal/LegalDocumentPage'));
 const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
 
 // Role constants for route protection (must match Sidebar menuItems)
@@ -145,6 +146,11 @@ function App() {
                     <Route path="/invite/:code" element={
                         <Suspense fallback={<LoadingFallback />}>
                             <ReferralLandingPage />
+                        </Suspense>
+                    } />
+                    <Route path="/legal/:docId" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <LegalDocumentPage />
                         </Suspense>
                     } />
                     

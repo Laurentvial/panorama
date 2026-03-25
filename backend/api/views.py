@@ -11960,6 +11960,18 @@ def app_settings(request):
                     'address': getattr(settings_obj, 'address', ''),
                     'website': getattr(settings_obj, 'website', ''),
                     'email': getattr(settings_obj, 'email', ''),
+                    'legal_form': getattr(settings_obj, 'legal_form', ''),
+                    'share_capital': getattr(settings_obj, 'share_capital', ''),
+                    'siren': getattr(settings_obj, 'siren', ''),
+                    'siret': getattr(settings_obj, 'siret', ''),
+                    'rcs': getattr(settings_obj, 'rcs', ''),
+                    'vat_number': getattr(settings_obj, 'vat_number', ''),
+                    'publication_director': getattr(settings_obj, 'publication_director', ''),
+                    'hosting_provider': getattr(settings_obj, 'hosting_provider', ''),
+                    'dpo_contact': getattr(settings_obj, 'dpo_contact', ''),
+                    'consumer_mediator': getattr(settings_obj, 'consumer_mediator', ''),
+                    'regulatory_mentions': getattr(settings_obj, 'regulatory_mentions', ''),
+                    'company_country': getattr(settings_obj, 'company_country', 'FR') or 'FR',
                     'logo': None,
                     'logo_url': None,
                     'favicon': None,
@@ -12167,6 +12179,38 @@ def app_settings(request):
             if 'email' in data:
                 settings_obj.email = (data.get('email') or '').strip()[:100]
                 update_fields.append('email')
+            text_legal_fields = [
+                ('legal_form', 'legal_form', 120),
+                ('share_capital', 'share_capital', 120),
+                ('siren', 'siren', 20),
+                ('siret', 'siret', 20),
+                ('rcs', 'rcs', 200),
+                ('vat_number', 'vat_number', 30),
+                ('publication_director', 'publication_director', 200),
+            ]
+            for req_key, attr, max_len in text_legal_fields:
+                if req_key in data:
+                    val = (data.get(req_key) or '').strip()[:max_len]
+                    setattr(settings_obj, attr, val)
+                    update_fields.append(attr)
+            for req_key, attr in (
+                ('hosting_provider', 'hosting_provider'),
+                ('dpo_contact', 'dpo_contact'),
+                ('consumer_mediator', 'consumer_mediator'),
+                ('regulatory_mentions', 'regulatory_mentions'),
+            ):
+                if req_key in data:
+                    val = (data.get(req_key) or '').strip()
+                    if len(val) > 8000:
+                        val = val[:8000]
+                    setattr(settings_obj, attr, val)
+                    update_fields.append(attr)
+            if 'company_country' in data:
+                cc = (data.get('company_country') or 'FR').strip().upper()[:2]
+                if cc not in ('FR', 'BE', 'LU', 'CH'):
+                    cc = 'FR'
+                settings_obj.company_country = cc
+                update_fields.append('company_country')
             # Update colors from request data
             if 'primary_color' in data:
                 settings_obj.primary_color = data.get('primary_color', '#030213')
