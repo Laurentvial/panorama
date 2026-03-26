@@ -3500,10 +3500,24 @@ def user_update(request, user_id):
         django_user.first_name = request.data['first_name']
     if 'last_name' in request.data:
         django_user.last_name = request.data['last_name']
-    if 'username' in request.data:
-        django_user.username = request.data['username']
     if 'email' in request.data:
-        django_user.email = request.data['email']
+        new_email = (request.data['email'] or '').strip()
+        if new_email:
+            if DjangoUser.objects.filter(email__iexact=new_email).exclude(pk=django_user.pk).exists():
+                return Response(
+                    {'error': 'Cet email est déjà utilisé par un autre utilisateur'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if DjangoUser.objects.filter(username__iexact=new_email).exclude(pk=django_user.pk).exists():
+                return Response(
+                    {'error': 'Cet email est déjà utilisé par un autre utilisateur'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        django_user.email = new_email
+        if new_email:
+            django_user.username = new_email  # same as UserSerializer / update_own_profile
+    elif 'username' in request.data:
+        django_user.username = request.data['username']
     django_user.save()
     
     # Update UserDetails fields
