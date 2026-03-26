@@ -4,7 +4,7 @@ import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
 import { Button } from './ui/button';
-import { TrendingUp, TrendingDown, Check, PieChart, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Check, PieChart, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { useIsMobile, useIsPhone, useIsNarrowForCards } from './ui/use-mobile';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
@@ -13,8 +13,13 @@ import { formatSubcategoryForDisplay } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
 import '../styles/PlatformDashboardMovers.css';
 
+/** Stops runaway pagination if the API omits or misreports pagination metadata. */
+const DASHBOARD_PAGINATION_MAX_PAGES = 250;
+/** Avoid infinite skeleton when the API never responds (browser fetch has no default timeout). */
+const DASHBOARD_FETCH_TIMEOUT_MS = 120_000;
+
 export function PlatformDashboard() {
-  const { currentUser } = useUser();
+  const { currentUser, loading: userCtxLoading } = useUser();
   const { settings } = useTheme();
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
@@ -33,114 +38,28 @@ export function PlatformDashboard() {
   const [clientAssets, setClientAssets] = useState<any[]>([]);
   const [clientProducts, setClientProducts] = useState<any[]>([]);
   const featuredSliderRef = useRef<HTMLDivElement | null>(null);
+  const [dashboardLoadError, setDashboardLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
-
-  const loadDashboardData = async () => {
+  const loadNewsPostsWithSignal = async (signal: AbortSignal) => {
     try {
-      setLoading(true);
-      const clientId = currentUser.id;
-      const limit = 500;
-
-      // Helper: paginate through all positions
-      const loadAllPositions = async (): Promise<any[]> => {
-        const list: any[] = [];
-        let page = 1;
-        let hasMore = true;
-        while (hasMore) {
-          const res = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`);
-          const items = (res as any)?.positions || [];
-          list.push(...items);
-          const pagination = (res as any).pagination;
-          if (pagination && page >= pagination.total_pages) hasMore = false;
-          else if (items.length < limit) hasMore = false;
-          else page++;
-        }
-        return list;
-      };
-
-      // Helper: paginate through all transactions
-      const loadAllTransactions = async (): Promise<any[]> => {
-        const list: any[] = [];
-        let page = 1;
-        let hasMore = true;
-        while (hasMore) {
-          const res = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
-          const items = (res as any)?.transactions || [];
-          list.push(...items);
-          const pagination = (res as any).pagination;
-          if (pagination && page >= pagination.total_pages) hasMore = false;
-          else if (items.length < limit) hasMore = false;
-          else page++;
-        }
-        return list;
-      };
-
-      // Run positions, transactions, assets, products, config, documents in parallel
-      const [
-        allPositionsList,
-        allTransactionsList,
-        clientAssetsResponse,
-        clientProductsResponse,
-        verificationConfigResult,
-        documentsResult,
-      ] = await Promise.all([
-        loadAllPositions(),
-        loadAllTransactions(),
-        apiCall(`/api/clients/${clientId}/assets/`),
-        apiCall(`/api/clients/${clientId}/products/`),
-        apiCall(`/api/clients/${clientId}/verification-config/?_t=${Date.now()}`).catch(() => ({ stepsConfig: {} })),
-        apiCall(`/api/clients/${clientId}/documents/`).catch(() => ({ documents: [] })),
-      ]);
-
-      setPositions(allPositionsList);
-      setAllTransactions(allTransactionsList);
-
-      const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
-      const assetsList = clientAssetsData.map((ca: any) => ca.asset || ca).filter(Boolean);
-      setAssets(assetsList);
-      setClientAssets(clientAssetsData);
-
-      const clientProductsData = (clientProductsResponse as any)?.products || [];
-      const productsList = clientProductsData.map((cp: any) => cp.product || cp).filter(Boolean);
-      setProducts(productsList);
-      setClientProducts(clientProductsData);
-
-      setVerificationConfig((verificationConfigResult as any)?.stepsConfig || {});
-      setDocuments((documentsResult as any)?.documents || []);
-    } catch (error: any) {
-      // If it's a redirect error, don't log it - page is navigating away
-      if (error?.isRedirecting) {
-        return;
-      }
-      // If it's an authentication error, the redirect will happen in apiCall
-      if (error?.status === 401 || error?.message?.includes('token') || error?.message?.includes('Authentication')) {
-        // Redirect is handled in apiCall, just return early
-        return;
-      }
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadNewsPosts = async () => {
-    try {
-      setNewsLoading(true);
-      const newsResponse = await apiCall('/api/news/');
-      setNewsPosts(newsResponse.news || []);
+      const newsResponse = await apiCall('/api/news/', { signal });
+      setNewsPosts(newsResponse?.news || []);
       setVisibleNewsCount(3);
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
       console.error('Error loading news posts:', error);
-      // If it's a 401 and we're on a public endpoint, try without auth
       if (error?.status === 401) {
         try {
-          // Try fetching news without authentication (public endpoint)
           const apiUrl = getApiBaseUrl();
           const response = await fetch(`${apiUrl}/api/news/`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
             },
+            signal,
           });
           if (response.ok) {
             const data = await response.json();
@@ -148,11 +67,13 @@ export function PlatformDashboard() {
             setVisibleNewsCount(3);
             return;
           }
-        } catch (fallbackError) {
+        } catch (fallbackError: any) {
+          if (fallbackError?.name === 'AbortError') {
+            return;
+          }
           console.error('Fallback news fetch also failed:', fallbackError);
         }
       }
-      // Set empty array on error
       setNewsPosts([]);
       setVisibleNewsCount(3);
     } finally {
@@ -290,11 +211,153 @@ export function PlatformDashboard() {
   };
 
   useEffect(() => {
-    if (currentUser && currentUser.id) {
-      loadDashboardData();
-      loadNewsPosts();
+    if (userCtxLoading) {
+      return;
     }
-  }, [currentUser]);
+    if (!currentUser?.id) {
+      setLoading(false);
+      setNewsLoading(false);
+      setDashboardLoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let loadTimedOut = false;
+    const ac = new AbortController();
+    const { signal } = ac;
+    const timeoutId = window.setTimeout(() => {
+      loadTimedOut = true;
+      ac.abort();
+    }, DASHBOARD_FETCH_TIMEOUT_MS);
+
+    const clientId = currentUser.id;
+    const limit = 500;
+
+    const loadAllPositions = async (): Promise<any[]> => {
+      const list: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= DASHBOARD_PAGINATION_MAX_PAGES) {
+        const res = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`, { signal });
+        const items = (res as any)?.positions || [];
+        list.push(...items);
+        const pagination = (res as any).pagination;
+        if (pagination && page >= pagination.total_pages) hasMore = false;
+        else if (items.length < limit) hasMore = false;
+        else page++;
+      }
+      return list;
+    };
+
+    const loadAllTransactions = async (): Promise<any[]> => {
+      const list: any[] = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore && page <= DASHBOARD_PAGINATION_MAX_PAGES) {
+        const res = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`, { signal });
+        const items = (res as any)?.transactions || [];
+        list.push(...items);
+        const pagination = (res as any).pagination;
+        if (pagination && page >= pagination.total_pages) hasMore = false;
+        else if (items.length < limit) hasMore = false;
+        else page++;
+      }
+      return list;
+    };
+
+    (async () => {
+      try {
+        setLoading(true);
+        setNewsLoading(true);
+        setDashboardLoadError(null);
+
+        const loadDashboardMain = async () => {
+          const verificationConfigResult = await apiCall(`/api/clients/${clientId}/verification-config/?_t=${Date.now()}`, {
+            signal,
+          }).catch((err: any) => {
+            if (err?.name === 'AbortError') throw err;
+            return { stepsConfig: {} };
+          });
+
+          const documentsResult = await apiCall(`/api/clients/${clientId}/documents/`, { signal }).catch((err: any) => {
+            if (err?.name === 'AbortError') throw err;
+            return { documents: [] };
+          });
+
+          const [
+            allPositionsList,
+            allTransactionsList,
+            clientAssetsResponse,
+            clientProductsResponse,
+          ] = await Promise.all([
+            loadAllPositions(),
+            loadAllTransactions(),
+            apiCall(`/api/clients/${clientId}/assets/`, { signal }),
+            apiCall(`/api/clients/${clientId}/products/`, { signal }),
+          ]);
+
+          if (cancelled) {
+            return;
+          }
+
+          setPositions(allPositionsList);
+          setAllTransactions(allTransactionsList);
+
+          const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
+          const assetsList = clientAssetsData.map((ca: any) => ca.asset || ca).filter(Boolean);
+          setAssets(assetsList);
+          setClientAssets(clientAssetsData);
+
+          const clientProductsData = (clientProductsResponse as any)?.products || [];
+          const productsList = clientProductsData.map((cp: any) => cp.product || cp).filter(Boolean);
+          setProducts(productsList);
+          setClientProducts(clientProductsData);
+
+          setVerificationConfig((verificationConfigResult as any)?.stepsConfig || {});
+          setDocuments((documentsResult as any)?.documents || []);
+        };
+
+        await Promise.all([loadDashboardMain(), loadNewsPostsWithSignal(signal)]);
+      } catch (error: any) {
+        if (cancelled) {
+          return;
+        }
+        if (error?.isRedirecting) {
+          return;
+        }
+        if (error?.status === 401 || error?.message?.includes('token') || error?.message?.includes('Authentication')) {
+          return;
+        }
+        if (error?.name === 'AbortError' && loadTimedOut) {
+          setDashboardLoadError(
+            'Le chargement du tableau de bord a expiré. Vérifiez votre connexion puis réessayez.'
+          );
+          return;
+        }
+        if (error?.name === 'AbortError') {
+          return;
+        }
+        console.error('Error loading dashboard data:', error);
+        const msg =
+          error?.isNetworkError || error?.status === 0
+            ? 'Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez.'
+            : (error?.message as string) || 'Une erreur est survenue lors du chargement.';
+        setDashboardLoadError(msg);
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (!cancelled) {
+          setLoading(false);
+          setNewsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      ac.abort();
+    };
+  }, [userCtxLoading, currentUser?.id, retryTick]);
 
   // Parse financial values, handling strings, null, undefined, and ensuring they're numbers
   const parseFinancialValue = (value: any): number => {
@@ -848,8 +911,57 @@ export function PlatformDashboard() {
   return (
     <div style={{ padding: isPhone ? 0 : isMobile ? '16px' : '20px 20px' }}>
 
+      {dashboardLoadError && !loading ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: isPhone ? 16 : 20,
+            padding: '14px 16px',
+            borderRadius: 12,
+            border: '1px solid #fecaca',
+            backgroundColor: '#fef2f2',
+            color: '#991b1b',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 12,
+            justifyContent: 'space-between',
+          }}
+        >
+          <span style={{ flex: '1 1 220px', lineHeight: 1.5 }}>{dashboardLoadError}</span>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setRetryTick((t) => t + 1)}
+            style={{ borderRadius: 10 }}
+          >
+            Réessayer
+          </Button>
+        </div>
+      ) : null}
+
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? 16 : 24 }}>
+        <div
+          style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? 16 : 24 }}
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Chargement du tableau de bord, cela peut prendre quelques secondes"
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              justifyContent: 'center',
+              padding: isPhone ? '8px 0 4px' : '4px 0 8px',
+              color: '#4b5563',
+            }}
+          >
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+            <span style={{ fontSize: isMobile ? 14 : 15, fontWeight: 600 }}>
+              Chargement du tableau de bord — cela peut prendre quelques secondes.
+            </span>
+          </div>
           <div style={{ display: 'flex', gap: isMobile ? 16 : 24, flexDirection: isMobile ? 'column' : 'row' }}>
             <Card style={{ flex: 1, borderRadius: 16 }}>
               <CardHeader><Skeleton className="h-5 w-40" /></CardHeader>

@@ -5751,7 +5751,8 @@ def assets_bulk_update_prices(request):
 def assets_bulk_import_from_index(request):
     """
     Bulk import assets from a market index (NASDAQ, S&P 500, CAC 40, etc.)
-    Fetches constituent symbols and creates assets with full company details
+    or from Binance USDT spot pairs (index id: binance_usdt_spot) for crypto.
+    Fetches constituent symbols and creates assets with optional quotes / details.
     """
     import time
     from api.index_constituent_service import get_index_constituents
@@ -5763,6 +5764,7 @@ def assets_bulk_import_from_index(request):
     default_exchange = request.data.get('exchange', '').strip().upper()
     fetch_full_details = request.data.get('fetchFullDetails', True)
     skip_duplicates = request.data.get('skipDuplicates', True)
+    is_crypto_index = index_name == 'binance_usdt_spot'
     
     if not index_name:
         return Response({'error': 'index parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -5814,7 +5816,12 @@ def assets_bulk_import_from_index(request):
                 asset_type = 'Action'
                 
                 # Set default currency, region, and exchange based on index
-                if index_name in ['cac40', 'cacmid60']:
+                if is_crypto_index:
+                    asset_type = 'crypto'
+                    currency = 'USD'
+                    region = 'Monde'
+                    exchange = (default_exchange or 'BINANCE').strip().upper() or 'BINANCE'
+                elif index_name in ['cac40', 'cacmid60']:
                     currency = 'EUR'
                     region = 'France'
                     exchange = default_exchange or 'EURONEXT'
@@ -5833,7 +5840,7 @@ def assets_bulk_import_from_index(request):
                     exchange = default_exchange or ''
                 
                 # Override with constituent data if available
-                if constituent.get('headQuarter'):
+                if not is_crypto_index and constituent.get('headQuarter'):
                     region = constituent.get('headQuarter', '')
                 
                 # Generate unique asset ID
@@ -5854,7 +5861,7 @@ def assets_bulk_import_from_index(request):
                     'source_index': index_name,  # Store the source index for filtering
                     'default': False,  # As per requirements, not default
                     'reference': symbol,
-                    'category': region,
+                    'category': 'Monde' if is_crypto_index else region,
                     'subcategory': asset_type,
                 }
                 
@@ -5864,7 +5871,27 @@ def assets_bulk_import_from_index(request):
                     get_company_logo,
                     FINNHUB_API_KEY,
                 )
-                if FINNHUB_API_KEY or av_service:
+                if is_crypto_index and av_service:
+                    if idx > 0 and idx % 5 == 0:
+                        time.sleep(12)
+                    try:
+                        from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
+                        quote = get_crypto_quote_alpha_vantage(symbol)
+                        if quote:
+                            asset_data['last_price'] = quote.get('price')
+                            asset_data['last_price_update'] = timezone.now()
+                            asset_data['price_change'] = quote.get('change')
+                            asset_data['price_change_percent'] = float(quote.get('change_percent', 0)) if quote.get('change_percent') else None
+                        else:
+                            logger.warning(f"Could not fetch crypto quote for {symbol}, creating with basic info")
+                        if fetch_full_details:
+                            logo_crypto = get_crypto_logo(symbol) or ''
+                            if logo_crypto:
+                                asset_data['logo_url'] = logo_crypto
+                    except Exception as e:
+                        logger.warning(f"Error fetching crypto data for {symbol}: {str(e)}")
+                        errors.append({'symbol': symbol, 'error': f'Crypto quote/logo failed: {str(e)}'})
+                elif not is_crypto_index and (FINNHUB_API_KEY or av_service):
                     if not FINNHUB_API_KEY and av_service and imported > 0 and imported % 5 == 0:
                         time.sleep(12)
                     

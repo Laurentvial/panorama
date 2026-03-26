@@ -34,6 +34,9 @@ interface BulkImportFromIndexModalProps {
 
 type Step = 'select' | 'importing' | 'complete';
 
+/** Backend index id: Binance USDT spot pairs (see index_constituent_service.INDEX_MAPPING) */
+const BINANCE_USDT_SPOT_INDEX_ID = 'binance_usdt_spot';
+
 export function BulkImportFromIndexModal({
   isOpen,
   onClose,
@@ -56,6 +59,13 @@ export function BulkImportFromIndexModal({
       fetchSupportedIndices();
     }
   }, [isOpen]);
+
+  // List is Binance USDT pairs; exchange must be BINANCE for a coherent import
+  useEffect(() => {
+    if (selectedIndex === BINANCE_USDT_SPOT_INDEX_ID) {
+      setSelectedExchange('BINANCE');
+    }
+  }, [selectedIndex]);
 
   const fetchSupportedIndices = async () => {
     setLoadingIndices(true);
@@ -264,7 +274,7 @@ export function BulkImportFromIndexModal({
                 </div>
               </div>
 
-              {fetchFullDetails && (
+              {fetchFullDetails && selectedIndex !== BINANCE_USDT_SPOT_INDEX_ID && (
                 <div style={{
                   padding: '12px',
                   backgroundColor: '#fff3cd',
@@ -274,6 +284,21 @@ export function BulkImportFromIndexModal({
                 }}>
                   <strong>Note :</strong> La récupération des détails utilise l'API Alpha Vantage qui a des limites 
                   (5 requêtes/minute). Les grands indices peuvent prendre du temps à importer.
+                </div>
+              )}
+
+              {selectedIndex === BINANCE_USDT_SPOT_INDEX_ID && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '6px',
+                  fontSize: '13px'
+                }}>
+                  <strong>Crypto :</strong> cette liste provient de l&apos;API publique Binance (toutes les paires spot USDT en
+                  cotation). Il peut y en avoir plusieurs centaines. Les prix / logos optionnels passent par Alpha Vantage
+                  (limite ~5 appels/min) : laissez « détails complets » décoché pour un import beaucoup plus rapide, puis
+                  mettez les prix à jour ensuite depuis la liste des actifs.
                 </div>
               )}
 

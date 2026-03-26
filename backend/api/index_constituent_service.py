@@ -2,6 +2,7 @@
 Index Constituent Service for fetching stock lists from market indices
 Supports US indices via Financial Modeling Prep API and European indices via pytickersymbols
 When FMP returns 403, falls back to free public CSV sources (S&P 500, NASDAQ-100)
+Crypto: Binance public API for all USDT spot pairs (bulk import with exchange BINANCE).
 """
 import csv
 import io
@@ -24,6 +25,8 @@ FMP_STABLE_ENDPOINT_MAP = {
     'sp500_constituent': 'sp500-constituent',
     'dowjones_constituent': 'dowjones-constituent',
 }
+
+BINANCE_EXCHANGE_INFO_URL = 'https://api.binance.com/api/v3/exchangeInfo'
 
 # Static Euronext 100 constituents (main components, updated periodically)
 # Symbols: .PA=Paris, .AS=Amsterdam, .BR=Brussels, .LS=Lisbon, .IR=Dublin, .OL=Oslo
@@ -159,7 +162,13 @@ class IndexConstituentService:
             'index_name': 'CAC Mid 60',
             'name': 'CAC Mid 60',
             'region': 'France'
-        }
+        },
+        # Crypto: all Binance spot symbols quoted in USDT (public API; pair list only)
+        'binance_usdt_spot': {
+            'source': 'binance_spot',
+            'name': 'Binance — paires spot USDT',
+            'region': 'Crypto'
+        },
     }
     
     def __init__(self):
@@ -213,6 +222,8 @@ class IndexConstituentService:
             return self._fetch_from_pytickersymbols(config['index_name'])
         elif source == 'static':
             return self._fetch_from_static(index_name_lower)
+        elif source == 'binance_spot':
+            return self._fetch_binance_usdt_spot()
         else:
             raise ValueError(f"Unknown source: {source}")
     
@@ -380,6 +391,41 @@ class IndexConstituentService:
         logger.info(f"Successfully fetched {len(constituents)} constituents from FMP ({endpoint})")
         return constituents
     
+    def _fetch_binance_usdt_spot(self) -> List[Dict]:
+        """List all TRADING spot symbols on Binance with USDT as quote (base asset = Alpha Vantage crypto symbol)."""
+        logger.info('Fetching Binance exchangeInfo for USDT spot pairs')
+        response = requests.get(BINANCE_EXCHANGE_INFO_URL, timeout=60)
+        response.raise_for_status()
+        payload = response.json()
+        symbols = payload.get('symbols') or []
+        constituents: List[Dict] = []
+        for s in symbols:
+            if (s.get('status') or '').upper() != 'TRADING':
+                continue
+            if (s.get('quoteAsset') or '').upper() != 'USDT':
+                continue
+            perms = s.get('permissions') or []
+            if perms and 'SPOT' not in perms:
+                continue
+            if s.get('isSpotTradingAllowed') is False:
+                continue
+            base = (s.get('baseAsset') or '').strip().upper()
+            if not base:
+                continue
+            constituents.append({
+                'symbol': base,
+                'name': f"{base} / USDT",
+                'sector': 'Crypto',
+                'subSector': '',
+                'headQuarter': '',
+                'dateFirstAdded': '',
+                'cik': '',
+                'founded': '',
+            })
+        constituents.sort(key=lambda x: x['symbol'])
+        logger.info(f"Binance USDT spot: {len(constituents)} tradable bases")
+        return constituents
+
     def _fetch_from_static(self, index_id: str) -> List[Dict]:
         """Fetch index constituents from static list (e.g. Euronext 100)."""
         if index_id == 'euronext100':
