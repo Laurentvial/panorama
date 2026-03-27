@@ -2,7 +2,7 @@
 Index Constituent Service for fetching stock lists from market indices
 Supports US indices via Financial Modeling Prep API and European indices via pytickersymbols
 When FMP returns 403, falls back to free public CSV sources (S&P 500, NASDAQ-100)
-Crypto: Binance public API for all USDT spot pairs (bulk import with exchange BINANCE).
+Crypto: Binance spot lists (USDT/EUR); CoinGecko top 100 by market cap (no API key; rate-limited).
 """
 import csv
 import io
@@ -27,6 +27,8 @@ FMP_STABLE_ENDPOINT_MAP = {
 }
 
 BINANCE_EXCHANGE_INFO_URL = 'https://api.binance.com/api/v3/exchangeInfo'
+COINGECKO_TOP_MARKETS_URL = 'https://api.coingecko.com/api/v3/coins/markets'
+COINGECKO_REQUEST_HEADERS = {'User-Agent': 'Panorama/1.0 (asset bulk import)'}
 
 # Static Euronext 100 constituents (main components, updated periodically)
 # Symbols: .PA=Paris, .AS=Amsterdam, .BR=Brussels, .LS=Lisbon, .IR=Dublin, .OL=Oslo
@@ -163,10 +165,22 @@ class IndexConstituentService:
             'name': 'CAC Mid 60',
             'region': 'France'
         },
-        # Crypto: all Binance spot symbols quoted in USDT (public API; pair list only)
+        # Crypto: Binance spot by quote asset (public API; pair list only)
         'binance_usdt_spot': {
             'source': 'binance_spot',
+            'quote_asset': 'USDT',
             'name': 'Binance — paires spot USDT',
+            'region': 'Crypto'
+        },
+        'binance_eur_spot': {
+            'source': 'binance_spot',
+            'quote_asset': 'EUR',
+            'name': 'Binance — paires spot EUR',
+            'region': 'Crypto'
+        },
+        'top100_crypto_mc': {
+            'source': 'coingecko_top100',
+            'name': 'Top 100 cryptos (capitalisation — CoinGecko)',
             'region': 'Crypto'
         },
     }
@@ -223,7 +237,10 @@ class IndexConstituentService:
         elif source == 'static':
             return self._fetch_from_static(index_name_lower)
         elif source == 'binance_spot':
-            return self._fetch_binance_usdt_spot()
+            quote = (config.get('quote_asset') or 'USDT').strip().upper()
+            return self._fetch_binance_spot(quote)
+        elif source == 'coingecko_top100':
+            return self._fetch_coingecko_top100_market_cap()
         else:
             raise ValueError(f"Unknown source: {source}")
     
@@ -391,9 +408,10 @@ class IndexConstituentService:
         logger.info(f"Successfully fetched {len(constituents)} constituents from FMP ({endpoint})")
         return constituents
     
-    def _fetch_binance_usdt_spot(self) -> List[Dict]:
-        """List all TRADING spot symbols on Binance with USDT as quote (base asset = Alpha Vantage crypto symbol)."""
-        logger.info('Fetching Binance exchangeInfo for USDT spot pairs')
+    def _fetch_binance_spot(self, quote_asset: str) -> List[Dict]:
+        """List TRADING Binance spot symbols for a quote (e.g. USDT, EUR); base = Alpha Vantage crypto symbol."""
+        qa = (quote_asset or 'USDT').strip().upper()
+        logger.info('Fetching Binance exchangeInfo for %s spot pairs', qa)
         response = requests.get(BINANCE_EXCHANGE_INFO_URL, timeout=60)
         response.raise_for_status()
         payload = response.json()
@@ -402,7 +420,7 @@ class IndexConstituentService:
         for s in symbols:
             if (s.get('status') or '').upper() != 'TRADING':
                 continue
-            if (s.get('quoteAsset') or '').upper() != 'USDT':
+            if (s.get('quoteAsset') or '').upper() != qa:
                 continue
             perms = s.get('permissions') or []
             if perms and 'SPOT' not in perms:
@@ -414,7 +432,7 @@ class IndexConstituentService:
                 continue
             constituents.append({
                 'symbol': base,
-                'name': f"{base} / USDT",
+                'name': f"{base} / {qa}",
                 'sector': 'Crypto',
                 'subSector': '',
                 'headQuarter': '',
@@ -423,7 +441,55 @@ class IndexConstituentService:
                 'founded': '',
             })
         constituents.sort(key=lambda x: x['symbol'])
-        logger.info(f"Binance USDT spot: {len(constituents)} tradable bases")
+        logger.info('Binance %s spot: %s tradable bases', qa, len(constituents))
+        return constituents
+
+    def _fetch_coingecko_top100_market_cap(self) -> List[Dict]:
+        """Top 100 cryptocurrencies by market cap (USD) via CoinGecko public API."""
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': 100,
+            'page': 1,
+            'sparkline': 'false',
+        }
+        logger.info('Fetching CoinGecko /coins/markets top 100 by market cap')
+        response = requests.get(
+            COINGECKO_TOP_MARKETS_URL,
+            params=params,
+            headers=COINGECKO_REQUEST_HEADERS,
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, list) or not data:
+            raise ValueError(
+                'CoinGecko a renvoyé une réponse vide ou invalide. Réessayez plus tard '
+                '(limite de débit de l’API gratuite).'
+            )
+        constituents: List[Dict] = []
+        seen = set()
+        for item in data:
+            sym_raw = (item.get('symbol') or '').strip().upper()
+            if not sym_raw or sym_raw in seen:
+                continue
+            seen.add(sym_raw)
+            name = (item.get('name') or '').strip() or sym_raw
+            rank = item.get('market_cap_rank')
+            sector = f"Crypto (rang {rank})" if rank is not None else 'Crypto'
+            constituents.append({
+                'symbol': sym_raw,
+                'name': name,
+                'sector': sector,
+                'subSector': '',
+                'headQuarter': '',
+                'dateFirstAdded': '',
+                'cik': '',
+                'founded': '',
+            })
+        if len(constituents) < 50:
+            logger.warning('CoinGecko returned only %s coins (expected ~100)', len(constituents))
+        logger.info('CoinGecko top market cap: %s symbols', len(constituents))
         return constituents
 
     def _fetch_from_static(self, index_id: str) -> List[Dict]:

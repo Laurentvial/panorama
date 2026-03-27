@@ -498,8 +498,25 @@ class AlphaVantageService:
             
             time_series = data[time_series_key]
             meta_data = data.get('Meta Data', {})
+            # AV uses uppercase codes inside keys, e.g. "1a. open (EUR)" — never "(eur)".
+            mkt = (market or 'USD').strip().upper()
+
+            def _ohlc_keys(prefix_label: str, plain_label: str) -> List[str]:
+                """Build candidate field names for one OHLC component; avoid USD fallback when market is not USD."""
+                keys = [f'{prefix_label} ({mkt})']
+                if mkt == 'USD':
+                    keys.extend(
+                        [
+                            f'{prefix_label} (USD)',
+                            f'{prefix_label} (usd)',
+                            plain_label,
+                        ]
+                    )
+                else:
+                    keys.append(plain_label)
+                return keys
             
-            # Digital currency uses "1a. open (USD)", "2a. high (USD)", etc. (or "1. open" for single-currency)
+            # Keys are "1a. open (USD)", "1a. open (EUR)", etc., depending on market param
             def _get_float(d: dict, *keys: str) -> float:
                 for k in keys:
                     v = d.get(k)
@@ -514,10 +531,10 @@ class AlphaVantageService:
             for date_str, values in time_series.items():
                 chart_data.append({
                     'date': date_str,
-                    'open': _get_float(values, '1a. open (USD)', '1a. open (usd)', '1. open'),
-                    'high': _get_float(values, '2a. high (USD)', '2a. high (usd)', '2. high'),
-                    'low': _get_float(values, '3a. low (USD)', '3a. low (usd)', '3. low'),
-                    'close': _get_float(values, '4a. close (USD)', '4a. close (usd)', '4. close'),
+                    'open': _get_float(values, *_ohlc_keys('1a. open', '1. open')),
+                    'high': _get_float(values, *_ohlc_keys('2a. high', '2. high')),
+                    'low': _get_float(values, *_ohlc_keys('3a. low', '3. low')),
+                    'close': _get_float(values, *_ohlc_keys('4a. close', '4. close')),
                     'volume': int(_get_float(values, '5. volume'))
                 })
             chart_data.sort(key=lambda x: x['date'])

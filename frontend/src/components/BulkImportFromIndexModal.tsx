@@ -34,8 +34,24 @@ interface BulkImportFromIndexModalProps {
 
 type Step = 'select' | 'importing' | 'complete';
 
-/** Backend index id: Binance USDT spot pairs (see index_constituent_service.INDEX_MAPPING) */
-const BINANCE_USDT_SPOT_INDEX_ID = 'binance_usdt_spot';
+/** Binance spot bulk-import index ids (backend INDEX_MAPPING) */
+const BINANCE_CRYPTO_SPOT_INDEX_IDS = new Set(['binance_usdt_spot', 'binance_eur_spot']);
+
+const TOP100_CRYPTO_INDEX_ID = 'top100_crypto_mc';
+
+/** Crypto lists that use Alpha Vantage for optional price/logo (not equity “sociétés” flow) */
+const CRYPTO_BULK_AV_NOTE_INDEX_IDS = new Set([
+  ...BINANCE_CRYPTO_SPOT_INDEX_IDS,
+  TOP100_CRYPTO_INDEX_ID,
+]);
+
+function isBinanceCryptoSpotIndex(id: string): boolean {
+  return BINANCE_CRYPTO_SPOT_INDEX_IDS.has(id);
+}
+
+function isCryptoBulkAvNoteIndex(id: string): boolean {
+  return CRYPTO_BULK_AV_NOTE_INDEX_IDS.has(id);
+}
 
 export function BulkImportFromIndexModal({
   isOpen,
@@ -60,9 +76,8 @@ export function BulkImportFromIndexModal({
     }
   }, [isOpen]);
 
-  // List is Binance USDT pairs; exchange must be BINANCE for a coherent import
   useEffect(() => {
-    if (selectedIndex === BINANCE_USDT_SPOT_INDEX_ID) {
+    if (isBinanceCryptoSpotIndex(selectedIndex) || selectedIndex === TOP100_CRYPTO_INDEX_ID) {
       setSelectedExchange('BINANCE');
     }
   }, [selectedIndex]);
@@ -274,7 +289,7 @@ export function BulkImportFromIndexModal({
                 </div>
               </div>
 
-              {fetchFullDetails && selectedIndex !== BINANCE_USDT_SPOT_INDEX_ID && (
+              {fetchFullDetails && !isCryptoBulkAvNoteIndex(selectedIndex) && (
                 <div style={{
                   padding: '12px',
                   backgroundColor: '#fff3cd',
@@ -287,7 +302,7 @@ export function BulkImportFromIndexModal({
                 </div>
               )}
 
-              {selectedIndex === BINANCE_USDT_SPOT_INDEX_ID && (
+              {isBinanceCryptoSpotIndex(selectedIndex) && (
                 <div style={{
                   padding: '12px',
                   backgroundColor: '#fff3cd',
@@ -295,10 +310,23 @@ export function BulkImportFromIndexModal({
                   borderRadius: '6px',
                   fontSize: '13px'
                 }}>
-                  <strong>Crypto :</strong> cette liste provient de l&apos;API publique Binance (toutes les paires spot USDT en
-                  cotation). Il peut y en avoir plusieurs centaines. Les prix / logos optionnels passent par Alpha Vantage
-                  (limite ~5 appels/min) : laissez « détails complets » décoché pour un import beaucoup plus rapide, puis
-                  mettez les prix à jour ensuite depuis la liste des actifs.
+                  <strong>Crypto :</strong> cette liste provient de l&apos;API publique Binance (paires spot{' '}
+                  <strong>USDT</strong> ou <strong>EUR</strong> selon l&apos;indice choisi). Il peut y en avoir beaucoup.
+                  Les prix / logos optionnels passent par Alpha Vantage (limite ~5 appels/min) : laissez « détails complets »
+                  décoché pour un import plus rapide, puis mettez les prix à jour depuis la liste des actifs.
+                </div>
+              )}
+
+              {selectedIndex === TOP100_CRYPTO_INDEX_ID && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '6px',
+                  fontSize: '13px'
+                }}>
+                  <strong>Top 100 :</strong> classement par capitalisation (API publique CoinGecko, 100 actifs seulement). Les
+                  prix / logos optionnels passent par Alpha Vantage — décochez « détails complets » pour accélérer l&apos;import.
                 </div>
               )}
 

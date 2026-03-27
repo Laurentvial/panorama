@@ -5751,7 +5751,7 @@ def assets_bulk_update_prices(request):
 def assets_bulk_import_from_index(request):
     """
     Bulk import assets from a market index (NASDAQ, S&P 500, CAC 40, etc.)
-    or from Binance USDT spot pairs (index id: binance_usdt_spot) for crypto.
+    or from crypto lists (Binance spot, CoinGecko top 100 market cap).
     Fetches constituent symbols and creates assets with optional quotes / details.
     """
     import time
@@ -5764,7 +5764,9 @@ def assets_bulk_import_from_index(request):
     default_exchange = request.data.get('exchange', '').strip().upper()
     fetch_full_details = request.data.get('fetchFullDetails', True)
     skip_duplicates = request.data.get('skipDuplicates', True)
-    is_crypto_index = index_name == 'binance_usdt_spot'
+    crypto_bulk_indexes = frozenset({'binance_usdt_spot', 'binance_eur_spot', 'top100_crypto_mc'})
+    is_crypto_index = index_name in crypto_bulk_indexes
+    crypto_av_market = 'EUR' if index_name == 'binance_eur_spot' else 'USD'
     
     if not index_name:
         return Response({'error': 'index parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -5818,7 +5820,7 @@ def assets_bulk_import_from_index(request):
                 # Set default currency, region, and exchange based on index
                 if is_crypto_index:
                     asset_type = 'crypto'
-                    currency = 'USD'
+                    currency = 'EUR' if index_name == 'binance_eur_spot' else 'USD'
                     region = 'Monde'
                     exchange = (default_exchange or 'BINANCE').strip().upper() or 'BINANCE'
                 elif index_name in ['cac40', 'cacmid60']:
@@ -5876,7 +5878,7 @@ def assets_bulk_import_from_index(request):
                         time.sleep(12)
                     try:
                         from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
-                        quote = get_crypto_quote_alpha_vantage(symbol)
+                        quote = get_crypto_quote_alpha_vantage(symbol, crypto_av_market)
                         if quote:
                             asset_data['last_price'] = quote.get('price')
                             asset_data['last_price_update'] = timezone.now()

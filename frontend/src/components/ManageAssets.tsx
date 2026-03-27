@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } from '../utils/iconMapping';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
@@ -85,6 +85,104 @@ function formatLastPriceUpdate(isoDate: string): string {
   return date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+type AssetSortKey =
+  | 'type'
+  | 'name'
+  | 'reference'
+  | 'alphaVantageSymbol'
+  | 'lastPrice'
+  | 'priceChangePercent'
+  | 'lastPriceUpdate'
+  | 'category'
+  | 'subcategory'
+  | 'default';
+
+type AssetSortDir = 'asc' | 'desc';
+
+function defaultSortDirForColumn(key: AssetSortKey): AssetSortDir {
+  if (
+    key === 'lastPriceUpdate' ||
+    key === 'lastPrice' ||
+    key === 'priceChangePercent' ||
+    key === 'default'
+  ) {
+    return 'desc';
+  }
+  return 'asc';
+}
+
+function compareAssets(a: any, b: any, key: AssetSortKey, dir: AssetSortDir): number {
+  const sign = dir === 'asc' ? 1 : -1;
+  const strCmp = (sa: string, sb: string) => sa.localeCompare(sb, 'fr', { sensitivity: 'base' }) * sign;
+
+  switch (key) {
+    case 'type':
+      return strCmp((a.type || '').toLowerCase(), (b.type || '').toLowerCase());
+    case 'name':
+      return strCmp((a.name || '').toLowerCase(), (b.name || '').toLowerCase());
+    case 'reference':
+      return strCmp((a.reference || '').toLowerCase(), (b.reference || '').toLowerCase());
+    case 'alphaVantageSymbol':
+      return strCmp(
+        (a.alphaVantageSymbol || '').toLowerCase(),
+        (b.alphaVantageSymbol || '').toLowerCase()
+      );
+    case 'category':
+      return strCmp((a.category || '').toLowerCase(), (b.category || '').toLowerCase());
+    case 'subcategory':
+      return strCmp((a.subcategory || '').toLowerCase(), (b.subcategory || '').toLowerCase());
+    case 'lastPrice': {
+      const na = a.lastPrice === null || a.lastPrice === undefined || a.lastPrice === '';
+      const nb = b.lastPrice === null || b.lastPrice === undefined || b.lastPrice === '';
+      if (na && nb) return 0;
+      if (na) return 1;
+      if (nb) return -1;
+      const pa = parseFloat(a.lastPrice);
+      const pb = parseFloat(b.lastPrice);
+      if (pa !== pa && pb !== pb) return 0;
+      if (pa !== pa) return 1;
+      if (pb !== pb) return -1;
+      return pa < pb ? -sign : pa > pb ? sign : 0;
+    }
+    case 'priceChangePercent': {
+      const na =
+        a.priceChangePercent === null || a.priceChangePercent === undefined || a.priceChangePercent === '';
+      const nb =
+        b.priceChangePercent === null || b.priceChangePercent === undefined || b.priceChangePercent === '';
+      if (na && nb) return 0;
+      if (na) return 1;
+      if (nb) return -1;
+      const pa = parseFloat(a.priceChangePercent);
+      const pb = parseFloat(b.priceChangePercent);
+      if (pa !== pa && pb !== pb) return 0;
+      if (pa !== pa) return 1;
+      if (pb !== pb) return -1;
+      return pa < pb ? -sign : pa > pb ? sign : 0;
+    }
+    case 'lastPriceUpdate': {
+      const na = !a.lastPriceUpdate;
+      const nb = !b.lastPriceUpdate;
+      if (na && nb) return 0;
+      if (na) return 1;
+      if (nb) return -1;
+      const ta = new Date(a.lastPriceUpdate).getTime();
+      const tb = new Date(b.lastPriceUpdate).getTime();
+      if (ta !== ta && tb !== tb) return 0;
+      if (ta !== ta) return 1;
+      if (tb !== tb) return -1;
+      return ta < tb ? -sign : ta > tb ? sign : 0;
+    }
+    case 'default': {
+      const da = !!a.default;
+      const db = !!b.default;
+      if (da === db) return 0;
+      return (da ? 1 : -1) * sign;
+    }
+    default:
+      return 0;
+  }
+}
+
 export function ManageAssets() {
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,6 +191,8 @@ export function ManageAssets() {
   const [filterIndex, setFilterIndex] = useState<string>('all');
   const [activeTypeTab, setActiveTypeTab] = useState<string>('all');
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<AssetSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<AssetSortDir>('desc');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
@@ -928,33 +1028,55 @@ export function ManageAssets() {
     }
   }
 
-  const filteredAssets = assets.filter(asset => {
-    const searchLower = searchTerm.toLowerCase();
-    // Apply type tab filter first (then search).
-    if (activeTypeTab !== 'all') {
-      const tab = assetTypeTabs.find((t) => t.value === activeTypeTab) || null;
-      const assetTypeKey = canonicalTypeKey(asset?.type);
-      if (tab && tab.typeKey !== 'all' && assetTypeKey !== tab.typeKey) {
+  const filteredAssets = useMemo(() => {
+    const list = assets.filter((asset) => {
+      const searchLower = searchTerm.toLowerCase();
+      if (activeTypeTab !== 'all') {
+        const tab = assetTypeTabs.find((t) => t.value === activeTypeTab) || null;
+        const assetTypeKey = canonicalTypeKey(asset?.type);
+        if (tab && tab.typeKey !== 'all' && assetTypeKey !== tab.typeKey) {
+          return false;
+        }
+      }
+      if (filterExchange !== 'all' && (asset.exchange || '').trim() !== (filterExchange || '').trim()) {
         return false;
       }
-      // If we somehow have a selected tab but can't resolve it, fallback to showing all.
-    }
-    // Apply exchange (bourse) filter - trim both sides for consistent matching
-    if (filterExchange !== 'all' && (asset.exchange || '').trim() !== (filterExchange || '').trim()) {
-      return false;
-    }
-    // Apply index (indice) filter - trim both sides for consistent matching
-    if (filterIndex !== 'all' && (asset.sourceIndex || '').trim() !== (filterIndex || '').trim()) {
-      return false;
-    }
-    return (
-      asset.name?.toLowerCase().includes(searchLower) ||
-      asset.type?.toLowerCase().includes(searchLower) ||
-      asset.reference?.toLowerCase().includes(searchLower) ||
-      asset.category?.toLowerCase().includes(searchLower) ||
-      asset.subcategory?.toLowerCase().includes(searchLower)
-    );
-  });
+      if (filterIndex !== 'all' && (asset.sourceIndex || '').trim() !== (filterIndex || '').trim()) {
+        return false;
+      }
+      return (
+        asset.name?.toLowerCase().includes(searchLower) ||
+        asset.type?.toLowerCase().includes(searchLower) ||
+        asset.reference?.toLowerCase().includes(searchLower) ||
+        asset.category?.toLowerCase().includes(searchLower) ||
+        asset.subcategory?.toLowerCase().includes(searchLower)
+      );
+    });
+    if (!sortKey) return list;
+    return [...list].sort((a, b) => compareAssets(a, b, sortKey, sortDir));
+  }, [
+    assets,
+    searchTerm,
+    filterExchange,
+    filterIndex,
+    activeTypeTab,
+    assetTypeTabs,
+    canonicalTypeKey,
+    sortKey,
+    sortDir,
+  ]);
+
+  const toggleSort = useCallback((key: AssetSortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey === key) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return prevKey;
+      }
+      setSortDir(defaultSortDirForColumn(key));
+      return key;
+    });
+    setPage(1);
+  }, []);
 
   const totalPages = Math.max(1, Math.ceil(filteredAssets.length / ASSETS_PAGE_SIZE));
   const safePage = Math.min(Math.max(1, page), totalPages);
@@ -966,6 +1088,31 @@ export function ManageAssets() {
   useEffect(() => {
     setPage(1);
   }, [searchTerm, filterExchange, filterIndex, activeTypeTab]);
+
+  const renderSortableHeader = (label: string, colKey: AssetSortKey) => {
+    const active = sortKey === colKey;
+    return (
+      <th className="text-left p-2 font-medium text-slate-700">
+        <button
+          type="button"
+          onClick={() => toggleSort(colKey)}
+          className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+          aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        >
+          <span>{label}</span>
+          {active ? (
+            sortDir === 'asc' ? (
+              <ChevronUp className="h-4 w-4 shrink-0 text-slate-700" aria-hidden />
+            ) : (
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-700" aria-hidden />
+            )
+          ) : (
+            <ChevronsUpDown className="h-4 w-4 shrink-0 text-slate-400 opacity-60" aria-hidden />
+          )}
+        </button>
+      </th>
+    );
+  };
 
   useEffect(() => {
     setPage((p) => Math.min(p, totalPages));
@@ -1091,16 +1238,16 @@ export function ManageAssets() {
                 <thead>
                   <tr className="border-b">
                     <th className="text-left p-2 font-medium text-slate-700">Logo</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Type</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Nom</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Référence</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Symbole Ticker</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Prix</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Variation</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Dernière MAJ</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Catégorie</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Sous-catégorie</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
+                    {renderSortableHeader('Type', 'type')}
+                    {renderSortableHeader('Nom', 'name')}
+                    {renderSortableHeader('Référence', 'reference')}
+                    {renderSortableHeader('Symbole Ticker', 'alphaVantageSymbol')}
+                    {renderSortableHeader('Prix', 'lastPrice')}
+                    {renderSortableHeader('Variation', 'priceChangePercent')}
+                    {renderSortableHeader('Dernière MAJ', 'lastPriceUpdate')}
+                    {renderSortableHeader('Catégorie', 'category')}
+                    {renderSortableHeader('Sous-catégorie', 'subcategory')}
+                    {renderSortableHeader('Par défaut', 'default')}
                     <th className="text-right p-2 font-medium text-slate-700">Actions</th>
                   </tr>
                 </thead>
