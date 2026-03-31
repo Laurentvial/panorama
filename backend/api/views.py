@@ -5536,17 +5536,53 @@ def assets_bulk_update_prices(request):
     Update prices and missing information for multiple assets at once
     Uses Alpha Vantage for stocks/ETFs and Finnhub for cryptos
     Updates: prices, logos, descriptions, sectors, and other company details
+
+    Either pass assetIds (legacy) or refreshScope:
+    - default_prices: assets marked default=True
+    - client_assigned_prices: assets linked via ClientAsset
+    - stale_24h_prices: last_price_update null or older than 24 hours
+    - all_prices: all assets with a symbol
+    - all_logos: refresh logo URL for all assets with a symbol (no price update)
     """
     import time
     from api.alpha_vantage_service import get_crypto_quote_alpha_vantage, get_crypto_logo
-    
-    asset_ids = request.data.get('assetIds', [])
-    
+
+    refresh_scope = (request.data.get('refreshScope') or request.data.get('refresh_scope') or '').strip()
+    valid_scopes = frozenset({
+        'default_prices',
+        'client_assigned_prices',
+        'stale_24h_prices',
+        'all_prices',
+        'all_logos',
+    })
+    logos_only = False
+
+    if refresh_scope:
+        if refresh_scope not in valid_scopes:
+            return Response(
+                {'error': f'Invalid refreshScope. Allowed: {", ".join(sorted(valid_scopes))}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        logos_only = refresh_scope == 'all_logos'
+        qs = Asset.objects.filter(alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol='')
+        if refresh_scope == 'default_prices':
+            qs = qs.filter(default=True)
+        elif refresh_scope == 'client_assigned_prices':
+            qs = qs.filter(id__in=ClientAsset.objects.values_list('asset_id', flat=True).distinct())
+        elif refresh_scope == 'stale_24h_prices':
+            cutoff = timezone.now() - timedelta(hours=24)
+            qs = qs.filter(Q(last_price_update__isnull=True) | Q(last_price_update__lt=cutoff))
+        asset_ids = list(qs.values_list('id', flat=True))
+    else:
+        asset_ids = request.data.get('assetIds', [])
+
     if not asset_ids:
+        if refresh_scope:
+            return Response({'updated': 0, 'total': 0, 'errors': [], 'skipped': True}, status=status.HTTP_200_OK)
         return Response({'error': 'assetIds array is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     assets = Asset.objects.filter(id__in=asset_ids, alpha_vantage_symbol__isnull=False).exclude(alpha_vantage_symbol='')
-    
+
     if not assets.exists():
         return Response({'error': 'No valid assets found with symbols configured'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -5560,13 +5596,36 @@ def assets_bulk_update_prices(request):
     
     updated_count = 0
     errors = []
-    
+
     for idx, asset in enumerate(assets):
         try:
             # Delay only when using Alpha Vantage (Finnhub has no strict rate limits)
-            if not FINNHUB_API_KEY and av_service and idx > 0 and idx % 5 == 0:
+            if not FINNHUB_API_KEY and av_service and not logos_only and idx > 0 and idx % 5 == 0:
                 time.sleep(12)
-            
+
+            if logos_only:
+                logo_url = None
+                if (asset.type or '').lower() == 'crypto':
+                    logo_url = get_crypto_logo(asset.alpha_vantage_symbol)
+                else:
+                    sym = (asset.alpha_vantage_symbol or '').strip().upper()
+                    from api.alpha_vantage_service import _normalize_metal_symbol
+                    symbol_normalized = _normalize_metal_symbol(sym)
+                    is_forex_metal = symbol_normalized in ['XAU', 'XAG'] or (asset.exchange or '').strip().upper() == 'FOREX'
+                    if is_forex_metal:
+                        logo_url = get_company_logo(sym) or None
+                    else:
+                        logo_url = get_company_logo(asset.alpha_vantage_symbol) or (
+                            av_service.get_company_logo(asset.alpha_vantage_symbol) if av_service else None
+                        )
+                if logo_url:
+                    asset.logo_url = logo_url
+                    asset.save(update_fields=['logo_url'])
+                    updated_count += 1
+                else:
+                    errors.append(f'{asset.alpha_vantage_symbol}: Logo introuvable')
+                continue
+
             updated = False
             
             # Use Finnhub/Alpha Vantage for cryptos and stocks/ETFs

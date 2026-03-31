@@ -12,10 +12,27 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import { BulkImportFromIndexModal } from './BulkImportFromIndexModal';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
 
 const ASSETS_PAGE_SIZE = 25;
+
+type ExternalAssetRefreshScope =
+  | 'default_prices'
+  | 'client_assigned_prices'
+  | 'stale_24h_prices'
+  | 'all_prices'
+  | 'all_logos';
+
+const EXTERNAL_ASSET_REFRESH_OPTIONS: { value: ExternalAssetRefreshScope; label: string }[] = [
+  { value: 'default_prices', label: 'Prix des actifs par défaut' },
+  { value: 'client_assigned_prices', label: 'Prix des actifs assignés à des clients' },
+  { value: 'stale_24h_prices', label: 'Prix des actifs non mis à jour depuis plus de 24 heures' },
+  { value: 'all_prices', label: 'Prix de tous les actifs' },
+  { value: 'all_logos', label: 'Logo de tous les actifs' },
+];
 
 // Liste des bourses disponibles pour le champ Exchange
 const EXCHANGE_OPTIONS: { value: string; label: string }[] = [
@@ -195,6 +212,8 @@ export function ManageAssets() {
   const [sortDir, setSortDir] = useState<AssetSortDir>('desc');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
+  const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
+  const [bulkRefreshScope, setBulkRefreshScope] = useState<ExternalAssetRefreshScope>('all_prices');
   const [editingAsset, setEditingAsset] = useState<any>(null);
   // Used only for the Alpha Vantage search mode in the create dialog
   // (separate from CRM "Type" stored in formData.type)
@@ -988,8 +1007,8 @@ export function ManageAssets() {
     }
   }
 
-  async function handleBulkUpdatePrices() {
-    const assetsWithSymbols = assets.filter(a => a.alphaVantageSymbol);
+  async function runBulkRefresh(scope: ExternalAssetRefreshScope) {
+    const assetsWithSymbols = assets.filter((a) => a.alphaVantageSymbol);
     if (assetsWithSymbols.length === 0) {
       toast.error('Aucun actif avec symbole Alpha Vantage trouvé');
       return;
@@ -997,32 +1016,43 @@ export function ManageAssets() {
 
     try {
       setUpdatingPrices(true);
-      const assetIds = assetsWithSymbols.map(a => a.id);
       const response = await apiCall('/api/assets/bulk-update-prices/', {
         method: 'POST',
-        body: JSON.stringify({ assetIds }),
-        headers: { 'Content-Type': 'application/json' }
+        body: JSON.stringify({ refreshScope: scope }),
+        headers: { 'Content-Type': 'application/json' },
       });
       bustAssetsCache();
-      
-      // Show detailed success message
-      const updatedCount = response.updated || 0;
-      if (updatedCount > 0) {
-        toast.success(`${updatedCount} actif(s) actualisé(s)`);
-      } else {
-        toast.info('Aucune donnée à actualiser');
+
+      if (response.skipped) {
+        toast.info('Aucun actif ne correspond à ce critère');
+        loadAssets();
+        return;
       }
-      
-      // Show errors if any
+
+      const updatedCount = response.updated || 0;
+      if (scope === 'all_logos') {
+        if (updatedCount > 0) {
+          toast.success(`${updatedCount} logo(s) actualisé(s)`);
+        } else {
+          toast.info('Aucun logo mis à jour');
+        }
+      } else {
+        if (updatedCount > 0) {
+          toast.success(`${updatedCount} actif(s) actualisé(s)`);
+        } else {
+          toast.info('Aucune donnée à actualiser');
+        }
+      }
+
       if (response.errors && response.errors.length > 0) {
         const errorCount = response.errors.length;
         toast.warning(`${errorCount} erreur(s) lors de l'actualisation`);
       }
-      
+
       loadAssets();
     } catch (error: any) {
       console.error('Error updating assets:', error);
-      toast.error(error?.message || 'Erreur lors de l\'actualisation des données');
+      toast.error(error?.message || "Erreur lors de l'actualisation des données");
     } finally {
       setUpdatingPrices(false);
     }
@@ -1134,10 +1164,10 @@ export function ManageAssets() {
           <p className="page-subtitle">Gérer les actifs externes du marché (actions, crypto, ETF, etc.)</p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            onClick={handleBulkUpdatePrices}
-            disabled={updatingPrices || assets.filter(a => a.alphaVantageSymbol).length === 0}
+          <Button
+            variant="outline"
+            onClick={() => setIsRefreshModalOpen(true)}
+            disabled={updatingPrices || assets.filter((a) => a.alphaVantageSymbol).length === 0}
           >
             {/* @ts-ignore - react-icons accepts className at runtime */}
             <RefreshCw className={`w-4 h-4 mr-2 ${updatingPrices ? 'animate-spin' : ''}`} />
@@ -1942,6 +1972,49 @@ export function ManageAssets() {
           </div>
         </div>
       )}
+
+      <Dialog open={isRefreshModalOpen} onOpenChange={setIsRefreshModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Actualiser les données</DialogTitle>
+            <DialogDescription>
+              Choisissez ce qui doit être mis à jour depuis les sources externes.
+            </DialogDescription>
+          </DialogHeader>
+          <RadioGroup
+            value={bulkRefreshScope}
+            onValueChange={(v) => setBulkRefreshScope(v as ExternalAssetRefreshScope)}
+            className="gap-2"
+          >
+            {EXTERNAL_ASSET_REFRESH_OPTIONS.map((opt) => (
+              <div
+                key={opt.value}
+                className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 has-[[data-state=checked]]:border-slate-400 has-[[data-state=checked]]:bg-slate-50"
+              >
+                <RadioGroupItem value={opt.value} id={`refresh-scope-${opt.value}`} className="mt-0.5" />
+                <Label htmlFor={`refresh-scope-${opt.value}`} className="cursor-pointer font-normal leading-snug text-slate-800">
+                  {opt.label}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setIsRefreshModalOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              type="button"
+              disabled={updatingPrices}
+              onClick={() => {
+                setIsRefreshModalOpen(false);
+                void runBulkRefresh(bulkRefreshScope);
+              }}
+            >
+              {updatingPrices ? 'Actualisation…' : "Lancer l'actualisation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bulk Import from Index Modal */}
       <BulkImportFromIndexModal

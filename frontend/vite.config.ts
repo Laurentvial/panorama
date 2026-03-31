@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
   // For Choreo standalone frontend, always use '/'
   base: '/',
   resolve: {
+      dedupe: ['react', 'react-dom'],
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {
         'vaul@1.1.2': 'vaul',
