@@ -2241,15 +2241,15 @@ export function ManageAssets() {
           if (!open) setDuplicateDeleteSelection(new Set());
         }}
       >
-        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:w-full">
-          <div
-            className={`grid max-h-[92vh] gap-4 overflow-hidden p-6 pt-7 min-h-0 ${
-              externalAssetDuplicateGroups.length > 0
-                ? 'grid-rows-[auto_auto_minmax(0,1fr)_auto]'
-                : 'grid-rows-[auto_1fr_auto]'
-            }`}
-          >
-          <DialogHeader className="min-h-0 space-y-2 pr-10 text-left">
+        <DialogContent
+          className="!flex w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:w-full"
+          style={{
+            height: 'min(85vh, 720px)',
+            maxHeight: 'min(85vh, 720px)',
+          }}
+        >
+          <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-4 overflow-hidden p-6 pt-7 box-border">
+          <DialogHeader className="shrink-0 space-y-2 pr-10 text-left">
             <DialogTitle>Vérifier les doublons</DialogTitle>
             <DialogDescription>
               Comparaison insensible à la casse sur le symbole API (ticker), la référence et le symbole TradingView.
@@ -2293,12 +2293,14 @@ export function ManageAssets() {
           ) : null}
 
           {externalAssetDuplicateGroups.length === 0 ? (
-            <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900 sm:mb-6">
-              Aucun doublon détecté sur la liste actuelle des actifs.
-            </p>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900">
+                Aucun doublon détecté sur la liste actuelle des actifs.
+              </p>
+            </div>
           ) : (
             <div
-              className="min-h-0 w-full min-w-0 overflow-y-scroll overflow-x-hidden overscroll-y-contain rounded-lg border border-slate-200 bg-slate-50/50 px-2 py-2 pr-3 [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:rgb(203_213_225)_rgb(248_250_252)]"
+              className="min-h-0 flex-1 overflow-y-scroll overflow-x-hidden overscroll-y-contain rounded-lg border border-slate-200 bg-slate-50/50 px-2 py-2 pr-3 [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:rgb(203_213_225)_rgb(248_250_252)]"
             >
               <div className="space-y-6">
                 {externalAssetDuplicateGroups.map((group) => (
@@ -2360,7 +2362,7 @@ export function ManageAssets() {
             </div>
           )}
 
-          <DialogFooter className="min-h-0 flex-col gap-3 sm:gap-3">
+          <DialogFooter className="shrink-0 flex-col gap-3 sm:gap-3">
             {externalAssetDuplicateGroups.length > 0 ? (
               <>
                 <div className="flex w-full flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
