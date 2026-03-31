@@ -13,7 +13,6 @@ import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import { BulkImportFromIndexModal } from './BulkImportFromIndexModal';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
-import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
 
@@ -1974,31 +1973,41 @@ export function ManageAssets() {
       )}
 
       <Dialog open={isRefreshModalOpen} onOpenChange={setIsRefreshModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-[22rem] gap-6 px-6 py-8 pt-9 sm:px-8 sm:py-10 sm:pt-10">
+          <DialogHeader className="space-y-2 pr-10">
             <DialogTitle>Actualiser les données</DialogTitle>
             <DialogDescription>
               Choisissez ce qui doit être mis à jour depuis les sources externes.
             </DialogDescription>
           </DialogHeader>
-          <RadioGroup
-            value={bulkRefreshScope}
-            onValueChange={(v) => setBulkRefreshScope(v as ExternalAssetRefreshScope)}
-            className="gap-2"
-          >
-            {EXTERNAL_ASSET_REFRESH_OPTIONS.map((opt) => (
-              <div
-                key={opt.value}
-                className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 has-[[data-state=checked]]:border-slate-400 has-[[data-state=checked]]:bg-slate-50"
-              >
-                <RadioGroupItem value={opt.value} id={`refresh-scope-${opt.value}`} className="mt-0.5" />
-                <Label htmlFor={`refresh-scope-${opt.value}`} className="cursor-pointer font-normal leading-snug text-slate-800">
-                  {opt.label}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <fieldset className="space-y-3 border-0 p-0 m-0 min-w-0 py-1">
+            <legend className="sr-only">Type d&apos;actualisation</legend>
+            {EXTERNAL_ASSET_REFRESH_OPTIONS.map((opt) => {
+              const selected = bulkRefreshScope === opt.value;
+              return (
+                <label
+                  key={opt.value}
+                  className={[
+                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+                    selected
+                      ? 'border-slate-700 bg-slate-50 ring-1 ring-slate-700/15'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/80',
+                  ].join(' ')}
+                >
+                  <input
+                    type="radio"
+                    name="external-refresh-scope"
+                    value={opt.value}
+                    checked={selected}
+                    onChange={() => setBulkRefreshScope(opt.value)}
+                    className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-slate-900"
+                  />
+                  <span className="text-sm font-normal leading-snug text-slate-800">{opt.label}</span>
+                </label>
+              );
+            })}
+          </fieldset>
+          <DialogFooter className="gap-3 pt-2 sm:gap-3">
             <Button type="button" variant="outline" onClick={() => setIsRefreshModalOpen(false)}>
               Annuler
             </Button>
