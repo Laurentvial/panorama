@@ -2259,7 +2259,7 @@ export function ManageAssets() {
           </DialogHeader>
 
           {externalAssetDuplicateGroups.length > 0 ? (
-            <div className="flex min-h-0 flex-col gap-2 text-sm">
+            <div className="flex shrink-0 flex-col gap-2 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -2362,15 +2362,16 @@ export function ManageAssets() {
             </div>
           )}
 
-          <DialogFooter className="shrink-0 flex-col gap-3 sm:gap-3">
+          {/* Plain div: DialogFooter uses sm:flex-row sm:justify-end which broke this modal layout */}
+          <div className="shrink-0 flex w-full min-w-0 flex-col gap-3 overflow-x-hidden border-t border-slate-200 bg-background pt-3">
             {externalAssetDuplicateGroups.length > 0 ? (
               <>
-                <div className="flex w-full flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-4">
                   <Button
                     type="button"
                     variant="destructive"
                     disabled={duplicateDeleteSelection.size === 0 || deletingDuplicateSelection}
-                    className="w-full sm:w-auto"
+                    className="w-full shrink-0 sm:w-auto"
                     onClick={() =>
                       void handleBulkDeleteDuplicateSelection(Array.from(duplicateDeleteSelection))
                     }
@@ -2380,34 +2381,43 @@ export function ManageAssets() {
                       ? 'Suppression…'
                       : `Supprimer la sélection (${duplicateDeleteSelection.size})`}
                   </Button>
-                  <p className="text-xs text-slate-500 sm:max-w-xs sm:text-right">
+                  <p className="min-w-0 flex-1 text-xs leading-snug text-slate-500">
                     Les actifs encore liés à des clients peuvent être refusés par l&apos;API ; vérifiez les messages d&apos;erreur.
                   </p>
                 </div>
-                <div className="flex w-full flex-wrap gap-2 sm:justify-between">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setDuplicateRowHighlight(true)}
-                    >
-                      Surligner dans le tableau
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => setDuplicateRowHighlight(false)}>
-                      Masquer le surlignage
-                    </Button>
-                  </div>
-                  <Button type="button" variant="default" onClick={() => setIsDuplicatesModalOpen(false)}>
+                <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full justify-center sm:w-auto"
+                    onClick={() => setDuplicateRowHighlight(true)}
+                  >
+                    Surligner dans le tableau
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-center sm:w-auto"
+                    onClick={() => setDuplicateRowHighlight(false)}
+                  >
+                    Masquer le surlignage
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="w-full justify-center sm:ml-auto sm:w-auto"
+                    onClick={() => setIsDuplicatesModalOpen(false)}
+                  >
                     Fermer
                   </Button>
                 </div>
               </>
             ) : (
-              <Button type="button" variant="default" className="w-full sm:w-auto sm:ml-auto" onClick={() => setIsDuplicatesModalOpen(false)}>
+              <Button type="button" variant="default" className="w-full justify-center sm:ml-auto sm:w-auto" onClick={() => setIsDuplicatesModalOpen(false)}>
                 Fermer
               </Button>
             )}
-          </DialogFooter>
+          </div>
           </div>
         </DialogContent>
       </Dialog>
