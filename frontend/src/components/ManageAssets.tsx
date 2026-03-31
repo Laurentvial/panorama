@@ -92,6 +92,19 @@ function buildExternalAssetDuplicateGroups(assets: any[]): ExternalAssetDuplicat
   return groups;
 }
 
+/** Oldest first for “keep one original”; missing createdAt sorts after dated rows, then by id. */
+function sortExternalAssetsOldestFirst(assets: any[]): any[] {
+  return [...assets].sort((a, b) => {
+    const ta = a?.createdAt != null && a.createdAt !== '' ? new Date(a.createdAt).getTime() : NaN;
+    const tb = b?.createdAt != null && b.createdAt !== '' ? new Date(b.createdAt).getTime() : NaN;
+    const aOk = !Number.isNaN(ta);
+    const bOk = !Number.isNaN(tb);
+    if (aOk && bOk && ta !== tb) return ta - tb;
+    if (aOk !== bOk) return aOk ? -1 : 1;
+    return String(a.id).localeCompare(String(b.id), 'fr', { sensitivity: 'base' });
+  });
+}
+
 // Liste des bourses disponibles pour le champ Exchange
 const EXCHANGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'NASDAQ', label: 'NASDAQ' },
@@ -1236,6 +1249,24 @@ export function ManageAssets() {
     });
   }, []);
 
+  /** One unchecked row per duplicate group (oldest kept), all others checked — quick path to bulk delete extras. */
+  const preselectDuplicateExtrasKeepOldestPerGroup = useCallback(() => {
+    const next = new Set<string>();
+    for (const g of externalAssetDuplicateGroups) {
+      if (g.assets.length < 2) continue;
+      const ordered = sortExternalAssetsOldestFirst(g.assets);
+      for (let i = 1; i < ordered.length; i++) {
+        next.add(ordered[i].id);
+      }
+    }
+    setDuplicateDeleteSelection(next);
+    if (next.size === 0) {
+      toast.info('Aucun excédent à pré-sélectionner dans les groupes affichés.');
+    } else {
+      toast.success(`${next.size} fiche(s) cochée(s) — la plus ancienne de chaque groupe est laissée décochée.`);
+    }
+  }, [externalAssetDuplicateGroups]);
+
   const toggleSort = useCallback((key: AssetSortKey) => {
     setSortKey((prevKey) => {
       if (prevKey === key) {
@@ -1317,16 +1348,11 @@ export function ManageAssets() {
             variant="outline"
             onClick={() => setIsDuplicatesModalOpen(true)}
             title="Détecter les actifs en double (symbole API, référence, TradingView)"
-            className={
-              externalAssetDuplicateIds.size > 0
-                ? 'border-amber-300 bg-amber-50/80 text-amber-950 hover:bg-amber-50'
-                : ''
-            }
           >
-            <Layers2 className="w-4 h-4 mr-2 shrink-0" aria-hidden />
+            <Layers2 className="w-4 h-4 mr-2" aria-hidden />
             Vérifier les doublons
             {externalAssetDuplicateIds.size > 0 ? (
-              <span className="ml-1.5 rounded-full bg-amber-600 px-1.5 py-0 text-xs font-semibold text-white tabular-nums">
+              <span className="ml-1.5 rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0 text-xs font-semibold text-slate-600 tabular-nums">
                 {externalAssetDuplicateIds.size}
               </span>
             ) : null}
@@ -2226,22 +2252,36 @@ export function ManageAssets() {
           </DialogHeader>
 
           {externalAssetDuplicateGroups.length > 0 ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2 text-sm">
-              <Button type="button" variant="outline" size="sm" onClick={selectAllDuplicatesInModal}>
-                Tout sélectionner
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setDuplicateDeleteSelection(new Set())}
-                disabled={duplicateDeleteSelection.size === 0}
-              >
-                Effacer la sélection
-              </Button>
-              <span className="text-slate-500">
-                {duplicateDeleteSelection.size} sélectionné(s) sur {duplicateModalSelectableIds.length}
-              </span>
+            <div className="flex shrink-0 flex-col gap-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={preselectDuplicateExtrasKeepOldestPerGroup}
+                  title="Pour chaque groupe de doublons : laisse décochée la fiche la plus ancienne (date de création), coche toutes les autres pour les supprimer en un clic."
+                >
+                  Cocher les doublons (garder 1 par groupe)
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={selectAllDuplicatesInModal}>
+                  Tout sélectionner
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDuplicateDeleteSelection(new Set())}
+                  disabled={duplicateDeleteSelection.size === 0}
+                >
+                  Effacer la sélection
+                </Button>
+                <span className="text-slate-500">
+                  {duplicateDeleteSelection.size} sélectionné(s) sur {duplicateModalSelectableIds.length}
+                </span>
+              </div>
+              <p className="text-xs leading-snug text-slate-500">
+                Raccourci : « Cocher les doublons… » conserve la fiche <span className="font-medium text-slate-600">la plus ancienne</span> de chaque groupe (selon la date de création) et coche les fiches en trop.
+              </p>
             </div>
           ) : null}
 
