@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 import { Plus, Search, Trash2, Pencil, X, RefreshCw, TrendingUp, TrendingDown } from '../utils/iconMapping';
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, Layers2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
@@ -32,6 +32,65 @@ const EXTERNAL_ASSET_REFRESH_OPTIONS: { value: ExternalAssetRefreshScope; label:
   { value: 'all_prices', label: 'Prix de tous les actifs' },
   { value: 'all_logos', label: 'Logo de tous les actifs' },
 ];
+
+type ExternalAssetDuplicateKind = 'alphaSymbol' | 'reference' | 'tradingView';
+
+type ExternalAssetDuplicateGroup = {
+  kind: ExternalAssetDuplicateKind;
+  key: string;
+  assets: any[];
+};
+
+const EXTERNAL_ASSET_DUPLICATE_KIND_LABELS: Record<ExternalAssetDuplicateKind, string> = {
+  alphaSymbol: 'Symbole API (ticker)',
+  reference: 'Référence',
+  tradingView: 'Symbole TradingView',
+};
+
+function normalizeExternalAssetKey(value: string): string {
+  return (value || '').trim().toUpperCase();
+}
+
+function buildExternalAssetDuplicateGroups(assets: any[]): ExternalAssetDuplicateGroup[] {
+  const push = (map: Map<string, any[]>, key: string, asset: any) => {
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(asset);
+  };
+
+  const byAlpha = new Map<string, any[]>();
+  const byRef = new Map<string, any[]>();
+  const byTv = new Map<string, any[]>();
+
+  for (const a of assets) {
+    const sym = normalizeExternalAssetKey(a.alphaVantageSymbol || '');
+    if (sym) push(byAlpha, sym, a);
+    const ref = normalizeExternalAssetKey(a.reference || '');
+    if (ref) push(byRef, ref, a);
+    const tv = normalizeExternalAssetKey(a.tradingViewSymbol || '');
+    if (tv) push(byTv, tv, a);
+  }
+
+  const groups: ExternalAssetDuplicateGroup[] = [];
+  const collect = (kind: ExternalAssetDuplicateKind, map: Map<string, any[]>) => {
+    for (const [key, list] of map) {
+      if (list.length > 1) groups.push({ kind, key, assets: list });
+    }
+  };
+  collect('alphaSymbol', byAlpha);
+  collect('reference', byRef);
+  collect('tradingView', byTv);
+
+  groups.sort((a, b) => {
+    const byLabel = EXTERNAL_ASSET_DUPLICATE_KIND_LABELS[a.kind].localeCompare(
+      EXTERNAL_ASSET_DUPLICATE_KIND_LABELS[b.kind],
+      'fr'
+    );
+    if (byLabel !== 0) return byLabel;
+    return a.key.localeCompare(b.key, 'fr', { sensitivity: 'base' });
+  });
+  return groups;
+}
 
 // Liste des bourses disponibles pour le champ Exchange
 const EXCHANGE_OPTIONS: { value: string; label: string }[] = [
@@ -213,6 +272,10 @@ export function ManageAssets() {
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
   const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false);
   const [bulkRefreshScope, setBulkRefreshScope] = useState<ExternalAssetRefreshScope>('all_prices');
+  const [isDuplicatesModalOpen, setIsDuplicatesModalOpen] = useState(false);
+  const [duplicateRowHighlight, setDuplicateRowHighlight] = useState(false);
+  const [duplicateDeleteSelection, setDuplicateDeleteSelection] = useState<Set<string>>(() => new Set());
+  const [deletingDuplicateSelection, setDeletingDuplicateSelection] = useState(false);
   const [editingAsset, setEditingAsset] = useState<any>(null);
   // Used only for the Alpha Vantage search mode in the create dialog
   // (separate from CRM "Type" stored in formData.type)
@@ -692,6 +755,53 @@ export function ManageAssets() {
     }
   }
 
+  const toggleDuplicateDeleteSelect = useCallback((id: string) => {
+    setDuplicateDeleteSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  async function handleBulkDeleteDuplicateSelection(ids: string[]) {
+    if (ids.length === 0) {
+      toast.info('Sélectionnez au moins un actif à supprimer');
+      return;
+    }
+    if (
+      !confirm(
+        `Supprimer définitivement ${ids.length} actif(s) sélectionné(s) ? Les liaisons clients seront supprimées si nécessaire. Cette action est irréversible.`
+      )
+    ) {
+      return;
+    }
+    setDeletingDuplicateSelection(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const id of ids) {
+        try {
+          await apiCall(`/api/assets/${id}/delete/`, { method: 'DELETE' });
+          bustAssetsCache(String(id));
+          ok += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (ok > 0) {
+        toast.success(`${ok} actif(s) supprimé(s)`);
+      }
+      if (failed > 0) {
+        toast.error(`${failed} suppression(s) en échec`);
+      }
+      setDuplicateDeleteSelection(new Set());
+      await loadAssets();
+    } finally {
+      setDeletingDuplicateSelection(false);
+    }
+  }
+
   async function handleAlphaVantageSearch(searchValue?: string) {
     const keywords = (searchValue || alphaVantageSearch).trim();
     if (!keywords) {
@@ -1095,6 +1205,37 @@ export function ManageAssets() {
     sortDir,
   ]);
 
+  const externalAssetDuplicateGroups = useMemo(
+    () => buildExternalAssetDuplicateGroups(assets),
+    [assets]
+  );
+
+  const externalAssetDuplicateIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of externalAssetDuplicateGroups) {
+      for (const a of g.assets) {
+        s.add(a.id);
+      }
+    }
+    return s;
+  }, [externalAssetDuplicateGroups]);
+
+  const duplicateModalSelectableIds = useMemo(() => Array.from(externalAssetDuplicateIds), [externalAssetDuplicateIds]);
+
+  const selectAllDuplicatesInModal = useCallback(() => {
+    setDuplicateDeleteSelection(new Set(duplicateModalSelectableIds));
+  }, [duplicateModalSelectableIds]);
+
+  const selectDuplicateGroupAssets = useCallback((group: ExternalAssetDuplicateGroup) => {
+    setDuplicateDeleteSelection((prev) => {
+      const next = new Set(prev);
+      for (const a of group.assets) {
+        next.add(a.id);
+      }
+      return next;
+    });
+  }, []);
+
   const toggleSort = useCallback((key: AssetSortKey) => {
     setSortKey((prevKey) => {
       if (prevKey === key) {
@@ -1172,6 +1313,24 @@ export function ManageAssets() {
             <RefreshCw className={`w-4 h-4 mr-2 ${updatingPrices ? 'animate-spin' : ''}`} />
             Actualiser les données
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setIsDuplicatesModalOpen(true)}
+            title="Détecter les actifs en double (symbole API, référence, TradingView)"
+            className={
+              externalAssetDuplicateIds.size > 0
+                ? 'border-amber-300 bg-amber-50/80 text-amber-950 hover:bg-amber-50'
+                : ''
+            }
+          >
+            <Layers2 className="w-4 h-4 mr-2 shrink-0" aria-hidden />
+            Vérifier les doublons
+            {externalAssetDuplicateIds.size > 0 ? (
+              <span className="ml-1.5 rounded-full bg-amber-600 px-1.5 py-0 text-xs font-semibold text-white tabular-nums">
+                {externalAssetDuplicateIds.size}
+              </span>
+            ) : null}
+          </Button>
           <Button 
             variant="outline" 
             onClick={() => setIsBulkImportModalOpen(true)}
@@ -1187,6 +1346,20 @@ export function ManageAssets() {
           </Button>
         </div>
       </div>
+
+      {duplicateRowHighlight && externalAssetDuplicateIds.size > 0 ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-2 text-sm text-amber-950"
+          role="status"
+        >
+          <span>
+            {externalAssetDuplicateIds.size} actif(s) concerné(s) par au moins un doublon — surlignés dans le tableau.
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setDuplicateRowHighlight(false)}>
+            Masquer le surlignage
+          </Button>
+        </div>
+      ) : null}
 
       {/* Type Tabs */}
       <Card>
@@ -1282,7 +1455,17 @@ export function ManageAssets() {
                 </thead>
                 <tbody>
                   {paginatedAssets.map((asset) => (
-                    <tr key={asset.id} className="border-b hover:bg-slate-50">
+                    <tr
+                      key={asset.id}
+                      className={[
+                        'border-b hover:bg-slate-50',
+                        duplicateRowHighlight && externalAssetDuplicateIds.has(asset.id)
+                          ? 'bg-amber-50/95 hover:bg-amber-50'
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
                       <td className="p-2">
                         {asset.logoUrl ? (
                           <img 
@@ -2021,6 +2204,158 @@ export function ManageAssets() {
             >
               {updatingPrices ? 'Actualisation…' : "Lancer l'actualisation"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isDuplicatesModalOpen}
+        onOpenChange={(open) => {
+          setIsDuplicatesModalOpen(open);
+          if (!open) setDuplicateDeleteSelection(new Set());
+        }}
+      >
+        <DialogContent className="flex max-h-[min(85vh,720px)] max-w-2xl flex-col gap-4 overflow-hidden p-6">
+          <DialogHeader className="shrink-0 space-y-2 pr-8 text-left">
+            <DialogTitle>Vérifier les doublons</DialogTitle>
+            <DialogDescription>
+              Comparaison insensible à la casse sur le symbole API (ticker), la référence et le symbole TradingView.
+              Deux lignes ou plus avec la même valeur dans l&apos;un de ces champs (non vide) sont signalées.
+              Cochez les fiches à retirer puis supprimez-les en lot (gardez au moins une fiche par ligne si vous voulez conserver l&apos;actif).
+            </DialogDescription>
+          </DialogHeader>
+
+          {externalAssetDuplicateGroups.length > 0 ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 text-sm">
+              <Button type="button" variant="outline" size="sm" onClick={selectAllDuplicatesInModal}>
+                Tout sélectionner
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setDuplicateDeleteSelection(new Set())}
+                disabled={duplicateDeleteSelection.size === 0}
+              >
+                Effacer la sélection
+              </Button>
+              <span className="text-slate-500">
+                {duplicateDeleteSelection.size} sélectionné(s) sur {duplicateModalSelectableIds.length}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {externalAssetDuplicateGroups.length === 0 ? (
+              <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900 sm:mb-6">
+                Aucun doublon détecté sur la liste actuelle des actifs.
+              </p>
+            ) : (
+              <div className="space-y-6">
+                {externalAssetDuplicateGroups.map((group) => (
+                  <div
+                    key={`${group.kind}-${group.key}`}
+                    className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                  >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="font-semibold text-slate-800">
+                          {EXTERNAL_ASSET_DUPLICATE_KIND_LABELS[group.kind]}
+                        </span>
+                        <span className="font-mono text-slate-600">{group.key}</span>
+                        <span className="text-slate-500">({group.assets.length} fiches)</span>
+                      </div>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => selectDuplicateGroupAssets(group)}>
+                        Sélectionner ce groupe
+                      </Button>
+                    </div>
+                    <ul className="divide-y divide-slate-100 rounded-md border border-slate-100">
+                      {group.assets.map((a) => (
+                        <li
+                          key={a.id}
+                          className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={duplicateDeleteSelection.has(a.id)}
+                            onChange={() => toggleDuplicateDeleteSelect(a.id)}
+                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-slate-900"
+                            aria-label={`Sélectionner ${a.name || a.id} pour suppression`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-900">{a.name || '—'}</div>
+                            <div className="text-xs text-slate-500">
+                              ID {a.id}
+                              {a.alphaVantageSymbol ? ` · ${a.alphaVantageSymbol}` : ''}
+                              {a.reference ? ` · réf. ${a.reference}` : ''}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setIsDuplicatesModalOpen(false);
+                              handleOpenDialog(a);
+                            }}
+                          >
+                            <Pencil className="w-3.5 h-3.5 mr-1" />
+                            Modifier
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="shrink-0 flex-col gap-3 sm:gap-3">
+            {externalAssetDuplicateGroups.length > 0 ? (
+              <>
+                <div className="flex w-full flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={duplicateDeleteSelection.size === 0 || deletingDuplicateSelection}
+                    className="w-full sm:w-auto"
+                    onClick={() =>
+                      void handleBulkDeleteDuplicateSelection(Array.from(duplicateDeleteSelection))
+                    }
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {deletingDuplicateSelection
+                      ? 'Suppression…'
+                      : `Supprimer la sélection (${duplicateDeleteSelection.size})`}
+                  </Button>
+                  <p className="text-xs text-slate-500 sm:max-w-xs sm:text-right">
+                    Les actifs encore liés à des clients peuvent être refusés par l&apos;API ; vérifiez les messages d&apos;erreur.
+                  </p>
+                </div>
+                <div className="flex w-full flex-wrap gap-2 sm:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setDuplicateRowHighlight(true)}
+                    >
+                      Surligner dans le tableau
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setDuplicateRowHighlight(false)}>
+                      Masquer le surlignage
+                    </Button>
+                  </div>
+                  <Button type="button" variant="default" onClick={() => setIsDuplicatesModalOpen(false)}>
+                    Fermer
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button type="button" variant="default" className="w-full sm:w-auto sm:ml-auto" onClick={() => setIsDuplicatesModalOpen(false)}>
+                Fermer
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
