@@ -2215,7 +2215,7 @@ export function ManageAssets() {
           if (!open) setDuplicateDeleteSelection(new Set());
         }}
       >
-        <DialogContent className="flex max-h-[min(85vh,720px)] max-w-2xl flex-col gap-4 overflow-hidden p-6">
+        <DialogContent className="flex min-h-0 max-h-[min(85vh,720px)] max-w-2xl flex-col gap-4 overflow-hidden p-6">
           <DialogHeader className="shrink-0 space-y-2 pr-8 text-left">
             <DialogTitle>Vérifier les doublons</DialogTitle>
             <DialogDescription>
@@ -2245,12 +2245,14 @@ export function ManageAssets() {
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            {externalAssetDuplicateGroups.length === 0 ? (
-              <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900 sm:mb-6">
-                Aucun doublon détecté sur la liste actuelle des actifs.
-              </p>
-            ) : (
+          {externalAssetDuplicateGroups.length === 0 ? (
+            <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900 sm:mb-6">
+              Aucun doublon détecté sur la liste actuelle des actifs.
+            </p>
+          ) : (
+            <div
+              className="min-h-0 w-full max-h-[min(58vh,480px)] flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain rounded-lg border border-slate-200 bg-slate-50/50 px-2 py-2 pr-3 [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:rgb(203_213_225)_rgb(248_250_252)]"
+            >
               <div className="space-y-6">
                 {externalAssetDuplicateGroups.map((group) => (
                   <div
@@ -2308,8 +2310,8 @@ export function ManageAssets() {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <DialogFooter className="shrink-0 flex-col gap-3 sm:gap-3">
             {externalAssetDuplicateGroups.length > 0 ? (
