@@ -6697,7 +6697,10 @@ def stats(request):
     total_clients = Client.objects.filter(**client_filter).count()
     
     # Get recent transactions (last 10) - filter by client access
-    recent_transactions = Transaction.objects.all().order_by('-datetime', '-created_at')
+    recent_transactions = (
+        Transaction.objects.annotate(positions_count=Count('positions'))
+        .order_by('-datetime', '-created_at')
+    )
     if client_ids is not None:
         recent_transactions = recent_transactions.filter(client_id__in=client_ids)
     recent_transactions = recent_transactions[:10]

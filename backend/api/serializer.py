@@ -995,6 +995,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         cnt = getattr(obj, 'positions_count', None)
         if cnt is not None:
             return cnt
+        # Avoid extra COUNT when positions were prefetch_related (no annotate on queryset)
+        cache = getattr(obj, '_prefetched_objects_cache', None)
+        if cache is not None and 'positions' in cache:
+            return len(cache['positions'])
         return obj.positions.count()
 
     class Meta:
