@@ -136,6 +136,7 @@ export function PositionGenerationModal({
   const [positions, setPositions] = useState<Position[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [avoidLosses, setAvoidLosses] = useState<boolean>(false);
+  const [positiveGainsOnly, setPositiveGainsOnly] = useState<boolean>(false);
   const [positionsSaved, setPositionsSaved] = useState<boolean>(false);
   const [readyToConfirm, setReadyToConfirm] = useState<boolean>(false);
   const [positionsPerMonthMin, setPositionsPerMonthMin] = useState<string>('');
@@ -176,6 +177,7 @@ export function PositionGenerationModal({
       setPositions([]);
       setError(null);
       setAvoidLosses(false);
+      setPositiveGainsOnly(false);
       setPositionsSaved(false);
       setReadyToConfirm(false);
       setDeletedPositions(null);
@@ -375,7 +377,8 @@ export function PositionGenerationModal({
       // Prepare request body with optional positions per month override
       const requestBody: any = {
         rates: ratesToUse,
-        avoid_losses: avoidLosses
+        avoid_losses: avoidLosses,
+        positive_only: positiveGainsOnly
       };
       
       // Add positions per month override if provided
@@ -970,13 +973,33 @@ export function PositionGenerationModal({
                       <input
                         type="checkbox"
                         checked={avoidLosses}
-                        onChange={(e) => setAvoidLosses(e.target.checked)}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setAvoidLosses(v);
+                          if (!v) setPositiveGainsOnly(false);
+                        }}
                         style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
                       />
                       <span style={{ fontWeight: '500' }}>Eviter les pertes</span>
                     </label>
                     <p style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', marginLeft: '24px' }}>
                       Si activé, toutes les positions générées seront gagnantes ou neutres (aucune perte)
+                    </p>
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '14px', marginTop: '12px' }}>
+                      <input
+                        type="checkbox"
+                        checked={positiveGainsOnly}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setPositiveGainsOnly(v);
+                          if (v) setAvoidLosses(true);
+                        }}
+                        style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontWeight: '500' }}>Gains uniquement sur chaque trade</span>
+                    </label>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', marginLeft: '24px' }}>
+                      Chaque position a un gain strictement positif (aucun trade à 0 €). Exige un profit de période suffisant par rapport au nombre de trades ; sinon la génération renverra une erreur explicite.
                     </p>
                   </div>
 

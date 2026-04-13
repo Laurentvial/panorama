@@ -9350,7 +9350,14 @@ def transaction_generate_positions(request, client_id, transaction_id):
     avoid_losses = request.data.get('avoid_losses', False)
     if not isinstance(avoid_losses, bool):
         avoid_losses = str(avoid_losses).lower() in ('true', '1', 'yes', 'on')
-    
+
+    # Parse positive_only: each trade strictly winning (no 0€ P&L); implies avoid_losses in backend
+    positive_only = request.data.get('positive_only', False)
+    if not isinstance(positive_only, bool):
+        positive_only = str(positive_only).lower() in ('true', '1', 'yes', 'on')
+    if positive_only:
+        avoid_losses = True
+
     # Parse positions per month override (optional)
     positions_per_month_min = request.data.get('positions_per_month_min')
     positions_per_month_max = request.data.get('positions_per_month_max')
@@ -9571,10 +9578,11 @@ def transaction_generate_positions(request, client_id, transaction_id):
         
         try:
             positions = generate_positions_with_rates(
-                txn_to_use, 
-                custom_rates=custom_rates, 
+                txn_to_use,
+                custom_rates=custom_rates,
                 save_to_db=False,
-                avoid_losses=avoid_losses
+                avoid_losses=avoid_losses,
+                positive_only=positive_only,
             )
         except ValueError as e:
             # Catch validation errors from position generation (e.g., range too high)

@@ -422,23 +422,87 @@ def _distribute_pnl_total(target_total: Decimal, amounts: list[Decimal]) -> list
     return parts
 
 
-def _distribute_pnl_total_capped(target_total: Decimal, amounts: list[Decimal], *, avoid_losses: bool = False) -> list[Decimal]:
+def _distribute_pnl_total_capped(
+    target_total: Decimal,
+    amounts: list[Decimal],
+    *,
+    avoid_losses: bool = False,
+    positive_only: bool = False,
+) -> list[Decimal]:
     """
     Distribute total P&L across positions, but cap each position's P&L
     to keep it "logical" relative to its amount.
-    
+
     If avoid_losses=True, all positions will have profit_loss >= 0 (no losses).
+    If positive_only=True, each position has profit_loss >= 0.01 (strictly winning trades);
+    implies avoid_losses. May raise ValueError if the period profit or caps make that impossible.
     """
     n = len(amounts)
     if n == 0:
         return []
     target_total = target_total.quantize(Decimal('0.01'))
-    
+    step = Decimal('0.01')
+
+    if positive_only:
+        avoid_losses = True
+
     # If avoid_losses is True and target_total is negative, we can't avoid losses
     # In this case, we'll set all positions to 0 (no profit, no loss)
     if avoid_losses and target_total < 0:
+        if positive_only:
+            raise ValueError(
+                'Option « gains uniquement sur chaque trade » impossible : le profit cible de la période est négatif.'
+            )
         return [Decimal('0.00')] * n
-    
+
+    if positive_only:
+        if target_total <= 0:
+            raise ValueError(
+                'Option « gains uniquement sur chaque trade » impossible : le profit cible doit être strictement positif.'
+            )
+        if n == 1:
+            cap = (amounts[0] * _pick_pnl_cap_pct()).quantize(Decimal('0.01'))
+            v = max(Decimal('0'), min(cap, target_total)).quantize(Decimal('0.01'))
+            if v < step:
+                raise ValueError(
+                    'Option « gains uniquement sur chaque trade » impossible : profit insuffisant par rapport au nombre de trades.'
+                )
+            return [v]
+        min_required = (step * n).quantize(Decimal('0.01'))
+        if target_total < min_required:
+            raise ValueError(
+                'Option « gains uniquement sur chaque trade » impossible : le profit restant pour une période '
+                f'({target_total}) est inférieur au minimum requis ({min_required}) pour {n} trades avec gain '
+                f'strictement positif (≥ {step} chacun).'
+            )
+        caps = [(amounts[i] * _pick_pnl_cap_pct()).quantize(Decimal('0.01')) for i in range(n)]
+        for i in range(n):
+            if caps[i] < step:
+                raise ValueError(
+                    'Option « gains uniquement sur chaque trade » impossible : plafond de P&L trop bas pour un trade.'
+                )
+        parts = [step] * n
+        drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
+        guard = 0
+        while drift >= step and guard < 20000:
+            guard += 1
+            candidates = [(i, caps[i] - parts[i]) for i in range(n) if caps[i] - parts[i] >= step]
+            if not candidates:
+                break
+            candidates.sort(key=lambda x: float(x[1]), reverse=True)
+            i, slack = candidates[0]
+            delta = min(drift, slack).quantize(Decimal('0.01'))
+            if delta < step:
+                break
+            parts[i] = (parts[i] + delta).quantize(Decimal('0.01'))
+            drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
+        if drift >= step:
+            raise ValueError(
+                'Option « gains uniquement sur chaque trade » impossible : les plafonds de P&L par trade '
+                'ne permettent pas de répartir tout le profit avec un gain strictement positif sur chaque trade.'
+            )
+        return parts
+
     if n == 1:
         cap = (amounts[0] * _pick_pnl_cap_pct()).quantize(Decimal('0.01'))
         v = max(-cap, min(cap, target_total))
@@ -1332,7 +1396,8 @@ def _create_period_positions_simple(
     positions_per_month_min = None
     positions_per_month_max = None
     avoid_losses = True  # Default: avoid losses
-    
+    positive_only = False
+
     if isinstance(subscription_details, dict):
         try:
             min_val = subscription_details.get('positionsPerMonthMin')
@@ -1350,7 +1415,12 @@ def _create_period_positions_simple(
         avoid_losses_val = subscription_details.get('avoidLosses')
         if avoid_losses_val is not None:
             avoid_losses = avoid_losses_val in (True, 'true', '1', 1)
-        
+        positive_val = subscription_details.get('positiveGainsOnly')
+        if positive_val is not None:
+            positive_only = positive_val in (True, 'true', '1', 1)
+        if positive_only:
+            avoid_losses = True
+
         # Debug logging
         import logging
         logger = logging.getLogger(__name__)
@@ -1358,6 +1428,7 @@ def _create_period_positions_simple(
             f"Position generation settings for txn {txn.id}: "
             f"avoidLosses (raw)={avoid_losses_val}, "
             f"avoidLosses (computed)={avoid_losses}, "
+            f"positiveGainsOnly={positive_only}, "
             f"positionsPerMonthMin={positions_per_month_min}, "
             f"positionsPerMonthMax={positions_per_month_max}"
         )
@@ -1498,20 +1569,19 @@ def _create_period_positions_simple(
             logger.info(
                 f"Period {period_idx} P&L distribution: "
                 f"avoid_losses={avoid_losses}, "
+                f"positive_only={positive_only}, "
                 f"profit_with_variability={profit_with_variability}, "
                 f"num_positions={num_positions_for_period}"
             )
-            
+
             if total_invested > 0:
                 if avoid_losses:
-                    # All positions are profitable, distributed proportionally
-                    for i, inv_amt in enumerate(invested_amounts[:-1]):
-                        # Proportional profit for this position
-                        profit_for_pos = (profit_with_variability * inv_amt / total_invested).quantize(Decimal('0.01'))
-                        profit_parts.append(profit_for_pos)
-                    
-                    # Last position gets remainder to ensure exact total
-                    profit_parts.append((profit_with_variability - sum(profit_parts)).quantize(Decimal('0.01')))
+                    profit_parts = _distribute_pnl_total_capped(
+                        profit_with_variability,
+                        invested_amounts,
+                        avoid_losses=True,
+                        positive_only=positive_only,
+                    )
                 else:
                     # Allow random gains AND losses for each position
                     # Some positions can have negative P&L, but total must equal profit_with_variability
@@ -1970,12 +2040,14 @@ def generate_positions_with_rates(
     custom_rates: dict[int, Decimal],
     save_to_db: bool = False,
     avoid_losses: bool = False,
+    positive_only: bool = False,
 ) -> list[Position | dict]:
     """
     Generate positions using custom rates without saving to database (unless save_to_db=True).
-    
+
     custom_rates: Dict mapping period_index to rate percentage (before proration)
     avoid_losses: If True, only generate positions with profit_loss >= 0 (no losses)
+    positive_only: If True, each trade has profit_loss >= 0.01 (implies avoid_losses)
     Returns list of Position objects (if saved) or dict representations (if not saved)
     """
     ctx = build_investment_context(txn)
@@ -2211,7 +2283,12 @@ def generate_positions_with_rates(
                     amt = Decimal('50.00')
                 invested_amounts.append(amt)
 
-            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts, avoid_losses=avoid_losses)
+            pnl_parts = _distribute_pnl_total_capped(
+                profit_remaining,
+                invested_amounts,
+                avoid_losses=avoid_losses,
+                positive_only=positive_only,
+            )
 
             for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
                 # Determine asset first to get market-specific hours

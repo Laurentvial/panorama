@@ -91,6 +91,7 @@ def _snapshot_for_position(instance: Any) -> dict[str, Any]:
 def _position_pre_delete(sender, instance, **kwargs):
     try:
         from django.contrib.auth import get_user_model
+        from django.db import IntegrityError, transaction
 
         from .models import PositionDeletionRecord
 
@@ -105,22 +106,32 @@ def _position_pre_delete(sender, instance, **kwargs):
             except User.DoesNotExist:
                 pass
 
-        rid = uuid.uuid4().hex[:12]
-        while PositionDeletionRecord.objects.filter(id=rid).exists():
+        # Allocate PK under concurrency: retry on duplicate id (TOCTOU-safe vs .exists() + .create()).
+        # Nested atomic() uses a savepoint when callers already hold atomic() (e.g. position deletes).
+        for _ in range(32):
             rid = uuid.uuid4().hex[:12]
-
-        PositionDeletionRecord.objects.create(
-            id=rid,
-            position_id=instance.id,
-            client_id=instance.client_id,
-            transaction_id=instance.transaction_id,
-            product_id=instance.product_id,
-            snapshot=_snapshot_for_position(instance),
-            trigger=trigger[:128],
-            actor_user=actor,
-            batch_id=batch_id,
-            details={},
-        )
+            try:
+                with transaction.atomic():
+                    PositionDeletionRecord.objects.create(
+                        id=rid,
+                        position_id=instance.id,
+                        client_id=instance.client_id,
+                        transaction_id=instance.transaction_id,
+                        product_id=instance.product_id,
+                        snapshot=_snapshot_for_position(instance),
+                        trigger=trigger[:128],
+                        actor_user=actor,
+                        batch_id=batch_id,
+                        details={},
+                    )
+                break
+            except IntegrityError:
+                continue
+        else:
+            _logger.error(
+                'Position deletion audit: could not allocate a unique id after retries (pos=%s)',
+                getattr(instance, 'id', None),
+            )
     except Exception as e:
         _logger.exception('Position deletion audit failed (non-fatal): %s', e)
 
