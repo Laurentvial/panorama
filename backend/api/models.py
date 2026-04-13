@@ -628,6 +628,34 @@ class Position(models.Model):
         period_info = f" - {self.period_date} (#{self.period_index})" if self.period_date else ""
         return f"Position {self.client_id} - {self.product_id or '-'}{period_info}"
 
+
+class PositionDeletionRecord(models.Model):
+    """
+    Append-only audit trail when a Position row is deleted (debug: who / why / snapshot).
+    Does not FK to Position (row is gone); IDs are denormalized strings.
+    """
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    position_id = models.CharField(max_length=12, db_index=True)
+    client_id = models.CharField(max_length=12, db_index=True)
+    transaction_id = models.CharField(max_length=12, null=True, blank=True, db_index=True)
+    product_id = models.CharField(max_length=12, null=True, blank=True)
+    snapshot = models.JSONField(default=dict, blank=True)
+    trigger = models.CharField(max_length=128, db_index=True)
+    actor_user = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='position_deletion_records')
+    batch_id = models.CharField(max_length=36, null=True, blank=True, db_index=True)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['client_id', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"PositionDeletion {self.id} pos={self.position_id} @ {self.created_at}"
+
+
 class ProductCategory(models.Model):
     """Table des catégories de produits financiers"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)

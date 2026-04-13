@@ -9,6 +9,9 @@ class ApiConfig(AppConfig):
         # Import signal handlers
         try:
             from . import signals  # noqa: F401
+            from .position_audit import connect_position_audit_signals
+
+            connect_position_audit_signals()
         except Exception:
             # Avoid crashing app startup if optional imports fail
             pass

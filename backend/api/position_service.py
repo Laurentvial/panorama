@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.db.models import Q, Sum
 
 from .models import Product, Transaction, Position, ProductAssetAllocation, Log, Asset
+from .position_audit import position_deletion_audit
 from django.db.models import Q, Sum
 
 
@@ -2462,12 +2463,13 @@ def save_generated_positions(
             # CRITICAL: Delete all pending positions directly using a fresh queryset
             # Recreate the queryset to ensure it's up-to-date and not cached
             logger.info(f"DEBUG: Executing delete() on fresh queryset with {total_pending_count} positions...")
-            delete_queryset = Position.objects.filter(
-                product_id=ctx.product_id,
-                client_id=ctx.client_id,
-                status='pending'
-            )
-            deleted_result = delete_queryset.delete()
+            with position_deletion_audit('save_generated_positions'):
+                delete_queryset = Position.objects.filter(
+                    product_id=ctx.product_id,
+                    client_id=ctx.client_id,
+                    status='pending'
+                )
+                deleted_result = delete_queryset.delete()
             deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
             deleted_by_model = deleted_result[1] if isinstance(deleted_result, tuple) and len(deleted_result) > 1 else {}
             
@@ -3655,7 +3657,9 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
             deleted_ids = list(pending_positions.values_list('id', flat=True))
             logger.info(f"Deleting {pending_count} pending positions (IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}) "
                        f"for transaction {txn.id} before creating new positions (trigger: {trigger})")
-            pending_positions.delete()
+            trig = f"create_positions_for_investment:{trigger or 'none'}"
+            with position_deletion_audit(trig):
+                pending_positions.delete()
         else:
             logger.debug(f"No pending positions to delete for transaction {txn.id} (trigger: {trigger})")
 
@@ -3849,12 +3853,13 @@ def recalculate_positions_for_product_withdrawal(
             
             # CRITICAL: Delete all pending positions directly using a fresh queryset
             # Recreate the queryset to ensure it's up-to-date and not cached
-            delete_queryset = Position.objects.filter(
-                product_id=product.id,
-                client_id=withdrawal_txn.client_id,
-                status='pending'
-            )
-            deleted_result = delete_queryset.delete()
+            with position_deletion_audit('recalculate_positions_for_product_withdrawal'):
+                delete_queryset = Position.objects.filter(
+                    product_id=product.id,
+                    client_id=withdrawal_txn.client_id,
+                    status='pending'
+                )
+                deleted_result = delete_queryset.delete()
             deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
             
             logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}) "
@@ -4258,12 +4263,13 @@ def recalculate_positions_for_product_addition(
                     f"Breakdown by transaction: {deleted_by_transaction}")
             
             # Delete all pending positions directly using a fresh queryset
-            delete_queryset = Position.objects.filter(
-                product_id=product.id,
-                client_id=addition_txn.client_id,
-                status='pending'
-            )
-            deleted_result = delete_queryset.delete()
+            with position_deletion_audit('recalculate_positions_for_product_addition'):
+                delete_queryset = Position.objects.filter(
+                    product_id=product.id,
+                    client_id=addition_txn.client_id,
+                    status='pending'
+                )
+                deleted_result = delete_queryset.delete()
             deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
             
             logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}) "

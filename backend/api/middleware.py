@@ -11,6 +11,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class PositionAuditMiddleware:
+    """
+    Expose the authenticated Django user on thread-local for Position deletion audit
+    (pre_delete) during the same HTTP request.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from api.position_audit import clear_request_user_for_audit, set_request_user_for_audit
+
+        user = getattr(request, 'user', None)
+        uid = user.pk if user is not None and getattr(user, 'is_authenticated', False) else None
+        set_request_user_for_audit(uid)
+        try:
+            return self.get_response(request)
+        finally:
+            clear_request_user_for_audit()
+
+
 class CloseDBConnectionsMiddleware:
     """
     Middleware to aggressively close all database connections after each request.

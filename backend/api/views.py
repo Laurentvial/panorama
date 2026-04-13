@@ -29,7 +29,7 @@ from .models import ProductCategory
 from .models import Product
 from .models import ProductAssetAllocation
 from .models import ClientProduct
-from .models import Position
+from .models import Position, PositionDeletionRecord
 from .models import AppSettings
 from .models import NewsPost
 from .models import ClientVerificationConfig
@@ -40,7 +40,7 @@ from .serializer import (
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
     AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     ReferralProspectCreateSerializer,
-    TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer,
+    TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer, PositionDeletionRecordSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
     ClientSuccessorSerializer,
     ClientHistoryLogSerializer, ClientPlatformLogSerializer,
@@ -1565,11 +1565,14 @@ def client_toggle_active(request, client_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def client_delete(request, client_id):
+    from .position_audit import position_deletion_audit
+
     client = get_object_or_404(Client, id=client_id)
     err = _check_gestionnaire_client_access(request, client)
     if err:
         return err
-    client.delete()
+    with position_deletion_audit('orm_cascade_client'):
+        client.delete()
     return Response({'message': 'Client supprimé avec succès'}, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'PUT'])
@@ -10143,6 +10146,43 @@ def transaction_logs(request, client_id, transaction_id):
     serializer = LogSerializer(logs, many=True)
     return Response({'logs': serializer.data})
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def position_deletion_records_list(request, client_id):
+    """Historique des suppressions de positions pour un client (audit / debug)."""
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    qs = PositionDeletionRecord.objects.filter(client_id=client_id).order_by('-created_at')
+    transaction_id = request.GET.get('transaction_id')
+    position_id = request.GET.get('position_id')
+    if transaction_id:
+        qs = qs.filter(transaction_id=transaction_id)
+    if position_id:
+        qs = qs.filter(position_id=position_id)
+
+    try:
+        limit = int(request.GET.get('limit', 100))
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    try:
+        offset = int(request.GET.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    offset = max(0, offset)
+
+    total = qs.count()
+    rows = qs[offset : offset + limit]
+    serializer = PositionDeletionRecordSerializer(rows, many=True)
+    return Response(
+        {'records': serializer.data, 'total': total, 'limit': limit, 'offset': offset}
+    )
+
+
 # Product Categories endpoints
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
@@ -10454,7 +10494,10 @@ def product_create(request):
             ProductAssetAllocation.objects.filter(product=product).delete()
     except ValueError as e:
         # Rollback product if allocations invalid
-        product.delete()
+        from .position_audit import position_deletion_audit
+
+        with position_deletion_audit('orm_rollback_product_create_invalid_allocations'):
+            product.delete()
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     # Handle image upload
@@ -11509,8 +11552,11 @@ def product_update(request, product_id):
 @permission_classes([IsAuthenticated])
 def product_delete(request, product_id):
     """Supprimer un produit"""
+    from .position_audit import position_deletion_audit
+
     product = get_object_or_404(Product, id=product_id)
-    product.delete()
+    with position_deletion_audit('orm_cascade_product'):
+        product.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 @api_view(['POST'])

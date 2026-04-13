@@ -148,6 +148,7 @@ urlpatterns = [
     path('clients/<str:client_id>/transactions/<str:transaction_id>/recover-positions/', api_views.transaction_recover_positions, name='transaction-recover-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/logs/', api_views.transaction_logs, name='transaction-logs'),
+    path('clients/<str:client_id>/position-deletion-records/', api_views.position_deletion_records_list, name='position-deletion-records'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),
     # Product Categories endpoints
     path('categories/', api_views.category_list, name='category-list'),

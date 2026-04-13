@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
 from rest_framework import serializers
-from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
+from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 import uuid
 from urllib.parse import urlparse, unquote, quote
 
@@ -715,6 +715,35 @@ class LogSerializer(serializers.ModelSerializer):
         ret['oldValue'] = instance.old_value if instance.old_value else {}
         ret['newValue'] = instance.new_value if instance.new_value else {}
         return ret
+
+
+class PositionDeletionRecordSerializer(serializers.ModelSerializer):
+    positionId = serializers.CharField(source='position_id', read_only=True)
+    clientId = serializers.CharField(source='client_id', read_only=True)
+    transactionId = serializers.CharField(source='transaction_id', read_only=True, allow_null=True)
+    productId = serializers.CharField(source='product_id', read_only=True, allow_null=True)
+    actorUserId = serializers.SerializerMethodField()
+    actorUserName = serializers.SerializerMethodField()
+    batchId = serializers.CharField(source='batch_id', read_only=True, allow_null=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+
+    class Meta:
+        model = PositionDeletionRecord
+        fields = [
+            'id', 'positionId', 'clientId', 'transactionId', 'productId', 'snapshot', 'trigger',
+            'actorUserId', 'actorUserName', 'batchId', 'details', 'createdAt',
+        ]
+        read_only_fields = fields
+
+    def get_actorUserId(self, obj):
+        return obj.actor_user_id if obj.actor_user_id else None
+
+    def get_actorUserName(self, obj):
+        u = obj.actor_user
+        if not u:
+            return None
+        return f"{u.first_name} {u.last_name}".strip() or u.username
+
 
 class ClientHistoryLogSerializer(serializers.ModelSerializer):
     """Serializer for client history logs (actions performed ON the client)"""
