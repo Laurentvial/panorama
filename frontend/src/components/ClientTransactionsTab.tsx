@@ -95,7 +95,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [transactionForPositionGeneration, setTransactionForPositionGeneration] = useState<any>(null);
   const [isWithdrawalForPositionGeneration, setIsWithdrawalForPositionGeneration] = useState(false);
-  const [positionModalSource, setPositionModalSource] = useState<'create' | 'validate'>('create');
+  const [positionModalSource, setPositionModalSource] = useState<'create' | 'validate' | 'recovery'>('create');
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
@@ -262,6 +262,34 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       } catch (err: any) {
         toast.error((err as any).message || 'Erreur lors de la mise à jour');
       }
+    }
+  };
+
+  /** Transaction investissement déjà validée mais sans positions : ouvrir le même modal que pour valider un transfert. */
+  const handleOpenRecoverPositionsModal = async (tx: any) => {
+    const transferTo = tx.transfer_to || tx.to_field || tx.to || null;
+    const transferFrom = tx.transfer_from || tx.from_field || tx.from || null;
+    const productIdFromSub = tx.subscription_details?.productId || tx.productId || tx.product_id || null;
+    const finalProductId = transferTo || productIdFromSub;
+    const isInvestment =
+      !!finalProductId && String(finalProductId) !== 'solde' && String(finalProductId) !== 'trading';
+    const isWithdrawal = transferTo === 'solde' && transferFrom && transferFrom !== 'solde';
+    const relevantProductId = isInvestment
+      ? finalProductId
+      : transferFrom && transferFrom !== 'solde'
+        ? transferFrom
+        : null;
+    const hasAllocations = relevantProductId ? await productHasAllocationsForValidate(relevantProductId) : false;
+
+    if (hasAllocations) {
+      setPositionModalSource('recovery');
+      setTransactionForPositionGeneration(tx);
+      setIsWithdrawalForPositionGeneration(isWithdrawal);
+      setIsPositionGenerationModalOpen(true);
+    } else {
+      toast.info(
+        'Ce produit n’a pas d’allocations d’actifs : le modal de génération n’est pas disponible. Vérifiez la configuration du produit.'
+      );
     }
   };
 
@@ -1446,6 +1474,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                   openEditModal(transaction);
                 }}
                 onValidateAndGenerate={handleValidateAndGenerate}
+                onRecoverPositions={handleOpenRecoverPositionsModal}
                 emptyMessage="Aucune transaction"
               />
 
@@ -1619,12 +1648,15 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
           accountCurrency={accountCurrency}
           onClose={() => {
             const isValidate = positionModalSource === 'validate';
+            const isRecovery = positionModalSource === 'recovery';
             setIsPositionGenerationModalOpen(false);
             setTransactionForPositionGeneration(null);
             setIsWithdrawalForPositionGeneration(false);
             setPositionModalSource('create');
             setIsTransactionDialogOpen(false);
-            if (isValidate) {
+            if (isRecovery) {
+              toast.info('Génération des positions annulée.');
+            } else if (isValidate) {
               toast.info('La validation requiert la génération des positions. La transaction reste en cours.');
             } else {
               toast.info('Transaction créée avec le statut "En cours". Vous pouvez la finaliser plus tard.');
@@ -1634,6 +1666,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             onRefresh();
           }}
           onSuccess={async () => {
+            const successModalSource = positionModalSource;
             // Update transaction status to "valide" after position generation completes
             if (transactionForPositionGeneration) {
               try {
@@ -1683,8 +1716,13 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             setIsPositionGenerationModalOpen(false);
             setTransactionForPositionGeneration(null);
             setIsWithdrawalForPositionGeneration(false);
+            setPositionModalSource('create');
             setIsTransactionDialogOpen(false);
-            toast.success('Transaction créée avec succès');
+            toast.success(
+              successModalSource === 'recovery'
+                ? 'Positions enregistrées avec succès'
+                : 'Transaction créée avec succès'
+            );
             // After modal completion, bring newest rows immediately.
             loadTransactions(1, pagination.limit);
             loadContractDocuments();

@@ -8,7 +8,7 @@ const getEnvVar = (key: string): string | undefined => {
 
 function normalizeBaseUrl(raw: string): string {
   const trimmed = (raw || '').trim();
-  if (!trimmed) return 'http://127.0.0.1:8000';
+  if (!trimmed) return 'http://127.0.0.1:8001';
 
   let result: string;
 
@@ -38,7 +38,13 @@ function normalizeBaseUrl(raw: string): string {
 
 export function getApiBaseUrl(): string {
   // Prefer VITE_URL, but keep VITE_API_URL as a backwards-compatible alias.
-  const raw = getEnvVar('VITE_URL') || getEnvVar('VITE_API_URL') || 'http://127.0.0.1:8000';
+  const fromEnv = (getEnvVar('VITE_URL') || getEnvVar('VITE_API_URL') || '').trim();
+  // In dev, omitting the env vars uses same-origin `/api/...` so Vite's proxy matches
+  // `vite.config.ts` — avoids 404s when the shell still has VITE_URL=:8000 but Django runs on :8001.
+  if (import.meta.env.DEV && !fromEnv) {
+    return '';
+  }
+  const raw = fromEnv || 'http://127.0.0.1:8001';
   return normalizeBaseUrl(raw);
 }
 
@@ -72,7 +78,9 @@ export function resolveMediaProxyUrlForBrowser(storedUrl: string): string {
     return storedUrl;
   }
 
-  const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+  const apiBaseRaw = getApiBaseUrl().replace(/\/+$/, '');
+  const apiBase =
+    apiBaseRaw || (typeof window !== 'undefined' ? window.location.origin : '');
   let apiOrigin: string;
   try {
     apiOrigin = new URL(apiBase).origin;

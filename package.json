@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "concurrently -k -n backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
     "start": "npm run dev",
-    "dev:backend": "python backend/manage.py runserver",
+    "dev:backend": "python backend/manage.py runserver 127.0.0.1:8001",
     "dev:frontend": "npm --prefix frontend run dev"
   },
   "devDependencies": {

@@ -60,7 +60,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
 from django.utils import timezone
 from django.core import signing
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -6753,7 +6753,7 @@ def stats(request):
 @permission_classes([IsAuthenticated])
 def all_transactions(request):
     """Liste toutes les transactions de tous les clients"""
-    transactions = Transaction.objects.all()
+    transactions = Transaction.objects.annotate(positions_count=Count('positions'))
     client_ids = _get_client_ids_user_has_access_to(request)
     if client_ids is not None:
         transactions = transactions.filter(client_id__in=client_ids)
@@ -7567,8 +7567,12 @@ def client_transactions(request, client_id):
         if err:
             return err
     
-    transactions = Transaction.objects.filter(client=client).order_by('-datetime', '-created_at')
-    
+    transactions = (
+        Transaction.objects.filter(client=client)
+        .annotate(positions_count=Count('positions'))
+        .order_by('-datetime', '-created_at')
+    )
+
     # Pagination support
     page = request.GET.get('page', '1')
     limit = request.GET.get('limit', '50')
@@ -9715,6 +9719,68 @@ def transaction_generate_positions(request, client_id, transaction_id):
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to generate positions for transaction {transaction.id}: {str(e)}", exc_info=True)
         return Response({'error': f'Erreur lors de la génération des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_recover_positions(request, client_id, transaction_id):
+    """
+    Staff/gestionnaire only: persist positions for a validated investment transaction
+    that has none (recovery when auto-generation failed to save).
+    Rejects client_ tokens.
+    """
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    if token and token.startswith('client_'):
+        return Response({'error': 'Action réservée au personnel'}, status=status.HTTP_403_FORBIDDEN)
+    if not getattr(request.user, 'is_authenticated', False):
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    is_investment = (
+        transaction.type == 'transfert'
+        and transaction.transfer_to
+        and transaction.transfer_to != 'solde'
+    )
+    if not is_investment:
+        return Response(
+            {'error': "Cette transaction n'est pas un investissement (transfert vers un produit)."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if transaction.status not in COMPLETED_TRANSACTION_STATUSES:
+        return Response({'error': 'La transaction doit être validée.'}, status=status.HTTP_400_BAD_REQUEST)
+    if Position.objects.filter(transaction=transaction).exists():
+        return Response(
+            {'error': 'Des positions existent déjà pour cette transaction.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        created = create_positions_for_investment(transaction, trigger='manual_recovery')
+    except Exception as e:
+        logger.exception('transaction_recover_positions failed for %s', transaction_id)
+        return Response(
+            {'error': f'Échec de la création des positions: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    transaction.refresh_from_db()
+    positions_count = Position.objects.filter(transaction=transaction).count()
+    payload = {
+        'created': len(created),
+        'positionsCount': positions_count,
+        'transaction': TransactionSerializer(transaction, context={'request': request}).data,
+    }
+    if len(created) == 0:
+        payload['detail'] = (
+            'Aucune position créée. Vérifiez que le produit a des allocations d’actifs et que la transaction est éligible.'
+        )
+    return Response(payload, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])

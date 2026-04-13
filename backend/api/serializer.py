@@ -989,11 +989,18 @@ class TransactionSerializer(serializers.ModelSerializer):
     assetType = serializers.CharField(source='asset.type', read_only=True, allow_null=True)
     from_field = serializers.CharField(source='transfer_from', allow_null=True, required=False)
     to_field = serializers.CharField(source='transfer_to', allow_null=True, required=False)
-    
+    positionsCount = serializers.SerializerMethodField()
+
+    def get_positionsCount(self, obj):
+        cnt = getattr(obj, 'positions_count', None)
+        if cnt is not None:
+            return cnt
+        return obj.positions.count()
+
     class Meta:
         model = Transaction
         fields = [
-            'id', 'clientId', 'type', 'amount', 'amount_currency', 'description', 'status', 'datetime', 
+            'id', 'clientId', 'type', 'amount', 'amount_currency', 'description', 'status', 'datetime',
             'createdAt', 'updatedAt', 'productId', 'assetId', 'assetType', 'from_field', 'to_field',
             'fx_rate_eur_to_asset', 'amount_in_asset_currency',
             'subscription_details', 'subscription_first_name', 'subscription_last_name',
@@ -1001,9 +1008,9 @@ class TransactionSerializer(serializers.ModelSerializer):
             'subscription_date', 'subscription_duration', 'subscription_interest_period',
             'subscription_profitability', 'subscription_investment', 'subscription_profits',
             'subscription_total', 'subscription_contract_end', 'subscription_signature',
-            'position_generation_history'
+            'position_generation_history', 'positionsCount',
         ]
-        read_only_fields = ['id', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'positionsCount']
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)

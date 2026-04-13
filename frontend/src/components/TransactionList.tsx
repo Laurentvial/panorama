@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from './ui/button';
-import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle } from 'lucide-react';
+import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getStatusLabel, getTypeLabel, getTypeColors, getStatusColors, extractAssetInfo } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
@@ -71,6 +71,8 @@ interface TransactionListProps {
   onView?: (transaction: any) => void;
   onEdit?: (transaction: any) => void;
   onValidateAndGenerate?: (transaction: any) => void;
+  /** Ouvre le modal de génération de positions (même flux que valider un transfert) */
+  onRecoverPositions?: (transaction: any) => void | Promise<void>;
   emptyMessage?: string;
 }
 
@@ -87,6 +89,7 @@ export function TransactionList({
   onView,
   onEdit,
   onValidateAndGenerate,
+  onRecoverPositions,
   emptyMessage = 'Aucune transaction trouvée'
 }: TransactionListProps) {
   const navigate = useNavigate();
@@ -135,7 +138,15 @@ export function TransactionList({
             const client = clients.find(c => c.id === transaction.clientId);
             const contractDocs = transactionDocuments[String(transaction.id)] || [];
             const hasContract = contractDocs.length > 0;
-            
+            const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
+            const showRecoverPositions =
+              !!onRecoverPositions &&
+              transaction.status === 'valide' &&
+              transaction.type === 'transfert' &&
+              transferTo !== '' &&
+              transferTo !== 'solde' &&
+              (transaction.positionsCount ?? 0) === 0;
+
             // Get product/asset info - prioritize productId from transaction
             let productName = '-';
             let productId: string | null = null;
@@ -285,6 +296,22 @@ export function TransactionList({
                       >
                         {showIcons && <CheckCircle className="w-4 h-4 mr-1" />}
                         Valider
+                      </Button>
+                    )}
+                    {showRecoverPositions && onRecoverPositions && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onRecoverPositions(transaction);
+                        }}
+                        className="hover:!bg-amber-50 hover:!text-amber-800 transition-colors duration-200 px-4"
+                        style={{ position: 'relative', zIndex: 10 }}
+                        title="Générer les positions (modal)"
+                      >
+                        <Layers className="w-4 h-4 mr-1" />
+                        Créer les positions
                       </Button>
                     )}
                     {onView ? (

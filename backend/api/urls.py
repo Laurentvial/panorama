@@ -145,6 +145,7 @@ urlpatterns = [
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-positions/', api_views.transaction_generate_positions, name='transaction-generate-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/save-positions/', api_views.transaction_save_positions, name='transaction-save-positions'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/recover-positions/', api_views.transaction_recover_positions, name='transaction-recover-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/logs/', api_views.transaction_logs, name='transaction-logs'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/', api_views.client_transaction_update, name='client-transaction-update'),

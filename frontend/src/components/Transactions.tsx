@@ -21,6 +21,7 @@ import {
 import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
+import { PositionGenerationModal } from './PositionGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
@@ -44,6 +45,8 @@ export function Transactions() {
     amountMax: '',
     teamId: 'all'
   });
+  const [recoverPositionModalTx, setRecoverPositionModalTx] = useState<any>(null);
+  const [recoverPositionModalOpen, setRecoverPositionModalOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -72,6 +75,46 @@ export function Transactions() {
     }
   }
 
+  const productHasAllocationsForValidate = async (productId: any): Promise<boolean> => {
+    if (!productId) return false;
+    try {
+      const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
+      const p = res?.product || res || null;
+      const allocations = p?.assetAllocations || p?.asset_allocations || [];
+      return Array.isArray(allocations) && allocations.length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleOpenRecoverPositionsModal = async (tx: any) => {
+    const cid = tx.clientId;
+    if (!cid) {
+      toast.error('Client inconnu pour cette transaction');
+      return;
+    }
+    const transferTo = tx.transfer_to || tx.to_field || tx.to || null;
+    const transferFrom = tx.transfer_from || tx.from_field || tx.from || null;
+    const productIdFromSub = tx.subscription_details?.productId || tx.productId || tx.product_id || null;
+    const finalProductId = transferTo || productIdFromSub;
+    const isInvestment =
+      !!finalProductId && String(finalProductId) !== 'solde' && String(finalProductId) !== 'trading';
+    const relevantProductId = isInvestment
+      ? finalProductId
+      : transferFrom && transferFrom !== 'solde'
+        ? transferFrom
+        : null;
+    const hasAllocations = relevantProductId ? await productHasAllocationsForValidate(relevantProductId) : false;
+
+    if (hasAllocations) {
+      setRecoverPositionModalTx(tx);
+      setRecoverPositionModalOpen(true);
+    } else {
+      toast.info(
+        'Ce produit n’a pas d’allocations d’actifs : le modal de génération n’est pas disponible. Vérifiez la configuration du produit.'
+      );
+    }
+  };
 
   const filteredTransactions = transactions.filter(transaction => {
     const transactionDate = new Date(transaction.datetime || transaction.createdAt);
@@ -368,6 +411,7 @@ export function Transactions() {
                 onEdit={(transaction) => {
                   openEditModal(transaction);
                 }}
+                onRecoverPositions={handleOpenRecoverPositionsModal}
                 emptyMessage="Aucune transaction trouvée"
               />
             </div>
@@ -450,6 +494,73 @@ export function Transactions() {
           loadData();
         }}
       />
+
+      {recoverPositionModalTx && (
+        <PositionGenerationModal
+          isOpen={recoverPositionModalOpen}
+          transaction={recoverPositionModalTx}
+          clientId={recoverPositionModalTx.clientId}
+          accountCurrency={
+            (
+              clients.find((c) => c.id === recoverPositionModalTx.clientId)?.accountCurrency || 'EUR'
+            ).toString()
+          }
+          onClose={() => {
+            setRecoverPositionModalOpen(false);
+            setRecoverPositionModalTx(null);
+            toast.info('Génération des positions annulée.');
+            loadData();
+          }}
+          onSuccess={async () => {
+            const tx = recoverPositionModalTx;
+            if (tx?.clientId) {
+              try {
+                let datetimeISO = tx.datetime;
+                if (datetimeISO && typeof datetimeISO === 'string') {
+                  if (!datetimeISO.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                    const dt = new Date(datetimeISO);
+                    const year = dt.getFullYear();
+                    const month = String(dt.getMonth() + 1).padStart(2, '0');
+                    const day = String(dt.getDate()).padStart(2, '0');
+                    const hours = String(dt.getHours()).padStart(2, '0');
+                    const minutes = String(dt.getMinutes()).padStart(2, '0');
+                    const seconds = String(dt.getSeconds()).padStart(2, '0');
+                    datetimeISO = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+                  }
+                } else {
+                  const now = new Date();
+                  const year = now.getFullYear();
+                  const month = String(now.getMonth() + 1).padStart(2, '0');
+                  const day = String(now.getDate()).padStart(2, '0');
+                  const hours = String(now.getHours()).padStart(2, '0');
+                  const minutes = String(now.getMinutes()).padStart(2, '0');
+                  const seconds = String(now.getSeconds()).padStart(2, '0');
+                  datetimeISO = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+                }
+                await apiCall(`/api/clients/${tx.clientId}/transactions/${tx.id}/`, {
+                  method: 'PUT',
+                  body: JSON.stringify({
+                    type: tx.type,
+                    amount: parseFloat(tx.amount),
+                    description: tx.description,
+                    status: 'valide',
+                    datetime: datetimeISO,
+                    skip_position_generation: true,
+                  }),
+                });
+              } catch (error: any) {
+                console.error('Error updating transaction status:', error);
+                toast.error('Erreur lors de la mise à jour du statut de la transaction');
+              }
+            }
+            setRecoverPositionModalOpen(false);
+            setRecoverPositionModalTx(null);
+            toast.success('Positions enregistrées avec succès');
+            await loadData();
+          }}
+          isWithdrawal={false}
+        />
+      )}
     </div>
   );
 }
