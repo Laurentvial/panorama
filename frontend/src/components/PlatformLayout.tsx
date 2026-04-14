@@ -265,9 +265,12 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
   const menuItems = useMemo(() => {
     const items = [
       { id: 'dashboard', label: 'Tableau de bord', iconChar: '\uE88A', path: '/platform' },
-      { id: 'portfolio', label: 'Portefeuille', iconChar: '\uE850', path: '/platform/portfolio' },
+      { id: 'portfolio', label: 'Mon portefeuille', iconChar: '\uE850', path: '/platform/portfolio' },
+      { id: 'transactions', label: 'Transactions', iconChar: '\uE8B0', path: '/platform/transactions' },
+      { id: 'positions', label: 'Mes positions', iconChar: '\uE6E1', path: '/platform/positions' },
       { id: 'funds', label: 'Mon solde', iconChar: '\uE8A1', path: '/platform/funds' },
       { id: 'discover', label: 'Découvrir', iconChar: '\uE87B', path: '/platform/discover' },
+      { id: 'messaging', label: 'Messagerie', iconChar: '\uE0E1', path: '/platform/messaging' },
       { id: 'useful-links', label: 'Liens utiles', iconChar: '\uE157', path: '/platform/useful-links' },
     ];
     if (currentUser?.userType === 'client' && currentUser?.hasUsefulLinks === false) {
@@ -275,6 +278,12 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     }
     return items;
   }, [currentUser?.userType, currentUser?.hasUsefulLinks]);
+
+  /** Barre du bas : moins d’entrées pour éviter la surcharge (Transactions / Mes positions restent dans le menu latéral). */
+  const bottomNavMenuItems = useMemo(
+    () => menuItems.filter((item) => item.id !== 'transactions' && item.id !== 'positions'),
+    [menuItems]
+  );
 
   const handleMenuClick = (path: string) => {
     navigate(path);
@@ -641,7 +650,14 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
         </div>
       </header>
 
-      <div style={{ display: 'flex', position: 'relative' }}>
+      <div
+        style={{
+          display: 'flex',
+          position: 'relative',
+          alignItems: 'stretch',
+          minHeight: sidebarHeight,
+        }}
+      >
         {/* Drawer Overlay (when bottom nav is active) */}
         {showBottomNav && sidebarOpen && (
           <div
@@ -1056,7 +1072,16 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           overflowX: 'hidden',
           scrollMarginTop: `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`, // Account for sticky header height
         }}>
-          <div style={{ flex: '1 1 auto', minHeight: 0 }}>{children}</div>
+          <div
+            style={{
+              flex: '1 1 auto',
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            {children}
+          </div>
           <footer
             style={{
               flexShrink: 0,
@@ -1154,7 +1179,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           }}
           aria-label="Navigation mobile"
         >
-          {menuItems.map((item) => {
+          {bottomNavMenuItems.map((item) => {
             const isActive =
               location.pathname === item.path ||
               (item.path !== '/platform' && location.pathname.startsWith(`${item.path}/`));

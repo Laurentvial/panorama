@@ -12,6 +12,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { formatSubcategoryForDisplay } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
 import '../styles/PlatformDashboardMovers.css';
+import '../styles/PlatformPortfolio.css';
 
 /** Stops runaway pagination if the API omits or misreports pagination metadata. */
 const DASHBOARD_PAGINATION_MAX_PAGES = 250;
@@ -910,6 +911,7 @@ export function PlatformDashboard() {
 
   return (
     <div style={{ padding: isPhone ? 0 : isMobile ? '16px' : '20px 20px' }}>
+      <h1 className="platform-portfolioPageTitle">Tableau de bord</h1>
 
       {dashboardLoadError && !loading ? (
         <div

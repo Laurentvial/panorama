@@ -8,6 +8,7 @@ import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import '../styles/PlatformTypography.css';
 import '../styles/PlatformUsefulLinks.css';
+import '../styles/PlatformPortfolio.css';
 
 interface UsefulLink {
   id: string;
@@ -61,7 +62,7 @@ export function PlatformUsefulLinks() {
   if (loading) {
     return (
       <div className="platform-page" style={{ padding: isMobile ? '20px 16px' : '24px 24px' }}>
-        <h1 className="platform-page-title">Liens utiles</h1>
+        <h1 className="platform-portfolioPageTitle">Liens utiles</h1>
         <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
           <span style={{ color: 'var(--muted-foreground)' }}>Chargement...</span>
         </div>
@@ -71,7 +72,7 @@ export function PlatformUsefulLinks() {
 
   return (
     <div className="platform-page" style={{ padding: isMobile ? '20px 16px' : '24px 24px' }}>
-      <h1 className="platform-page-title">Liens utiles</h1>
+      <h1 className="platform-portfolioPageTitle">Liens utiles</h1>
       <p style={{ color: 'var(--muted-foreground)', marginTop: '8px', marginBottom: '24px' }}>
         Accédez rapidement à vos ressources et documents utiles.
       </p>

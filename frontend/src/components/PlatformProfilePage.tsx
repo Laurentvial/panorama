@@ -19,6 +19,7 @@ import {
 import { DateInput } from './ui/date-input';
 import '../styles/PageHeader.css';
 import '../styles/PlatformProfile.css';
+import '../styles/PlatformPortfolio.css';
 import '../styles/Modal.css';
 
 const CIVILITY_OPTIONS = [
@@ -213,7 +214,7 @@ export function PlatformProfilePage() {
   return (
     <div className="platform-profile-page">
       <div className="page-header" style={{ marginBottom: '24px' }}>
-        <h1 className="page-title">Mon profil</h1>
+        <h1 className="platform-portfolioPageTitle">Mon profil</h1>
       </div>
 
       {/* Photo de profil */}

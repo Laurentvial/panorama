@@ -3872,6 +3872,22 @@ def asset_detail(request, asset_id):
 @permission_classes([IsAuthenticated])
 def asset_delete(request, asset_id):
     """Supprimer un asset"""
+    # Authorization: only admins (or Django superuser) can delete assets.
+    if not getattr(request.user, 'is_superuser', False):
+        try:
+            user_details = UserDetails.objects.get(django_user=request.user)
+            role = (user_details.role or '').lower().strip()
+            if role != 'admin':
+                return Response(
+                    {'error': 'Seuls les administrateurs peuvent supprimer les actifs'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except UserDetails.DoesNotExist:
+            return Response(
+                {'error': 'Seuls les administrateurs peuvent supprimer les actifs'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
     asset = get_object_or_404(Asset, id=asset_id)
     asset.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
@@ -4058,12 +4074,11 @@ def client_assets(request, client_id):
     # Get all client assets
     client_assets = ClientAsset.objects.filter(client=client).select_related('asset')
     
-    # Filter by availability dates ONLY if it's a client accessing (not admin)
+    # Filter by availability dates ONLY if it's a client accessing (not admin).
+    # Clients always see assigned assets (including future start dates); hide only after availability_end.
     if is_client_access:
         today = date.today()
         client_assets = client_assets.filter(
-            Q(availability_start__isnull=True) | Q(availability_start__lte=today)
-        ).filter(
             Q(availability_end__isnull=True) | Q(availability_end__gte=today)
         )
     
@@ -4269,22 +4284,14 @@ def client_products(request, client_id):
         product__isnull=False  # Exclude products that have been deleted
     ).select_related('product')
     
-    # Filter by availability dates ONLY if it's a client accessing (not admin)
+    # Filter by availability dates ONLY if it's a client accessing (not admin).
+    # Clients always see assigned products (including future start dates); hide only after the effective end date.
     if is_client_access:
-        # Filter client products with priority logic:
-        # - Use ClientProduct dates if set (client-specific override)
-        # - Otherwise use Product dates (global product availability)
-        # - If neither set, product is always available
         client_products = client_products.filter(
-            # Start date check: use ClientProduct.availability_start if set, otherwise Product.availability_start
-            Q(availability_start__isnull=True, product__availability_start__isnull=True) |  # Both null = always available
-            Q(availability_start__isnull=True, product__availability_start__lte=today) |     # ClientProduct null, use Product date
-            Q(availability_start__lte=today)                                                  # ClientProduct date has priority
-        ).filter(
-            # End date check: use ClientProduct.availability_end if set, otherwise Product.availability_end
-            Q(availability_end__isnull=True, product__availability_end__isnull=True) |      # Both null = always available
-            Q(availability_end__isnull=True, product__availability_end__gte=today) |         # ClientProduct null, use Product date
-            Q(availability_end__gte=today)                                                    # ClientProduct date has priority
+            # End date: ClientProduct override if set, otherwise Product
+            Q(availability_end__isnull=True, product__availability_end__isnull=True)
+            | Q(availability_end__isnull=True, product__availability_end__gte=today)
+            | Q(availability_end__gte=today)
         )
     
     serializer = ClientProductSerializer(client_products, many=True, context={'request': request})
@@ -7695,7 +7702,8 @@ def _client_transaction_create_impl(request, client_id):
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Admin JWT: check gestionnaire can only access assigned clients
-    if not (token and token.startswith('client_')):
+    is_client_token = bool(token and token.startswith('client_'))
+    if not is_client_token:
         err = _check_gestionnaire_client_access(request, client)
         if err:
             return err
@@ -7908,14 +7916,66 @@ def _client_transaction_create_impl(request, client_id):
     
     # Transfer transactions can be created even when solde is insufficient (e.g. pending deposits).
     
+    # Client-only: block subscriptions / trading until the effective availability window (lists may show future starts).
+    if is_client_token and transaction_type == 'transfert':
+        today = date.today()
+        is_trade_payload = (
+            transfer_to == 'trading'
+            or (isinstance(subscription_details_data, dict) and subscription_details_data.get('tradeType') == 'asset')
+        )
+        if is_trade_payload:
+            trade_asset_id = None
+            if isinstance(subscription_details_data, dict):
+                trade_asset_id = subscription_details_data.get('assetId') or subscription_details_data.get('asset_id')
+            if trade_asset_id:
+                ca = ClientAsset.objects.filter(client=client, asset_id=str(trade_asset_id)).first()
+                if not ca:
+                    return Response(
+                        {'error': 'Actif introuvable pour ce compte.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if ca.availability_start and today < ca.availability_start:
+                    return Response(
+                        {'error': "La période de disponibilité de cet actif n'a pas encore commencé."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if ca.availability_end and today > ca.availability_end:
+                    return Response(
+                        {'error': "La période de disponibilité de cet actif est terminée."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        elif transfer_to and transfer_to not in ('solde', 'trading') and product:
+            cp = ClientProduct.objects.filter(client=client, product=product).first()
+            eff_start = None
+            eff_end = None
+            if cp:
+                if cp.availability_start is not None:
+                    eff_start = cp.availability_start
+                if cp.availability_end is not None:
+                    eff_end = cp.availability_end
+            if eff_start is None:
+                eff_start = product.availability_start
+            if eff_end is None:
+                eff_end = product.availability_end
+            if eff_start and today < eff_start:
+                return Response(
+                    {'error': "La souscription n'est pas encore ouverte pour ce produit."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if eff_end and today > eff_end:
+                return Response(
+                    {'error': 'La période de souscription pour ce produit est terminée.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+    
     # Check if this is an investment transaction that will be created with status 'valide'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
     transaction_status = request.data.get('status', 'en_cours')
     skip_position_generation = request.data.get('skip_position_generation', False)
     is_investment_transfert = (
-        transaction_type == 'transfert' 
-        and transfer_to 
-        and transfer_to != 'solde'
+        transaction_type == 'transfert'
+        and transfer_to
+        and transfer_to not in ('solde', 'trading')
     )
     if is_investment_transfert:
         chosen_interest_period = (

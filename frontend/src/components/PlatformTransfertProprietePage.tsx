@@ -10,6 +10,7 @@ import { apiCall } from '../utils/api';
 import '../styles/PageHeader.css';
 import '../styles/PlatformProfile.css';
 import '../styles/PlatformTransfertPropriete.css';
+import '../styles/PlatformPortfolio.css';
 
 interface SuccessorForm {
   id?: string;
@@ -203,7 +204,7 @@ export function PlatformTransfertProprietePage() {
     return (
       <div className="platform-profile-page">
         <div className="page-header" style={{ marginBottom: '24px' }}>
-          <h1 className="page-title">Transfert de propriété</h1>
+          <h1 className="platform-portfolioPageTitle">Transfert de propriété</h1>
         </div>
         <p style={{ color: 'var(--muted-foreground)' }}>Chargement...</p>
       </div>
@@ -213,7 +214,7 @@ export function PlatformTransfertProprietePage() {
   return (
     <div className="platform-profile-page platform-transfert-page">
       <div className="page-header" style={{ marginBottom: '24px' }}>
-        <h1 className="page-title">Transfert de propriété</h1>
+        <h1 className="platform-portfolioPageTitle">Transfert de propriété</h1>
       </div>
       <p style={{ marginBottom: 24, color: 'var(--muted-foreground)' }}>
         Gérez vos successeurs et la répartition de vos parts.

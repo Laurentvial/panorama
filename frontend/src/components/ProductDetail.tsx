@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, Check, ExternalLink, X } from 'lucide-react';
 import '../styles/Modal.css';
 import '../styles/ProductDetail.css';
+import '../styles/PlatformPortfolio.css';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { useUser } from '../contexts/UserContext';
@@ -264,6 +265,12 @@ export function ProductDetail() {
     }
   };
 
+  const toDateOnlyString = (v: any): string | null => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'string') return v.length >= 10 ? v.slice(0, 10) : v;
+    return null;
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -329,6 +336,27 @@ export function ProductDetail() {
               enrichedProductData = { ...productData, categoryName: category.title };
             }
           }
+
+          const matchingCp = clientProducts.find((cp: any) => {
+            const p = cp.product || cp;
+            return String(cp.productId || p?.id || '') === String(id);
+          });
+          const clientStart = matchingCp
+            ? (matchingCp.availabilityStart ?? matchingCp.availability_start ?? null)
+            : null;
+          const clientEnd = matchingCp
+            ? (matchingCp.availabilityEnd ?? matchingCp.availability_end ?? null)
+            : null;
+          const pStart = productData.availabilityStart ?? productData.availability_start ?? null;
+          const pEnd = productData.availabilityEnd ?? productData.availability_end ?? null;
+          const effStart =
+            clientStart != null && String(clientStart).trim() !== '' ? clientStart : pStart;
+          const effEnd = clientEnd != null && String(clientEnd).trim() !== '' ? clientEnd : pEnd;
+          enrichedProductData = {
+            ...enrichedProductData,
+            effectiveAvailabilityStart: toDateOnlyString(effStart),
+            effectiveAvailabilityEnd: toDateOnlyString(effEnd),
+          };
           
           setData(enrichedProductData);
           setDataType('product');
@@ -347,7 +375,22 @@ export function ProductDetail() {
       if (isAsset && !productLoaded) {
         try {
           const assetResponse = await apiCall(`/api/assets/${id}/`);
-          setData(assetResponse.asset || assetResponse);
+          const rawAsset = assetResponse.asset || assetResponse;
+          const matchingCa = clientAssets.find((ca: any) => {
+            const a = ca.asset || ca;
+            return String(ca.assetId || a?.id || '') === String(id);
+          });
+          const caStart = matchingCa
+            ? (matchingCa.availabilityStart ?? matchingCa.availability_start ?? null)
+            : null;
+          const caEnd = matchingCa
+            ? (matchingCa.availabilityEnd ?? matchingCa.availability_end ?? null)
+            : null;
+          setData({
+            ...rawAsset,
+            effectiveAvailabilityStart: toDateOnlyString(caStart),
+            effectiveAvailabilityEnd: toDateOnlyString(caEnd),
+          });
           setDataType('asset');
           productLoaded = true;
         } catch (assetError: any) {
@@ -694,6 +737,42 @@ export function ProductDetail() {
 
     const productData = data;
 
+    const effStartSub = toDateOnlyString(
+      productData.effectiveAvailabilityStart ?? productData.availabilityStart,
+    );
+    const effEndSub = toDateOnlyString(
+      productData.effectiveAvailabilityEnd ?? productData.availabilityEnd,
+    );
+    const parseAvailDay = (s: string | null) => {
+      if (!s) return null;
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+      const d = m
+        ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+        : new Date(s);
+      if (Number.isNaN(d.getTime())) return null;
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    };
+    const todayMs = (() => {
+      const t = new Date();
+      t.setHours(0, 0, 0, 0);
+      return t.getTime();
+    })();
+    const startMs = parseAvailDay(effStartSub);
+    const endMs = parseAvailDay(effEndSub);
+    if (startMs != null && todayMs < startMs) {
+      setSubscriptionError(
+        effStartSub
+          ? `La souscription ouvrira le ${formatDateToFrench(effStartSub)}.`
+          : 'La souscription pour ce produit n’est pas encore ouverte.',
+      );
+      return;
+    }
+    if (endMs != null && todayMs > endMs) {
+      setSubscriptionError('La période de souscription pour ce produit est terminée.');
+      return;
+    }
+
     const amount = parseFloat(subscriptionData.amount);
     if (!amount || amount <= 0) {
       setSubscriptionError('Veuillez saisir un montant valide');
@@ -1005,6 +1084,37 @@ export function ProductDetail() {
   // Product view (internal investment products)
   if (dataType === 'product') {
     const product = data;
+    const dispAvailStart =
+      toDateOnlyString(product.effectiveAvailabilityStart) ??
+      toDateOnlyString(product.availabilityStart);
+    const dispAvailEnd =
+      toDateOnlyString(product.effectiveAvailabilityEnd) ?? toDateOnlyString(product.availabilityEnd);
+    const parseAvailDay = (s: string | null) => {
+      if (!s) return null;
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+      const d = m
+        ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+        : new Date(s);
+      if (Number.isNaN(d.getTime())) return null;
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    };
+    const todayMsProd = (() => {
+      const t = new Date();
+      t.setHours(0, 0, 0, 0);
+      return t.getTime();
+    })();
+    const startMsProd = parseAvailDay(dispAvailStart);
+    const endMsProd = parseAvailDay(dispAvailEnd);
+    const canSubscribeProduct =
+      (startMsProd == null || todayMsProd >= startMsProd) &&
+      (endMsProd == null || todayMsProd <= endMsProd);
+    const subscriptionClosedReason =
+      startMsProd != null && todayMsProd < startMsProd
+        ? 'before_start'
+        : endMsProd != null && todayMsProd > endMsProd
+          ? 'after_end'
+          : null;
     const minInvestment = parseFinancialValue(product.minEntryValue);
     const maxInvestment = parseFinancialValue(product.maxEntryValue);
     
@@ -1047,6 +1157,7 @@ export function ProductDetail() {
           minWidth: 0,
         }}
       >
+        <h1 className="platform-portfolioPageTitle">{product.name || 'Produit'}</h1>
         {/* Breadcrumb */}
         <div style={{ 
           marginBottom: isPhone ? '12px' : isMobile ? '16px' : '20px', 
@@ -1181,20 +1292,20 @@ export function ProductDetail() {
                     </div>
                   </div>
                   
-                  {product.availabilityStart && (
+                  {dispAvailStart && (
                     <div>
                       <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Début de disponibilité</div>
                       <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                        {formatDateToFrench(product.availabilityStart)}
+                        {formatDateToFrench(dispAvailStart)}
                       </div>
                     </div>
                   )}
                   
-                  {product.availabilityEnd && (
+                  {dispAvailEnd && (
                     <div>
                       <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Fin de disponibilité</div>
                       <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-                        {formatDateToFrench(product.availabilityEnd)}
+                        {formatDateToFrench(dispAvailEnd)}
                       </div>
                     </div>
                   )}
@@ -1560,6 +1671,36 @@ export function ProductDetail() {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '10px' : isMobile ? '12px' : '16px', minHeight: isPhone ? 'auto' : '650px' }}>
 
+                    {!canSubscribeProduct && subscriptionClosedReason === 'before_start' && dispAvailStart && (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '8px',
+                          color: '#1e40af',
+                          fontSize: '14px',
+                        }}
+                      >
+                        Vous pouvez consulter ce produit dès maintenant. La souscription sera possible à partir du{' '}
+                        <strong>{formatDateToFrench(dispAvailStart)}</strong>.
+                      </div>
+                    )}
+                    {!canSubscribeProduct && subscriptionClosedReason === 'after_end' && (
+                      <div
+                        style={{
+                          padding: '12px',
+                          backgroundColor: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '8px',
+                          color: '#b91c1c',
+                          fontSize: '14px',
+                        }}
+                      >
+                        La période de souscription pour ce produit est terminée.
+                      </div>
+                    )}
+
                     
                     <div>
                       <Label htmlFor="firstName">Prénom</Label>
@@ -1852,7 +1993,7 @@ export function ProductDetail() {
                         logPlatformAction('click', { element: 'invest_button', productId: id });
                         handleSubscribe();
                       }}
-                      disabled={isSubscribing}
+                      disabled={isSubscribing || !canSubscribeProduct}
                       style={{
                         width: '100%',
                         backgroundColor: 'var(--platform-button-bg)',
@@ -1861,8 +2002,8 @@ export function ProductDetail() {
                         padding: '12px',
                         borderRadius: '8px',
                         marginTop: '10px',
-                        opacity: isSubscribing ? 0.6 : 1,
-                        cursor: isSubscribing ? 'not-allowed' : 'pointer',
+                        opacity: isSubscribing || !canSubscribeProduct ? 0.6 : 1,
+                        cursor: isSubscribing || !canSubscribeProduct ? 'not-allowed' : 'pointer',
                       }}
                     >
                       {isSubscribing ? 'Souscription en cours...' : 'Souscrire'}
@@ -1924,6 +2065,34 @@ export function ProductDetail() {
 
   // Asset view (crypto/stocks) - existing code
   const asset = data;
+  const assetAvailStart = toDateOnlyString(asset?.effectiveAvailabilityStart);
+  const assetAvailEnd = toDateOnlyString(asset?.effectiveAvailabilityEnd);
+  const parseAvailDayAsset = (s: string | null) => {
+    if (!s) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    const d = m
+      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      : new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  const todayMsAsset = (() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t.getTime();
+  })();
+  const startMsAsset = parseAvailDayAsset(assetAvailStart);
+  const endMsAsset = parseAvailDayAsset(assetAvailEnd);
+  const canTradeAsset =
+    (startMsAsset == null || todayMsAsset >= startMsAsset) &&
+    (endMsAsset == null || todayMsAsset <= endMsAsset);
+  const assetTradeBlockedReason =
+    startMsAsset != null && todayMsAsset < startMsAsset
+      ? 'before_start'
+      : endMsAsset != null && todayMsAsset > endMsAsset
+        ? 'after_end'
+        : null;
   const getAssetType = () => {
     const type = asset?.type?.toLowerCase() || '';
     if (type.includes('crypto') || type.includes('cryptomonnaie')) {
@@ -2119,6 +2288,7 @@ export function ProductDetail() {
         minWidth: 0,
       }}
     >
+      <h1 className="platform-portfolioPageTitle">{asset.name || asset.reference || 'Actif'}</h1>
       {/* Breadcrumb */}
       <div style={{ 
         marginBottom: isPhone ? '12px' : '20px', 
@@ -2245,7 +2415,39 @@ export function ProductDetail() {
         </div>
 
         {currentUser?.tradingEnabled !== false && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: isMobile ? '100%' : 'auto' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: isMobile ? 'stretch' : 'flex-end',
+              gap: '8px',
+              width: isMobile ? '100%' : 'auto',
+            }}
+          >
+            {!canTradeAsset && assetTradeBlockedReason === 'before_start' && assetAvailStart && (
+              <div
+                style={{
+                  fontSize: '13px',
+                  color: '#1e40af',
+                  textAlign: isMobile ? 'left' : 'right',
+                  maxWidth: isMobile ? '100%' : 280,
+                }}
+              >
+                Trading possible à partir du <strong>{formatDateToFrench(assetAvailStart)}</strong>.
+              </div>
+            )}
+            {!canTradeAsset && assetTradeBlockedReason === 'after_end' && (
+              <div
+                style={{
+                  fontSize: '13px',
+                  color: '#b91c1c',
+                  textAlign: isMobile ? 'left' : 'right',
+                  maxWidth: isMobile ? '100%' : 280,
+                }}
+              >
+                La période de trading pour cet actif est terminée.
+              </div>
+            )}
             <Button 
               style={{
                 backgroundColor: 'var(--platform-button-bg)',
@@ -2254,10 +2456,13 @@ export function ProductDetail() {
                 padding: '12px 24px',
                 borderRadius: 9999,
                 border: 'none',
-                cursor: 'pointer',
+                cursor: canTradeAsset ? 'pointer' : 'not-allowed',
                 width: isMobile ? '100%' : 'auto',
+                opacity: canTradeAsset ? 1 : 0.55,
               }}
+            disabled={!canTradeAsset}
             onClick={() => {
+              if (!canTradeAsset) return;
               logPlatformAction('click', { element: 'trading_modal_open', assetId: id });
               setTradeAmountEur('');
               setFxError(null);
@@ -2367,7 +2572,7 @@ export function ProductDetail() {
                     navigate('/platform/portfolio');
                   }}
                 >
-                  Voir portefeuille
+                  Voir mon portefeuille
                 </Button>
               </div>
             </div>
@@ -2447,6 +2652,7 @@ export function ProductDetail() {
               </Button>
               <Button
                 disabled={
+                  !canTradeAsset ||
                   isPlacingTradeOrder ||
                   amountEurNum <= 0 ||
                   (assetCurrency !== 'EUR' && (fxLoading || fxRateEurToAsset <= 0))
@@ -2459,6 +2665,10 @@ export function ProductDetail() {
                     }
                     if (!asset?.id) {
                       toast.error('Actif introuvable');
+                      return;
+                    }
+                    if (!canTradeAsset) {
+                      toast.error('Trading non disponible pour cet actif à cette date.');
                       return;
                     }
 

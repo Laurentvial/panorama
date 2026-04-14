@@ -11,6 +11,7 @@ import { MdPadding } from 'react-icons/md';
 import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import { formatSubcategoryForDisplay } from './transactionUtils';
+import '../styles/PlatformPortfolio.css';
 
 // Component for asset logo with fallback
 function AssetLogo({ logoUrl, name, productType, typeColor, getProductTypeIcon }: any) {
@@ -651,6 +652,7 @@ export function PlatformDiscover() {
 
   return (
     <div style={{ padding: '0' }}>
+      <h1 className="platform-portfolioPageTitle">Découvrir</h1>
       {/* Navigation Tabs */}
       <div style={{ 
         marginBottom: isMobile ? 12 : 16,

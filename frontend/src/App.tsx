@@ -36,6 +36,15 @@ const EditProduct = lazy(() => import('./components/EditProduct').then(m => ({ d
 const Positions = lazy(() => import('./components/Positions').then(m => ({ default: m.Positions })));
 const PlatformDashboard = lazy(() => import('./components/PlatformDashboard').then(m => ({ default: m.PlatformDashboard })));
 const PlatformPortfolio = lazy(() => import('./components/PlatformPortfolio').then(m => ({ default: m.PlatformPortfolio })));
+const PlatformTransactionsPage = lazy(() =>
+  import('./components/PlatformTransactionsPage').then((m) => ({ default: m.PlatformTransactionsPage }))
+);
+const PlatformPositionsPage = lazy(() =>
+  import('./components/PlatformPositionsPage').then((m) => ({ default: m.PlatformPositionsPage }))
+);
+const PlatformMessagingPage = lazy(() =>
+  import('./components/PlatformMessagingPage').then((m) => ({ default: m.PlatformMessagingPage }))
+);
 const PlatformTrading = lazy(() => import('./components/PlatformTrading').then(m => ({ default: m.PlatformTrading })));
 const PlatformDiscover = lazy(() => import('./components/PlatformDiscover').then(m => ({ default: m.PlatformDiscover })));
 const PlatformUsefulLinks = lazy(() => import('./components/PlatformUsefulLinks').then(m => ({ default: m.PlatformUsefulLinks })));
@@ -365,6 +374,45 @@ function App() {
                                     <PlatformLayout>
                                         <Suspense fallback={<LoadingFallback />}>
                                             <PlatformPortfolio />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/transactions" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformTransactionsPage />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/positions" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformPositionsPage />
+                                        </Suspense>
+                                    </PlatformLayout>
+                                </Suspense>
+                            </PlatformSearchProvider>
+                        </ClientProtectedRoute>
+                    } />
+                    <Route path="/platform/messaging" element={
+                        <ClientProtectedRoute>
+                            <PlatformSearchProvider>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <PlatformLayout>
+                                        <Suspense fallback={<LoadingFallback />}>
+                                            <PlatformMessagingPage />
                                         </Suspense>
                                     </PlatformLayout>
                                 </Suspense>

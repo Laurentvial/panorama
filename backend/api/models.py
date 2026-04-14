@@ -427,6 +427,7 @@ class RIB(models.Model):
     account_number = models.CharField(max_length=11, default="", blank=True)  # Numéro de compte (11 caractères)
     rib_key = models.CharField(max_length=2, default="", blank=True)  # Clé RIB (2 chiffres)
     domiciliation = models.CharField(max_length=200, default="", blank=True)  # Domiciliation
+    motif = models.CharField(max_length=512, default="", blank=True)  # Libellé / référence à utiliser sur le virement (défini par la gestion)
     default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

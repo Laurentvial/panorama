@@ -17,6 +17,7 @@ import { logPlatformAction } from '../utils/platformLogger';
 import { getStatusColors, getStatusLabel } from './transactionUtils';
 import { getCurrencySymbol, formatAmount } from '../utils/currency';
 import '../styles/PlatformTrading.css';
+import '../styles/PlatformPortfolio.css';
 
 export function PlatformTrading() {
   const { currentUser } = useUser();
@@ -35,7 +36,7 @@ export function PlatformTrading() {
   const [withdrawBankName, setWithdrawBankName] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
-  const [transferMotif, setTransferMotif] = useState('');
+  const [depositSelectedClientRibId, setDepositSelectedClientRibId] = useState<string | null>(null);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [pendingAmount, setPendingAmount] = useState<number>(0);
   const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
@@ -78,6 +79,18 @@ export function PlatformTrading() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transferDialogOpen, clientRibs.length, pendingAmount]);
+
+  useEffect(() => {
+    if (!transferDialogOpen || transferSuccess) return;
+    if (clientRibs.length === 0) {
+      setDepositSelectedClientRibId(null);
+      return;
+    }
+    setDepositSelectedClientRibId((prev) => {
+      if (prev && clientRibs.some((c: any) => c.id === prev)) return prev;
+      return clientRibs[0].id;
+    });
+  }, [transferDialogOpen, transferSuccess, clientRibs]);
 
   // Pre-fill withdrawal form with client's RIB data when dialog opens
   useEffect(() => {
@@ -273,6 +286,7 @@ export function PlatformTrading() {
     // If deposit with virement, show transfer instructions modal
     if (movementType === 'depot' && paymentMethod === 'virement') {
       setPendingAmount(amountNum);
+      await loadClientRibs();
       setTransferDialogOpen(true);
       return;
     }
@@ -338,10 +352,32 @@ export function PlatformTrading() {
     }
   };
 
-  const confirmTransfer = async (motif?: string) => {
+  const resolveWireDepositDescription = () => {
+    if (clientRibs.length === 0) {
+      return 'Dépôt de fonds (Virement bancaire)';
+    }
+    const selected =
+      clientRibs.length === 1
+        ? clientRibs[0]
+        : clientRibs.find((c: any) => c.id === depositSelectedClientRibId) || clientRibs[0];
+    const m = (selected?.rib?.motif || '').trim();
+    return m || 'Dépôt de fonds (Virement bancaire)';
+  };
+
+  const selectedDepositClientRib =
+    clientRibs.length === 0
+      ? null
+      : clientRibs.length === 1
+        ? clientRibs[0]
+        : clientRibs.find((c: any) => c.id === depositSelectedClientRibId) || clientRibs[0];
+
+  const depositWireMotifMissing =
+    clientRibs.length > 0 && !(selectedDepositClientRib?.rib?.motif || '').trim();
+
+  const confirmTransfer = async () => {
     try {
       setSubmitting(true);
-      const description = (motif || transferMotif || '').trim() || 'Dépôt de fonds (Virement bancaire)';
+      const description = resolveWireDepositDescription();
       const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
@@ -508,14 +544,15 @@ export function PlatformTrading() {
 
   return (
     <div>
+      <h1 className="platform-portfolioPageTitle">Mon solde</h1>
       {loading ? (
         <div>Chargement...</div>
       ) : (
         <>
           <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
-              <CardTitle>Mon solde</CardTitle>
-              <CardDescription>Solde disponible</CardDescription>
+              <CardTitle>Solde disponible</CardTitle>
+              <CardDescription>Montant retirable sur votre compte</CardDescription>
             </CardHeader>
             <CardContent>
               <div style={{ fontSize: '28px', fontWeight: 800 }}>
@@ -748,7 +785,7 @@ export function PlatformTrading() {
                 if (!open) {
                   setTransferSuccess(null);
                   setPendingAmount(0);
-                  setTransferMotif('');
+                  setDepositSelectedClientRibId(null);
                 }
               }
             }}
@@ -816,7 +853,7 @@ export function PlatformTrading() {
                         setTransferDialogOpen(false);
                         setTransferSuccess(null);
                         setPendingAmount(0);
-                        setTransferMotif('');
+                        setDepositSelectedClientRibId(null);
                       }}
                       style={{ width: '100%' }}
                     >
@@ -866,7 +903,11 @@ export function PlatformTrading() {
                             Montant à virer : {formatAmount(pendingAmount, 'EUR')}
                           </div>
                           <div style={{ fontSize: 13, color: '#6b7280' }}>
-                            Veuillez effectuer le virement depuis votre compte bancaire en utilisant l'un des RIBs ci-dessous.
+                            Veuillez effectuer le virement depuis votre compte bancaire en utilisant le RIB ci-dessous
+                            {clientRibs.length > 1 ? 's' : ''}.
+                            {clientRibs.length > 1 && (
+                              <span> Indiquez le RIB utilisé en le sélectionnant.</span>
+                            )}
                           </div>
                         </div>
 
@@ -876,8 +917,34 @@ export function PlatformTrading() {
                             return (
                               <div key={clientRib.id} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 6 }}>
                                 {clientRibs.length > 1 && (
+                                  <label
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'flex-start',
+                                      gap: 10,
+                                      cursor: 'pointer',
+                                      marginBottom: 10,
+                                      fontWeight: 600,
+                                      fontSize: 13,
+                                      color: '#374151',
+                                    }}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="depositClientRib"
+                                      checked={depositSelectedClientRibId === clientRib.id}
+                                      onChange={() => setDepositSelectedClientRibId(clientRib.id)}
+                                      style={{ marginTop: 3, flexShrink: 0 }}
+                                    />
+                                    <span>
+                                      RIB {index + 1}
+                                      {rib.name ? ` — ${rib.name}` : ''}
+                                    </span>
+                                  </label>
+                                )}
+                                {clientRibs.length === 1 && rib.name && (
                                   <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#374151' }}>
-                                    RIB {index + 1} {rib.name ? `- ${rib.name}` : ''}
+                                    {rib.name}
                                   </div>
                                 )}
                                 <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
@@ -923,6 +990,24 @@ export function PlatformTrading() {
                                       <div style={{ fontSize: 12, color: '#374151' }}>{rib.domiciliation}</div>
                                     </div>
                                   )}
+                                  {(rib.motif || '').trim() ? (
+                                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>
+                                        Motif du virement (libellé banque) :
+                                      </div>
+                                      <div
+                                        style={{
+                                          fontSize: 13,
+                                          color: '#111827',
+                                          whiteSpace: 'pre-wrap',
+                                          fontWeight: 600,
+                                          lineHeight: 1.45,
+                                        }}
+                                      >
+                                        {(rib.motif || '').trim()}
+                                      </div>
+                                    </div>
+                                  ) : null}
                                 </div>
                               </div>
                             );
@@ -934,21 +1019,15 @@ export function PlatformTrading() {
                           <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
                             <li>Effectuez le virement depuis votre compte bancaire</li>
                             <li>Utilisez le montant exact indiqué ci-dessus</li>
+                            {!depositWireMotifMissing ? (
+                              <li>
+                                Utilisez strictement, sans le modifier, le motif de virement indiqué ci-dessus pour le RIB
+                                concerné (libellé, communication ou référence selon votre banque).
+                              </li>
+                            ) : null}
                             <li>Le traitement peut prendre 1 à 3 jours ouvrés</li>
                             <li>Vous recevrez une confirmation une fois le virement traité</li>
                           </ul>
-                        </div>
-
-                        <div style={{ display: 'grid', gap: 8 }}>
-                          <Label htmlFor="transferMotif" style={{ fontWeight: 600, fontSize: 13 }}>Motif *</Label>
-                          <Textarea
-                            id="transferMotif"
-                            placeholder="Décrivez le motif de ce dépôt (ex: virement mensuel, complément de capital...)"
-                            value={transferMotif}
-                            onChange={(e) => setTransferMotif(e.target.value)}
-                            rows={3}
-                            style={{ resize: 'vertical', minHeight: 60 }}
-                          />
                         </div>
                       </div>
 
@@ -960,7 +1039,7 @@ export function PlatformTrading() {
                           onClick={() => {
                             setTransferDialogOpen(false);
                             setPendingAmount(0);
-                            setTransferMotif('');
+                            setDepositSelectedClientRibId(null);
                           }}
                         >
                           Annuler
@@ -968,7 +1047,7 @@ export function PlatformTrading() {
                         <Button 
                           type="button" 
                           variant="platform" 
-                          disabled={submitting || !transferMotif.trim()} 
+                          disabled={submitting || depositWireMotifMissing} 
                           onClick={() => confirmTransfer()}
                         >
                           {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}

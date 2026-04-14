@@ -1,3 +1,14 @@
+/* Titre de page (h1) — pages plateforme client */
+.platform-portfolioPageTitle {
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-foreground) 65%, transparent);
+  margin: 0 0 16px;
+  line-height: 1.2;
+}
+
 .platform-portfolioPage {
   padding: 16px;
 }

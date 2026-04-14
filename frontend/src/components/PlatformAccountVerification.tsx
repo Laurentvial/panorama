@@ -73,7 +73,7 @@ import {
 
 } from 'lucide-react';
 
-
+import '../styles/PlatformPortfolio.css';
 
 type SexValue = '' | 'male' | 'female' | 'other';
 
@@ -1276,11 +1276,9 @@ export function PlatformAccountVerification() {
   if (step === null) {
     return (
       <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 980, margin: '0 auto' }}>
+        <h1 className="platform-portfolioPageTitle">Vérification du compte</h1>
         <Card style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#ffffff' }}>
-          <CardHeader style={{ paddingBottom: 8 }}>
-            <div className="platform-page-title">Vérification du compte</div>
-          </CardHeader>
-          <CardContent style={{ paddingTop: 10 }}>
+          <CardContent style={{ paddingTop: 18 }}>
             <div className="py-10 flex flex-col items-center justify-center text-center">
               <div className="text-slate-700" style={{ fontWeight: 600, fontSize: 16, marginBottom: 6 }}>
                 Ouverture de votre prochaine étape...
@@ -1298,6 +1296,7 @@ export function PlatformAccountVerification() {
   return (
 
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 980, margin: '0 auto' }}>
+      <h1 className="platform-portfolioPageTitle">Vérification du compte</h1>
 
       {/* Top progress header (inspired by screenshot) */}
 

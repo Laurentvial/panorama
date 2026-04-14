@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
 import { Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
@@ -27,6 +28,7 @@ export function ManageRibs() {
     accountNumber: '',
     ribKey: '',
     domiciliation: '',
+    motif: '',
     default: false
   });
 
@@ -61,6 +63,7 @@ export function ManageRibs() {
         accountNumber: rib.accountNumber || '',
         ribKey: rib.ribKey || '',
         domiciliation: rib.domiciliation || '',
+        motif: rib.motif || '',
         default: rib.default || false
       });
     } else {
@@ -76,6 +79,7 @@ export function ManageRibs() {
         accountNumber: '',
         ribKey: '',
         domiciliation: '',
+        motif: '',
         default: false
       });
     }
@@ -96,24 +100,26 @@ export function ManageRibs() {
       accountNumber: '',
       ribKey: '',
       domiciliation: '',
+      motif: '',
       default: false
     });
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const payload = { ...formData, motif: (formData.motif || '').trim() };
     try {
       if (editingRib) {
         await apiCall(`/api/ribs/${editingRib.id}/`, {
           method: 'PATCH',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
         toast.success('RIB modifié avec succès');
       } else {
         await apiCall('/api/ribs/create/', {
           method: 'POST',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
         toast.success('RIB créé avec succès');
@@ -150,7 +156,8 @@ export function ManageRibs() {
       rib.domiciliation?.toLowerCase().includes(searchLower) ||
       rib.iban?.toLowerCase().includes(searchLower) ||
       rib.bankName?.toLowerCase().includes(searchLower) ||
-      rib.accountHolder?.toLowerCase().includes(searchLower)
+      rib.accountHolder?.toLowerCase().includes(searchLower) ||
+      rib.motif?.toLowerCase().includes(searchLower)
     );
   });
 
@@ -212,6 +219,7 @@ export function ManageRibs() {
                     <th className="text-left p-2 font-medium text-slate-700">N° compte</th>
                     <th className="text-left p-2 font-medium text-slate-700">Clé RIB</th>
                     <th className="text-left p-2 font-medium text-slate-700">Domiciliation</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Motif virement</th>
                     <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
                     <th className="text-right p-2 font-medium text-slate-700">Actions</th>
                   </tr>
@@ -228,6 +236,9 @@ export function ManageRibs() {
                       <td className="p-2 font-mono text-sm">{rib.accountNumber}</td>
                       <td className="p-2 font-mono text-sm">{rib.ribKey}</td>
                       <td className="p-2">{rib.domiciliation}</td>
+                      <td className="p-2 max-w-[200px] truncate" title={rib.motif || ''}>
+                        {rib.motif || '—'}
+                      </td>
                       <td className="p-2">
                         {rib.default ? (
                           <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm">Oui</span>
@@ -369,6 +380,21 @@ export function ManageRibs() {
                   onChange={(e) => setFormData({ ...formData, domiciliation: e.target.value })}
                   placeholder="Adresse de la banque"
                 />
+              </div>
+              <div className="modal-form-field">
+                <Label htmlFor="motif">Motif du virement (libellé banque) *</Label>
+                <Textarea
+                  id="motif"
+                  value={formData.motif}
+                  onChange={(e) => setFormData({ ...formData, motif: e.target.value })}
+                  placeholder="Texte exact que le client doit indiquer sur son virement"
+                  rows={3}
+                  required
+                  className="resize-y min-h-[72px]"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Ce libellé sera affiché au client sur la plateforme ; il ne pourra pas le modifier.
+                </p>
               </div>
               <div className="modal-form-field">
                 <Label htmlFor="bankName">Nom de la banque</Label>

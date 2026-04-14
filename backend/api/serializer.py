@@ -919,10 +919,11 @@ class RIBSerializer(serializers.ModelSerializer):
     branchCode = serializers.CharField(source='branch_code', required=False, allow_blank=True)
     accountNumber = serializers.CharField(source='account_number', required=False, allow_blank=True)
     ribKey = serializers.CharField(source='rib_key', required=False, allow_blank=True)
+    motif = serializers.CharField(required=True, allow_blank=False, max_length=512)
     
     class Meta:
         model = RIB
-        fields = ['id', 'name', 'iban', 'bic', 'bankName', 'accountHolder', 'bankCode', 'branchCode', 'accountNumber', 'ribKey', 'domiciliation', 'default', 'createdAt', 'updatedAt']
+        fields = ['id', 'name', 'iban', 'bic', 'bankName', 'accountHolder', 'bankCode', 'branchCode', 'accountNumber', 'ribKey', 'domiciliation', 'motif', 'default', 'createdAt', 'updatedAt']
         read_only_fields = ['id', 'createdAt', 'updatedAt']
     
     def to_representation(self, instance):
