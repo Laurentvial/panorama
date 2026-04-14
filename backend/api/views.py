@@ -3741,6 +3741,42 @@ def asset_list(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def assets_positions_count(request):
+    """
+    Return number of positions linked to the given asset IDs.
+
+    Body: { "assetIds": ["id1", "id2", ...] }
+    Response: { "counts": { "id1": 3, "id2": 0, ... } }
+    """
+    asset_ids = request.data.get('assetIds', None)
+    if asset_ids is None:
+        return Response({'error': 'assetIds is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(asset_ids, list):
+        return Response({'error': 'assetIds must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+
+    normalized = [str(x) for x in asset_ids if x is not None and str(x).strip() != '']
+    normalized = list(dict.fromkeys(normalized))  # stable dedupe
+    if len(normalized) == 0:
+        return Response({'counts': {}}, status=status.HTTP_200_OK)
+
+    counts = {aid: 0 for aid in normalized}
+    try:
+        from django.db.models import Count
+        qs = Position.objects.filter(asset_id__in=normalized).values('asset_id').annotate(c=Count('id'))
+        for row in qs:
+            aid = str(row.get('asset_id'))
+            if aid in counts:
+                counts[aid] = int(row.get('c') or 0)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("assets_positions_count failed")
+        return Response({'error': f'Erreur lors du calcul des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({'counts': counts}, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def asset_create(request):
     """Créer un nouvel asset"""
     serializer = AssetSerializer(data=request.data)

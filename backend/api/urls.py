@@ -85,6 +85,7 @@ urlpatterns = [
     path('assets/create-from-alpha-vantage', api_views.asset_create_from_alpha_vantage, name='asset-create-from-alpha-vantage-no-slash'),
     # AI (assets) - must be BEFORE the generic assets/<asset_id>/ route
     path('assets/generate-description/', api_views.asset_generate_description, name='asset-generate-description'),
+    path('assets/positions-count/', api_views.assets_positions_count, name='assets-positions-count'),
     path('assets/bulk-update-prices/', api_views.assets_bulk_update_prices, name='assets-bulk-update-prices'),
     path('assets/bulk-import-from-index/', api_views.assets_bulk_import_from_index, name='assets-bulk-import-from-index'),
     path('assets/supported-indices/', api_views.assets_supported_indices, name='assets-supported-indices'),

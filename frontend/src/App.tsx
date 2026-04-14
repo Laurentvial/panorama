@@ -24,6 +24,7 @@ const AddClient = lazy(() => import('./components/AddClient'));
 const ClientDetail = lazy(() => import('./components/ClientDetail').then(m => ({ default: m.ClientDetail })));
 const ManageRibs = lazy(() => import('./components/ManageRibs').then(m => ({ default: m.ManageRibs })));
 const ManageAssets = lazy(() => import('./components/ManageAssets').then(m => ({ default: m.ManageAssets })));
+const ExternalAssetDuplicatesPage = lazy(() => import('./components/ExternalAssetDuplicatesPage').then(m => ({ default: m.ExternalAssetDuplicatesPage })));
 const ManageUsefulLinks = lazy(() => import('./components/ManageUsefulLinks').then(m => ({ default: m.ManageUsefulLinks })));
 const ManageNews = lazy(() => import('./components/ManageNews').then(m => ({ default: m.ManageNews })));
 const Transactions = lazy(() => import('./components/Transactions').then(m => ({ default: m.Transactions })));
@@ -230,6 +231,15 @@ function App() {
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageAssets />
+                                </Suspense>
+                            </Layout>
+                        </AdminRoleProtectedRoute>
+                    } />
+                    <Route path="/admin/manage/assets/duplicates" element={
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
+                            <Layout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ExternalAssetDuplicatesPage />
                                 </Suspense>
                             </Layout>
                         </AdminRoleProtectedRoute>

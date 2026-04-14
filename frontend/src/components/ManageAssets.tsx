@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
 import { useUser } from '../contexts/UserContext';
+import { useNavigate } from 'react-router-dom';
 
 const ASSETS_PAGE_SIZE = 25;
 
@@ -274,6 +275,7 @@ function compareAssets(a: any, b: any, key: AssetSortKey, dir: AssetSortDir): nu
 
 export function ManageAssets() {
   const { currentUser } = useUser();
+  const navigate = useNavigate();
   const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1349,7 +1351,7 @@ export function ManageAssets() {
           </Button>
           <Button
             variant="outline"
-            onClick={() => setIsDuplicatesModalOpen(true)}
+            onClick={() => navigate('/admin/manage/assets/duplicates')}
             title="Détecter les actifs en double (symbole API, référence, TradingView)"
           >
             <Layers2 className="w-4 h-4 mr-2" aria-hidden />
