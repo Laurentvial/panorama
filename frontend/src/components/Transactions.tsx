@@ -113,6 +113,30 @@ export function Transactions() {
     }
   };
 
+  const resolveRelevantProductIdFromTransaction = (tx: any): string | null => {
+    if (!tx) return null;
+    const rawTo = tx.transfer_to ?? tx.to_field ?? tx.to ?? null;
+    const rawFrom = tx.transfer_from ?? tx.from_field ?? tx.from ?? null;
+    const sub = tx.subscription_details ?? {};
+    const rawFromSub =
+      sub.productId ?? sub.product_id ?? sub.product?.id ?? tx.productId ?? tx.product_id ?? null;
+
+    const to = rawTo == null ? '' : String(rawTo).trim();
+    const from = rawFrom == null ? '' : String(rawFrom).trim();
+    const fromSub = rawFromSub == null ? '' : String(rawFromSub).trim();
+
+    const isInvestToProduct = to && to !== 'solde' && to !== 'trading';
+    if (isInvestToProduct) return to;
+
+    const isWithdrawalFromProduct = to === 'solde' && from && from !== 'solde' && from !== 'trading';
+    if (isWithdrawalFromProduct) return from;
+
+    // Fallback: older transactions sometimes only carry productId in subscription_details or top-level
+    if (fromSub && fromSub !== 'solde' && fromSub !== 'trading') return fromSub;
+
+    return null;
+  };
+
   /** Liste des transactions : ouvre le modal de création ou de régénération des positions (produit avec allocations). */
   const handleOpenRecoverPositionsModal = async (tx: any) => {
     const cid = tx.clientId;
@@ -120,18 +144,10 @@ export function Transactions() {
       toast.error('Client inconnu pour cette transaction');
       return;
     }
-    const transferTo = tx.transfer_to || tx.to_field || tx.to || null;
-    const transferFrom = tx.transfer_from || tx.from_field || tx.from || null;
-    const productIdFromSub = tx.subscription_details?.productId || tx.productId || tx.product_id || null;
-    const finalProductId = transferTo || productIdFromSub;
-    const isInvestment =
-      !!finalProductId && String(finalProductId) !== 'solde' && String(finalProductId) !== 'trading';
-    const relevantProductId = isInvestment
-      ? finalProductId
-      : transferFrom && transferFrom !== 'solde'
-        ? transferFrom
-        : null;
-    const hasAllocations = relevantProductId ? await productHasAllocationsForValidate(relevantProductId) : false;
+    const relevantProductId = resolveRelevantProductIdFromTransaction(tx);
+    const hasAllocations = relevantProductId
+      ? await productHasAllocationsForValidate(relevantProductId)
+      : false;
 
     if (hasAllocations) {
       setRecoverPositionModalTx(tx);
