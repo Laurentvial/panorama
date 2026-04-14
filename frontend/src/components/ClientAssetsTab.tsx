@@ -162,6 +162,64 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     return `${day}/${month}/${year}`;
   };
 
+  const formatEur = (value: any): string => {
+    if (value === null || value === undefined || value === '') return '-';
+    const n = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+    if (!Number.isFinite(n)) return '-';
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+  };
+
+  const formatSubscriptionText = (minEntry: any, maxEntry: any): string => {
+    const hasMin = !(minEntry === null || minEntry === undefined || minEntry === '');
+    const hasMax = !(maxEntry === null || maxEntry === undefined || maxEntry === '');
+    if (hasMin && hasMax) return `${formatEur(minEntry)} → ${formatEur(maxEntry)}`;
+    if (hasMin) return `À partir de ${formatEur(minEntry)}`;
+    if (hasMax) return `Jusqu’à ${formatEur(maxEntry)}`;
+    return '-';
+  };
+
+  const getProductSubcategoryList = (productSub: any): string[] => {
+    if (Array.isArray(productSub)) return productSub.filter(Boolean).map(String);
+    if (productSub === null || productSub === undefined || productSub === '') return [];
+    return [String(productSub)];
+  };
+
+  const formatProductProfitability = (product: any): { main: string; sub?: string } => {
+    if (!product) return { main: '-' };
+    if (product.noProfitability === true) return { main: '-' };
+
+    const profitNum =
+      product.profitability === null || product.profitability === undefined || product.profitability === ''
+        ? NaN
+        : typeof product.profitability === 'number'
+          ? product.profitability
+          : parseFloat(String(product.profitability).replace(',', '.'));
+
+    const isVariable = String(product.isVariableProfitability || '').toLowerCase() === 'oui';
+    if (isVariable) {
+      const maxNum =
+        product.variableProfitability === null || product.variableProfitability === undefined || product.variableProfitability === ''
+          ? NaN
+          : typeof product.variableProfitability === 'number'
+            ? product.variableProfitability
+            : parseFloat(String(product.variableProfitability).replace(',', '.'));
+
+      const hasMin = Number.isFinite(profitNum) && profitNum !== 0;
+      const hasMax = Number.isFinite(maxNum) && maxNum !== 0;
+      if (!hasMin && !hasMax) return { main: '-' };
+
+      const minText = hasMin ? `${profitNum.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%` : '-';
+      const maxText = hasMax ? `${maxNum.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%` : '-';
+      return { main: `${minText} à ${maxText}`, sub: product.profitabilityPeriod || undefined };
+    }
+
+    if (!Number.isFinite(profitNum) || profitNum === 0) return { main: '-' };
+    return {
+      main: `${profitNum.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`,
+      sub: product.profitabilityPeriod || undefined,
+    };
+  };
+
   const openAvailabilityModal = (clientAsset: any) => {
     setSelectedClientAsset(clientAsset);
     setIsAvailabilityModalOpen(true);
@@ -808,7 +866,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                               const filteredForSub = availableProducts.filter(
                                 (p: any) => p.status === 'Actif' && (filterProductCategory === 'all' || (p.categoryTitle || p.category?.title) === filterProductCategory)
                               );
-                              return (Array.from(new Set(filteredForSub.map((p: any) => p.subcategory).filter(Boolean))) as string[]).sort().map((sub: string) => (
+                              const allSubcategories = filteredForSub.flatMap((p: any) => getProductSubcategoryList(p.subcategory));
+                              return (Array.from(new Set(allSubcategories)).sort() as string[]).map((sub: string) => (
                                 <SelectItem key={sub} value={sub}>{sub}</SelectItem>
                               ));
                             })()}
@@ -836,7 +895,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                       const typeMatch = filterProductType === 'all' || product.type === filterProductType;
                       const catTitle = product.categoryTitle || product.category?.title;
                       const categoryMatch = filterProductCategory === 'all' || catTitle === filterProductCategory;
-                      const subMatch = filterProductSubcategory === 'all' || product.subcategory === filterProductSubcategory;
+                      const productSubList = getProductSubcategoryList(product.subcategory);
+                      const subMatch = filterProductSubcategory === 'all' || productSubList.includes(filterProductSubcategory);
                       const q = productSearchQuery.trim().toLowerCase();
                       const searchMatch = !q || (product.name || '').toLowerCase().includes(q) || (product.reference || '').toLowerCase().includes(q);
                       return typeMatch && categoryMatch && subMatch && searchMatch;
@@ -880,6 +940,10 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                             <div className="space-y-2">
                               {filteredProducts.map((product: any) => {
                                 const isSelected = selectedProductIdsInModal.has(product.id);
+                                const profitability = formatProductProfitability(product);
+                                const minEntry = product.minEntryValue;
+                                const maxEntry = product.maxEntryValue;
+                                const subscriptionText = formatSubscriptionText(minEntry, maxEntry);
                                 return (
                                   <div
                                     key={product.id}
@@ -907,6 +971,27 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                         {product.type || 'Aucun'}
                                         {(product.categoryTitle || product.category?.title) && ` • ${product.categoryTitle || product.category?.title}`}
                                         {product.subcategory && ` • ${product.subcategory}`}
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1 flex flex-wrap">
+                                        <span>
+                                          <span className="text-slate-500">Rentabilité:</span>{' '}{profitability.main}
+                                        </span>
+                                        <span>{' • '}</span>
+                                        <span>
+                                          <span className="text-slate-500">Souscription:</span>{' '}{subscriptionText}
+                                        </span>
+                                        <span>{' • '}</span>
+                                        <span>
+                                          <span className="text-slate-500">Durée:</span>{' '}{product.duration || '-'}
+                                        </span>
+                                        {profitability.sub && (
+                                          <>
+                                            <span>{' • '}</span>
+                                            <span>
+                                              <span className="text-slate-500">Période:</span>{' '}{profitability.sub}
+                                            </span>
+                                          </>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
@@ -975,6 +1060,9 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           <th className="text-left py-2 px-3">Type</th>
                           <th className="text-left py-2 px-3">Nom</th>
                           <th className="text-left py-2 px-3">Référence</th>
+                          <th className="text-left py-2 px-3">Rentabilité</th>
+                          <th className="text-left py-2 px-3">Souscription</th>
+                          <th className="text-left py-2 px-3">Durée</th>
                           <th className="text-left py-2 px-3">Statut</th>
                           <th className="text-center py-2 px-3">Mis en avant</th>
                           <th className="text-left py-2 px-3">Dates de disponibilité</th>
@@ -986,6 +1074,10 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           const product = clientProduct.product;
                           if (!product) return null; // Skip if product was deleted
                           const isFeatured = clientProduct.featured || false;
+                          const profitability = formatProductProfitability(product);
+                          const minEntry = product.minEntryValue;
+                          const maxEntry = product.maxEntryValue;
+                          const subscriptionText = formatSubscriptionText(minEntry, maxEntry);
                           return (
                             <tr key={clientProduct.id} className="border-b border-slate-100">
                               <td className="w-10 py-2 px-3 pr-0">
@@ -998,6 +1090,19 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                               <td className="py-2 px-3">{product.type || '-'}</td>
                               <td className="py-2 px-3">{product.name || '-'}</td>
                               <td className="py-2 px-3">{product.reference || '-'}</td>
+                              <td className="py-2 px-3">
+                                <div className="text-sm text-slate-900">{profitability.main}</div>
+                                {profitability.sub && (
+                                  <div className="text-xs text-slate-500">{profitability.sub}</div>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">
+                                <div className="text-sm text-slate-900">{subscriptionText}</div>
+                                {(product.availableFunds === true) && (
+                                  <div className="text-xs text-slate-500">Fonds disponibles</div>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">{product.duration || '-'}</td>
                               <td className="py-2 px-3">{product.status || '-'}</td>
                               <td className="py-2 px-3 text-center">
                                 <Button

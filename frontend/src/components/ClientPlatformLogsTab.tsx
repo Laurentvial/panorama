@@ -28,6 +28,49 @@ const ACTION_TYPE_LABELS: { [key: string]: string } = {
   form_submit: 'Soumission de formulaire',
 };
 
+function normalizeRouteToPath(route: unknown): string {
+  if (!route) return '';
+  const raw = String(route).trim();
+  if (!raw) return '';
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost';
+    const u = new URL(raw, baseOrigin);
+    return u.pathname;
+  } catch {
+    const pathOnly = raw.split('?')[0]?.split('#')[0] ?? raw;
+    return pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
+  }
+}
+
+function getFriendlyPageNameFromRoute(route: unknown): string {
+  const path = normalizeRouteToPath(route);
+  if (!path) return '';
+
+  const EXACT: Record<string, string> = {
+    '/login': 'Connexion client',
+    '/login/otp': 'Connexion OTP',
+    '/forgot-password': 'Mot de passe oublié',
+    '/reset-password': 'Réinitialisation mot de passe',
+    '/platform': 'Tableau de bord',
+    '/platform/portfolio': 'Portefeuille',
+    '/platform/funds': 'Fonds',
+    '/platform/discover': 'Découvrir',
+    '/platform/useful-links': 'Liens utiles',
+    '/platform/profile': 'Profil',
+    '/platform/verification': 'Vérification du compte',
+    '/platform/transfert-propriete': 'Transfert de propriété',
+  };
+
+  if (EXACT[path]) return EXACT[path];
+
+  if (/^\/platform\/product\/[^/]+$/.test(path)) return 'Détail produit';
+  if (/^\/invite\/[^/]+$/.test(path)) return 'Invitation';
+  if (/^\/legal\/[^/]+$/.test(path)) return 'Document légal';
+
+  return '';
+}
+
 export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,12 +182,13 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     const details: string[] = [];
     
     if (log.actionType === 'page_view') {
-      if (log.actionDetails.route) {
-        details.push(`Route: ${log.actionDetails.route}`);
-      }
-      if (log.actionDetails.page) {
-        details.push(`Page: ${log.actionDetails.page}`);
-      }
+      const friendly =
+        log.actionDetails.page ||
+        getFriendlyPageNameFromRoute(log.actionDetails.route) ||
+        getFriendlyPageNameFromRoute(log.actionDetails.url);
+      const url = log.actionDetails.route || log.actionDetails.url;
+      if (friendly) details.push(`Page: ${friendly}`);
+      if (url) details.push(`URL: ${url}`);
     }
     
     if (log.actionType === 'click') {

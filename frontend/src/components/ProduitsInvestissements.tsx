@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
+import { useUser } from '../contexts/UserContext';
 
 interface ProduitsInvestissementsProps {
   user?: any;
@@ -20,6 +21,8 @@ interface ProduitsInvestissementsProps {
 
 export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) {
   const navigate = useNavigate();
+  const { currentUser } = useUser();
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -433,15 +436,17 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                                 >
                                   <Copy className="w-4 h-4" />
                                 </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm"
-                                  onClick={() => handleDeleteProduct(product.id)}
-                                  className="text-red-600 hover:text-red-700"
-                                  title="Supprimer le produit"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                {isAdmin && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm"
+                                    onClick={() => handleDeleteProduct(product.id)}
+                                    className="text-red-600 hover:text-red-700"
+                                    title="Supprimer le produit"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>

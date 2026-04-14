@@ -43,6 +43,67 @@ const ACTION_TYPE_OPTIONS = [
   { value: 'otp_login_requested', label: 'Demande connexion OTP' },
 ];
 
+function normalizeRouteToPath(route: unknown): string {
+  if (!route) return '';
+  const raw = String(route).trim();
+  if (!raw) return '';
+  try {
+    const baseOrigin =
+      typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost';
+    const u = new URL(raw, baseOrigin);
+    return u.pathname;
+  } catch {
+    const pathOnly = raw.split('?')[0]?.split('#')[0] ?? raw;
+    return pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
+  }
+}
+
+function getFriendlyPageNameFromRoute(route: unknown): string {
+  const path = normalizeRouteToPath(route);
+  if (!path) return '';
+
+  const EXACT: Record<string, string> = {
+    '/login': 'Connexion client',
+    '/login/otp': 'Connexion OTP',
+    '/forgot-password': 'Mot de passe oublié',
+    '/reset-password': 'Réinitialisation mot de passe',
+    '/platform': 'Tableau de bord',
+    '/platform/portfolio': 'Portefeuille',
+    '/platform/funds': 'Fonds',
+    '/platform/discover': 'Découvrir',
+    '/platform/useful-links': 'Liens utiles',
+    '/platform/profile': 'Profil',
+    '/platform/verification': 'Vérification du compte',
+    '/platform/transfert-propriete': 'Transfert de propriété',
+    '/admin': 'Dashboard admin',
+    '/admin/dashboard': 'Dashboard admin',
+    '/admin/clients': 'Clients',
+    '/admin/users': 'Utilisateurs & équipes',
+    '/admin/transactions': 'Transactions',
+    '/admin/platform-logs': 'Logs plateforme',
+    '/admin/messagerie': 'Messagerie',
+    '/admin/manage/ribs': 'RIB',
+    '/admin/manage/assets': 'Actifs',
+    '/admin/manage/useful-links': 'Liens utiles (admin)',
+    '/admin/manage/news': 'Actualités',
+    '/admin/positions': 'Positions',
+    '/admin/produits-investissements': "Produits d'investissement",
+    '/admin/settings': 'Paramètres',
+  };
+
+  if (EXACT[path]) return EXACT[path];
+
+  if (/^\/platform\/product\/[^/]+$/.test(path)) return 'Détail produit';
+  if (/^\/platform\/impersonate\/[^/]+$/.test(path)) return 'Impersonation client';
+  if (/^\/invite\/[^/]+$/.test(path)) return 'Invitation';
+  if (/^\/legal\/[^/]+$/.test(path)) return 'Document légal';
+  if (/^\/admin\/clients\/[^/]+$/.test(path)) return 'Fiche client';
+  if (/^\/admin\/produits-investissements\/add$/.test(path)) return 'Ajouter un produit';
+  if (/^\/admin\/produits-investissements\/edit\/[^/]+$/.test(path)) return 'Modifier un produit';
+
+  return '';
+}
+
 function getTodayISO(): string {
   const d = new Date();
   return d.toISOString().slice(0, 10);
@@ -169,8 +230,13 @@ export function PlatformLogs() {
     }
     const details: string[] = [];
     if (log.actionType === 'page_view') {
-      if (log.actionDetails.route) details.push(`Route: ${log.actionDetails.route}`);
-      if (log.actionDetails.page) details.push(`Page: ${log.actionDetails.page}`);
+      const friendly =
+        log.actionDetails.page ||
+        getFriendlyPageNameFromRoute(log.actionDetails.route) ||
+        getFriendlyPageNameFromRoute(log.actionDetails.url);
+      const url = log.actionDetails.route || log.actionDetails.url;
+      if (friendly) details.push(`Page: ${friendly}`);
+      if (url) details.push(`URL: ${url}`);
     }
     if (log.actionType === 'click') {
       if (log.actionDetails.element) details.push(`Élément: ${log.actionDetails.element}`);

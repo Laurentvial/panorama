@@ -15,6 +15,7 @@ import { BulkImportFromIndexModal } from './BulkImportFromIndexModal';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import '../styles/Modal.css';
 import '../styles/PageHeader.css';
+import { useUser } from '../contexts/UserContext';
 
 const ASSETS_PAGE_SIZE = 25;
 
@@ -272,6 +273,8 @@ function compareAssets(a: any, b: any, key: AssetSortKey, dir: AssetSortDir): nu
 }
 
 export function ManageAssets() {
+  const { currentUser } = useUser();
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -1589,15 +1592,17 @@ export function ManageAssets() {
                             {/* @ts-ignore - react-icons accepts className at runtime */}
                             <Pencil className="w-4 h-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(asset.id)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            {/* @ts-ignore - react-icons accepts className at runtime */}
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(asset.id)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              {/* @ts-ignore - react-icons accepts className at runtime */}
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2258,7 +2263,7 @@ export function ManageAssets() {
             </DialogDescription>
           </DialogHeader>
 
-          {externalAssetDuplicateGroups.length > 0 ? (
+          {externalAssetDuplicateGroups.length > 0 && isAdmin ? (
             <div className="flex shrink-0 flex-col gap-2 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -2326,13 +2331,15 @@ export function ManageAssets() {
                           key={a.id}
                           className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
                         >
-                          <input
-                            type="checkbox"
-                            checked={duplicateDeleteSelection.has(a.id)}
-                            onChange={() => toggleDuplicateDeleteSelect(a.id)}
-                            className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-slate-900"
-                            aria-label={`Sélectionner ${a.name || a.id} pour suppression`}
-                          />
+                          {isAdmin && (
+                            <input
+                              type="checkbox"
+                              checked={duplicateDeleteSelection.has(a.id)}
+                              onChange={() => toggleDuplicateDeleteSelect(a.id)}
+                              className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-slate-900"
+                              aria-label={`Sélectionner ${a.name || a.id} pour suppression`}
+                            />
+                          )}
                           <div className="min-w-0 flex-1">
                             <div className="font-medium text-slate-900">{a.name || '—'}</div>
                             <div className="text-xs text-slate-500">
@@ -2366,25 +2373,27 @@ export function ManageAssets() {
           <div className="shrink-0 flex w-full min-w-0 flex-col gap-3 overflow-x-hidden border-t border-slate-200 bg-background pt-3">
             {externalAssetDuplicateGroups.length > 0 ? (
               <>
-                <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-4">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={duplicateDeleteSelection.size === 0 || deletingDuplicateSelection}
-                    className="w-full shrink-0 sm:w-auto"
-                    onClick={() =>
-                      void handleBulkDeleteDuplicateSelection(Array.from(duplicateDeleteSelection))
-                    }
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    {deletingDuplicateSelection
-                      ? 'Suppression…'
-                      : `Supprimer la sélection (${duplicateDeleteSelection.size})`}
-                  </Button>
-                  <p className="min-w-0 flex-1 text-xs leading-snug text-slate-500">
-                    Les actifs encore liés à des clients peuvent être refusés par l&apos;API ; vérifiez les messages d&apos;erreur.
-                  </p>
-                </div>
+                {isAdmin && (
+                  <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-x-4">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={duplicateDeleteSelection.size === 0 || deletingDuplicateSelection}
+                      className="w-full shrink-0 sm:w-auto"
+                      onClick={() =>
+                        void handleBulkDeleteDuplicateSelection(Array.from(duplicateDeleteSelection))
+                      }
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      {deletingDuplicateSelection
+                        ? 'Suppression…'
+                        : `Supprimer la sélection (${duplicateDeleteSelection.size})`}
+                    </Button>
+                    <p className="min-w-0 flex-1 text-xs leading-snug text-slate-500">
+                      Les actifs encore liés à des clients peuvent être refusés par l&apos;API ; vérifiez les messages d&apos;erreur.
+                    </p>
+                  </div>
+                )}
                 <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   <Button
                     type="button"

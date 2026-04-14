@@ -244,7 +244,7 @@ function App() {
                         </AdminRoleProtectedRoute>
                     } />
                     <Route path="/admin/manage/news" element={
-                        <AdminRoleProtectedRoute allowedRoles={ROLES_ADMIN_ONLY}>
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageNews />
