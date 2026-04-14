@@ -139,13 +139,19 @@ export function TransactionList({
             const contractDocs = transactionDocuments[String(transaction.id)] || [];
             const hasContract = contractDocs.length > 0;
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
+            const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
             const showRecoverPositions =
               !!onRecoverPositions &&
               transaction.status === 'valide' &&
               transaction.type === 'transfert' &&
               transferTo !== '' &&
-              transferTo !== 'solde' &&
-              (transaction.positionsCount ?? 0) === 0;
+              transferTo !== 'solde';
+            const recoverPositionsLabel =
+              positionsCountForRecover > 0 ? 'Régénérer les positions' : 'Créer les positions';
+            const recoverPositionsTitle =
+              positionsCountForRecover > 0
+                ? 'Recalculer les positions en attente (statut « en attente ») sur ce produit pour ce client. Les positions ouvertes ou déjà réalisées ne sont pas supprimées.'
+                : 'Prévisualiser puis enregistrer les positions (même assistant que lors de la validation du transfert).';
 
             // Get product/asset info - prioritize productId from transaction
             let productName = '-';
@@ -308,10 +314,10 @@ export function TransactionList({
                         }}
                         className="hover:!bg-amber-50 hover:!text-amber-800 transition-colors duration-200 px-4"
                         style={{ position: 'relative', zIndex: 10 }}
-                        title="Générer les positions (modal)"
+                        title={recoverPositionsTitle}
                       >
                         <Layers className="w-4 h-4 mr-1" />
-                        Créer les positions
+                        {recoverPositionsLabel}
                       </Button>
                     )}
                     {onView ? (

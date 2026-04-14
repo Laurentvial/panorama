@@ -378,7 +378,8 @@ export function PositionGenerationModal({
       const requestBody: any = {
         rates: ratesToUse,
         avoid_losses: avoidLosses,
-        positive_only: positiveGainsOnly
+        positive_only: positiveGainsOnly,
+        manual_regeneration: true,
       };
       
       // Add positions per month override if provided
@@ -562,6 +563,7 @@ export function PositionGenerationModal({
             positions,
             rates_used: ratesUsed,
             period_summaries: recalculatedPeriodSummaries,
+            manual_regeneration: true,
             ...(shouldSendPositionsMonthRange
               ? {
                   positions_per_month_min: parseInt(positionsPerMonthMin.trim(), 10),
@@ -760,6 +762,26 @@ export function PositionGenerationModal({
         </div>
 
         <div className="modal-form" style={{ padding: '20px' }}>
+          {Number(transaction?.positionsCount ?? 0) > 0 && (
+            <div
+              style={{
+                padding: '12px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fcd34d',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                fontSize: '14px',
+                color: '#78350f',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: '6px' }}>Positions déjà présentes</div>
+              <div style={{ lineHeight: 1.5 }}>
+                L’enregistrement remplace les positions <strong>en attente</strong> sur ce produit pour ce client. Les
+                positions ouvertes ou déjà réalisées ne sont pas supprimées par ce flux.
+              </div>
+            </div>
+          )}
+
           <div
             style={{
               padding: '12px',

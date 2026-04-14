@@ -265,7 +265,10 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     }
   };
 
-  /** Transaction investissement déjà validée mais sans positions : ouvrir le même modal que pour valider un transfert. */
+  /**
+   * Transfert investissement ou retrait déjà validé : ouvrir le modal de génération / régénération
+   * (même flux que « valider un transfert »), y compris lorsqu’il existe déjà des positions pour la transaction.
+   */
   const handleOpenRecoverPositionsModal = async (tx: any) => {
     const transferTo = tx.transfer_to || tx.to_field || tx.to || null;
     const transferFrom = tx.transfer_from || tx.from_field || tx.from || null;

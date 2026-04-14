@@ -475,28 +475,59 @@ def _distribute_pnl_total_capped(
                 f'({target_total}) est inférieur au minimum requis ({min_required}) pour {n} trades avec gain '
                 f'strictement positif (≥ {step} chacun).'
             )
-        caps = [(amounts[i] * _pick_pnl_cap_pct()).quantize(Decimal('0.01')) for i in range(n)]
-        for i in range(n):
-            if caps[i] < step:
-                raise ValueError(
-                    'Option « gains uniquement sur chaque trade » impossible : plafond de P&L trop bas pour un trade.'
-                )
-        parts = [step] * n
+        # Un seul plafond % pour la période : évite qu’un trade tire 80 % et un autre 30 % au hasard.
+        cap_pct = _pick_pnl_cap_pct()
+        # Arrondi centimes : un investissement minuscule peut donner cap=0,00 ; on garde au moins `step`
+        # pour rester cohérent avec « gain ≥ 0,01 € par trade » et permettre la répartition.
+        caps = [
+            max(step, (amounts[i] * cap_pct).quantize(Decimal('0.01')))
+            for i in range(n)
+        ]
+        total_amt = sum(amounts)
+        if total_amt <= 0:
+            raise ValueError(
+                'Option « gains uniquement sur chaque trade » impossible : montants investis invalides.'
+            )
+        # Base = même logique que « éviter les pertes » : répartir le gain selon les montants, pas [0,01]×n + reliquat.
+        acc = Decimal('0')
+        parts = []
+        for i in range(n - 1):
+            p = (target_total * amounts[i] / total_amt).quantize(Decimal('0.01'))
+            parts.append(p)
+            acc += p
+        parts.append((target_total - acc).quantize(Decimal('0.01')))
+        parts = [max(step, min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
+
         drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
         guard = 0
-        while drift >= step and guard < 20000:
+        while abs(drift) >= step and guard < 20000:
             guard += 1
-            candidates = [(i, caps[i] - parts[i]) for i in range(n) if caps[i] - parts[i] >= step]
-            if not candidates:
-                break
-            candidates.sort(key=lambda x: float(x[1]), reverse=True)
-            i, slack = candidates[0]
-            delta = min(drift, slack).quantize(Decimal('0.01'))
-            if delta < step:
-                break
-            parts[i] = (parts[i] + delta).quantize(Decimal('0.01'))
+            if drift > 0:
+                pool = [(i, caps[i] - parts[i]) for i in range(n) if caps[i] - parts[i] >= step]
+                if not pool:
+                    break
+                ts = sum(s for _, s in pool)
+                if ts <= 0:
+                    break
+                for i, slack in pool:
+                    add = (drift * slack / ts).quantize(Decimal('0.01'))
+                    parts[i] = (parts[i] + min(add, slack)).quantize(Decimal('0.01'))
+            else:
+                need = -drift
+                pool = [(i, parts[i] - step) for i in range(n) if parts[i] - step >= step]
+                if not pool:
+                    break
+                ts = sum(s for _, s in pool)
+                if ts <= 0:
+                    break
+                for i, slack in pool:
+                    sub = (need * slack / ts).quantize(Decimal('0.01'))
+                    parts[i] = (parts[i] - min(sub, slack)).quantize(Decimal('0.01'))
+                for i in range(n):
+                    parts[i] = max(step, parts[i]).quantize(Decimal('0.01'))
             drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
-        if drift >= step:
+
+        if abs(drift) >= step:
             raise ValueError(
                 'Option « gains uniquement sur chaque trade » impossible : les plafonds de P&L par trade '
                 'ne permettent pas de répartir tout le profit avec un gain strictement positif sur chaque trade.'
@@ -510,52 +541,59 @@ def _distribute_pnl_total_capped(
             v = max(Decimal('0'), v)
         return [v]
 
-    # Start with an unconstrained distribution
-    parts = _distribute_pnl_total(target_total, amounts)
-
-    # Apply per-position caps
     caps = [(a * _pick_pnl_cap_pct()).quantize(Decimal('0.01')) for a in amounts]
-    parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
-    
-    # If avoid_losses is True, ensure all parts are >= 0
-    if avoid_losses:
-        parts = [max(Decimal('0'), p).quantize(Decimal('0.01')) for p in parts]
 
-    # Adjust drift while respecting caps
+    # Avoid losses: split profit proportionally to invested amounts (not random), then cap.
+    # This prevents one "filler" trade from absorbing almost all of the period P&L.
+    if avoid_losses and not positive_only:
+        total_amt = sum(amounts)
+        if total_amt <= 0:
+            parts = [Decimal('0.00')] * n
+        else:
+            acc = Decimal('0')
+            parts = []
+            for i in range(n - 1):
+                p = (target_total * amounts[i] / total_amt).quantize(Decimal('0.01'))
+                parts.append(p)
+                acc += p
+            parts.append((target_total - acc).quantize(Decimal('0.01')))
+        parts = [max(Decimal('0'), min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
+    else:
+        parts = _distribute_pnl_total(target_total, amounts)
+        parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
+        if avoid_losses:
+            parts = [max(Decimal('0'), p).quantize(Decimal('0.01')) for p in parts]
+
+    # Adjust drift: spread changes across positions with slack (proportional to slack), not only the largest.
     drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
     step = Decimal('0.01')
     guard = 0
-    while drift != 0 and guard < 20000:
+    while abs(drift) >= step and guard < 20000:
         guard += 1
-        direction = 1 if drift > 0 else -1
-
-        # Find candidates with slack in drift direction
-        candidates = []
-        for i in range(n):
-            if direction > 0:
-                slack = caps[i] - parts[i]
-            else:
-                # If avoid_losses is True, we can't go below 0
-                if avoid_losses:
-                    slack = parts[i]  # Can only reduce to 0
-                else:
-                    slack = parts[i] + caps[i]
-            if slack >= step:
-                candidates.append((i, slack))
-
-        if not candidates:
-            break  # can't fit perfectly, return best effort
-
-        # Prefer adjusting bigger trades (more slack)
-        candidates.sort(key=lambda x: float(x[1]), reverse=True)
-        i, slack = candidates[0]
-        delta = min(abs(drift), slack).quantize(Decimal('0.01'))
-        if delta < step:
-            break
-        parts[i] = (parts[i] + (delta if direction > 0 else -delta)).quantize(Decimal('0.01'))
-        # Ensure we don't go below 0 if avoid_losses is True
-        if avoid_losses:
-            parts[i] = max(Decimal('0'), parts[i])
+        if drift > 0:
+            pool = [(i, caps[i] - parts[i]) for i in range(n) if caps[i] - parts[i] >= step]
+            if not pool:
+                break
+            ts = sum(s for _, s in pool)
+            if ts <= 0:
+                break
+            for i, slack in pool:
+                add = (drift * slack / ts).quantize(Decimal('0.01'))
+                parts[i] = (parts[i] + min(add, slack)).quantize(Decimal('0.01'))
+        else:
+            need = -drift
+            pool = [(i, parts[i]) for i in range(n) if parts[i] >= step]
+            if not pool:
+                break
+            ts = sum(s for _, s in pool)
+            if ts <= 0:
+                break
+            for i, slack in pool:
+                sub = (need * slack / ts).quantize(Decimal('0.01'))
+                parts[i] = (parts[i] - min(sub, slack)).quantize(Decimal('0.01'))
+            if avoid_losses:
+                for i in range(n):
+                    parts[i] = max(Decimal('0'), parts[i]).quantize(Decimal('0.01'))
         drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
 
     return parts
@@ -2607,56 +2645,80 @@ def save_generated_positions(
     ).count() if ctx.product_id else 0
     logger.info(f"DEBUG: Total pending positions for product {ctx.product_id} BEFORE creating new positions: {total_pending_before_create}")
 
-    created: list[Position] = []
+    # Performance: avoid one SELECT + one INSERT per position.
+    # Collisions on UUID4 (12 chars) are effectively impossible; if they happen, we retry on IntegrityError.
+    from django.db import IntegrityError
+
     logger.info(f"DEBUG: About to create {len(positions_data)} new positions for transaction {txn.id}")
-    
-    for idx, pos_data in enumerate(positions_data):
-        position_id = pos_data.get('id') or uuid.uuid4().hex[:12]
-        while Position.objects.filter(id=position_id).exists():
-            position_id = uuid.uuid4().hex[:12]
 
-        opened_at = datetime.fromisoformat(pos_data['opened_at'].replace('Z', '+00:00'))
-        closed_at = datetime.fromisoformat(pos_data['closed_at'].replace('Z', '+00:00'))
-        if timezone.is_naive(opened_at):
-            opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
-        if timezone.is_naive(closed_at):
-            closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
-
-        # Get FX rate from position data if available
-        fx_rate_eur_to_asset = Decimal(str(pos_data['fx_rate_eur_to_asset'])) if pos_data.get('fx_rate_eur_to_asset') else None
-        invested_amount_asset_currency = Decimal(str(pos_data['invested_amount_asset_currency'])) if pos_data.get('invested_amount_asset_currency') else None
-
-        # CRITICAL: Always use txn.id for transaction_id, not pos_data.get('transaction_id')
-        # This ensures positions are linked to the correct transaction even if pos_data contains wrong transaction_id
-        transaction_id_to_use = txn.id  # Always use the transaction passed as parameter
-        
-        # Log first position to verify transaction ID
-        if idx == 0:
-            logger.info(f"DEBUG: Creating first position with transaction_id={transaction_id_to_use} "
-                       f"(txn.id={txn.id}, ctx.transaction_id={ctx.transaction_id}, "
-                       f"pos_data.transaction_id={pos_data.get('transaction_id', 'N/A')})")
-        
-        created.append(
-            Position.objects.create(
-                id=position_id,
-                client_id=ctx.client_id,
-                product_id=ctx.product_id,
-                transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
-                asset_id=pos_data.get('asset_id'),
-                opened_at=opened_at,
-                closed_at=closed_at,
-                invested_amount=Decimal(str(pos_data['invested_amount'])),
-                fx_rate_eur_to_asset=fx_rate_eur_to_asset,
-                invested_amount_asset_currency=invested_amount_asset_currency,
-                profit_loss=Decimal(str(pos_data['profit_loss'])),
-                period_index=pos_data['period_index'],
-                period_date=date.fromisoformat(pos_data['period_date']),
-                status='pending',
-            )
+    transaction_id_to_use = txn.id  # Always use the transaction passed as parameter
+    if positions_data:
+        logger.info(
+            f"DEBUG: Creating positions with transaction_id={transaction_id_to_use} "
+            f"(txn.id={txn.id}, ctx.transaction_id={ctx.transaction_id}, "
+            f"first.pos_data.transaction_id={positions_data[0].get('transaction_id', 'N/A')})"
         )
-        if (idx + 1) % 10 == 0:
-            logger.debug(f"DEBUG: Created {idx + 1}/{len(positions_data)} positions so far")
-    
+
+    def _build_instances() -> list[Position]:
+        instances: list[Position] = []
+        for pos_data in positions_data:
+            position_id = pos_data.get('id') or uuid.uuid4().hex[:12]
+
+            opened_at = datetime.fromisoformat(pos_data['opened_at'].replace('Z', '+00:00'))
+            closed_at = datetime.fromisoformat(pos_data['closed_at'].replace('Z', '+00:00'))
+            if timezone.is_naive(opened_at):
+                opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
+            if timezone.is_naive(closed_at):
+                closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
+
+            fx_rate_eur_to_asset = (
+                Decimal(str(pos_data['fx_rate_eur_to_asset']))
+                if pos_data.get('fx_rate_eur_to_asset')
+                else None
+            )
+            invested_amount_asset_currency = (
+                Decimal(str(pos_data['invested_amount_asset_currency']))
+                if pos_data.get('invested_amount_asset_currency')
+                else None
+            )
+
+            instances.append(
+                Position(
+                    id=position_id,
+                    client_id=ctx.client_id,
+                    product_id=ctx.product_id,
+                    transaction_id=transaction_id_to_use,
+                    asset_id=pos_data.get('asset_id'),
+                    opened_at=opened_at,
+                    closed_at=closed_at,
+                    invested_amount=Decimal(str(pos_data['invested_amount'])),
+                    fx_rate_eur_to_asset=fx_rate_eur_to_asset,
+                    invested_amount_asset_currency=invested_amount_asset_currency,
+                    profit_loss=Decimal(str(pos_data['profit_loss'])),
+                    period_index=pos_data['period_index'],
+                    period_date=date.fromisoformat(pos_data['period_date']),
+                    status='pending',
+                )
+            )
+        return instances
+
+    created: list[Position] = []
+    for attempt in range(3):
+        instances = _build_instances()
+        try:
+            created = Position.objects.bulk_create(instances, batch_size=500)
+            break
+        except IntegrityError:
+            logger.warning(
+                "IntegrityError during bulk_create of positions (attempt %s/3); regenerating ids and retrying.",
+                attempt + 1,
+            )
+            # Retry: regenerate ids for any instances that might collide.
+            for inst in instances:
+                inst.id = uuid.uuid4().hex[:12]
+            created = Position.objects.bulk_create(instances, batch_size=500)
+            break
+
     logger.info(f"DEBUG: Created {len(created)} positions for transaction {txn.id}")
     
     # Verify that all created positions have the correct transaction_id
@@ -4210,12 +4272,17 @@ def recalculate_positions_for_product_addition(
     dry_run: bool = False,
     positions_per_month_min: int | None = None,
     positions_per_month_max: int | None = None,
+    include_focus_transaction: bool = False,
 ) -> dict:
     """
     Recalculate pending positions after a fund addition.
     Similar to withdrawal recalculation but with capital increase (scale_factor > 1).
     Returns a structured execution summary.
     In strict=True mode, raises on partial/inconsistent execution.
+
+    include_focus_transaction: When True, include addition_txn (the transaction that
+    triggered the API call) in the regeneration loop. When False (default), that
+    transaction is excluded — legacy behaviour for non-UI callers.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -4237,6 +4304,7 @@ def recalculate_positions_for_product_addition(
         'generated_positions_preview_note': None,
         'errors': [],
         'status': 'skipped',
+        'include_focus_transaction': bool(include_focus_transaction),
     }
     savepoint_id = db_transaction.savepoint() if dry_run else None
 
@@ -4377,15 +4445,18 @@ def recalculate_positions_for_product_addition(
                 f"Deleted positions mismatch for product {product.id}: deleted={deleted_count}, expected={total_pending_count}."
             )
         
-        # Find all investment transactions (transfer_to = product_id) for the same client and product
-        # that are 'valide' and have positions (excluding the current addition transaction)
+        # Find all investment transactions (transfer_to = product_id) for the same client and product.
+        # By default exclude addition_txn (legacy). Manual UI regeneration passes include_focus_transaction=True
+        # so the transaction opened in the modal is regenerated too (e.g. sole investment on the product).
         investment_transactions = Transaction.objects.filter(
             client_id=addition_txn.client_id,
             type='transfert',
             transfer_to=product.id,
-            status__in=COMPLETED_TRANSACTION_STATUSES
-        ).exclude(id=addition_txn.id)  # Exclude the addition transaction itself
-        
+            status__in=COMPLETED_TRANSACTION_STATUSES,
+        ).order_by('datetime')
+        if not include_focus_transaction:
+            investment_transactions = investment_transactions.exclude(id=addition_txn.id)
+
         txn_count = investment_transactions.count()
         execution_summary['transaction_count'] = int(txn_count)
         logger.info(f"Recalculating positions for {txn_count} investment transactions "

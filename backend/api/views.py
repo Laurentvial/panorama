@@ -9358,6 +9358,12 @@ def transaction_generate_positions(request, client_id, transaction_id):
     if positive_only:
         avoid_losses = True
 
+    # Manual UI regeneration: include the transaction from the URL in addition recalculation loop
+    manual_regeneration = request.data.get('manual_regeneration', False)
+    if not isinstance(manual_regeneration, bool):
+        manual_regeneration = str(manual_regeneration).lower() in ('true', '1', 'yes', 'on')
+    include_focus_transaction = manual_regeneration
+
     # Parse positions per month override (optional)
     positions_per_month_min = request.data.get('positions_per_month_min')
     positions_per_month_max = request.data.get('positions_per_month_max')
@@ -9417,6 +9423,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 dry_run=True,
                 positions_per_month_min=min_val if positions_per_month_min is not None else None,
                 positions_per_month_max=max_val if positions_per_month_max is not None else None,
+                include_focus_transaction=include_focus_transaction,
             )
 
             deleted_total_expected = int(recalculation_preview.get('deleted_total') or 0)
@@ -9863,6 +9870,11 @@ def transaction_save_positions(request, client_id, transaction_id):
     period_summaries = request.data.get('period_summaries')
     if not isinstance(period_summaries, list):
         period_summaries = None
+
+    manual_regeneration = request.data.get('manual_regeneration', False)
+    if not isinstance(manual_regeneration, bool):
+        manual_regeneration = str(manual_regeneration).lower() in ('true', '1', 'yes', 'on')
+    include_focus_transaction = manual_regeneration
     
     try:
         if requires_addition_recalculation:
@@ -9963,6 +9975,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                     strict=True,
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
+                    include_focus_transaction=include_focus_transaction,
                 )
 
             response_data = {

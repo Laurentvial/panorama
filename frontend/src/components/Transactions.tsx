@@ -87,6 +87,7 @@ export function Transactions() {
     }
   };
 
+  /** Liste des transactions : ouvre le modal de création ou de régénération des positions (produit avec allocations). */
   const handleOpenRecoverPositionsModal = async (tx: any) => {
     const cid = tx.clientId;
     if (!cid) {
