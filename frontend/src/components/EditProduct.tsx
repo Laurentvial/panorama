@@ -15,6 +15,9 @@ import { DateInput } from './ui/date-input';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
 
+/** Hauteur fixe (px) du tableau des actifs liés — styles inline pour éviter tout souci de purge Tailwind. */
+const LINKED_ASSETS_TABLE_HEIGHT_PX = 360;
+
 export function EditProduct() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -1445,9 +1448,30 @@ export function EditProduct() {
                   </div>
 
                   {assetAllocations.length > 0 && (
-                    <div className="overflow-x-auto">
+                    <div
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white box-border"
+                      style={{
+                        height: LINKED_ASSETS_TABLE_HEIGHT_PX,
+                        maxHeight: LINKED_ASSETS_TABLE_HEIGHT_PX,
+                        overflow: 'hidden',
+                        minHeight: 0,
+                      }}
+                      aria-label="Liste des actifs liés (zone défilante)"
+                    >
+                      <div
+                        className="box-border"
+                        style={{
+                          height: '100%',
+                          maxHeight: '100%',
+                          minHeight: 0,
+                          overflowY: 'auto',
+                          overflowX: 'auto',
+                          overscrollBehaviorY: 'contain',
+                          WebkitOverflowScrolling: 'touch',
+                        }}
+                      >
                       <table className="w-full border-collapse">
-                        <thead>
+                        <thead className="sticky top-0 z-10 bg-white">
                           <tr className="border-b border-slate-200">
                             <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Logo</th>
                             <th className="text-left py-2 px-3 text-sm font-semibold text-accent-foreground">Nom</th>
@@ -1513,6 +1537,7 @@ export function EditProduct() {
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   )}
 
