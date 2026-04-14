@@ -54,7 +54,7 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
     '/reset-password': 'Réinitialisation mot de passe',
     '/platform': 'Tableau de bord',
     '/platform/portfolio': 'Portefeuille',
-    '/platform/funds': 'Fonds',
+    '/platform/funds': 'Mon solde',
     '/platform/discover': 'Découvrir',
     '/platform/useful-links': 'Liens utiles',
     '/platform/profile': 'Profil',

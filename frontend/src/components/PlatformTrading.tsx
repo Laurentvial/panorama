@@ -514,7 +514,7 @@ export function PlatformTrading() {
         <>
           <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
             <CardHeader>
-              <CardTitle>Fonds</CardTitle>
+              <CardTitle>Mon solde</CardTitle>
               <CardDescription>Solde disponible</CardDescription>
             </CardHeader>
             <CardContent>
@@ -536,38 +536,58 @@ export function PlatformTrading() {
             <CardContent>
               <form onSubmit={handleSubmit}>
                 {/* Tabulation style (same as Découvrir) */}
-                <div style={{ marginBottom: 16, borderBottom: `1px solid ${tabBorderColor}` }}>
-                  <div style={{ display: 'flex', gap: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <div style={{ marginBottom: 16, paddingBottom: 10, borderBottom: `1px solid ${tabBorderColor}` }}>
+                  <div style={{ display: 'flex', gap: 10, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     {[
                       ...(availablePaymentMethods.length > 0 ? [{ value: 'depot' as const, label: 'Dépôt' }] : []),
                       { value: 'retrait' as const, label: 'Retrait' },
                     ].map((tab) => (
+                      (() => {
+                        const isActive = movementType === tab.value;
+                        const isDeposit = tab.value === 'depot';
+                        const activeBg = isDeposit ? '#10b981' : '#ef4444';
+                        const activeBorder = isDeposit ? '#059669' : '#dc2626';
+                        const inactiveText = isDeposit ? '#065f46' : '#7f1d1d';
+                        const inactiveBg = isDeposit ? 'rgba(16, 185, 129, 0.10)' : 'rgba(239, 68, 68, 0.10)';
+                        const inactiveBorder = isDeposit ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)';
+
+                        return (
                       <button
                         key={tab.value}
                         type="button"
                         onClick={() => setMovementType(tab.value)}
                         style={{
-                          border: 'none',
-                          borderBottom: movementType === tab.value ? `2px solid ${tabActiveColor}` : '2px solid transparent',
-                          borderRadius: 0,
+                          border: `1px solid ${isActive ? activeBorder : inactiveBorder}`,
+                          borderBottom: `3px solid ${isActive ? activeBorder : 'transparent'}`,
+                          borderRadius: 9999,
                           padding: isMobile ? '10px 16px' : '12px 20px',
-                          backgroundColor: 'transparent',
-                          color: movementType === tab.value ? tabActiveColor : tabInactiveColor,
-                          fontWeight: movementType === tab.value ? 600 : 400,
+                          backgroundColor: isActive ? activeBg : inactiveBg,
+                          color: isActive ? '#ffffff' : inactiveText,
+                          fontWeight: isActive ? 800 : 700,
                           fontSize: isMobile ? 12 : 14,
                           cursor: 'pointer',
                           whiteSpace: 'nowrap',
                           transition: 'all 0.2s',
+                          boxShadow: isActive ? '0 8px 22px rgba(2, 6, 23, 0.14)' : 'none',
+                          transform: isActive ? 'translateY(-1px)' : 'translateY(0px)',
                         }}
                         onMouseEnter={(e) => {
-                          if (movementType !== tab.value) e.currentTarget.style.color = tabActiveColor;
+                          if (!isActive) {
+                            e.currentTarget.style.backgroundColor = isDeposit ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.16)';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                          }
                         }}
                         onMouseLeave={(e) => {
-                          if (movementType !== tab.value) e.currentTarget.style.color = tabInactiveColor;
+                          if (!isActive) {
+                            e.currentTarget.style.backgroundColor = inactiveBg;
+                            e.currentTarget.style.transform = 'translateY(0px)';
+                          }
                         }}
                       >
                         {tab.label}
                       </button>
+                        );
+                      })()
                     ))}
                   </div>
                 </div>

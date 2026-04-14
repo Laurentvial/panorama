@@ -99,6 +99,30 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
+  const getAllocationsFromProduct = (p: any): any[] => {
+    if (!p) return [];
+    const raw =
+      (p as any).assetAllocations ??
+      (p as any).asset_allocations ??
+      (p as any).assetAllocations?.results ??
+      (p as any).asset_allocations?.results ??
+      [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    if (raw && typeof raw === 'object') {
+      const values = Object.values(raw);
+      return Array.isArray(values) ? values : [];
+    }
+    return [];
+  };
+
   const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
 
   // Load transactions with pagination
@@ -179,10 +203,10 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     try {
       const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
       const p = res?.product || res || null;
-      const allocations = p?.assetAllocations || p?.asset_allocations || [];
-      return Array.isArray(allocations) && allocations.length > 0;
+      return getAllocationsFromProduct(p).length > 0;
     } catch {
-      return false;
+      const fromList = products.find((x: any) => String(x?.id) === String(productId));
+      return getAllocationsFromProduct(fromList).length > 0;
     }
   };
 

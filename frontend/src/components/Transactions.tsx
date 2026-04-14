@@ -48,6 +48,31 @@ export function Transactions() {
   const [recoverPositionModalTx, setRecoverPositionModalTx] = useState<any>(null);
   const [recoverPositionModalOpen, setRecoverPositionModalOpen] = useState(false);
 
+  const getAllocationsFromProduct = (p: any): any[] => {
+    if (!p) return [];
+    const raw =
+      (p as any).assetAllocations ??
+      (p as any).asset_allocations ??
+      (p as any).assetAllocations?.results ??
+      (p as any).asset_allocations?.results ??
+      [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    // Accept some non-standard shapes (object keyed by id, etc.)
+    if (raw && typeof raw === 'object') {
+      const values = Object.values(raw);
+      return Array.isArray(values) ? values : [];
+    }
+    return [];
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -80,10 +105,11 @@ export function Transactions() {
     try {
       const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
       const p = res?.product || res || null;
-      const allocations = p?.assetAllocations || p?.asset_allocations || [];
-      return Array.isArray(allocations) && allocations.length > 0;
+      return getAllocationsFromProduct(p).length > 0;
     } catch {
-      return false;
+      // Fallback: avoid false-negative when the detail endpoint fails (auth/network/cache).
+      const fromList = products.find((x: any) => String(x?.id) === String(productId));
+      return getAllocationsFromProduct(fromList).length > 0;
     }
   };
 

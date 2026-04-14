@@ -138,16 +138,39 @@ export function EditTransactionModal({
     clearApiCache('/api/transactions/?');
   };
 
+  const getAllocationsFromProduct = (p: any): any[] => {
+    if (!p) return [];
+    const raw =
+      (p as any).assetAllocations ??
+      (p as any).asset_allocations ??
+      (p as any).assetAllocations?.results ??
+      (p as any).asset_allocations?.results ??
+      [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    if (raw && typeof raw === 'object') {
+      const values = Object.values(raw);
+      return Array.isArray(values) ? values : [];
+    }
+    return [];
+  };
+
   const productHasAllocations = async (productId: any): Promise<boolean> => {
     if (!productId) return false;
     try {
       const res: any = await apiCall(`/api/products/${String(productId)}/`, { method: 'GET' });
       const p = res?.product || res || null;
-      const allocations = p?.assetAllocations || p?.asset_allocations || [];
-      return Array.isArray(allocations) && allocations.length > 0;
+      return getAllocationsFromProduct(p).length > 0;
     } catch {
-      // If we can't fetch the product, default to not showing the generation modal.
-      return false;
+      const fromList = products.find((x: any) => String(x?.id) === String(productId));
+      return getAllocationsFromProduct(fromList).length > 0;
     }
   };
 

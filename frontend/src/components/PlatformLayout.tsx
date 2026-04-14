@@ -266,7 +266,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     const items = [
       { id: 'dashboard', label: 'Tableau de bord', iconChar: '\uE88A', path: '/platform' },
       { id: 'portfolio', label: 'Portefeuille', iconChar: '\uE850', path: '/platform/portfolio' },
-      { id: 'funds', label: 'Fonds', iconChar: '\uE8A1', path: '/platform/funds' },
+      { id: 'funds', label: 'Mon solde', iconChar: '\uE8A1', path: '/platform/funds' },
       { id: 'discover', label: 'Découvrir', iconChar: '\uE87B', path: '/platform/discover' },
       { id: 'useful-links', label: 'Liens utiles', iconChar: '\uE157', path: '/platform/useful-links' },
     ];

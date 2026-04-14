@@ -1218,6 +1218,52 @@ export function ProductDetail() {
             {/* Note: To show charts for products linked to assets, we need to fetch the linked asset ID */}
             {/* For now, charts are only available when viewing assets directly */}
 
+            {product.description && (
+              <Card>
+                <CardHeader>
+                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Description</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {(() => {
+                    const limit = isMobile ? 280 : 520;
+                    const full = String(product.description || '');
+                    const shouldTruncate = full.length > limit;
+                    const text = isDescriptionExpanded ? full : getTruncatedText(full, limit);
+                    return (
+                      <>
+                        <div style={{ 
+                          fontSize: isMobile ? '13px' : '14px', 
+                          color: '#374151', 
+                          lineHeight: '1.6',
+                          whiteSpace: 'pre-wrap',
+                        }}>
+                          {text}
+                        </div>
+                        {shouldTruncate && (
+                          <button
+                            type="button"
+                            onClick={() => setIsDescriptionExpanded((v) => !v)}
+                            style={{
+                              marginTop: 10,
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              color: 'var(--platform-button-bg)',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            {isDescriptionExpanded ? 'Lire moins' : 'Lire plus'}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Profitability Simulator */}
             <Card>
               <CardHeader>
@@ -1477,53 +1523,6 @@ export function ProductDetail() {
                 </div>
               </CardContent>
             </Card>
-
-            {/* Description */}
-            {product.description && (
-              <Card>
-                <CardHeader>
-                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>Description</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {(() => {
-                    const limit = isMobile ? 280 : 520;
-                    const full = String(product.description || '');
-                    const shouldTruncate = full.length > limit;
-                    const text = isDescriptionExpanded ? full : getTruncatedText(full, limit);
-                    return (
-                      <>
-                        <div style={{ 
-                          fontSize: isMobile ? '13px' : '14px', 
-                          color: '#374151', 
-                          lineHeight: '1.6',
-                          whiteSpace: 'pre-wrap',
-                        }}>
-                          {text}
-                        </div>
-                        {shouldTruncate && (
-                          <button
-                            type="button"
-                            onClick={() => setIsDescriptionExpanded((v) => !v)}
-                            style={{
-                              marginTop: 10,
-                              background: 'transparent',
-                              border: 'none',
-                              padding: 0,
-                              color: 'var(--platform-button-bg)',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              textDecoration: 'underline',
-                            }}
-                          >
-                            {isDescriptionExpanded ? 'Lire moins' : 'Lire plus'}
-                          </button>
-                        )}
-                      </>
-                    );
-                  })()}
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Sidebar */}
