@@ -487,7 +487,13 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['tradingEnabled'] = bool(ret.get('trading_enabled', False))
         ret['bannerMessage'] = ret.get('banner_message', '') or ''
         ret['contractPreviewEnabled'] = bool(ret.get('contract_preview_enabled', True))
-        
+
+        pending_count = getattr(instance, 'pending_positions_count', None)
+        if pending_count is None:
+            from .models import Position
+            pending_count = Position.objects.filter(client=instance, status='pending').count()
+        ret['pendingPositionsCount'] = int(pending_count or 0)
+
         return ret
 
 

@@ -10,6 +10,32 @@ import '../styles/Modal.css';
 
 const API_TIMEOUT_MS = 120_000; // 2 minutes
 
+const GENERATION_HORIZON_MIN = 30;
+const GENERATION_HORIZON_MAX = 3650;
+
+/** Align with backend `_product_has_explicit_contract_duration`: positive integer in product.duration. */
+function productHasExplicitContractDuration(duration: unknown): boolean {
+  if (duration == null || !String(duration).trim()) return false;
+  const m = String(duration).match(/(\d+)/);
+  if (!m) return false;
+  const v = parseInt(m[1], 10);
+  return Number.isFinite(v) && v > 0;
+}
+
+/** Proration = effective_rate / base_rate when base ≠ 0 (aligns with backend; works for negative rates). */
+function deriveRateProrationFromPeriod(baseRatePct: string, effectiveRatePct: string): number {
+  const baseRateValue = parseFloat(baseRatePct);
+  const originalEffectiveRate = parseFloat(effectiveRatePct);
+  if (!Number.isFinite(baseRateValue) || !Number.isFinite(originalEffectiveRate) || baseRateValue === 0) {
+    return 1;
+  }
+  let proration = originalEffectiveRate / baseRateValue;
+  if (Math.abs(proration - 1) < 0.0001) {
+    proration = 1;
+  }
+  return proration;
+}
+
 interface PeriodRate {
   periodIndex: number;
   months: number;
@@ -147,6 +173,9 @@ export function PositionGenerationModal({
   const [isRecalculationSaved, setIsRecalculationSaved] = useState<boolean>(false);
   const [recalculationPreview, setRecalculationPreview] = useState<RecalculationExecutionPreview | null>(null);
   const [recalculationExecution, setRecalculationExecution] = useState<RecalculationExecutionSummary | null>(null);
+  const [generationHorizonDays, setGenerationHorizonDays] = useState<string>('30');
+  const generationHorizonDaysRef = useRef<string>('30');
+
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
     deleted_by_transaction: Record<string, number>;
@@ -189,6 +218,8 @@ export function PositionGenerationModal({
       setIsRecalculationSaved(false);
       setRecalculationPreview(null);
       setRecalculationExecution(null);
+      generationHorizonDaysRef.current = '30';
+      setGenerationHorizonDays('30');
 
       // For both investments and withdrawals, generate rates
       // For withdrawals, rates will be generated for the source product
@@ -225,9 +256,26 @@ export function PositionGenerationModal({
         product: transaction.product
       });
 
+      const product = transaction?.product;
+      const useHorizon =
+        Boolean(product) && !productHasExplicitContractDuration(product?.duration);
+      let parsedHorizon = parseInt(generationHorizonDaysRef.current.trim(), 10);
+      if (!Number.isFinite(parsedHorizon)) parsedHorizon = GENERATION_HORIZON_MIN;
+      parsedHorizon = Math.min(
+        GENERATION_HORIZON_MAX,
+        Math.max(GENERATION_HORIZON_MIN, parsedHorizon)
+      );
+      const ratesRequestBody = useHorizon
+        ? { generation_horizon_days: parsedHorizon }
+        : {};
+
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/generate-rates/`,
-        { method: 'POST', signal: controller.signal }
+        {
+          method: 'POST',
+          body: JSON.stringify(ratesRequestBody),
+          signal: controller.signal,
+        }
       );
       
       console.log('PositionGenerationModal - Response from generate-rates:', response);
@@ -255,9 +303,10 @@ export function PositionGenerationModal({
       console.log('PositionGenerationModal - Parsed rates data:', ratesData);
       
       if (!ratesData || ratesData.length === 0) {
-        const errorMsg = 'Aucune période trouvée pour cette transaction. Vérifiez que :\n' +
+        const errorMsg =
+          'Aucune période trouvée pour cette transaction. Vérifiez que :\n' +
           '- La transaction est un investissement (transfert vers un produit)\n' +
-          '- Le produit a une durée configurée\n' +
+          '- Pour un produit sans durée, l’horizon de génération (jours) est suffisant\n' +
           '- Le capital investi est supérieur à 0\n' +
           '- Il y a des jours de trading entre la date de début et la fin';
         console.error('PositionGenerationModal - No rates returned:', errorMsg);
@@ -323,11 +372,11 @@ export function PositionGenerationModal({
   };
 
   const handleRateChange = (periodIndex: number, value: string) => {
-    const numValue = parseFloat(value);
-    if (!isNaN(numValue) && numValue >= 0) {
-      setEditedRates({ ...editedRates, [periodIndex]: value });
-    } else if (value === '') {
+    const trimmed = value.trim();
+    if (trimmed === '') {
       setEditedRates({ ...editedRates, [periodIndex]: '' });
+    } else if (/^-?\d*\.?\d*$/.test(trimmed)) {
+      setEditedRates({ ...editedRates, [periodIndex]: trimmed });
     }
   };
 
@@ -355,14 +404,14 @@ export function PositionGenerationModal({
         
         // Use edited rate if available and valid, otherwise fall back to baseRatePct
         let rateValue: number;
-        if (rateStr !== undefined && rateStr !== '' && !isNaN(parseFloat(rateStr))) {
+        if (rateStr !== undefined && rateStr !== '' && Number.isFinite(parseFloat(rateStr))) {
           rateValue = parseFloat(rateStr);
         } else {
           // Fallback to original baseRatePct
           rateValue = parseFloat(rate.baseRatePct);
         }
         
-        if (isNaN(rateValue) || rateValue < 0) {
+        if (!Number.isFinite(rateValue)) {
           clearTimeout(timeoutId);
           toast.error(`Le taux pour la période ${periodIdx + 1} est invalide`);
           setStep('review-rates');
@@ -381,6 +430,17 @@ export function PositionGenerationModal({
         positive_only: positiveGainsOnly,
         manual_regeneration: true,
       };
+
+      const productForHorizon = transaction?.product;
+      const useHorizonForPositions =
+        Boolean(productForHorizon) &&
+        !productHasExplicitContractDuration(productForHorizon?.duration);
+      if (useHorizonForPositions) {
+        let hz = parseInt(generationHorizonDaysRef.current.trim(), 10);
+        if (!Number.isFinite(hz)) hz = GENERATION_HORIZON_MIN;
+        hz = Math.min(GENERATION_HORIZON_MAX, Math.max(GENERATION_HORIZON_MIN, hz));
+        requestBody.generation_horizon_days = hz;
+      }
       
       // Add positions per month override if provided
       if (positionsPerMonthMin.trim() !== '' || positionsPerMonthMax.trim() !== '') {
@@ -515,16 +575,7 @@ export function PositionGenerationModal({
           ? parseFloat(editedRate) 
           : parseFloat(rate.baseRatePct);
         
-        // Calculate proration factor
-        const baseRateValue = parseFloat(rate.baseRatePct);
-        const originalEffectiveRate = parseFloat(rate.ratePct);
-        let proration = 1;
-        if (baseRateValue > 0 && originalEffectiveRate > 0) {
-          proration = originalEffectiveRate / baseRateValue;
-          if (Math.abs(proration - 1) < 0.0001) {
-            proration = 1;
-          }
-        }
+        const proration = deriveRateProrationFromPeriod(rate.baseRatePct, rate.ratePct);
         
         // Calculate target profit with edited rate
         const capitalBase = parseFloat(rate.capitalBase);
@@ -645,6 +696,8 @@ export function PositionGenerationModal({
     setIsRecalculationSaved(false);
     setRecalculationPreview(null);
     setRecalculationExecution(null);
+    generationHorizonDaysRef.current = '30';
+    setGenerationHorizonDays('30');
     onClose();
   };
 
@@ -695,12 +748,17 @@ export function PositionGenerationModal({
 
   const cumulativeInterestTakenIntoAccount = Boolean(selectedInterestPeriod);
 
+  const useHorizonForProduct = Boolean(
+    transaction?.product &&
+      !productHasExplicitContractDuration(transaction.product.duration)
+  );
+
   const calculateTargetProfit = (rate: PeriodRate, editedRate: string | undefined): string => {
     // Use edited rate if available and valid, otherwise use baseRatePct
     const rateStr = editedRate !== undefined && editedRate !== '' ? editedRate : rate.baseRatePct;
     const rateValue = parseFloat(rateStr);
     
-    if (isNaN(rateValue) || rateValue < 0) {
+    if (!Number.isFinite(rateValue)) {
       return formatCurrency('0');
     }
     
@@ -710,23 +768,7 @@ export function PositionGenerationModal({
       return formatCurrency('0');
     }
     
-    // Calculate proration factor
-    // The backend calculates: effective_rate = base_rate * proration
-    // Where proration = step_months / profit_period_months
-    // We can derive proration from: proration = effective_rate / base_rate
-    const baseRateValue = parseFloat(rate.baseRatePct);
-    const originalEffectiveRate = parseFloat(rate.ratePct);
-    let proration = 1;
-    
-    if (baseRateValue > 0 && originalEffectiveRate > 0) {
-      // Proration = effective_rate / base_rate
-      proration = originalEffectiveRate / baseRateValue;
-      // If proration is very close to 1 (within 0.0001), treat it as exactly 1
-      // This avoids floating point precision issues that cause 1999.99 instead of 2000.00
-      if (Math.abs(proration - 1) < 0.0001) {
-        proration = 1;
-      }
-    }
+    const proration = deriveRateProrationFromPeriod(rate.baseRatePct, rate.ratePct);
     
     // Calculate target profit: capitalBase * (editedRate / 100) * proration
     // This matches the backend calculation: capital_base * effective_rate_pct / 100
@@ -915,6 +957,54 @@ export function PositionGenerationModal({
 
           {step === 'review-rates' && (
             <div>
+              {useHorizonForProduct && (
+                <div
+                  style={{
+                    padding: '14px',
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #86efac',
+                    borderRadius: '8px',
+                    marginBottom: '16px',
+                    fontSize: '14px',
+                  }}
+                >
+                  <Label htmlFor="generation-horizon-days" style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>
+                    Horizon de génération (jours)
+                  </Label>
+                  <Input
+                    id="generation-horizon-days"
+                    type="number"
+                    min={GENERATION_HORIZON_MIN}
+                    max={GENERATION_HORIZON_MAX}
+                    value={generationHorizonDays}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      generationHorizonDaysRef.current = v;
+                      setGenerationHorizonDays(v);
+                    }}
+                    style={{ maxWidth: '200px', marginBottom: '8px' }}
+                  />
+                  <p style={{ color: '#166534', marginBottom: '12px', lineHeight: 1.5 }}>
+                    Ce produit n’a pas de durée contractuelle fixe. Indiquez sur combien de jours générer les
+                    périodes (ex. 270 jours pour environ neuf « mois » de 30 jours, utile avec une rentabilité
+                    trimestrielle). Plage autorisée : {GENERATION_HORIZON_MIN} à {GENERATION_HORIZON_MAX} jours.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      let hz = parseInt(generationHorizonDaysRef.current.trim(), 10);
+                      if (!Number.isFinite(hz)) hz = GENERATION_HORIZON_MIN;
+                      hz = Math.min(GENERATION_HORIZON_MAX, Math.max(GENERATION_HORIZON_MIN, hz));
+                      generationHorizonDaysRef.current = String(hz);
+                      setGenerationHorizonDays(String(hz));
+                      generateRates();
+                    }}
+                  >
+                    Régénérer les taux avec cet horizon
+                  </Button>
+                </div>
+              )}
               {rates.length === 0 ? (
                 <div style={{ 
                   padding: '20px', 
@@ -936,7 +1026,11 @@ export function PositionGenerationModal({
                         <p style={{ marginBottom: '4px' }}>Vérifiez que :</p>
                         <ul style={{ marginLeft: '20px', marginTop: '8px', marginBottom: '0' }}>
                           <li>La transaction est un investissement (transfert vers un produit)</li>
-                          <li>Le produit a une durée configurée</li>
+                          <li>
+                            {useHorizonForProduct
+                              ? 'L’horizon de génération (jours) est cohérent avec la rentabilité du produit'
+                              : 'Le produit a une durée configurée (ou un horizon de génération suffisant)'}
+                          </li>
                           <li>Le capital investi est supérieur à 0</li>
                           <li>Il y a des jours de trading entre la date de début et la fin</li>
                         </ul>
@@ -975,7 +1069,6 @@ export function PositionGenerationModal({
                           <Input
                             type="number"
                             step="0.01"
-                            min="0"
                             value={editedRates[rate.periodIndex] || rate.baseRatePct}
                             onChange={(e) => handleRateChange(rate.periodIndex, e.target.value)}
                             style={{ width: '100px' }}

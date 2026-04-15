@@ -1,0 +1,47 @@
+/* Origine logs plateforme — couleurs explicites (hors utilitaires Tailwind partiels du build) */
+
+.platform-log-origin-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.platform-log-origin-badge--client {
+  background: #d1fae5;
+  border-color: #059669;
+  color: #064e3b;
+}
+
+.platform-log-origin-badge--conseiller {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #475569;
+}
+
+.platform-log-origin-badge--unknown {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.platform-log-origin-row--client {
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.platform-log-origin-row--client:hover {
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.platform-log-origin-row--conseiller {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.platform-log-origin-row--conseiller:hover {
+  background: rgba(148, 163, 184, 0.2);
+}

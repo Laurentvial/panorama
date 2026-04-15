@@ -857,7 +857,7 @@ class ClientVerificationConfig(models.Model):
     
     # Configuration des étapes (1-8)
     # Structure: {"step_1": {"enabled": true, "questions": {"firstName": true, "middleName": false, ...}}, ...}
-    # Par défaut, toutes les étapes sont activées si non spécifié
+    # Étapes 3–5 actives et 6–7 inactives par défaut côté API (voir defaults get_or_create).
     steps_config = models.JSONField(default=dict, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)

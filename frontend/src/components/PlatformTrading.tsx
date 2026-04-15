@@ -36,7 +36,6 @@ export function PlatformTrading() {
   const [withdrawBankName, setWithdrawBankName] = useState('');
   const [withdrawNote, setWithdrawNote] = useState('');
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
-  const [depositSelectedClientRibId, setDepositSelectedClientRibId] = useState<string | null>(null);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [pendingAmount, setPendingAmount] = useState<number>(0);
   const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
@@ -79,18 +78,6 @@ export function PlatformTrading() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transferDialogOpen, clientRibs.length, pendingAmount]);
-
-  useEffect(() => {
-    if (!transferDialogOpen || transferSuccess) return;
-    if (clientRibs.length === 0) {
-      setDepositSelectedClientRibId(null);
-      return;
-    }
-    setDepositSelectedClientRibId((prev) => {
-      if (prev && clientRibs.some((c: any) => c.id === prev)) return prev;
-      return clientRibs[0].id;
-    });
-  }, [transferDialogOpen, transferSuccess, clientRibs]);
 
   // Pre-fill withdrawal form with client's RIB data when dialog opens
   useEffect(() => {
@@ -141,7 +128,9 @@ export function PlatformTrading() {
     if (!currentUser?.id) return;
     try {
       const ribsResponse = await apiCall(`/api/clients/${currentUser.id}/ribs/`);
-      setClientRibs((ribsResponse as any).ribs || []);
+      const raw = (ribsResponse as any).ribs || [];
+      // Un seul RIB affiché côté plateforme (aligné API client ; sécurité si données anciennes).
+      setClientRibs(Array.isArray(raw) ? raw.slice(0, 1) : []);
     } catch (error) {
       console.error('Error loading client RIBs:', error);
       setClientRibs([]);
@@ -356,20 +345,12 @@ export function PlatformTrading() {
     if (clientRibs.length === 0) {
       return 'Dépôt de fonds (Virement bancaire)';
     }
-    const selected =
-      clientRibs.length === 1
-        ? clientRibs[0]
-        : clientRibs.find((c: any) => c.id === depositSelectedClientRibId) || clientRibs[0];
+    const selected = clientRibs[0];
     const m = (selected?.rib?.motif || '').trim();
     return m || 'Dépôt de fonds (Virement bancaire)';
   };
 
-  const selectedDepositClientRib =
-    clientRibs.length === 0
-      ? null
-      : clientRibs.length === 1
-        ? clientRibs[0]
-        : clientRibs.find((c: any) => c.id === depositSelectedClientRibId) || clientRibs[0];
+  const selectedDepositClientRib = clientRibs.length === 0 ? null : clientRibs[0];
 
   const depositWireMotifMissing =
     clientRibs.length > 0 && !(selectedDepositClientRib?.rib?.motif || '').trim();
@@ -785,7 +766,6 @@ export function PlatformTrading() {
                 if (!open) {
                   setTransferSuccess(null);
                   setPendingAmount(0);
-                  setDepositSelectedClientRibId(null);
                 }
               }
             }}
@@ -853,7 +833,6 @@ export function PlatformTrading() {
                         setTransferDialogOpen(false);
                         setTransferSuccess(null);
                         setPendingAmount(0);
-                        setDepositSelectedClientRibId(null);
                       }}
                       style={{ width: '100%' }}
                     >
@@ -903,50 +882,23 @@ export function PlatformTrading() {
                             Montant à virer : {formatAmount(pendingAmount, 'EUR')}
                           </div>
                           <div style={{ fontSize: 13, color: '#6b7280' }}>
-                            Veuillez effectuer le virement depuis votre compte bancaire en utilisant le RIB ci-dessous
-                            {clientRibs.length > 1 ? 's' : ''}.
-                            {clientRibs.length > 1 && (
-                              <span> Indiquez le RIB utilisé en le sélectionnant.</span>
-                            )}
+                            Veuillez effectuer le virement depuis votre compte bancaire en utilisant le RIB ci-dessous.
                           </div>
                         </div>
 
                         <div style={{ display: 'grid', gap: 12 }}>
-                          {clientRibs.map((clientRib: any, index: number) => {
+                          {clientRibs.map((clientRib: any) => {
                             const rib = clientRib.rib;
                             return (
-                              <div key={clientRib.id} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 6 }}>
-                                {clientRibs.length > 1 && (
-                                  <label
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'flex-start',
-                                      gap: 10,
-                                      cursor: 'pointer',
-                                      marginBottom: 10,
-                                      fontWeight: 600,
-                                      fontSize: 13,
-                                      color: '#374151',
-                                    }}
-                                  >
-                                    <input
-                                      type="radio"
-                                      name="depositClientRib"
-                                      checked={depositSelectedClientRibId === clientRib.id}
-                                      onChange={() => setDepositSelectedClientRibId(clientRib.id)}
-                                      style={{ marginTop: 3, flexShrink: 0 }}
-                                    />
-                                    <span>
-                                      RIB {index + 1}
-                                      {rib.name ? ` — ${rib.name}` : ''}
-                                    </span>
-                                  </label>
-                                )}
-                                {clientRibs.length === 1 && rib.name && (
-                                  <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 13, color: '#374151' }}>
-                                    {rib.name}
-                                  </div>
-                                )}
+                              <div
+                                key={clientRib.id}
+                                style={{
+                                  padding: 12,
+                                  border: '2px solid #bfdbfe',
+                                  borderRadius: 6,
+                                  backgroundColor: '#f8fafc',
+                                }}
+                              >
                                 <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <span style={{ fontWeight: 500, color: '#6b7280' }}>Titulaire du compte :</span>
@@ -1039,7 +991,6 @@ export function PlatformTrading() {
                           onClick={() => {
                             setTransferDialogOpen(false);
                             setPendingAmount(0);
-                            setDepositSelectedClientRibId(null);
                           }}
                         >
                           Annuler
@@ -1050,7 +1001,7 @@ export function PlatformTrading() {
                           disabled={submitting || depositWireMotifMissing} 
                           onClick={() => confirmTransfer()}
                         >
-                          {submitting ? 'Traitement...' : 'J\'ai effectué le virement'}
+                          {submitting ? 'Traitement...' : 'Valider ma demande de versement'}
                         </Button>
                       </DialogFooter>
                     </>

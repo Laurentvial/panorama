@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { apiCall } from '../utils/api';
+import {
+  getPlatformLogActorKind,
+  getPlatformLogOriginPresentation,
+} from '../utils/platformLogOrigin';
 import LoadingIndicator from './LoadingIndicator';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import '../styles/PlatformLogOrigin.css';
 
 interface ClientPlatformLogsTabProps {
   clientId: string;
@@ -77,6 +82,7 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
 export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewerIp, setViewerIp] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [clientDisplayName, setClientDisplayName] = useState<string>('');
 
@@ -91,6 +97,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
       const data = await apiCall(`/api/clients/${clientId}/platform-logs/?page=${page}&limit=50`);
       const logs = (data as any).platformLogs || [];
       setPlatformLogs(logs);
+      setViewerIp((data as any).viewerIp ?? null);
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
       }
@@ -228,6 +235,14 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     <Card>
       <CardHeader>
         <CardTitle>Logs plateforme</CardTitle>
+        <p className="text-sm text-slate-600 mt-1 max-w-3xl">
+          La colonne <strong>Origine</strong> compare l&apos;IP du log à votre IP CRM actuelle :{' '}
+          <span className="text-slate-600 font-medium">même IP</span> → conseiller (gris) ;{' '}
+          <span className="text-green-600 font-medium">IP différente</span> → client (vert).
+          {viewerIp ? (
+            <span className="block mt-1 text-xs text-slate-500">Votre IP (session CRM) : {viewerIp}</span>
+          ) : null}
+        </p>
       </CardHeader>
       <CardContent>
         {loading && platformLogs.length === 0 ? (
@@ -244,14 +259,17 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
                     <TableHead className="w-[190px]">Date</TableHead>
                     <TableHead className="w-[340px]">Action</TableHead>
                     <TableHead>Détails</TableHead>
+                    <TableHead className="w-[120px]">Origine</TableHead>
                     <TableHead className="w-[170px]">IP</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {platformLogs.map((log) => {
                     const detailsSummary = getActionDetailsSummary(log);
+                    const originKind = getPlatformLogActorKind(log.ipAddress, viewerIp);
+                    const origin = getPlatformLogOriginPresentation(originKind);
                     return (
-                      <TableRow key={log.id}>
+                      <TableRow key={log.id} className={origin.rowClassName || undefined}>
                         <TableCell className="text-xs text-slate-600 whitespace-nowrap">
                           {formatDate(log.createdAt)}
                         </TableCell>
@@ -262,6 +280,9 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
                           <span className="block max-w-[520px] truncate" title={detailsSummary}>
                             {detailsSummary}
                           </span>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap align-middle">
+                          <span className={origin.className}>{origin.label}</span>
                         </TableCell>
                         <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                           {log.ipAddress || '-'}

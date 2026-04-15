@@ -422,6 +422,28 @@ def _distribute_pnl_total(target_total: Decimal, amounts: list[Decimal]) -> list
     return parts
 
 
+def _proportional_pnl_parts(target_total: Decimal, amounts: list[Decimal]) -> list[Decimal]:
+    """
+    Split target_total across amounts by invested weight; last slot absorbs rounding drift.
+    """
+    n = len(amounts)
+    if n == 0:
+        return []
+    if n == 1:
+        return [target_total.quantize(Decimal('0.01'))]
+    total_amt = sum(amounts)
+    if total_amt <= 0:
+        return [Decimal('0.00')] * n
+    acc = Decimal('0')
+    parts: list[Decimal] = []
+    for i in range(n - 1):
+        p = (target_total * amounts[i] / total_amt).quantize(Decimal('0.01'))
+        parts.append(p)
+        acc += p
+    parts.append((target_total - acc).quantize(Decimal('0.01')))
+    return parts
+
+
 def _distribute_pnl_total_capped(
     target_total: Decimal,
     amounts: list[Decimal],
@@ -436,6 +458,9 @@ def _distribute_pnl_total_capped(
     If avoid_losses=True, all positions will have profit_loss >= 0 (no losses).
     If positive_only=True, each position has profit_loss >= 0.01 (strictly winning trades);
     implies avoid_losses. May raise ValueError if the period profit or caps make that impossible.
+
+    When target_total < 0 (e.g. negative profitability for the period), splits losses
+    proportionally to invested amounts instead of using the random mix used for positive targets.
     """
     n = len(amounts)
     if n == 0:
@@ -558,6 +583,11 @@ def _distribute_pnl_total_capped(
                 acc += p
             parts.append((target_total - acc).quantize(Decimal('0.01')))
         parts = [max(Decimal('0'), min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
+    elif target_total == 0:
+        parts = [Decimal('0.00')] * n
+    elif target_total < 0:
+        parts = _proportional_pnl_parts(target_total, amounts)
+        parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
     else:
         parts = _distribute_pnl_total(target_total, amounts)
         parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
@@ -583,6 +613,13 @@ def _distribute_pnl_total_capped(
         else:
             need = -drift
             pool = [(i, parts[i]) for i in range(n) if parts[i] >= step]
+            if not pool:
+                # All losses or zeros: increase loss magnitude toward per-trade floors (-caps)
+                pool = [
+                    (i, (parts[i] - (-caps[i])).quantize(Decimal('0.01')))
+                    for i in range(n)
+                    if (parts[i] - (-caps[i])) >= step
+                ]
             if not pool:
                 break
             ts = sum(s for _, s in pool)
@@ -1910,14 +1947,16 @@ def generate_rates_for_investment(
     txn: Transaction,
     *,
     custom_rates: dict[int, Decimal] | None = None,
+    generation_horizon_days: int | None = None,
 ) -> list[dict]:
     """
     Generate profitability rates for each period without creating positions.
     Returns a list of period summaries with rates that can be edited.
-    
+
     custom_rates: Optional dict mapping period_index to custom rate percentage
+    generation_horizon_days: When the product has no explicit duration, use this window (days).
     """
-    ctx = build_investment_context(txn)
+    ctx = build_investment_context(txn, generation_horizon_days=generation_horizon_days)
     if ctx is None:
         import logging
         logger = logging.getLogger(__name__)
@@ -1936,18 +1975,7 @@ def generate_rates_for_investment(
     if product is not None:
         has_allocations = ProductAssetAllocation.objects.filter(product_id=product.id).exists()
 
-    # Use subscription_date for contract start when available (from create transaction modal)
-    contract_start = _get_contract_start_date(txn)
-    tz = timezone.get_current_timezone()
-    if contract_start:
-        start_dt = timezone.make_aware(
-            datetime.combine(contract_start, datetime.min.time()),
-            tz
-        )
-    else:
-        start_dt = txn.datetime or timezone.now()
-    if timezone.is_naive(start_dt):
-        start_dt = timezone.make_aware(start_dt, tz)
+    start_dt = _position_generation_window_start_dt(txn)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -2079,6 +2107,7 @@ def generate_positions_with_rates(
     save_to_db: bool = False,
     avoid_losses: bool = False,
     positive_only: bool = False,
+    generation_horizon_days: int | None = None,
 ) -> list[Position | dict]:
     """
     Generate positions using custom rates without saving to database (unless save_to_db=True).
@@ -2086,9 +2115,10 @@ def generate_positions_with_rates(
     custom_rates: Dict mapping period_index to rate percentage (before proration)
     avoid_losses: If True, only generate positions with profit_loss >= 0 (no losses)
     positive_only: If True, each trade has profit_loss >= 0.01 (implies avoid_losses)
+    generation_horizon_days: When the product has no explicit duration, use this window (days).
     Returns list of Position objects (if saved) or dict representations (if not saved)
     """
-    ctx = build_investment_context(txn)
+    ctx = build_investment_context(txn, generation_horizon_days=generation_horizon_days)
     if ctx is None:
         return []
 
@@ -2109,9 +2139,7 @@ def generate_positions_with_rates(
         if allocations_list:
             allocations = allocations_list
 
-    start_dt = txn.datetime or timezone.now()
-    if timezone.is_naive(start_dt):
-        start_dt = timezone.make_aware(start_dt, timezone.get_current_timezone())
+    start_dt = _position_generation_window_start_dt(txn)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -3410,6 +3438,43 @@ def _parse_days(duration: str | None) -> int:
         return 30
 
 
+GENERATION_HORIZON_MIN_DAYS = 30
+GENERATION_HORIZON_MAX_DAYS = 3650
+
+
+def _product_has_explicit_contract_duration(duration_str: str | None) -> bool:
+    """True when product.duration carries a positive integer (months legacy or days)."""
+    if duration_str is None or not str(duration_str).strip():
+        return False
+    m = _DURATION_RE.search(str(duration_str))
+    if not m:
+        return False
+    try:
+        return int(m.group(1)) > 0
+    except Exception:
+        return False
+
+
+def _clamp_generation_horizon_days(days: int) -> int:
+    return max(GENERATION_HORIZON_MIN_DAYS, min(int(days), GENERATION_HORIZON_MAX_DAYS))
+
+
+def _position_generation_window_start_dt(txn: Transaction) -> datetime:
+    """Same start as generate_rates_for_investment / modal preview (contract date or txn datetime)."""
+    contract_start = _get_contract_start_date(txn)
+    tz = timezone.get_current_timezone()
+    if contract_start:
+        start_dt = timezone.make_aware(
+            datetime.combine(contract_start, datetime.min.time()),
+            tz,
+        )
+    else:
+        start_dt = txn.datetime or timezone.now()
+    if timezone.is_naive(start_dt):
+        start_dt = timezone.make_aware(start_dt, tz)
+    return start_dt
+
+
 def _to_decimal(value) -> Decimal | None:
     if value is None or value == '':
         return None
@@ -3463,7 +3528,11 @@ def _get_fx_rate_eur_to_ccy(
     return None
 
 
-def build_investment_context(txn: Transaction) -> InvestmentContext | None:
+def build_investment_context(
+    txn: Transaction,
+    *,
+    generation_horizon_days: int | None = None,
+) -> InvestmentContext | None:
     """
     Build the context needed to generate monthly Positions.
 
@@ -3534,18 +3603,35 @@ def build_investment_context(txn: Transaction) -> InvestmentContext | None:
         )
 
     duration_days = _parse_days(duration_str)
-    
+
     # Log duration resolution for debugging
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Duration resolution for transaction {txn.id}: "
-                f"product.duration={product.duration}, duration_days={duration_days}, "
-                f"subscription_details.duration={txn.subscription_details.get('duration') if isinstance(txn.subscription_details, dict) else 'N/A'}, "
-                f"subscription_duration={getattr(txn, 'subscription_duration', 'N/A')}")
-    
+    logger.info(
+        f"Duration resolution for transaction {txn.id}: "
+        f"product.duration={product.duration}, parsed_duration_days={duration_days}, "
+        f"subscription_details.duration={txn.subscription_details.get('duration') if isinstance(txn.subscription_details, dict) else 'N/A'}, "
+        f"subscription_duration={getattr(txn, 'subscription_duration', 'N/A')}"
+    )
+
+    explicit_duration = _product_has_explicit_contract_duration(duration_str)
+    if generation_horizon_days is not None and explicit_duration:
+        logger.info(
+            f"Ignoring generation_horizon_days={generation_horizon_days} for transaction {txn.id}: "
+            f"product has explicit duration {product.duration!r}"
+        )
+    elif generation_horizon_days is not None and not explicit_duration:
+        duration_days = _clamp_generation_horizon_days(int(generation_horizon_days))
+        logger.info(
+            f"Using generation_horizon_days={duration_days} for transaction {txn.id} "
+            f"(product has no explicit duration)"
+        )
+
     # Ensure we have a valid duration (at least 30 days)
     if duration_days <= 0:
-        logger.warning(f"Invalid duration ({duration_days} days) for transaction {txn.id}. Using default of 30 days.")
+        logger.warning(
+            f"Invalid duration ({duration_days} days) for transaction {txn.id}. Using default of 30 days."
+        )
         duration_days = 30
     duration_months_approx = max(1, duration_days // 30)
 

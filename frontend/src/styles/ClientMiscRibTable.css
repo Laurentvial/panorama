@@ -1,0 +1,46 @@
+/* Boutons radio natifs (colonne Choix) */
+.client-misc-rib-radio {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.client-misc-rib-radio:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.75);
+  outline-offset: 2px;
+}
+
+/* Ligne RIB / option « Aucun » : mise en évidence au focus clavier ou focus dans la ligne */
+.client-misc-rib-row {
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.client-misc-rib-row:focus-within {
+  background-color: rgba(59, 130, 246, 0.1);
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.45);
+}
+
+.client-misc-rib-row:hover {
+  background-color: rgba(248, 250, 252, 0.95);
+}
+
+/* Orphan rows keep the amber palette on hover (generic row hover is slate). */
+.client-misc-rib-row--orphan:hover {
+  background-color: rgba(251, 191, 36, 0.1);
+}
+
+.client-misc-rib-row:focus-within:hover {
+  background-color: rgba(59, 130, 246, 0.12);
+}
+
+.client-misc-rib-row--orphan:focus-within {
+  background-color: rgba(251, 191, 36, 0.12);
+  box-shadow: inset 0 0 0 2px rgba(217, 119, 6, 0.45);
+}
+
+.client-misc-rib-row--orphan:focus-within:hover {
+  background-color: rgba(251, 191, 36, 0.16);
+}

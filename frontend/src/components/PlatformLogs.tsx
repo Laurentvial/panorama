@@ -6,10 +6,15 @@ import { DateInputWithCalendar } from './ui/date-input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { apiCall } from '../utils/api';
+import {
+  getPlatformLogActorKind,
+  getPlatformLogOriginPresentation,
+} from '../utils/platformLogOrigin';
 import LoadingIndicator from './LoadingIndicator';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import '../styles/PageHeader.css';
+import '../styles/PlatformLogOrigin.css';
 
 interface PlatformLog {
   id: string;
@@ -116,6 +121,7 @@ export function PlatformLogs() {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewerIp, setViewerIp] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [filters, setFilters] = useState({
     clientId: 'all',
@@ -155,6 +161,7 @@ export function PlatformLogs() {
       const data = await apiCall(`/api/platform-logs/?${params.toString()}`);
       const logs = (data as any).platformLogs || [];
       setPlatformLogs(logs);
+      setViewerIp((data as any).viewerIp ?? null);
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
       }
@@ -340,6 +347,15 @@ export function PlatformLogs() {
       <Card>
         <CardHeader>
           <CardTitle>Logs</CardTitle>
+          <p className="text-sm text-slate-600 mt-1 max-w-3xl">
+            La colonne <strong>Origine</strong> compare l&apos;adresse IP enregistrée dans le log à votre IP CRM
+            actuelle : <span className="text-slate-600 font-medium">même IP</span> → accès depuis votre poste /
+            réseau (conseiller, étiquette grise) ; <span className="text-green-600 font-medium">IP différente</span>{' '}
+            → accès distant (client, étiquette verte).
+            {viewerIp ? (
+              <span className="block mt-1 text-xs text-slate-500">Votre IP (session CRM) : {viewerIp}</span>
+            ) : null}
+          </p>
         </CardHeader>
         <CardContent>
           {loading && platformLogs.length === 0 ? (
@@ -357,14 +373,17 @@ export function PlatformLogs() {
                       <TableHead className="w-[180px]">Client</TableHead>
                       <TableHead className="w-[280px]">Action</TableHead>
                       <TableHead>Détails</TableHead>
+                      <TableHead className="w-[120px]">Origine</TableHead>
                       <TableHead className="w-[140px]">IP</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {platformLogs.map((log) => {
                       const detailsSummary = getActionDetailsSummary(log);
+                      const originKind = getPlatformLogActorKind(log.ipAddress, viewerIp);
+                      const origin = getPlatformLogOriginPresentation(originKind);
                       return (
-                        <TableRow key={log.id}>
+                        <TableRow key={log.id} className={origin.rowClassName || undefined}>
                           <TableCell className="text-xs text-slate-600 whitespace-nowrap">
                             {formatDate(log.createdAt)}
                           </TableCell>
@@ -378,6 +397,9 @@ export function PlatformLogs() {
                             <span className="block max-w-[400px] truncate" title={detailsSummary}>
                               {detailsSummary}
                             </span>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap align-middle">
+                            <span className={origin.className}>{origin.label}</span>
                           </TableCell>
                           <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                             {log.ipAddress || '-'}

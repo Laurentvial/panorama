@@ -442,11 +442,11 @@ export function PlatformAccountVerification() {
 
       ...prev,
 
-      firstName: prev.firstName || firstName,
+      firstName,
 
-      lastName: prev.lastName || lastName,
+      lastName,
 
-      middleName: prev.middleName || middleName,
+      middleName,
 
       sex: prev.sex || sex,
 
@@ -525,14 +525,18 @@ export function PlatformAccountVerification() {
   // Helper function to check if a config step is enabled
   const isConfigStepEnabled = (configStepNumber: number): boolean => {
     const stepKey = `step_${configStepNumber}`;
-    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
-      const stepConfig = verificationConfig[stepKey];
-      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+    const disabledByDefaultIfMissing = [6, 7];
+    if (!verificationConfig || verificationConfig[stepKey] === undefined) {
+      if (disabledByDefaultIfMissing.includes(configStepNumber)) {
         return false;
       }
       return true;
     }
-    return true; // Default to enabled
+    const stepConfig = verificationConfig[stepKey];
+    if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+      return false;
+    }
+    return true;
   };
 
   // Helper function to check if a UI step is enabled
@@ -727,9 +731,9 @@ export function PlatformAccountVerification() {
 
 
 
-    const firstName = form.firstName.trim();
+    const firstName = (currentUser?.firstName || currentUser?.fname || '').trim();
 
-    const lastName = form.lastName.trim();
+    const lastName = (currentUser?.lastName || currentUser?.lname || '').trim();
 
     const sex = form.sex;
 
@@ -739,7 +743,7 @@ export function PlatformAccountVerification() {
 
     if (!firstName || !lastName) {
 
-      toast.error('Veuillez renseigner votre prénom et votre nom de famille.');
+      toast.error('Votre prénom et nom ne figurent pas sur votre dossier. Veuillez contacter votre conseiller.');
 
       return;
 
@@ -768,12 +772,6 @@ export function PlatformAccountVerification() {
       setSubmitting(true);
 
       await patchClientIdentity({
-
-        firstName,
-
-        middleName: form.middleName.trim(),
-
-        lastName,
 
         sex,
 
@@ -1613,9 +1611,11 @@ export function PlatformAccountVerification() {
 
                     value={form.firstName}
 
-                    onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                    readOnly
 
-                    required
+                    className="bg-slate-50 text-slate-700"
+
+                    title="Renseigné par votre conseiller — non modifiable"
 
                   />
 
@@ -1633,7 +1633,11 @@ export function PlatformAccountVerification() {
 
                     value={form.middleName}
 
-                    onChange={(e) => setForm({ ...form, middleName: e.target.value })}
+                    readOnly
+
+                    className="bg-slate-50 text-slate-700"
+
+                    title="Renseigné par votre conseiller — non modifiable"
 
                     placeholder="(optionnel)"
 
@@ -1653,9 +1657,11 @@ export function PlatformAccountVerification() {
 
                     value={form.lastName}
 
-                    onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                    readOnly
 
-                    required
+                    className="bg-slate-50 text-slate-700"
+
+                    title="Renseigné par votre conseiller — non modifiable"
 
                   />
 

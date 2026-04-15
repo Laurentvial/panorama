@@ -79,11 +79,6 @@ export function PlatformProfilePage() {
   const [passwordSending, setPasswordSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editForm, setEditForm] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    mobile: '',
     address: '',
     postalCode: '',
     city: '',
@@ -98,11 +93,6 @@ export function PlatformProfilePage() {
   const openEditModal = () => {
     if (currentUser) {
       setEditForm({
-        firstName: currentUser.fname || currentUser.firstName || '',
-        lastName: currentUser.lname || currentUser.lastName || '',
-        email: currentUser.email || '',
-        phone: currentUser.phone || '',
-        mobile: currentUser.mobile || '',
         address: currentUser.address || '',
         postalCode: currentUser.postalCode || currentUser.postal_code || '',
         city: currentUser.city || '',
@@ -138,15 +128,14 @@ export function PlatformProfilePage() {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      toast.error('Session expirée. Veuillez vous reconnecter.');
+      return;
+    }
     setSaving(true);
     try {
       const hasFile = !!editForm.profilePhoto;
       const payload: Record<string, string> = {
-        firstName: editForm.firstName.trim(),
-        lastName: editForm.lastName.trim(),
-        email: editForm.email.trim().toLowerCase(),
-        phone: editForm.phone.trim(),
-        mobile: editForm.mobile.trim(),
         address: editForm.address.trim(),
         postalCode: editForm.postalCode.trim(),
         city: editForm.city.trim(),
@@ -357,50 +346,6 @@ export function PlatformProfilePage() {
                   </div>
                 </div>
                 <div className="platform-profile-edit-fields">
-                  <div className="platform-profile-edit-field">
-                    <Label htmlFor="firstName">Prénom</Label>
-                    <Input
-                      id="firstName"
-                      value={editForm.firstName}
-                      onChange={(e) => setEditForm((p) => ({ ...p, firstName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="platform-profile-edit-field">
-                    <Label htmlFor="lastName">Nom</Label>
-                    <Input
-                      id="lastName"
-                      value={editForm.lastName}
-                      onChange={(e) => setEditForm((p) => ({ ...p, lastName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="platform-profile-edit-field platform-profile-edit-field-full">
-                    <Label htmlFor="email">E-mail</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={editForm.email}
-                      onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="platform-profile-edit-field">
-                    <Label htmlFor="phone">Téléphone</Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      value={editForm.phone}
-                      onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))}
-                    />
-                  </div>
-                  <div className="platform-profile-edit-field">
-                    <Label htmlFor="mobile">Portable</Label>
-                    <Input
-                      id="mobile"
-                      type="tel"
-                      value={editForm.mobile}
-                      onChange={(e) => setEditForm((p) => ({ ...p, mobile: e.target.value }))}
-                    />
-                  </div>
                   <div className="platform-profile-edit-field platform-profile-edit-field-full">
                     <Label htmlFor="address">Adresse</Label>
                     <Input

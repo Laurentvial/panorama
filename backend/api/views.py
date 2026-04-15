@@ -81,6 +81,8 @@ from .emailing import (
 from .sms import create_prelude_verification, check_prelude_verification
 from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import (
+    GENERATION_HORIZON_MAX_DAYS,
+    GENERATION_HORIZON_MIN_DAYS,
     create_positions_for_investment,
     generate_rates_for_investment,
     generate_positions_with_rates,
@@ -91,6 +93,43 @@ from .position_service import (
 )
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
+
+# Étapes 3–5 (profil, préférences, objectifs) activées par défaut ; 6–7 (conformité, sources) désactivées.
+DEFAULT_CLIENT_VERIFICATION_STEPS_CONFIG = {
+    'step_3': {'enabled': True},
+    'step_4': {'enabled': True},
+    'step_5': {'enabled': True},
+    'step_6': {'enabled': False},
+    'step_7': {'enabled': False},
+}
+
+
+def _parse_generation_horizon_days_from_request(request_data) -> tuple[int | None, Response | None]:
+    """
+    Optional generation_horizon_days for products without explicit contract duration.
+    Returns (value_or_none, error_response_or_none).
+    """
+    raw = request_data.get('generation_horizon_days')
+    if raw is None or raw == '':
+        return None, None
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return None, Response(
+            {'error': 'generation_horizon_days doit être un nombre entier'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if v < GENERATION_HORIZON_MIN_DAYS or v > GENERATION_HORIZON_MAX_DAYS:
+        return None, Response(
+            {
+                'error': (
+                    f'generation_horizon_days doit être entre '
+                    f'{GENERATION_HORIZON_MIN_DAYS} et {GENERATION_HORIZON_MAX_DAYS}'
+                ),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return v, None
 
 
 class SafeTokenRefreshView(TokenRefreshView):
@@ -860,6 +899,8 @@ class ClientView(generics.ListAPIView):
                 queryset=Transaction.objects.filter(status__in=COMPLETED_TRANSACTION_STATUSES),
                 to_attr='completed_transactions'
             )
+        ).annotate(
+            pending_positions_count=Count('positions', filter=Q(positions__status='pending')),
         )
         client_ids = _get_client_ids_user_has_access_to(self.request)
         if client_ids is not None:
@@ -1121,19 +1162,17 @@ def client_create(request):
                     asset=asset
                 )
         
-        # Assign default RIBs
-        default_ribs = RIB.objects.filter(default=True)
-        for rib in default_ribs:
-            # Check if client already has this RIB (shouldn't happen for new client, but safety check)
-            if not ClientRIB.objects.filter(client=client, rib=rib).exists():
+        # Assign at most one default RIB catalogue (un seul RIB affichable côté client)
+        default_rib = RIB.objects.filter(default=True).order_by('name', 'id').first()
+        if default_rib and not ClientRIB.objects.filter(client=client, rib=default_rib).exists():
+            client_rib_id = uuid.uuid4().hex[:12]
+            while ClientRIB.objects.filter(id=client_rib_id).exists():
                 client_rib_id = uuid.uuid4().hex[:12]
-                while ClientRIB.objects.filter(id=client_rib_id).exists():
-                    client_rib_id = uuid.uuid4().hex[:12]
-                ClientRIB.objects.create(
-                    id=client_rib_id,
-                    client=client,
-                    rib=rib
-                )
+            ClientRIB.objects.create(
+                id=client_rib_id,
+                client=client,
+                rib=default_rib
+            )
         
         # Assign default useful links
         default_useful_links = UsefulLink.objects.filter(default=True)
@@ -1628,7 +1667,10 @@ def client_verification_config(request, client_id):
         # Récupérer ou créer la config si elle n'existe pas
         config, created = ClientVerificationConfig.objects.get_or_create(
             client=client,
-            defaults={'id': uuid.uuid4().hex[:12], 'steps_config': {}}
+            defaults={
+                'id': uuid.uuid4().hex[:12],
+                'steps_config': dict(DEFAULT_CLIENT_VERIFICATION_STEPS_CONFIG),
+            },
         )
         serializer = ClientVerificationConfigSerializer(config, context={'request': request})
         response = Response(serializer.data)
@@ -1642,7 +1684,10 @@ def client_verification_config(request, client_id):
         # Mettre à jour la config (admin only)
         config, created = ClientVerificationConfig.objects.get_or_create(
             client=client,
-            defaults={'id': uuid.uuid4().hex[:12], 'steps_config': {}}
+            defaults={
+                'id': uuid.uuid4().hex[:12],
+                'steps_config': dict(DEFAULT_CLIENT_VERIFICATION_STEPS_CONFIG),
+            },
         )
         # Log the incoming data for debugging
         import logging
@@ -1782,8 +1827,10 @@ def platform_logs_list(request):
 
     from .serializer import PlatformLogWithClientSerializer
     serializer = PlatformLogWithClientSerializer(paginated_logs, many=True)
+    viewer_ip = get_client_ip(request)
     return Response({
         'platformLogs': serializer.data,
+        'viewerIp': viewer_ip if viewer_ip and viewer_ip != 'Unknown' else None,
         'pagination': {
             'page': page,
             'limit': limit,
@@ -1854,8 +1901,10 @@ def client_platform_logs(request, client_id):
         paginated_logs = logs[offset:offset + limit]
         
         serializer = ClientPlatformLogSerializer(paginated_logs, many=True)
+        viewer_ip = get_client_ip(request)
         return Response({
             'platformLogs': serializer.data,
+            'viewerIp': viewer_ip if viewer_ip and viewer_ip != 'Unknown' else None,
             'pagination': {
                 'page': page,
                 'limit': limit,
@@ -2696,12 +2745,7 @@ def client_update_identity(request):
             return None
 
     # Update identity fields
-    if 'firstName' in request.data:
-        client.fname = request.data.get('firstName', '') or ''
-    if 'middleName' in request.data:
-        client.middle_name = request.data.get('middleName', '') or ''
-    if 'lastName' in request.data:
-        client.lname = request.data.get('lastName', '') or ''
+    # Name, e-mail and phone numbers are CRM-managed; self-service clients cannot change them here.
     if 'legalName' in request.data:
         client.legal_name = request.data.get('legalName', '') or ''
     if 'sex' in request.data:
@@ -2714,18 +2758,6 @@ def client_update_identity(request):
         client.postal_code = request.data.get('postalCode', '') or ''
     if 'city' in request.data:
         client.city = request.data.get('city', '') or ''
-    if 'email' in request.data:
-        new_email = (request.data.get('email', '') or '').strip().lower()
-        if new_email:
-            # Check if email is already used by another client (excluding current)
-            existing = Client.objects.filter(email__iexact=new_email).exclude(id=client.id).first()
-            if existing:
-                return Response({'error': 'Un client avec cet e-mail existe déjà'}, status=status.HTTP_400_BAD_REQUEST)
-            client.email = new_email
-    if 'phone' in request.data:
-        client.phone = request.data.get('phone', '') or ''
-    if 'mobile' in request.data:
-        client.mobile = request.data.get('mobile', '') or ''
     if 'civility' in request.data:
         client.civility = request.data.get('civility', '') or ''
     if 'birthPlace' in request.data:
@@ -6173,7 +6205,11 @@ def rib_delete(request, rib_id):
 @authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
 @permission_classes([AllowAny])
 def client_ribs(request, client_id):
-    """Liste les RIBs d'un client"""
+    """Liste les RIBs catalogue liés au client.
+
+    Avec un jeton client (`client_`), au plus un RIB est renvoyé (le plus ancien par date de liaison).
+    Avec un jeton CRM, la liste complète est renvoyée pour l'administration.
+    """
     client = get_object_or_404(Client, id=client_id)
     
     # Check authentication manually - tokens must be in Authorization header only (not query params for security)
@@ -6210,8 +6246,15 @@ def client_ribs(request, client_id):
         if err:
             return err
     
-    client_ribs = ClientRIB.objects.filter(client=client).select_related('rib')
-    serializer = ClientRIBSerializer(client_ribs, many=True)
+    client_ribs_qs = (
+        ClientRIB.objects.filter(client=client)
+        .select_related('rib')
+        .order_by('created_at', 'id')
+    )
+    # Plateforme client : un seul RIB catalogue exposé (évite les doublons historiques).
+    if token.startswith('client_'):
+        client_ribs_qs = client_ribs_qs[:1]
+    serializer = ClientRIBSerializer(client_ribs_qs, many=True)
     return Response({'ribs': serializer.data})
 
 @api_view(['POST'])
@@ -6245,7 +6288,9 @@ def client_rib_add(request, client_id):
             client=client,
             rib=rib
         )
-        
+        # Un seul RIB catalogue par client : retirer les autres liaisons.
+        ClientRIB.objects.filter(client=client).exclude(pk=client_rib.pk).delete()
+
         serializer = ClientRIBSerializer(client_rib)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     except RIB.DoesNotExist:
@@ -9291,6 +9336,10 @@ def transaction_generate_rates(request, client_id, transaction_id):
     
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
+
+    generation_horizon_days, gh_err = _parse_generation_horizon_days_from_request(request.data)
+    if gh_err is not None:
+        return gh_err
     
     try:
         withdrawal_metadata = None
@@ -9337,7 +9386,10 @@ def transaction_generate_rates(request, client_id, transaction_id):
             )
             temp_transaction._capital_cutoff_datetime = transaction.datetime or timezone.now()
             temp_transaction._withdrawal_recalc_metadata = withdrawal_metadata
-            rates = generate_rates_for_investment(temp_transaction)
+            rates = generate_rates_for_investment(
+                temp_transaction,
+                generation_horizon_days=generation_horizon_days,
+            )
         elif requires_addition_recalculation:
             # For additions with recalculation, get the product and calculate metadata
             product = None
@@ -9360,9 +9412,15 @@ def transaction_generate_rates(request, client_id, transaction_id):
                 # Attach metadata to transaction so build_investment_context can use it
                 transaction._capital_cutoff_datetime = transaction.datetime or timezone.now()
                 transaction._withdrawal_recalc_metadata = addition_metadata  # Reuse same attribute name for consistency
-            rates = generate_rates_for_investment(transaction)
+            rates = generate_rates_for_investment(
+                transaction,
+                generation_horizon_days=generation_horizon_days,
+            )
         else:
-            rates = generate_rates_for_investment(transaction)
+            rates = generate_rates_for_investment(
+                transaction,
+                generation_horizon_days=generation_horizon_days,
+            )
         response_payload = {'rates': rates}
         if withdrawal_metadata:
             response_payload['withdrawal_recalculation'] = withdrawal_metadata
@@ -9423,6 +9481,10 @@ def transaction_generate_positions(request, client_id, transaction_id):
     
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)
+
+    generation_horizon_days, gh_err = _parse_generation_horizon_days_from_request(request.data)
+    if gh_err is not None:
+        return gh_err
     
     # Parse custom rates from request
     custom_rates_data = request.data.get('rates', {})
@@ -9686,6 +9748,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 save_to_db=False,
                 avoid_losses=avoid_losses,
                 positive_only=positive_only,
+                generation_horizon_days=generation_horizon_days,
             )
         except ValueError as e:
             # Catch validation errors from position generation (e.g., range too high)

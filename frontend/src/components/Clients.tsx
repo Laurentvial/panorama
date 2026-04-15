@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -469,12 +470,33 @@ export function Clients({ onSelectClient }: ClientsProps) {
                         {client.id.substring(0, 8)}
                       </td>
                       <td>
-                        <button
-                          onClick={() => navigate(`/admin/clients/${client.id}`)}
-                          className="clients-name-link"
-                        >
-                          {client.fullName || `${client.firstName || ''} ${client.lastName || ''}`.trim() || '-'}
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => navigate(`/admin/clients/${client.id}`)}
+                            className="clients-name-link"
+                          >
+                            {client.fullName || `${client.firstName || ''} ${client.lastName || ''}`.trim() || '-'}
+                          </button>
+                          {typeof client.pendingPositionsCount === 'number' && client.pendingPositionsCount < 5 && (
+                            client.pendingPositionsCount === 0 ? (
+                              <Badge
+                                variant="outline"
+                                className="border-red-300 bg-red-50 text-red-800 font-normal"
+                                title="Aucune position au statut « en attente »"
+                              >
+                                0 en attente
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="border-orange-300 bg-orange-50 text-orange-900 font-normal"
+                                title={`${client.pendingPositionsCount} position(s) en attente (moins de 5)`}
+                              >
+                                {client.pendingPositionsCount} en attente
+                              </Badge>
+                            )
+                          )}
+                        </div>
                       </td>
                       <td>{client.phone || client.mobile || '-'}</td>
                       <td className="clients-table-email">{client.email || '-'}</td>

@@ -724,14 +724,18 @@ export function PlatformDashboard() {
   // Helper function to check if a config step is enabled
   const isConfigStepEnabled = (configStepNumber: number): boolean => {
     const stepKey = `step_${configStepNumber}`;
-    if (verificationConfig && verificationConfig[stepKey] !== undefined) {
-      const stepConfig = verificationConfig[stepKey];
-      if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+    const disabledByDefaultIfMissing = [6, 7];
+    if (!verificationConfig || verificationConfig[stepKey] === undefined) {
+      if (disabledByDefaultIfMissing.includes(configStepNumber)) {
         return false;
       }
       return true;
     }
-    return true; // Default to enabled
+    const stepConfig = verificationConfig[stepKey];
+    if (stepConfig && typeof stepConfig === 'object' && stepConfig.enabled === false) {
+      return false;
+    }
+    return true;
   };
 
   // Helper functions to check if specific config steps are completed

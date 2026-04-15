@@ -1,3 +1,68 @@
-from django.test import TestCase
+from decimal import Decimal
+from unittest.mock import patch
 
-# Create your tests here.
+from django.test import SimpleTestCase
+
+from .position_service import (
+    GENERATION_HORIZON_MAX_DAYS,
+    GENERATION_HORIZON_MIN_DAYS,
+    _clamp_generation_horizon_days,
+    _distribute_pnl_total_capped,
+    _product_has_explicit_contract_duration,
+)
+
+
+class GenerationHorizonHelpersTest(SimpleTestCase):
+    def test_product_has_explicit_contract_duration(self):
+        self.assertFalse(_product_has_explicit_contract_duration(None))
+        self.assertFalse(_product_has_explicit_contract_duration(""))
+        self.assertFalse(_product_has_explicit_contract_duration("   "))
+        self.assertTrue(_product_has_explicit_contract_duration("90"))
+        self.assertTrue(_product_has_explicit_contract_duration("12 mois"))
+        self.assertFalse(_product_has_explicit_contract_duration("abc"))
+
+    def test_clamp_generation_horizon_days(self):
+        self.assertEqual(_clamp_generation_horizon_days(15), GENERATION_HORIZON_MIN_DAYS)
+        self.assertEqual(_clamp_generation_horizon_days(270), 270)
+        self.assertEqual(_clamp_generation_horizon_days(99999), GENERATION_HORIZON_MAX_DAYS)
+
+
+class DistributePnlNegativeTargetTest(SimpleTestCase):
+    """_distribute_pnl_total_capped: proportional losses when target_total < 0."""
+
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_negative_target_proportional_losses(self, _mock_random):
+        amounts = [Decimal('5000')] * 4
+        target = Decimal('-1200.00')
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+        self.assertEqual(len(parts), 4)
+        for p in parts:
+            self.assertLessEqual(p, Decimal('0'))
+        total = sum(parts, Decimal('0')).quantize(Decimal('0.01'))
+        self.assertEqual(total, target)
+        for p in parts:
+            self.assertEqual(p, Decimal('-300.00'))
+
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_negative_target_zero_skips_random(self, _mock_random):
+        amounts = [Decimal('1000'), Decimal('2000')]
+        parts = _distribute_pnl_total_capped(Decimal('0'), amounts, avoid_losses=False)
+        self.assertEqual(parts, [Decimal('0.00'), Decimal('0.00')])
+
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_negative_target_respects_cap_sum(self, _mock_random):
+        """
+        When |target| exceeds what per-trade caps can absorb, the sum may not reach target;
+        drift stops once no slack remains (same class of behaviour as before for impossible totals).
+        """
+        amounts = [Decimal('1000.00'), Decimal('1000.00')]
+        target = Decimal('-50000.00')
+        cap_amt = (Decimal('1000') * Decimal('0.30')).quantize(Decimal('0.01'))
+        max_mag = cap_amt * 2
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+        total = sum(parts, Decimal('0')).quantize(Decimal('0.01'))
+        self.assertGreaterEqual(total, target)
+        self.assertGreaterEqual(total, -max_mag)
+        for p in parts:
+            self.assertGreaterEqual(p, -cap_amt)
+            self.assertLessEqual(p, Decimal('0'))

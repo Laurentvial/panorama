@@ -105,7 +105,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
       setLoading(true);
       const data = await apiCall(`/api/clients/${actualClientId}/verification-config/?_t=${Date.now()}`);
       setConfig(data);
-      // Initialiser stepsConfig avec les valeurs de la config ou des valeurs par défaut (toutes activées)
+      // Initialiser stepsConfig : 1–5 et 8 actifs par défaut si absents ; 6–7 inactifs par défaut.
       const steps: Record<string, { enabled: boolean; questions?: Record<string, boolean> }> = {};
       const loadedStepsConfig = data?.stepsConfig || {};
       console.log('Loaded config from server:', data);
@@ -113,13 +113,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
       console.log('Step 3 in loaded config:', loadedStepsConfig.step_3);
       for (let i = 1; i <= 8; i++) {
         const stepKey = `step_${i}`;
-        // Si la config existe pour cette étape, l'utiliser, sinon par défaut enabled: true
+        const defaultEnabled = i === 6 || i === 7 ? false : true;
         if (loadedStepsConfig[stepKey] !== undefined) {
           steps[stepKey] = loadedStepsConfig[stepKey];
           console.log(`Step ${i} (${stepKey}):`, loadedStepsConfig[stepKey], 'enabled:', loadedStepsConfig[stepKey]?.enabled);
         } else {
-          steps[stepKey] = { enabled: true };
-          console.log(`Step ${i} (${stepKey}): not found in config, defaulting to enabled: true`);
+          steps[stepKey] = { enabled: defaultEnabled };
+          console.log(`Step ${i} (${stepKey}): not found in config, defaulting to enabled:`, defaultEnabled);
         }
       }
       const step8 = steps.step_8 && typeof steps.step_8 === 'object' ? steps.step_8 : { enabled: true };
@@ -136,10 +136,10 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
       setHasUnsavedChanges(false);
     } catch (error: any) {
       console.error('Error loading verification config:', error);
-      // Initialiser avec des valeurs par défaut si erreur
+      // Initialiser avec des valeurs par défaut si erreur (6–7 désactivées)
       const steps: Record<string, { enabled: boolean }> = {};
       for (let i = 1; i <= 8; i++) {
-        steps[`step_${i}`] = { enabled: true };
+        steps[`step_${i}`] = { enabled: !(i === 6 || i === 7) };
       }
       steps.step_8 = {
         ...steps.step_8,
@@ -244,7 +244,11 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
 
   const isStepEnabled = (stepNumber: number): boolean => {
     const stepKey = `step_${stepNumber}`;
-    return stepsConfig[stepKey]?.enabled !== false; // Par défaut true si non défini
+    const v = stepsConfig[stepKey]?.enabled;
+    if (v === true || v === false) {
+      return v;
+    }
+    return !(stepNumber === 6 || stepNumber === 7);
   };
 
   const isKycDocumentRequested = (documentKey: string): boolean => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
@@ -9,6 +9,7 @@ import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet, MessageSquare, F
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
+import '../styles/ClientMiscRibTable.css';
 
 interface ClientMiscTabProps {
   clientId: string;
@@ -20,6 +21,13 @@ interface ClientMiscTabProps {
   onRefresh: () => void;
 }
 
+/** RIB ids may be string or number depending on serializer path — normalize for comparisons. */
+function normalizeClientRibId(id: unknown): string | null {
+  if (id === null || id === undefined) return null;
+  const s = String(id).trim();
+  return s === '' ? null : s;
+}
+
 export function ClientMiscTab({
   clientId,
   client,
@@ -29,8 +37,10 @@ export function ClientMiscTab({
   availableUsefulLinks,
   onRefresh
 }: ClientMiscTabProps) {
-  const [isAddRibDialogOpen, setIsAddRibDialogOpen] = useState(false);
   const [isAddLinkDialogOpen, setIsAddLinkDialogOpen] = useState(false);
+  const [draftDisplayedRibId, setDraftDisplayedRibId] = useState<string | null>(null);
+  const [savingRibDisplay, setSavingRibDisplay] = useState(false);
+  const prevRibAssignmentKey = useRef<string>('');
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
   const [tradingEnabled, setTradingEnabled] = useState<boolean>(false);
@@ -75,6 +85,60 @@ export function ClientMiscTab({
       setBannerMessage('');
     }
   }, [client]);
+
+  const ribAssignmentKey = useMemo(() => {
+    if (!clientRibs?.length) return 'none';
+    return clientRibs
+      .map((cr: any) => normalizeClientRibId(cr?.rib?.id))
+      .filter((x): x is string => x !== null)
+      .sort()
+      .join(',');
+  }, [clientRibs]);
+
+  const sortedCatalogueRibs = useMemo(() => {
+    return [...(availableRibs || [])].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
+    );
+  }, [availableRibs]);
+
+  const orphanAssignedRibs = useMemo(() => {
+    const catalogueIds = new Set(
+      (availableRibs || []).map((r: any) => normalizeClientRibId(r.id)).filter((x): x is string => x !== null)
+    );
+    return (clientRibs || [])
+      .map((cr: any) => cr?.rib)
+      .filter((r: any) => {
+        const id = normalizeClientRibId(r?.id);
+        return r && id && !catalogueIds.has(id);
+      });
+  }, [clientRibs, availableRibs]);
+
+  useEffect(() => {
+    if (ribAssignmentKey === prevRibAssignmentKey.current) return;
+    prevRibAssignmentKey.current = ribAssignmentKey;
+    if (ribAssignmentKey === 'none') {
+      setDraftDisplayedRibId(null);
+    } else {
+      const first = ribAssignmentKey.split(',')[0];
+      setDraftDisplayedRibId(normalizeClientRibId(first));
+    }
+  }, [ribAssignmentKey]);
+
+  const serverAssignedIds = useMemo(
+    () =>
+      (clientRibs || [])
+        .map((cr: any) => normalizeClientRibId(cr?.rib?.id))
+        .filter((x): x is string => x !== null)
+        .sort(),
+    [clientRibs]
+  );
+  const draftRibNorm = normalizeClientRibId(draftDisplayedRibId);
+  const ribSelectionClean =
+    (clientRibs?.length ?? 0) <= 1 &&
+    (serverAssignedIds.length === 0
+      ? draftRibNorm === null
+      : serverAssignedIds.length === 1 && draftRibNorm === serverAssignedIds[0]);
+  const ribSelectionDirty = !ribSelectionClean || (clientRibs?.length ?? 0) > 1;
 
   function handlePaymentMethodChange(method: string, checked: boolean | 'indeterminate') {
     if (checked === true) {
@@ -171,32 +235,35 @@ export function ClientMiscTab({
     }
   }
 
-  async function handleAddRib(ribId: string) {
+  async function handleSaveDisplayedRib() {
+    setSavingRibDisplay(true);
     try {
-      await apiCall(`/api/clients/${clientId}/ribs/add/`, {
-        method: 'POST',
-        body: JSON.stringify({ ribId }),
-        headers: { 'Content-Type': 'application/json' }
-      });
-      toast.success('RIB ajouté avec succès');
-      setIsAddRibDialogOpen(false);
+      const targetRibId = draftRibNorm;
+      const currentRibIds = (clientRibs || [])
+        .map((cr: any) => normalizeClientRibId(cr?.rib?.id))
+        .filter((x): x is string => x !== null);
+      for (const ribId of currentRibIds) {
+        await apiCall(`/api/clients/${clientId}/ribs/${ribId}/`, { method: 'DELETE' });
+      }
+      if (targetRibId) {
+        await apiCall(`/api/clients/${clientId}/ribs/add/`, {
+          method: 'POST',
+          body: JSON.stringify({ ribId: targetRibId }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      toast.success(
+        targetRibId
+          ? 'RIB affiché sur la plateforme du client mis à jour.'
+          : 'Aucun RIB catalogue ne sera affiché au client.'
+      );
       onRefresh();
     } catch (error: any) {
-      console.error('Error adding RIB:', error);
-      toast.error(error.message || 'Erreur lors de l\'ajout du RIB');
-    }
-  }
-
-  async function handleRemoveRib(ribId: string) {
-    if (!confirm('Retirer ce RIB du client ?')) return;
-    
-    try {
-      await apiCall(`/api/clients/${clientId}/ribs/${ribId}/`, { method: 'DELETE' });
-      toast.success('RIB retiré avec succès');
+      console.error('Error saving displayed RIB:', error);
+      toast.error(error?.message || "Erreur lors de l'enregistrement du RIB");
       onRefresh();
-    } catch (error) {
-      console.error('Error removing RIB:', error);
-      toast.error('Erreur lors du retrait du RIB');
+    } finally {
+      setSavingRibDisplay(false);
     }
   }
 
@@ -228,11 +295,6 @@ export function ClientMiscTab({
       toast.error('Erreur lors du retrait du lien utile');
     }
   }
-
-  // Filter available RIBs that are not already assigned
-  const availableRibsToAdd = availableRibs.filter(
-    (rib) => !clientRibs.some((cr) => cr.rib.id === rib.id)
-  );
 
   // Filter available useful links that are not already assigned
   const availableLinksToAdd = availableUsefulLinks.filter(
@@ -398,66 +460,147 @@ export function ClientMiscTab({
         </CardContent>
       </Card>
 
-      {/* RIBs Section */}
+      {/* RIBs Section — un seul RIB catalogue affichable sur la plateforme client */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="w-5 h-5" />
-              RIBs
-            </CardTitle>
-            <Button
-              size="sm"
-              onClick={() => setIsAddRibDialogOpen(true)}
-              disabled={availableRibsToAdd.length === 0}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Ajouter un RIB
-            </Button>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="w-5 h-5" />
+            RIB affiché sur la plateforme
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          {clientRibs.length === 0 ? (
-            <p className="text-slate-500 text-center py-8">Aucun RIB assigné à ce client</p>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Tous les RIB du catalogue sont listés ci-dessous. Choisissez celui que le client verra pour ses dépôts
+            par virement (un seul à la fois), ou « Aucun » pour ne rien afficher.
+          </p>
+          {draftRibNorm &&
+            !sortedCatalogueRibs.some((r: any) => normalizeClientRibId(r.id) === draftRibNorm) &&
+            !orphanAssignedRibs.some((r: any) => normalizeClientRibId(r.id) === draftRibNorm) ? (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Le RIB actuellement prévu n&apos;est plus dans le catalogue. Sélectionnez un autre RIB ou « Aucun »,
+              puis enregistrez.
+            </p>
+          ) : null}
+          {sortedCatalogueRibs.length === 0 && orphanAssignedRibs.length === 0 ? (
+            <p className="text-slate-500 text-center py-6">
+              Aucun RIB dans le catalogue. Créez des RIB dans la section administration (RIB) pour les proposer ici.
+            </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b">
-                    <th className="text-left p-2 font-medium text-slate-700">Nom</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Code banque</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Code guichet</th>
-                    <th className="text-left p-2 font-medium text-slate-700">N° compte</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Clé RIB</th>
-                    <th className="text-left p-2 font-medium text-slate-700">Domiciliation</th>
-                    <th className="text-right p-2 font-medium text-slate-700">Actions</th>
-                  </tr>
+                  <tr className="border-b bg-slate-50">
+                    <th className="text-center p-2 font-medium text-slate-700 w-14">Choix</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Nom</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Titulaire</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Banque</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Guichet</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Compte</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Clé</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Domiciliation</th>
+                      <th className="text-left p-2 font-medium text-slate-700">Défaut</th>
+                    </tr>
                 </thead>
                 <tbody>
-                  {clientRibs.map((clientRib) => (
-                    <tr key={clientRib.id} className="border-b hover:bg-slate-50">
-                      <td className="p-2">{clientRib.rib.name}</td>
-                      <td className="p-2 font-mono text-sm">{clientRib.rib.bankCode}</td>
-                      <td className="p-2 font-mono text-sm">{clientRib.rib.branchCode}</td>
-                      <td className="p-2 font-mono text-sm">{clientRib.rib.accountNumber}</td>
-                      <td className="p-2 font-mono text-sm">{clientRib.rib.ribKey}</td>
-                      <td className="p-2">{clientRib.rib.domiciliation}</td>
-                      <td className="p-2 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveRib(clientRib.rib.id)}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                    <tr className="border-b client-misc-rib-row">
+                      <td className="p-2 align-middle text-center">
+                        <input
+                          type="radio"
+                          id="rib-choice-none"
+                          name={`client-rib-display-${clientId}`}
+                          value="__none__"
+                          checked={draftRibNorm === null}
+                          onChange={() => setDraftDisplayedRibId(null)}
+                          className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-slate-800"
+                          aria-label="Aucun RIB affiché au client"
+                        />
+                      </td>
+                      <td className="p-2 align-middle" colSpan={8}>
+                        <Label htmlFor="rib-choice-none" className="font-medium cursor-pointer">
+                          Aucun RIB (le client ne verra pas de RIB catalogue sur la plateforme)
+                        </Label>
                       </td>
                     </tr>
-                  ))}
+                    {orphanAssignedRibs.map((rib: any) => (
+                      <tr
+                        key={`orphan-${rib.id}`}
+                        className="border-b client-misc-rib-row client-misc-rib-row--orphan bg-amber-50/30"
+                      >
+                        <td className="p-2 align-middle text-center">
+                          <input
+                            type="radio"
+                            id={`rib-choice-orphan-${String(rib.id)}`}
+                            name={`client-rib-display-${clientId}`}
+                            value={String(rib.id)}
+                            checked={draftRibNorm !== null && draftRibNorm === normalizeClientRibId(rib.id)}
+                            onChange={() => setDraftDisplayedRibId(normalizeClientRibId(rib.id))}
+                            className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-amber-800"
+                            aria-label={`Sélectionner le RIB ${rib.name}`}
+                          />
+                        </td>
+                        <td className="p-2 align-middle">
+                          <Label htmlFor={`rib-choice-orphan-${String(rib.id)}`} className="cursor-pointer">
+                            {rib.name}
+                            <span className="ml-2 text-xs font-normal text-amber-900">(hors catalogue)</span>
+                          </Label>
+                        </td>
+                        <td className="p-2 align-middle text-slate-700">{rib.accountHolder || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.bankCode || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.branchCode || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.accountNumber || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.ribKey || '—'}</td>
+                        <td className="p-2 align-middle text-slate-600 max-w-[140px] truncate" title={rib.domiciliation}>
+                          {rib.domiciliation || '—'}
+                        </td>
+                        <td className="p-2 align-middle">—</td>
+                      </tr>
+                    ))}
+                    {sortedCatalogueRibs.map((rib: any) => (
+                      <tr key={String(rib.id)} className="border-b client-misc-rib-row">
+                        <td className="p-2 align-middle text-center">
+                          <input
+                            type="radio"
+                            id={`rib-choice-${String(rib.id)}`}
+                            name={`client-rib-display-${clientId}`}
+                            value={String(rib.id)}
+                            checked={draftRibNorm !== null && draftRibNorm === normalizeClientRibId(rib.id)}
+                            onChange={() => setDraftDisplayedRibId(normalizeClientRibId(rib.id))}
+                            className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-slate-800"
+                            aria-label={`Sélectionner le RIB ${rib.name}`}
+                          />
+                        </td>
+                        <td className="p-2 align-middle">
+                          <Label htmlFor={`rib-choice-${String(rib.id)}`} className="cursor-pointer">
+                            {rib.name}
+                          </Label>
+                        </td>
+                        <td className="p-2 align-middle text-slate-700">{rib.accountHolder || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.bankCode || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.branchCode || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.accountNumber || '—'}</td>
+                        <td className="p-2 font-mono text-xs align-middle">{rib.ribKey || '—'}</td>
+                        <td className="p-2 align-middle text-slate-600 max-w-[140px] truncate" title={rib.domiciliation}>
+                          {rib.domiciliation || '—'}
+                        </td>
+                        <td className="p-2 align-middle text-xs">
+                          {rib.default ? <span className="text-slate-600">Oui</span> : <span className="text-slate-400">Non</span>}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
           )}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <Button size="sm" onClick={handleSaveDisplayedRib} disabled={!ribSelectionDirty || savingRibDisplay}>
+              {savingRibDisplay ? 'Enregistrement...' : 'Enregistrer le RIB affiché'}
+            </Button>
+            {(clientRibs?.length ?? 0) > 1 ? (
+              <span className="text-xs text-amber-800">
+                Plusieurs RIB étaient associés : enregistrez pour n&apos;en conserver qu&apos;un seul (celui sélectionné).
+              </span>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -536,52 +679,6 @@ export function ClientMiscTab({
           )}
         </CardContent>
       </Card>
-
-      {/* Add RIB Dialog */}
-      {isAddRibDialogOpen && (
-        <div className="modal-overlay" onClick={() => setIsAddRibDialogOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
-            <div className="modal-header">
-              <h2 className="modal-title">Ajouter un RIB</h2>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="modal-close"
-                onClick={() => setIsAddRibDialogOpen(false)}
-              >
-                <X className="planning-icon-md" />
-              </Button>
-            </div>
-            <div className="modal-form">
-              <div className="modal-form-field">
-                <Label>Sélectionner un RIB</Label>
-                <Select onValueChange={handleAddRib}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choisir un RIB" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableRibsToAdd.map((rib) => (
-                      <SelectItem key={rib.id} value={rib.id}>
-                        {rib.name} - {rib.bankCode} {rib.branchCode} {rib.accountNumber} {rib.ribKey}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="modal-form-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsAddRibDialogOpen(false)}
-                >
-                  Annuler
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Add Useful Link Dialog */}
       {isAddLinkDialogOpen && (
