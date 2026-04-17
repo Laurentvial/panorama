@@ -131,13 +131,40 @@ export function PlatformDiscover() {
           isFeatured: parseFeatured(cp.featured),
         };
       }).filter(Boolean);
-      // Filter active products only
-      const activeProducts = productsList.filter((p: any) => p.status === 'Actif');
+      // Filter products shown on Discover.
+      // Keep "Actif" products, and ALSO allow "Brouillon" products whose availability starts in the future
+      // so clients can consult them before subscription opens. Always hide "Inactif".
+      const todayMs = (() => {
+        const t = new Date();
+        t.setHours(0, 0, 0, 0);
+        return t.getTime();
+      })();
+      const parseAvailDayMs = (s: any): number | null => {
+        if (!s) return null;
+        if (s instanceof Date) {
+          const d = new Date(s.getTime());
+          d.setHours(0, 0, 0, 0);
+          return Number.isNaN(d.getTime()) ? null : d.getTime();
+        }
+        const str = String(s);
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+        const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(str);
+        if (Number.isNaN(d.getTime())) return null;
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      };
+      const visibleProducts = productsList.filter((p: any) => {
+        const status = String(p?.status || '').trim();
+        if (status === 'Inactif') return false;
+        if (status === 'Actif') return true;
+        const startMs = parseAvailDayMs(p?.availabilityStart);
+        return status === 'Brouillon' && startMs != null && startMs > todayMs;
+      });
       
       // Enrichir les produits avec le nom de la catégorie
       const categoriesData = categoriesResponse?.categories || categoriesResponse || [];
       setCategories(categoriesData);
-      const enrichedProducts = activeProducts.map((p: any) => {
+      const enrichedProducts = visibleProducts.map((p: any) => {
         if (p.categoryId) {
           const category = categoriesData.find((c: any) => c.id === p.categoryId);
           return { ...p, categoryName: category?.title || '' };

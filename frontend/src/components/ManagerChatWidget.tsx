@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import LoadingIndicator from './LoadingIndicator';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
+import '../styles/ManagerChatWidget.css';
 
 type ChatMessage = {
   id: string;
@@ -271,6 +272,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
 
   return (
     <div
+      className="managerChatWidget"
       style={
         isPage
           ? {
@@ -621,14 +623,14 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                             color: isMe ? 'white' : '#111827',
                             border: isMe ? 'none' : '1px solid rgba(2, 6, 23, 0.10)',
                             whiteSpace: 'pre-wrap',
-                            fontSize: 13,
-                            lineHeight: 1.35,
+                            fontSize: 14,
+                            lineHeight: 1.4,
                           }}
                         >
                           {m.message}
                         </div>
                         {m.createdAt && (
-                          <div style={{ marginTop: 4, fontSize: 11, color: '#9ca3af', textAlign: isMe ? 'right' : 'left' }}>
+                          <div style={{ marginTop: 4, fontSize: 12, color: '#9ca3af', textAlign: isMe ? 'right' : 'left' }}>
                             {new Date(m.createdAt).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                           </div>
                         )}
