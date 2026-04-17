@@ -4,6 +4,8 @@ const Toaster = () => {
   return (
     <Sonner
       theme="light"
+      position="top-center"
+      duration={5000}
       className="toaster group"
       toastOptions={{
         classNames: {

@@ -57,7 +57,9 @@ export function ProductDetail() {
   const [subscriptionSuccess, setSubscriptionSuccess] = useState<string | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
-  
+  /** Contrats CRM (documentType contract + product) pour prévisualisation quand le PDF produit est désactivé. */
+  const [importedProductContracts, setImportedProductContracts] = useState<any[]>([]);
+
   // Profitability simulator state
   const [simulatorAmount, setSimulatorAmount] = useState<number>(10000);
   const [simulatorBasePrice, setSimulatorBasePrice] = useState<string>('10000');
@@ -971,6 +973,56 @@ export function ProductDetail() {
     // Open in new tab
     window.open(pdfUrl, '_blank');
   };
+
+  const openImportedContractDocument = (doc: any) => {
+    const url = doc?.fileUrl;
+    if (!url) {
+      toast.error('Fichier indisponible pour ce contrat');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  useEffect(() => {
+    if (dataType !== 'product' || !data?.id || !currentUser?.id) {
+      setImportedProductContracts([]);
+      return;
+    }
+    const pdfOn = currentUser?.contractPreviewEnabled !== false;
+    const importedMode =
+      currentUser?.contractPreviewEnabled === false &&
+      currentUser?.importedContractPreviewEnabled === true;
+    if (pdfOn || !importedMode) {
+      setImportedProductContracts([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = (await apiCall(
+          `/api/clients/${currentUser.id}/documents/?productId=${encodeURIComponent(String(data.id))}&documentType=contract`
+        )) as { documents?: any[] };
+        if (cancelled) return;
+        const docs = (res.documents || []).filter((d: any) => d?.documentType === 'contract' && d?.fileUrl);
+        docs.sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        setImportedProductContracts(docs);
+      } catch {
+        if (!cancelled) setImportedProductContracts([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    dataType,
+    data?.id,
+    currentUser?.id,
+    currentUser?.contractPreviewEnabled,
+    currentUser?.importedContractPreviewEnabled,
+  ]);
 
   // Generate contract preview
   const generateContractPreview = (productData: any) => {
@@ -1954,17 +2006,61 @@ export function ProductDetail() {
                       </div>
                     </div>
                     
-                    {currentUser?.contractPreviewEnabled !== false && (
+                    {(currentUser?.contractPreviewEnabled !== false ||
+                      (currentUser?.contractPreviewEnabled === false &&
+                        currentUser?.importedContractPreviewEnabled === true &&
+                        importedProductContracts.length > 0)) && (
                       <div style={{ marginTop: '10px' }}>
-                        <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>Prévisualisation du contrat</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={openContractPDF}
-                          style={{ width: '100%' }}
-                        >
-                          Voir le contrat
-                        </Button>
+                        <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px' }}>
+                          Prévisualisation du contrat
+                        </div>
+                        {currentUser?.contractPreviewEnabled !== false ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={openContractPDF}
+                            style={{ width: '100%' }}
+                          >
+                            Voir le contrat
+                          </Button>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => openImportedContractDocument(importedProductContracts[0])}
+                              style={{ width: '100%' }}
+                            >
+                              Voir le contrat
+                            </Button>
+                            {importedProductContracts.length > 1 && (
+                              <div style={{ marginTop: '10px', fontSize: '12px', color: '#4b5563' }}>
+                                <div style={{ fontWeight: 600, marginBottom: '6px' }}>Autres contrats</div>
+                                <ul style={{ margin: 0, paddingLeft: '18px' }}>
+                                  {importedProductContracts.slice(1).map((doc: any) => (
+                                    <li key={doc.id} style={{ marginBottom: '4px' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => openImportedContractDocument(doc)}
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          color: '#2563eb',
+                                          cursor: 'pointer',
+                                          textDecoration: 'underline',
+                                          fontSize: '12px',
+                                        }}
+                                      >
+                                        {doc.name || 'Contrat'}
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                     

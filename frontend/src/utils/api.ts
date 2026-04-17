@@ -153,6 +153,12 @@ function getCacheKey(endpoint: string, options: RequestInit): string {
   return `${method}:${endpoint}:${body}`;
 }
 
+/** Client-specific mutable lists: never cache GET (key ignores auth, stale data is confusing). */
+function shouldSkipGetResponseCache(endpoint: string): boolean {
+  const path = endpoint.split('?')[0];
+  return path === '/api/client/successors' || path === '/api/client/successors/';
+}
+
 // Get cached data if available and valid
 function getCachedData(key: string): any | null {
   cleanupCache();
@@ -226,7 +232,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   const isGetRequest = method === 'GET';
   
   // Check cache for GET requests
-  if (isGetRequest) {
+  if (isGetRequest && !shouldSkipGetResponseCache(endpoint)) {
     const cacheKey = getCacheKey(endpoint, options);
     const cachedData = getCachedData(cacheKey);
     if (cachedData !== null) {
@@ -443,7 +449,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   const data = JSON.parse(text);
   
   // Cache GET requests
-  if (isGetRequest && response.ok) {
+  if (isGetRequest && response.ok && !shouldSkipGetResponseCache(endpoint)) {
     const cacheKey = getCacheKey(endpoint, options);
     // Use cache-control header if available, otherwise use default TTL
     const cacheControl = response.headers.get('cache-control');

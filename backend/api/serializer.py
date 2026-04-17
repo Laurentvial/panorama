@@ -487,6 +487,7 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['tradingEnabled'] = bool(ret.get('trading_enabled', False))
         ret['bannerMessage'] = ret.get('banner_message', '') or ''
         ret['contractPreviewEnabled'] = bool(ret.get('contract_preview_enabled', True))
+        ret['importedContractPreviewEnabled'] = bool(ret.get('imported_contract_preview_enabled', False))
 
         pending_count = getattr(instance, 'pending_positions_count', None)
         if pending_count is None:
@@ -1478,14 +1479,23 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
     uploadedByName = serializers.SerializerMethodField()
     documentType = serializers.CharField(source='document_type', required=False)
     transactionId = serializers.CharField(source='transaction.id', read_only=True, allow_null=True)
+    productId = serializers.SerializerMethodField()
+    productName = serializers.SerializerMethodField()
     uploadedBy = serializers.PrimaryKeyRelatedField(source='uploaded_by', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
     class Meta:
         model = ClientDocument
-        fields = ['id', 'name', 'documentType', 'file', 'fileUrl', 'description', 'transactionId', 'uploadedBy', 'uploadedByName', 'createdAt', 'updatedAt']
-        read_only_fields = ['id', 'createdAt', 'updatedAt', 'uploadedBy', 'fileUrl', 'uploadedByName', 'transactionId']
+        fields = [
+            'id', 'name', 'documentType', 'file', 'fileUrl', 'description',
+            'transactionId', 'productId', 'productName',
+            'uploadedBy', 'uploadedByName', 'createdAt', 'updatedAt',
+        ]
+        read_only_fields = [
+            'id', 'createdAt', 'updatedAt', 'uploadedBy', 'fileUrl', 'uploadedByName',
+            'transactionId', 'productId', 'productName',
+        ]
         extra_kwargs = {
             'transaction': {'write_only': True, 'required': False}
         }
@@ -1500,6 +1510,13 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         if obj.uploaded_by:
             return f"{obj.uploaded_by.first_name} {obj.uploaded_by.last_name}".strip() or obj.uploaded_by.username
         return ''
+
+    def get_productId(self, obj):
+        return obj.product_id if getattr(obj, 'product_id', None) else None
+
+    def get_productName(self, obj):
+        p = getattr(obj, 'product', None)
+        return p.name if p else ''
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -1507,6 +1524,8 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         ret['documentType'] = instance.document_type
         ret['uploadedBy'] = instance.uploaded_by.id if instance.uploaded_by else None
         ret['transactionId'] = instance.transaction.id if instance.transaction else None
+        ret['productId'] = instance.product_id if getattr(instance, 'product_id', None) else None
+        ret['productName'] = instance.product.name if getattr(instance, 'product', None) else ''
         return ret
     
     def create(self, validated_data):

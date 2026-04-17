@@ -442,7 +442,7 @@ export function PlatformPortfolioTransactionsSection({
         {effectiveUnlinked.length > 0 && (
           <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e2e8f0' }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#334155' }}>
-              Contrats non liés à une transaction
+              Contrats sans transaction
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {effectiveUnlinked.map((doc: any) => (
@@ -459,6 +459,11 @@ export function PlatformPortfolioTransactionsSection({
                   >
                     {doc?.name || 'Contrat'}
                   </a>
+                  {doc?.productName ? (
+                    <span style={{ marginLeft: 8, fontSize: 12, color: '#64748b' }}>
+                      — Produit : {doc.productName}
+                    </span>
+                  ) : null}
                   {doc?.description && (
                     <span style={{ marginLeft: 8, fontSize: 12, color: '#64748b' }}>— {doc.description}</span>
                   )}

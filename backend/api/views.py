@@ -1562,6 +1562,14 @@ def client_detail(request, client_id):
         if 'contractPreviewEnabled' in request.data:
             v = request.data.get('contractPreviewEnabled')
             client.contract_preview_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+            if client.contract_preview_enabled:
+                client.imported_contract_preview_enabled = False
+
+        if 'importedContractPreviewEnabled' in request.data:
+            v = request.data.get('importedContractPreviewEnabled')
+            parsed = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+            # Sous-option sans effet tant que la prévisualisation PDF est activée
+            client.imported_contract_preview_enabled = bool(parsed) and not client.contract_preview_enabled
         
         # Create log entry for client update
         try:
@@ -3031,6 +3039,11 @@ def client_successors_list(request):
             except Exception as e:
                 logger = logging.getLogger(__name__)
                 logger.error(f"Error uploading successor identity document: {str(e)}")
+                successor.delete()
+                return Response(
+                    {'error': "Impossible d'enregistrer la pièce d'identité. Vérifiez le format (PDF ou image) et la taille du fichier."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         serializer = ClientSuccessorSerializer(successor, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     successors = ClientSuccessor.objects.filter(client=client).order_by('order', 'created_at')
@@ -3088,6 +3101,10 @@ def client_successor_detail(request, successor_id):
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Error uploading successor identity document: {str(e)}")
+            return Response(
+                {'error': "Impossible d'enregistrer la pièce d'identité. Vérifiez le format (PDF ou image) et la taille du fichier."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     successor.save()
     serializer = ClientSuccessorSerializer(successor, context={'request': request})
     return Response(serializer.data)
@@ -6321,6 +6338,8 @@ def client_documents(request, client_id):
     """Liste tous les documents d'un client"""
     client = get_object_or_404(Client, id=client_id)
     transaction_id = request.GET.get('transactionId', None)
+    product_id = request.GET.get('productId', None)
+    document_type = (request.GET.get('documentType') or '').strip() or None
 
     # Authorization: allow client token for own data OR authenticated admin user
     auth_header = request.headers.get('Authorization', '')
@@ -6355,11 +6374,18 @@ def client_documents(request, client_id):
             return err
     
     # Filter documents
-    documents = ClientDocument.objects.filter(client=client)
+    documents = ClientDocument.objects.filter(client=client).select_related('transaction', 'product', 'uploaded_by')
     
     # If transactionId is provided, filter by transaction
     if transaction_id:
         documents = documents.filter(transaction_id=transaction_id)
+
+    if product_id:
+        documents = documents.filter(product_id=product_id)
+
+    allowed_doc_types = {c[0] for c in ClientDocument.DOCUMENT_TYPES}
+    if document_type and document_type in allowed_doc_types:
+        documents = documents.filter(document_type=document_type)
     
     documents = documents.order_by('-created_at')
     serializer = ClientDocumentSerializer(documents, many=True, context={'request': request})
@@ -6384,7 +6410,12 @@ def client_document_create(request, client_id):
     name = request.data.get('name', '')
     document_type = request.data.get('documentType', 'other')
     description = request.data.get('description', '')
-    transaction_id = request.data.get('transactionId', None)
+    transaction_id = request.data.get('transactionId', None) or None
+    product_id = request.data.get('productId', None) or None
+    if transaction_id == '':
+        transaction_id = None
+    if product_id == '':
+        product_id = None
     file = request.FILES.get('file')
     
     if not name:
@@ -6392,6 +6423,12 @@ def client_document_create(request, client_id):
     
     if not file:
         return Response({'error': 'Le fichier est requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if transaction_id and product_id:
+        return Response(
+            {'error': 'Choisir soit une transaction, soit un produit — pas les deux à la fois.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     
     # Transaction is optional - documents are not necessarily linked to a transaction
     transaction = None
@@ -6400,12 +6437,20 @@ def client_document_create(request, client_id):
             transaction = Transaction.objects.get(id=transaction_id, client=client)
         except Transaction.DoesNotExist:
             return Response({'error': 'Transaction introuvable ou n\'appartient pas au client'}, status=status.HTTP_404_NOT_FOUND)
+
+    product = None
+    if product_id:
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response({'error': 'Produit introuvable'}, status=status.HTTP_404_NOT_FOUND)
     
     # Create document
     document = ClientDocument.objects.create(
         id=document_id,
         client=client,
         transaction=transaction,
+        product=product,
         name=name,
         document_type=document_type,
         description=description,
@@ -8879,6 +8924,7 @@ def _client_transaction_create_impl(request, client_id):
                 id=document_id,
                 client=client,
                 transaction=transaction,
+                product=product,
                 name=f"Contrat - {product_name}",
                 document_type='contract',
                 description=f"Contrat de souscription généré automatiquement pour la transaction {transaction_id}",
@@ -8964,6 +9010,7 @@ def _client_transaction_create_impl(request, client_id):
                         id=fallback_doc_id,
                         client=client,
                         transaction=transaction,
+                        product=product,
                         name=f"Contrat - {safe_product_name}",
                         document_type='contract',
                         description=(

@@ -867,7 +867,8 @@ export function PlatformDashboard() {
   const currentVerificationStepId =
     verificationStepperSteps.find((s) => !s.completed)?.id ?? null;
 
-  const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
+  /** No overflow:hidden on the whole card — it clipped CTAs; clip images in their own wrappers. */
+  const roundedCardStyle: React.CSSProperties = { borderRadius: '10px' };
 
   const MarketMoverRow = ({ asset, direction }: { asset: any; direction: 'up' | 'down' }) => {
     const changePercent = parseFinancialValue(asset?.priceChangePercent);
@@ -995,7 +996,7 @@ export function PlatformDashboard() {
           {hasIncompleteEnabledSteps && settings?.platform_banner_image_url && (
             <div
               style={{
-                marginTop: isPhone ? -32 : isMobile ? -20 : -24,
+                marginTop: 0,
                 marginBottom: isPhone ? '24px' : isMobile ? '20px' : '24px',
                 borderRadius: 12,
                 overflow: 'hidden',
@@ -1028,11 +1029,9 @@ export function PlatformDashboard() {
           {hasIncompleteEnabledSteps && (
             <Card
               style={{
-                marginTop: isPhone ? '-12px' : undefined,
                 flex: isMobile ? undefined : 1,
                 minWidth: isMobile ? undefined : 0,
                 borderRadius: 16,
-                overflow: 'hidden',
                 border: '1px solid rgba(229, 231, 235, 1)',
                 backgroundColor: '#ffffff',
                 boxShadow: '0 10px 30px rgba(2, 6, 23, 0.06)',
@@ -1180,18 +1179,36 @@ export function PlatformDashboard() {
             {/* Valeur du Portefeuille */}
             <Card style={{ ...roundedCardStyle, flex: isMobile ? undefined : 1, minWidth: isMobile ? undefined : 0 }}>
               <CardHeader>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                  <CardTitle style={{ fontSize: isMobile ? '18px' : '20px', minWidth: 0 }}>
                     Valeur du Portefeuille
                   </CardTitle>
                   <PieChart className={isMobile ? "h-3 w-3 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" style={{ fontSize: isMobile ? '22px' : '28px' }}>
+              <CardContent style={{ minWidth: 0 }}>
+                <div
+                  className="text-2xl font-bold"
+                  style={{
+                    fontSize: isMobile ? '22px' : '28px',
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {formatAmount(portfolioValue, accountCurrency)}
                 </div>
-                <div style={{ marginTop: 8, fontSize: isMobile ? '16px' : '18px', fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: isMobile ? '16px' : '18px',
+                    fontWeight: 600,
+                    color: isProfit ? '#10b981' : '#ef4444',
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
                   {(() => {
                     const costBasis = portfolioValue - profitLoss;

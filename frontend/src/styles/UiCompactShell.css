@@ -1,0 +1,18 @@
+/*
+ * Logged-in app shell (admin CRM): slightly smaller rem root so
+ * Tailwind/shadcn spacing and type scale match a denser UI at 100% browser zoom.
+ * Login and public pages keep the default :root --font-size.
+ */
+html.ui-compact-shell {
+  --font-size: 14px;
+  font-size: var(--font-size);
+}
+
+/*
+ * Client platform: smaller rem root than admin (14px). Avoid zoom on .platform-root —
+ * it breaks min-height/100vh and fixed descendants (bottom nav, footer), leaving a gap.
+ */
+html.ui-compact-shell-platform {
+  --font-size: 12.5px;
+  font-size: var(--font-size);
+}

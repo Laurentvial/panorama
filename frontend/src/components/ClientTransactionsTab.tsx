@@ -1523,7 +1523,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               {unlinkedContractDocuments.length > 0 && (
                 <div className="mt-6 pt-6 border-t border-slate-200">
                   <div className="text-sm font-semibold text-slate-700 mb-3">
-                    Contrats non liés à une transaction
+                    Contrats sans transaction
                   </div>
                   <ul className="list-none p-0 m-0 space-y-2">
                     {unlinkedContractDocuments.map((doc: any) => (
@@ -1537,6 +1537,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                         >
                           {doc?.name || 'Contrat'}
                         </a>
+                        {doc?.productName ? (
+                          <span className="text-slate-500 text-sm">— Produit : {doc.productName}</span>
+                        ) : null}
                         {doc?.description && (
                           <span className="text-slate-500 text-sm">— {doc.description}</span>
                         )}

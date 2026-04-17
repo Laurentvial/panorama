@@ -6,7 +6,7 @@ import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import '../styles/PageHeader.css';
 import '../styles/PlatformProfile.css';
 import '../styles/PlatformTransfertPropriete.css';
@@ -41,6 +41,9 @@ const emptySuccessor = (): SuccessorForm => ({
 });
 
 function toForm(s: any): SuccessorForm {
+  if (!s || typeof s !== 'object') {
+    return emptySuccessor();
+  }
   const share = s.sharePercentage ?? s.share_percentage;
   return {
     id: s.id,
@@ -58,11 +61,63 @@ function toForm(s: any): SuccessorForm {
   };
 }
 
+function trim(s: string): string {
+  return (s || '').trim();
+}
+
+function isRowBlank(s: SuccessorForm): boolean {
+  if (s.id) return false;
+  return (
+    !trim(s.firstName) &&
+    !trim(s.lastName) &&
+    !trim(s.email) &&
+    !trim(s.phone) &&
+    !trim(s.address) &&
+    !trim(s.postalCode) &&
+    !trim(s.city) &&
+    !trim(s.country) &&
+    !trim(String(s.sharePercentage ?? '')) &&
+    !s.identityDocument &&
+    !trim(String(s.identityDocumentPreview ?? ''))
+  );
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateSuccessorRow(s: SuccessorForm, label: string): string | null {
+  if (!trim(s.firstName)) return `${label} : le prénom est obligatoire.`;
+  if (!trim(s.lastName)) return `${label} : le nom est obligatoire.`;
+  if (!trim(s.email)) return `${label} : l'e-mail est obligatoire.`;
+  if (!EMAIL_RE.test(trim(s.email))) return `${label} : l'e-mail n'est pas valide.`;
+  if (!trim(s.phone)) return `${label} : le téléphone est obligatoire.`;
+  if (!trim(s.address)) return `${label} : l'adresse est obligatoire.`;
+  if (!trim(s.postalCode)) return `${label} : le code postal est obligatoire.`;
+  if (!trim(s.city)) return `${label} : la ville est obligatoire.`;
+  if (!trim(s.country)) return `${label} : le pays est obligatoire.`;
+  const shareRaw = trim(String(s.sharePercentage ?? ''));
+  if (!shareRaw) return `${label} : la répartition des parts est obligatoire.`;
+  const pct = parseInt(shareRaw, 10);
+  if (Number.isNaN(pct) || String(pct) !== shareRaw) {
+    return `${label} : la répartition des parts doit être un nombre entier entre 0 et 100.`;
+  }
+  if (pct < 0 || pct > 100) {
+    return `${label} : la répartition des parts doit être comprise entre 0 et 100 %.`;
+  }
+  const hasDoc = Boolean(s.identityDocument) || Boolean(trim(String(s.identityDocumentPreview ?? '')));
+  if (!s.id && !hasDoc) {
+    return `${label} : veuillez joindre une pièce d'identité (CNI ou passeport).`;
+  }
+  return null;
+}
+
+type SaveFeedback = { type: 'success' | 'error'; message: string } | null;
+
 export function PlatformTransfertProprietePage() {
   const navigate = useNavigate();
   const [successors, setSuccessors] = useState<SuccessorForm[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>(null);
   const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   useEffect(() => {
@@ -92,20 +147,24 @@ export function PlatformTransfertProprietePage() {
   }, []);
 
   const updateSuccessor = (index: number, updates: Partial<SuccessorForm>) => {
+    setSaveFeedback(null);
     setSuccessors((prev) =>
       prev.map((s, i) => (i === index ? { ...s, ...updates } : s))
     );
   };
 
   const addSuccessor = () => {
+    setSaveFeedback(null);
     setSuccessors((prev) => [...prev, emptySuccessor()]);
   };
 
   const handleDeleteSuccessor = async (index: number) => {
+    setSaveFeedback(null);
     const s = successors[index];
     if (s.id) {
       try {
         await apiCall(`/api/client/successors/${s.id}/`, { method: 'DELETE' });
+        clearApiCache('/api/client/successors');
         toast.success('Successeur supprimé');
       } catch (err: any) {
         toast.error(err?.message || 'Erreur lors de la suppression');
@@ -119,6 +178,7 @@ export function PlatformTransfertProprietePage() {
   };
 
   const handleFileChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    setSaveFeedback(null);
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) {
@@ -133,10 +193,33 @@ export function PlatformTransfertProprietePage() {
   };
 
   const handleSave = async () => {
+    setSaveFeedback(null);
+
+    const indicesToSave = successors
+      .map((s, i) => (isRowBlank(s) ? -1 : i))
+      .filter((i) => i >= 0);
+
+    if (indicesToSave.length === 0) {
+      const msg = 'Veuillez renseigner au moins un successeur avec les informations complètes, ou supprimez les lignes entièrement vides.';
+      setSaveFeedback({ type: 'error', message: msg });
+      toast.error(msg);
+      return;
+    }
+
+    for (const i of indicesToSave) {
+      const label = `Successeur ${i + 1}`;
+      const err = validateSuccessorRow(successors[i], label);
+      if (err) {
+        setSaveFeedback({ type: 'error', message: err });
+        toast.error(err);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      const updated: SuccessorForm[] = [];
-      for (let i = 0; i < successors.length; i++) {
+      const nextState = [...successors];
+      for (const i of indicesToSave) {
         const s = successors[i];
         const payload = {
           firstName: s.firstName.trim(),
@@ -170,31 +253,39 @@ export function PlatformTransfertProprietePage() {
               headers: { 'Content-Type': 'application/json' },
             });
           }
+        } else if (hasFile) {
+          const formData = new FormData();
+          Object.entries(payload).forEach(([k, v]) => formData.append(k, String(v ?? '')));
+          formData.append('identityDocument', s.identityDocument!);
+          response = await apiCall('/api/client/successors/', {
+            method: 'POST',
+            body: formData,
+            headers: {},
+          });
         } else {
-          if (hasFile) {
-            const formData = new FormData();
-            Object.entries(payload).forEach(([k, v]) => formData.append(k, String(v ?? '')));
-            formData.append('identityDocument', s.identityDocument!);
-            response = await apiCall('/api/client/successors/', {
-              method: 'POST',
-              body: formData,
-              headers: {},
-            });
-          } else {
-            response = await apiCall('/api/client/successors/', {
-              method: 'POST',
-              body: JSON.stringify(payload),
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
+          response = await apiCall('/api/client/successors/', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
-        updated.push(toForm(response));
+
+        if (response == null || typeof response !== 'object') {
+          throw new Error('Réponse serveur invalide.');
+        }
+        nextState[i] = toForm(response);
       }
-      setSuccessors(updated.length > 0 ? updated : [emptySuccessor()]);
+
+      setSuccessors(nextState.length > 0 ? nextState : [emptySuccessor()]);
+      clearApiCache('/api/client/successors');
+      const okMsg = 'Vos informations ont bien été enregistrées.';
+      setSaveFeedback({ type: 'success', message: okMsg });
       toast.success('Successeurs enregistrés avec succès');
     } catch (err: any) {
       console.error('Error saving successors:', err);
-      toast.error(err?.message || 'Erreur lors de l\'enregistrement');
+      const msg = err?.message || 'Erreur lors de l\'enregistrement';
+      setSaveFeedback({ type: 'error', message: msg });
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -355,7 +446,7 @@ export function PlatformTransfertProprietePage() {
                   Choisir un fichier
                 </Button>
                 <span className="platform-transfert-file-name">
-                  {s.identityDocument?.name ?? s.identityDocumentPreview ? 'Fichier sélectionné' : 'Aucun fichier choisi'}
+                  {s.identityDocument?.name ?? (s.identityDocumentPreview ? 'Fichier sélectionné' : 'Aucun fichier choisi')}
                 </span>
               </div>
             </div>
@@ -363,24 +454,39 @@ export function PlatformTransfertProprietePage() {
         </Card>
       ))}
 
-      <div className="platform-transfert-actions">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={addSuccessor}
-          className="platform-transfert-add-btn"
-        >
-          <Plus size={16} />
-          Successeur
-        </Button>
-        <Button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="platform-transfert-save-btn"
-        >
-          {saving ? 'Enregistrement...' : 'Enregistrer'}
-        </Button>
+      <div className="platform-transfert-footer">
+        {saveFeedback ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className={
+              saveFeedback.type === 'success'
+                ? 'platform-transfert-feedback platform-transfert-feedback--success'
+                : 'platform-transfert-feedback platform-transfert-feedback--error'
+            }
+          >
+            {saveFeedback.message}
+          </div>
+        ) : null}
+        <div className="platform-transfert-actions">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addSuccessor}
+            className="platform-transfert-add-btn"
+          >
+            <Plus size={16} />
+            Successeur
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="platform-transfert-save-btn"
+          >
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </Button>
+        </div>
       </div>
 
       <button

@@ -2332,6 +2332,8 @@
 
 html {
   font-size: var(--font-size);
+  /* Évite le « saut » horizontal quand la barre de défilement verticale apparaît / disparaît */
+  scrollbar-gutter: stable;
 }
 
 @property --tw-translate-x {

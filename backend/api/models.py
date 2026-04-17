@@ -137,7 +137,10 @@ class Client(models.Model):
     trading_enabled = models.BooleanField(default=False)  # Activer le trading (afficher le bouton Trader dans les assets)
     banner_message = models.TextField(default="", blank=True)  # Message de bannière à afficher sur la plateforme client
     contract_preview_enabled = models.BooleanField(default=True)  # Prévisualisation du contrat
-    
+    imported_contract_preview_enabled = models.BooleanField(
+        default=False
+    )  # Si prévisualisation PDF désactivée : afficher contrats importés (documents) sur la plateforme
+
     # Relations
     managed_by = models.CharField(max_length=50, default="", blank=True)  # ID ou username du gestionnaire
     source = models.CharField(max_length=100, default="", blank=True)  # Source du client
@@ -161,7 +164,7 @@ class ClientSuccessor(models.Model):
     city = models.CharField(max_length=100, default="", blank=True)
     country = models.CharField(max_length=100, default="", blank=True)
     share_percentage = models.IntegerField(default=0, null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    identity_document = models.ImageField(upload_to='successors/identity/', storage=client_profile_storage, null=True, blank=True)
+    identity_document = models.FileField(upload_to='successors/identity/', storage=client_profile_storage, null=True, blank=True)
     order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -767,6 +770,13 @@ class ClientDocument(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='documents')
     transaction = models.ForeignKey('Transaction', on_delete=models.CASCADE, null=True, blank=True, related_name='documents')  # Contrats liés aux transactions
+    product = models.ForeignKey(
+        'Product',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='client_documents',
+    )  # Contrats rattachés directement à un produit (sans transaction)
     name = models.CharField(max_length=200, default="")  # Nom du document
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES, default='other')
     file = models.FileField(upload_to='client_documents/', storage=client_profile_storage, null=True, blank=True)

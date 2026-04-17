@@ -31,6 +31,8 @@ import '../styles/PlatformInputs.css';
 import '../styles/PlatformNotifications.css';
 import '../styles/Modal.css';
 
+const UI_COMPACT_SHELL_PLATFORM_CLASS = 'ui-compact-shell-platform';
+
 interface PlatformLayoutProps {
   children: React.ReactNode;
 }
@@ -83,6 +85,14 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
     onChange();
     mql.addEventListener('change', onChange);
     return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  /** Tighter rem root than admin CRM (see UiCompactShell.css); no zoom — avoids footer/viewport gaps. */
+  useEffect(() => {
+    document.documentElement.classList.add(UI_COMPACT_SHELL_PLATFORM_CLASS);
+    return () => {
+      document.documentElement.classList.remove(UI_COMPACT_SHELL_PLATFORM_CLASS);
+    };
   }, []);
 
   // Measure header height and update CSS variable
@@ -342,6 +352,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           backgroundColor: 'var(--primary)',
           color: 'var(--accent-foreground)',
           borderBottom: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+          boxShadow: '0 6px 24px rgba(15, 23, 42, 0.07), inset 0 1px 0 color-mix(in srgb, var(--accent-foreground) 12%, transparent)',
           padding: isMobile ? '12px 16px' : '15px 20px',
           display: 'flex',
           justifyContent: 'space-between',
@@ -373,15 +384,18 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           maxWidth: isMobile ? '100%' : '600px', 
           position: 'relative',
         }}>
-          <div style={{ 
-            position: 'absolute', 
-            top: '50%', 
-            transform: 'translateY(-50%)', 
-            left: isMobile ? '12px' : '20px', 
-            pointerEvents: 'none',
-            zIndex: 1
-          }}>
-            <Search size={isMobile ? 18 : 20} color="#9ca3af" />
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              left: isMobile ? '12px' : '20px',
+              pointerEvents: 'none',
+              zIndex: 1,
+              color: 'color-mix(in srgb, var(--accent-foreground) 38%, transparent)',
+            }}
+          >
+            <Search size={isMobile ? 18 : 20} color="currentColor" />
           </div>
           <Input
             className="platform-header-search"

@@ -33,11 +33,11 @@
 }
 
 .platform-root [data-slot='input'].platform-header-search::placeholder {
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent-foreground, #030213) 44%, transparent);
 }
 
 .platform-root [data-slot='input'].platform-header-search:focus::placeholder {
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent-foreground, #030213) 34%, transparent);
 }
 
 .platform-root [data-slot='input'][aria-invalid='true'],

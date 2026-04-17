@@ -46,6 +46,7 @@ export function ClientMiscTab({
   const [tradingEnabled, setTradingEnabled] = useState<boolean>(false);
   const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
   const [contractPreviewEnabled, setContractPreviewEnabled] = useState<boolean>(true);
+  const [importedContractPreviewEnabled, setImportedContractPreviewEnabled] = useState<boolean>(false);
   const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string>('');
   const [savingBannerMessage, setSavingBannerMessage] = useState(false);
@@ -74,6 +75,11 @@ export function ClientMiscTab({
       setContractPreviewEnabled(client.contractPreviewEnabled);
     } else {
       setContractPreviewEnabled(true); // Default to true
+    }
+    if (client?.importedContractPreviewEnabled !== undefined) {
+      setImportedContractPreviewEnabled(Boolean(client.importedContractPreviewEnabled));
+    } else {
+      setImportedContractPreviewEnabled(false);
     }
   }, [client]);
 
@@ -194,19 +200,27 @@ export function ClientMiscTab({
 
   async function handleSaveContractPreviewEnabled() {
     setSavingContractPreviewEnabled(true);
+    const effectiveImported =
+      contractPreviewEnabled ? false : importedContractPreviewEnabled;
     try {
       await apiCall(`/api/clients/${clientId}/`, {
         method: 'PATCH',
-        body: JSON.stringify({ contractPreviewEnabled: contractPreviewEnabled }),
+        body: JSON.stringify({
+          contractPreviewEnabled,
+          importedContractPreviewEnabled: effectiveImported,
+        }),
         headers: { 'Content-Type': 'application/json' }
       });
-      toast.success('Paramètre de prévisualisation du contrat mis à jour avec succès');
+      toast.success('Paramètres de prévisualisation du contrat mis à jour avec succès');
       onRefresh();
     } catch (error: any) {
       console.error('Error saving contract preview enabled:', error);
       toast.error(error.message || 'Erreur lors de la mise à jour du paramètre');
       if (client?.contractPreviewEnabled !== undefined) {
         setContractPreviewEnabled(client.contractPreviewEnabled);
+      }
+      if (client?.importedContractPreviewEnabled !== undefined) {
+        setImportedContractPreviewEnabled(Boolean(client.importedContractPreviewEnabled));
       }
     } finally {
       setSavingContractPreviewEnabled(false);
@@ -353,15 +367,38 @@ export function ClientMiscTab({
               <Checkbox
                 id="contractPreviewEnabled"
                 checked={contractPreviewEnabled}
-                onCheckedChange={(checked) => setContractPreviewEnabled(checked === true)}
+                onCheckedChange={(checked) => {
+                  const on = checked === true;
+                  setContractPreviewEnabled(on);
+                  if (on) {
+                    setImportedContractPreviewEnabled(false);
+                  }
+                }}
               />
               <Label htmlFor="contractPreviewEnabled" className="font-normal cursor-pointer">
                 Prévisualisation du contrat
               </Label>
             </div>
             <p className="text-xs text-slate-500">
-              Si désactivé, le client ne verra pas le bouton "Voir le contrat" lors de la souscription à un produit.
+              Si activé, le client voit le bouton « Voir le contrat » avec le PDF généré à partir du produit lors de la souscription.
             </p>
+            {!contractPreviewEnabled && (
+              <div className="pl-1 pt-2 border-t border-slate-100 mt-3 space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="importedContractPreviewEnabled"
+                    checked={importedContractPreviewEnabled}
+                    onCheckedChange={(checked) => setImportedContractPreviewEnabled(checked === true)}
+                  />
+                  <Label htmlFor="importedContractPreviewEnabled" className="font-normal cursor-pointer">
+                    Afficher les contrats importés manuellement
+                  </Label>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Si activé, le bloc « Prévisualisation du contrat » réapparaît sur la plateforme : les fichiers proviennent des documents CRM (type Contrat) liés au produit concerné.
+                </p>
+              </div>
+            )}
             <div className="pt-2">
               <Button
                 onClick={handleSaveContractPreviewEnabled}

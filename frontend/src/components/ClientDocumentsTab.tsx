@@ -7,6 +7,7 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Plus, Trash2, X, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
 
@@ -23,6 +24,8 @@ interface Document {
   fileUrl: string;
   description: string;
   transactionId: string | null;
+  productId?: string | null;
+  productName?: string | null;
   uploadedBy: number | null;
   uploadedByName: string;
   createdAt: string;
@@ -41,8 +44,11 @@ const DOCUMENT_TYPES = [
 export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefresh }: ClientDocumentsTabProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  /** Catalogue complet : le contrat peut être rattaché à un produit même sans ClientProduct. */
+  const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   
@@ -51,6 +57,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
     documentType: 'other',
     description: '',
     transactionId: '',
+    productId: '',
     file: null as File | null,
   });
 
@@ -95,6 +102,22 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
     loadTransferTransactions();
   }, [clientId]);
 
+  useEffect(() => {
+    async function loadCatalogProducts() {
+      try {
+        setLoadingProducts(true);
+        const data = await apiCall('/api/products/');
+        setCatalogProducts((data as any).products || []);
+      } catch (error) {
+        console.error('Error loading products for documents:', error);
+        setCatalogProducts([]);
+      } finally {
+        setLoadingProducts(false);
+      }
+    }
+    loadCatalogProducts();
+  }, []);
+
   async function loadDocuments() {
     try {
       setLoading(true);
@@ -138,6 +161,9 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
       if (formData.transactionId) {
         formDataToSend.append('transactionId', formData.transactionId);
       }
+      if (formData.productId) {
+        formDataToSend.append('productId', formData.productId);
+      }
       formDataToSend.append('file', formData.file);
 
       const created = await apiCall(`/api/clients/${clientId}/documents/create/`, {
@@ -148,7 +174,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
 
       toast.success('Document ajouté avec succès');
       setIsAddDialogOpen(false);
-      setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
+      setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
       // Instantly refresh list with the newly added document (optimistic update)
       const doc = (created as any)?.document ?? created;
       if (doc?.id) {
@@ -328,6 +354,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                     <th className="text-left py-3 px-3">Type</th>
                     <th className="text-left py-3 px-3">Description</th>
                     <th className="text-left py-3 px-3">Transaction</th>
+                    <th className="text-left py-3 px-3">Produit</th>
                     <th className="text-left py-3 px-3">Fichier</th>
                     <th className="text-left py-3 px-3">Ajouté le</th>
                     <th className="text-right py-3 px-3">Actions</th>
@@ -349,6 +376,9 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                       </td>
                       <td className="py-3 px-3 text-slate-600">
                         {document.transactionId || '-'}
+                      </td>
+                      <td className="py-3 px-3 text-slate-600">
+                        {document.productName || document.productId || '-'}
                       </td>
                       <td className="py-3 px-3">
                         {renderDocumentFileLink(document)}
@@ -389,7 +419,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                 className="modal-close"
                 onClick={() => {
                   setIsAddDialogOpen(false);
-                  setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
+                  setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
                 }}
               >
                 <X className="planning-icon-md" />
@@ -412,11 +442,11 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                 <Select
                   value={formData.documentType}
                   onValueChange={(value) => {
-                    setFormData({ ...formData, documentType: value });
-                    // Clear transaction if not a contract
-                    if (value !== 'contract') {
-                      setFormData(prev => ({ ...prev, transactionId: '' }));
-                    }
+                    setFormData((prev) => ({
+                      ...prev,
+                      documentType: value,
+                      ...(value !== 'contract' ? { transactionId: '', productId: '' } : {}),
+                    }));
                   }}
                 >
                   <SelectTrigger 
@@ -439,39 +469,85 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
               </div>
               
               {formData.documentType === 'contract' && (
-                <div className="modal-form-field">
-                  <Label htmlFor="document-transaction">Transaction (optionnel)</Label>
-                  {(() => {
-                    const transferTransactions = transactions.filter((t: any) => t.type === 'transfert');
-                    return (
-                      <Select
-                        value={formData.transactionId || 'none'}
-                        onValueChange={(value) => setFormData({ ...formData, transactionId: value === 'none' ? '' : value })}
-                      >
-                        <SelectTrigger 
-                          id="document-transaction"
-                          onClick={(e) => e.stopPropagation()}
+                <>
+                  <div className="modal-form-field">
+                    <Label htmlFor="document-transaction">Transaction (optionnel)</Label>
+                    {(() => {
+                      const transferTransactions = transactions.filter((t: any) => t.type === 'transfert');
+                      return (
+                        <Select
+                          value={formData.transactionId || 'none'}
+                          onValueChange={(value) => {
+                            const tid = value === 'none' ? '' : value;
+                            setFormData((prev) => ({
+                              ...prev,
+                              transactionId: tid,
+                              ...(tid ? { productId: '' } : {}),
+                            }));
+                          }}
                         >
-                          <SelectValue placeholder="Sélectionner une transaction" />
-                        </SelectTrigger>
-                        <SelectContent 
-                          className="z-[1001]"
-                          style={{ zIndex: 1001 }}
-                        >
-                          <SelectItem value="none">Aucune</SelectItem>
-                          {transferTransactions.map((transaction) => (
-                            <SelectItem key={transaction.id} value={transaction.id}>
-                              {formatTransactionLabel(transaction)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    );
-                  })()}
-                  <p className="mt-1 text-xs text-slate-500">
-                    Optionnel : lier à une transaction de type "transfert"
-                  </p>
-                </div>
+                          <SelectTrigger
+                            id="document-transaction"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <SelectValue placeholder="Sélectionner une transaction" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[1001]" style={{ zIndex: 1001 }}>
+                            <SelectItem value="none">Aucune</SelectItem>
+                            {transferTransactions.map((transaction) => (
+                              <SelectItem key={transaction.id} value={transaction.id}>
+                                {formatTransactionLabel(transaction)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
+                    <p className="mt-1 text-xs text-slate-500">
+                      Lié à une transaction de type « transfert », ou bien à un produit ci-dessous — pas les deux.
+                    </p>
+                  </div>
+                  <div className="modal-form-field">
+                    <Label htmlFor="document-product">Produit (optionnel)</Label>
+                    <Select
+                      value={formData.productId || 'none'}
+                      onValueChange={(value) => {
+                        const pid = value === 'none' ? '' : value;
+                        setFormData((prev) => ({
+                          ...prev,
+                          productId: pid,
+                          ...(pid ? { transactionId: '' } : {}),
+                        }));
+                      }}
+                      disabled={loadingProducts}
+                    >
+                      <SelectTrigger id="document-product" onClick={(e) => e.stopPropagation()}>
+                        <SelectValue
+                          placeholder={
+                            loadingProducts ? 'Chargement des produits…' : 'Sélectionner un produit'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent className="z-[1001]" style={{ zIndex: 1001 }}>
+                        <SelectItem value="none">Aucun</SelectItem>
+                        {catalogProducts
+                          .filter((p: any) => p?.id)
+                          .map((p: any) => {
+                            const ref = p.reference ? ` (${p.reference})` : '';
+                            return (
+                              <SelectItem key={p.id} value={String(p.id)}>
+                                {p.name}
+                                {ref}
+                              </SelectItem>
+                            );
+                          })}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Tout produit du catalogue peut être choisi (il n’a pas besoin d’être attribué au client).
+                    </p>
+                  </div>
+                </>
               )}
               
               <div className="modal-form-field">
@@ -507,7 +583,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                   variant="outline"
                   onClick={() => {
                     setIsAddDialogOpen(false);
-                    setFormData({ name: '', documentType: 'other', description: '', transactionId: '', file: null });
+                    setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
                   }}
                 >
                   Annuler

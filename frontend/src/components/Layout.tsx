@@ -1,9 +1,11 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import { useUser } from '../contexts/UserContext';
 import '../styles/Layout.css';
+
+const UI_COMPACT_SHELL_CLASS = 'ui-compact-shell';
 
 interface LayoutProps {
   children?: React.ReactNode;
@@ -42,6 +44,14 @@ const LayoutComponent = ({ children }: LayoutProps) => {
 
   // Memoize user role
   const userRole = useMemo(() => currentUser?.role || 'admin', [currentUser?.role]);
+
+  /** Same rem density as the client platform so CRM and plateforme match at 100% zoom. */
+  useEffect(() => {
+    document.documentElement.classList.add(UI_COMPACT_SHELL_CLASS);
+    return () => {
+      document.documentElement.classList.remove(UI_COMPACT_SHELL_CLASS);
+    };
+  }, []);
 
   if (loading) {
     return (
