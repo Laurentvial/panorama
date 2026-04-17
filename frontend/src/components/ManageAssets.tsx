@@ -504,6 +504,7 @@ export function ManageAssets() {
         default: false,
         alphaVantageSymbol: '',
         exchange: '',
+        currency: '',
         logoUrl: '',
         description: '',
       });
@@ -538,6 +539,7 @@ export function ManageAssets() {
       default: false,
       alphaVantageSymbol: '',
       exchange: '',
+      currency: '',
       logoUrl: '',
       description: '',
     });

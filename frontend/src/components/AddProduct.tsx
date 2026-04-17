@@ -443,8 +443,8 @@ export function AddProduct() {
         if (formData.description) formDataToSend.append('description', formData.description);
         if (formData.cgv) formDataToSend.append('cgv', formData.cgv);
         formDataToSend.append('active', (formData.status === 'Actif').toString());
-        formDataToSend.append('noProfitability', formData.noProfitability);
-        formDataToSend.append('isVariableProfitability', formData.isVariableProfitability);
+        formDataToSend.append('noProfitability', String(formData.noProfitability));
+        formDataToSend.append('isVariableProfitability', String(formData.isVariableProfitability));
         if (variableProfitabilityValue) formDataToSend.append('variableProfitability', variableProfitabilityValue);
         if (!formData.noProfitability) {
           if (formData.profitabilityPeriod) formDataToSend.append('profitabilityPeriod', formData.profitabilityPeriod);

@@ -53,6 +53,7 @@ export function ManageUsefulLinks() {
         url: link.url || '',
         description: link.description || '',
         image: null,
+        button: link.button || '',
         default: link.default || false
       });
       setImagePreview(link.imageUrl || null);
@@ -64,6 +65,7 @@ export function ManageUsefulLinks() {
         url: '',
         description: '',
         image: null,
+        button: '',
         default: false
       });
       setImagePreview(null);

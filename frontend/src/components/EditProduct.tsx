@@ -682,8 +682,13 @@ export function EditProduct() {
         formDataToSend.append('description', formData.description || '');
         formDataToSend.append('cgv', formData.cgv || '');
         formDataToSend.append('active', (formData.status === 'Actif').toString());
-        formDataToSend.append('noProfitability', formData.noProfitability);
-        formDataToSend.append('isVariableProfitability', formData.isVariableProfitability || 'Non');
+        formDataToSend.append('noProfitability', String(formData.noProfitability));
+        formDataToSend.append(
+          'isVariableProfitability',
+          typeof formData.isVariableProfitability === 'boolean'
+            ? String(formData.isVariableProfitability)
+            : String(formData.isVariableProfitability || '')
+        );
         // Always send variableProfitability, even if empty
         formDataToSend.append('variableProfitability', variableProfitabilityValue || '');
         // Always send profitabilityPeriod, even if empty

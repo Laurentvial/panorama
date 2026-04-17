@@ -137,7 +137,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
     } catch (error: any) {
       console.error('Error loading verification config:', error);
       // Initialiser avec des valeurs par défaut si erreur (6–7 désactivées)
-      const steps: Record<string, { enabled: boolean }> = {};
+      const steps: Record<string, { enabled: boolean; questions?: Record<string, boolean> }> = {};
       for (let i = 1; i <= 8; i++) {
         steps[`step_${i}`] = { enabled: !(i === 6 || i === 7) };
       }

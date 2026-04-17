@@ -2869,11 +2869,8 @@ export function ProductDetail() {
         scrollbarWidth: 'thin',
       }}>
         {[
+          // Note: the "product" view returns early above, so this section is the asset view.
           { id: 'overview', label: 'Vue d\'ensemble', icon: BarChart3 },
-          ...(dataType === 'product' ? [
-            { id: 'analysis', label: 'Analyse', icon: FileText },
-            { id: 'news', label: 'Actualités', icon: Newspaper },
-          ] : []),
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

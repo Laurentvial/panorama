@@ -16,7 +16,7 @@ import { ProductTransferSelect } from './ProductTransferSelect';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { PositionGenerationModal } from './PositionGenerationModal';
-import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
+import { getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/Modal.css';

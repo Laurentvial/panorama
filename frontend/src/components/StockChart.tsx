@@ -37,14 +37,25 @@ export function StockChart({
 }: StockChartProps) {
   const isCrypto = (assetType || '').toLowerCase() === 'crypto' || (assetType || '').toLowerCase() === 'cryptocurrency';
   const [allChartData, setAllChartData] = useState<ChartDataPoint[]>([]);
+  const [fetchedOutputsize, setFetchedOutputsize] = useState<'compact' | 'full' | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metaData, setMetaData] = useState<any>(null);
 
   useEffect(() => {
+    const requiredOutputsize: 'compact' | 'full' =
+      timeframe === '6M' || timeframe === '1Y' || timeframe === '3Y' || timeframe === 'MAX' ? 'full' : 'compact';
+
     const fetchChartData = async () => {
       if (!assetId) {
         setError('Asset ID is required');
+        setLoading(false);
+        return;
+      }
+
+      // If we already have "full" data, we can display any timeframe without refetch.
+      // If we already have the required outputsize, no need to refetch either.
+      if (fetchedOutputsize === 'full' || fetchedOutputsize === requiredOutputsize) {
         setLoading(false);
         return;
       }
@@ -53,8 +64,7 @@ export function StockChart({
       setError(null);
 
       try {
-        // Request full data to support 1Y, 3Y, MAX timeframes (compact only returns ~100 days)
-        const response = await apiCall(`/api/assets/${assetId}/chart-data/?outputsize=full`, {
+        const response = await apiCall(`/api/assets/${assetId}/chart-data/?outputsize=${requiredOutputsize}`, {
           method: 'GET',
         });
 
@@ -73,6 +83,7 @@ export function StockChart({
         if (response.data && Array.isArray(response.data)) {
           setAllChartData(response.data);
           setMetaData(response.meta_data || null);
+          setFetchedOutputsize(requiredOutputsize);
         } else {
           setError('Invalid chart data format');
         }
@@ -89,7 +100,7 @@ export function StockChart({
     };
 
     fetchChartData();
-  }, [assetId]);
+  }, [assetId, timeframe, fetchedOutputsize]);
 
   // Format date as YYYY-MM-DD for reliable date-only comparison (avoids timezone issues)
   const toDateStr = (d: Date) =>

@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from './ui/button';
 import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { getStatusLabel, getTypeLabel, getTypeColors, getStatusColors, extractAssetInfo } from './transactionUtils';
+import { getStatusLabel, getTypeLabel, getStatusColors } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
 
 // Helper functions for French labels

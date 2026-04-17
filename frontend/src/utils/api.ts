@@ -244,7 +244,7 @@ export async function apiCall(endpoint: string, options: RequestInit = {}) {
   const auth = getActiveAuth();
   let token = auth.token;
   const activeUserType = auth.userType;
-  const activeStorage = auth.storage;
+  // auth.storage is used via clearAuth(auth) to clear only the active context.
   
   // Don't set Content-Type for FormData, let the browser set it with boundary
   const isFormData = options.body instanceof FormData;

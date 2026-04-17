@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ArrowLeft, User, Power, CheckCircle, XCircle, FileText, Mail } from 'lucide-react';
@@ -9,7 +9,6 @@ import { EditPersonalInfoModal } from './EditPersonalInfoModal';
 import { EditPatrimonialInfoModal } from './EditPatrimonialInfoModal';
 import { ClientInfoTab } from './ClientInfoTab';
 import { ClientAssetsTab } from './ClientAssetsTab';
-import { ClientPortfolioTab } from './ClientPortfolioTab';
 import { ClientTransactionsTab } from './ClientTransactionsTab';
 import { ClientPositionsTab } from './ClientPositionsTab';
 import { ClientNotesTab } from './ClientNotesTab';
@@ -24,6 +23,10 @@ interface ClientDetailProps {
   clientId: string;
   onBack: () => void;
 }
+
+const ClientPortfolioTab = lazy(() =>
+  import('./ClientPortfolioTab').then((m) => ({ default: m.ClientPortfolioTab }))
+);
 
 const CLIENT_DETAIL_TAB_STORAGE_PREFIX = 'client_detail_active_tab_';
 const CLIENT_DETAIL_TABS = [
@@ -381,7 +384,16 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Portfolio Tab */}
         <TabsContent value="portfolio">
-          <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
+          <Suspense
+            fallback={
+              <div className="flex flex-col items-center justify-center py-12">
+                <LoadingIndicator />
+                <p className="mt-4 text-slate-600">Chargement du portefeuille...</p>
+              </div>
+            }
+          >
+            <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
+          </Suspense>
         </TabsContent>
 
         {/* Notes Tab */}

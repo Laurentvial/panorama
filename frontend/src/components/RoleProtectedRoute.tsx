@@ -6,7 +6,7 @@ import { useUser } from '../contexts/UserContext';
 interface RoleProtectedRouteProps {
   children: React.ReactNode;
   /** Roles allowed to access this route (e.g. ['admin'] or ['admin', 'teamleader', 'gestionnaire']) */
-  allowedRoles: string[];
+  allowedRoles: readonly string[];
 }
 
 /**
