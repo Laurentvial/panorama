@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 import pytz
 from django.db import transaction as db_transaction
 from django.utils import timezone
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 
 from .models import Product, Transaction, Position, ProductAssetAllocation, Log, Asset
 from .position_audit import position_deletion_audit
@@ -1021,6 +1021,83 @@ def _safe_decimal_sum(values) -> Decimal:
     return total
 
 
+def _clamp_amount_to_remaining_budget(
+    desired_amount: Decimal,
+    *,
+    remaining_budget: Decimal,
+) -> tuple[Decimal, Decimal]:
+    """
+    Clamp a desired invested amount to the remaining budget.
+    Returns (clamped_amount, new_remaining_budget).
+    """
+    desired = (desired_amount or Decimal('0')).quantize(Decimal('0.01'))
+    remaining = (remaining_budget or Decimal('0')).quantize(Decimal('0.01'))
+    if remaining <= 0:
+        return Decimal('0.00'), remaining
+    if desired <= 0:
+        return Decimal('0.00'), remaining
+    used = min(desired, remaining).quantize(Decimal('0.01'))
+    return used, (remaining - used).quantize(Decimal('0.01'))
+
+
+def _resolve_product_overlap_window(
+    *,
+    product_id: str | None,
+    opened_at: datetime,
+    closed_at: datetime,
+    exclude_transaction_id: str | None = None,
+    max_iterations: int = 20,
+) -> tuple[datetime, datetime] | None:
+    """
+    Ensure there is no overlap with existing pending/open positions for the same product.
+
+    If overlaps exist, shifts the entire window forward (keeping duration) to start right after
+    the latest conflicting closed_at. If any conflicting position has closed_at=NULL (open-ended),
+    returns None (cannot schedule without overlapping).
+    """
+    if product_id is None:
+        return opened_at, closed_at
+    if closed_at <= opened_at:
+        return None
+
+    duration = closed_at - opened_at
+    new_open = opened_at
+    new_close = closed_at
+
+    for _ in range(max_iterations):
+        qs = Position.objects.filter(
+            product_id=product_id,
+            status__in=('pending', 'open'),
+            opened_at__isnull=False,
+        )
+        if exclude_transaction_id:
+            qs = qs.exclude(transaction_id=exclude_transaction_id)
+
+        conflicts = qs.filter(
+            opened_at__lt=new_close,
+        ).filter(
+            Q(closed_at__isnull=True) | Q(closed_at__gt=new_open)
+        )
+
+        if not conflicts.exists():
+            return new_open, new_close
+
+        if conflicts.filter(closed_at__isnull=True).exists():
+            return None
+
+        latest_close = conflicts.aggregate(Max('closed_at'))['closed_at__max']
+        if latest_close is None:
+            return None
+        if latest_close >= new_close:
+            new_open = latest_close
+            new_close = latest_close + duration
+        else:
+            new_open = latest_close
+            new_close = latest_close + duration
+
+    return None
+
+
 def _log_positions_generation(
     *,
     txn: Transaction,
@@ -1142,6 +1219,8 @@ def _create_trade_positions_compounding(
     invested_total = ctx.invested_amount
     if invested_total <= 0:
         return []
+    remaining_budget = invested_total.quantize(Decimal('0.01'))
+    remaining_budget = invested_total.quantize(Decimal('0.01'))
 
     max_per_day = 3
     rng = random.Random(str(txn.id))
@@ -1282,6 +1361,8 @@ def _create_trade_positions_compounding(
             created_count_this_period = len(pnl_parts)
 
             for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
+                if remaining_budget <= 0:
+                    break
                 # Determine asset first to get market-specific hours
                 asset_obj = None
                 if assets_weighted:
@@ -1308,6 +1389,26 @@ def _create_trade_positions_compounding(
                 if not windows:
                     continue
                 opened_at, closed_at = windows[0]
+
+                overlap_resolved = _resolve_product_overlap_window(
+                    product_id=ctx.product_id,
+                    opened_at=opened_at,
+                    closed_at=closed_at,
+                )
+                if overlap_resolved is None:
+                    continue
+                opened_at, closed_at = overlap_resolved
+
+                amt_desired = Decimal(str(amt)).quantize(Decimal('0.01'))
+                pnl_desired = Decimal(str(pnl)).quantize(Decimal('0.01'))
+                amt, remaining_budget = _clamp_amount_to_remaining_budget(
+                    amt_desired,
+                    remaining_budget=remaining_budget,
+                )
+                if amt <= 0:
+                    continue
+                ratio = (amt / amt_desired) if amt_desired > 0 else Decimal('0')
+                pnl = (pnl_desired * ratio).quantize(Decimal('0.01'))
 
                 asset_currency = None
                 fx_rate = None
@@ -1803,8 +1904,31 @@ def _create_period_positions_simple(
                         # Create positions for whatever windows we could schedule
                         for pos_data, (retry_opened_at, retry_closed_at) in zip(skipped_positions, retry_windows):
                             asset_obj = pos_data['asset']
-                            pos_invested = pos_data['invested']
-                            pos_profit = pos_data['profit']
+                            pos_invested_desired = Decimal(str(pos_data['invested'])).quantize(Decimal('0.01'))
+                            pos_profit_desired = Decimal(str(pos_data['profit'])).quantize(Decimal('0.01'))
+
+                            if remaining_budget <= 0:
+                                break
+
+                            overlap_resolved = _resolve_product_overlap_window(
+                                product_id=ctx.product_id,
+                                opened_at=retry_opened_at,
+                                closed_at=retry_closed_at,
+                            )
+                            if overlap_resolved is None:
+                                continue
+                            retry_opened_at, retry_closed_at = overlap_resolved
+
+                            pos_invested, remaining_budget = _clamp_amount_to_remaining_budget(
+                                pos_invested_desired,
+                                remaining_budget=remaining_budget,
+                            )
+                            if pos_invested <= 0:
+                                continue
+
+                            # Keep profit proportional to the clamped invested amount.
+                            ratio = (pos_invested / pos_invested_desired) if pos_invested_desired > 0 else Decimal('0')
+                            pos_profit = (pos_profit_desired * ratio).quantize(Decimal('0.01'))
                             
                             # FX conversion
                             fx_rate = None
@@ -1840,7 +1964,7 @@ def _create_period_positions_simple(
                                     invested_amount_asset_currency=invested_amount_asset_currency,
                                     profit_loss=pos_profit,
                                     period_index=next_idx,
-                                    period_date=other_day,
+                                    period_date=retry_opened_at.date(),
                                     status='pending',
                                 )
                             )
@@ -1860,8 +1984,30 @@ def _create_period_positions_simple(
                 # Create positions with scheduled windows
                 for pos_data, (opened_at, closed_at) in zip(day_positions_data, windows):
                     asset_obj = pos_data['asset']
-                    pos_invested = pos_data['invested']
-                    pos_profit = pos_data['profit']
+                    pos_invested_desired = Decimal(str(pos_data['invested'])).quantize(Decimal('0.01'))
+                    pos_profit_desired = Decimal(str(pos_data['profit'])).quantize(Decimal('0.01'))
+
+                    if remaining_budget <= 0:
+                        break
+
+                    overlap_resolved = _resolve_product_overlap_window(
+                        product_id=ctx.product_id,
+                        opened_at=opened_at,
+                        closed_at=closed_at,
+                    )
+                    if overlap_resolved is None:
+                        continue
+                    opened_at, closed_at = overlap_resolved
+
+                    pos_invested, remaining_budget = _clamp_amount_to_remaining_budget(
+                        pos_invested_desired,
+                        remaining_budget=remaining_budget,
+                    )
+                    if pos_invested <= 0:
+                        continue
+
+                    ratio = (pos_invested / pos_invested_desired) if pos_invested_desired > 0 else Decimal('0')
+                    pos_profit = (pos_profit_desired * ratio).quantize(Decimal('0.01'))
                     
                     # FX conversion (for non-EUR assets)
                     fx_rate = None
@@ -1897,7 +2043,7 @@ def _create_period_positions_simple(
                             invested_amount_asset_currency=invested_amount_asset_currency,
                             profit_loss=pos_profit,
                             period_index=next_idx,
-                            period_date=day,
+                            period_date=opened_at.date(),
                             status='pending',
                         )
                     )
@@ -3743,12 +3889,40 @@ def build_investment_context(
                         f"current_txn_amount={current_txn_amount}")
             # Correct the value to prevent downstream issues
             real_invested_capital = expected_capital
-    elif txn.transfer_to == product.id and not is_withdrawal_temp_transaction:
+    elif (txn.transfer_to == product.id or txn.transfer_to is None) and not is_withdrawal_temp_transaction:
         # This is an investment: add the investment amount to the capital
-        # Only add if it's NOT a withdrawal temp transaction (double-check)
-        real_invested_capital += current_txn_amount
-        logger.info(f"Investment detected for txn {txn.id}: adding {current_txn_amount} to capital. "
-                    f"Capital after investment: {real_invested_capital}")
+        #
+        # IMPORTANT: some records resolve `product` via subscription_details (or description parsing)
+        # while `transfer_to` may be missing/None in the ORM instance. In that case we still must
+        # treat this as an investment and include the current transaction amount, otherwise
+        # invested_amount stays 0 and rate generation returns no periods.
+        is_investment_into_product = (
+            txn.transfer_to == product.id
+            or (
+                txn.transfer_to not in ('solde', 'trading', None, '')
+                and str(txn.transfer_to) == str(product.id)
+            )
+            or (
+                (txn.transfer_to is None or str(txn.transfer_to).strip() == '')
+                and str(getattr(txn, 'transfer_from', None) or '') in ('', 'solde', 'trading', None)
+                and isinstance(txn.subscription_details, dict)
+                and str(txn.subscription_details.get('productId') or '').strip() == str(product.id)
+            )
+        )
+        if is_investment_into_product:
+            real_invested_capital += current_txn_amount
+            logger.info(
+                f"Investment detected for txn {txn.id}: adding {current_txn_amount} to capital "
+                f"(transfer_to={txn.transfer_to!r}, product.id={product.id}). "
+                f"Capital after investment: {real_invested_capital}"
+            )
+        else:
+            logger.warning(
+                f"Investment capital add skipped for txn {txn.id}: "
+                f"transfer_to={txn.transfer_to!r}, product.id={product.id}, "
+                f"transfer_from={getattr(txn, 'transfer_from', None)!r}, "
+                f"subscription_details={getattr(txn, 'subscription_details', None)}"
+            )
     elif txn.transfer_to == 'solde' or txn.transfer_from == product.id:
         # This is a direct withdrawal: subtract the withdrawal amount from the capital
         real_invested_capital -= current_txn_amount
@@ -3798,11 +3972,27 @@ def build_investment_context(
     elif invested_amount == 0 and not is_withdrawal_temp_transaction:
         # If no capital is invested, use the current transaction amount as fallback
         # This handles the case of the first investment or investment after full withdrawal
-        if current_txn_amount > 0 and txn.transfer_to == product.id and not is_withdrawal_temp_transaction:
+        if current_txn_amount > 0 and not is_withdrawal_temp_transaction:
             # Investment: use the transaction amount as capital base
-            invested_amount = current_txn_amount
-            logger.info(f"Using transaction amount as capital base for investment {txn.id}: {invested_amount} "
-                       f"(previous capital was 0, this is a new investment)")
+            is_investment_into_product = (
+                txn.transfer_to == product.id
+                or (
+                    txn.transfer_to not in ('solde', 'trading', None, '')
+                    and str(txn.transfer_to) == str(product.id)
+                )
+                or (
+                    (txn.transfer_to is None or str(txn.transfer_to).strip() == '')
+                    and str(getattr(txn, 'transfer_from', None) or '') in ('', 'solde', 'trading', None)
+                    and isinstance(txn.subscription_details, dict)
+                    and str(txn.subscription_details.get('productId') or '').strip() == str(product.id)
+                )
+            )
+            if is_investment_into_product:
+                invested_amount = current_txn_amount
+                logger.info(
+                    f"Using transaction amount as capital base for investment {txn.id}: {invested_amount} "
+                    f"(previous capital was 0, this is a new investment; transfer_to={txn.transfer_to!r})"
+                )
         else:
             # No capital invested and current transaction is not a positive investment
             logger.warning(f"No capital and transaction is not a positive investment: "

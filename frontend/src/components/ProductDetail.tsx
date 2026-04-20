@@ -498,8 +498,10 @@ export function ProductDetail() {
   const profitabilityPeriodMonths = (period: any, durationDays: number): number => {
     const p = String(period || '').trim().toLowerCase();
     if (!p) return 1;
+    // Align with backend position_service: EOC rate applies once over the contract;
+    // profit "period" length uses floor(days/30), not ceil — otherwise e.g. 35d => proration 1/2.
     if (p.includes('fin') && (p.includes('contrat') || p.includes('matur'))) {
-      return Math.max(1, Math.ceil((durationDays || 30) / 30));
+      return Math.max(1, Math.floor((durationDays || 30) / 30));
     }
     if (p.includes('mens')) return 1;
     if (p.includes('trim')) return 3;

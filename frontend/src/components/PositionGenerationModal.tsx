@@ -13,13 +13,63 @@ const API_TIMEOUT_MS = 120_000; // 2 minutes
 const GENERATION_HORIZON_MIN = 30;
 const GENERATION_HORIZON_MAX = 3650;
 
-/** Align with backend `_product_has_explicit_contract_duration`: positive integer in product.duration. */
-function productHasExplicitContractDuration(duration: unknown): boolean {
-  if (duration == null || !String(duration).trim()) return false;
-  const m = String(duration).match(/(\d+)/);
+/**
+ * Align with backend `_product_has_explicit_contract_duration`:
+ * any positive integer found in the duration string counts as an explicit duration.
+ */
+function stringHasExplicitPositiveIntegerDuration(duration: unknown): boolean {
+  if (duration == null) return false;
+  const s = String(duration).trim();
+  if (!s) return false;
+  const m = s.match(/(\d+)/);
   if (!m) return false;
   const v = parseInt(m[1], 10);
   return Number.isFinite(v) && v > 0;
+}
+
+function transactionHasExplicitContractDuration(txn: any): boolean {
+  const candidates: unknown[] = [
+    txn?.product?.duration,
+    txn?.subscription_details?.duration,
+    txn?.subscription_duration,
+  ];
+  return candidates.some((d) => stringHasExplicitPositiveIntegerDuration(d));
+}
+
+function getTransactionTransferTo(txn: any): string | null {
+  const v =
+    txn?.transfer_to ??
+    txn?.to_field ??
+    txn?.to ??
+    txn?.transferTo ??
+    txn?.subscription_details?.productId ??
+    txn?.subscription_details?.product_id ??
+    null;
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+
+function getTransactionTransferFrom(txn: any): string | null {
+  const v =
+    txn?.transfer_from ??
+    txn?.from_field ??
+    txn?.from ??
+    txn?.transferFrom ??
+    null;
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+
+function isInvestmentTransferTransaction(txn: any): boolean {
+  if (!txn) return false;
+  if (String(txn.type || '').trim().toLowerCase() !== 'transfert') return false;
+
+  const transferTo = getTransactionTransferTo(txn);
+  if (!transferTo) return false;
+  if (transferTo === 'solde' || transferTo === 'trading') return false;
+  return true;
 }
 
 /** Proration = effective_rate / base_rate when base ≠ 0 (aligns with backend; works for negative rates). */
@@ -257,8 +307,11 @@ export function PositionGenerationModal({
       });
 
       const product = transaction?.product;
+      const isInvestment = isInvestmentTransferTransaction(transaction);
+      // Important: some callers provide a transaction object without `product` populated.
+      // In that case we still want to offer (and send) the horizon for indefinite products.
       const useHorizon =
-        Boolean(product) && !productHasExplicitContractDuration(product?.duration);
+        Boolean(isInvestment) && !transactionHasExplicitContractDuration(transaction);
       let parsedHorizon = parseInt(generationHorizonDaysRef.current.trim(), 10);
       if (!Number.isFinite(parsedHorizon)) parsedHorizon = GENERATION_HORIZON_MIN;
       parsedHorizon = Math.min(
@@ -317,6 +370,13 @@ export function PositionGenerationModal({
       }
       
       setRates(ratesData);
+
+      // Keep the horizon input in sync with what was actually sent to the API (clamped),
+      // otherwise the UI can show "30" while the generated schedule reflects a different horizon.
+      if (useHorizon) {
+        generationHorizonDaysRef.current = String(parsedHorizon);
+        setGenerationHorizonDays(String(parsedHorizon));
+      }
       
       // Initialize edited rates with original rates
       const initialEdited: Record<number, string> = {};
@@ -432,9 +492,9 @@ export function PositionGenerationModal({
       };
 
       const productForHorizon = transaction?.product;
+      const isInvestmentForPositions = isInvestmentTransferTransaction(transaction);
       const useHorizonForPositions =
-        Boolean(productForHorizon) &&
-        !productHasExplicitContractDuration(productForHorizon?.duration);
+        Boolean(isInvestmentForPositions) && !transactionHasExplicitContractDuration(transaction);
       if (useHorizonForPositions) {
         let hz = parseInt(generationHorizonDaysRef.current.trim(), 10);
         if (!Number.isFinite(hz)) hz = GENERATION_HORIZON_MIN;
@@ -748,9 +808,9 @@ export function PositionGenerationModal({
 
   const cumulativeInterestTakenIntoAccount = Boolean(selectedInterestPeriod);
 
+  const isInvestmentUi = isInvestmentTransferTransaction(transaction);
   const useHorizonForProduct = Boolean(
-    transaction?.product &&
-      !productHasExplicitContractDuration(transaction.product.duration)
+    isInvestmentUi && !transactionHasExplicitContractDuration(transaction)
   );
 
   const calculateTargetProfit = (rate: PeriodRate, editedRate: string | undefined): string => {
