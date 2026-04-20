@@ -13,27 +13,21 @@ const API_TIMEOUT_MS = 120_000; // 2 minutes
 const GENERATION_HORIZON_MIN = 30;
 const GENERATION_HORIZON_MAX = 3650;
 
-/**
- * Align with backend `_product_has_explicit_contract_duration`:
- * any positive integer found in the duration string counts as an explicit duration.
- */
-function stringHasExplicitPositiveIntegerDuration(duration: unknown): boolean {
-  if (duration == null) return false;
-  const s = String(duration).trim();
-  if (!s) return false;
-  const m = s.match(/(\d+)/);
-  if (!m) return false;
-  const v = parseInt(m[1], 10);
-  return Number.isFinite(v) && v > 0;
+function productDurationIsMissing(txn: any): boolean {
+  const d = txn?.product?.duration;
+  return d == null || !String(d).trim();
 }
 
-function transactionHasExplicitContractDuration(txn: any): boolean {
-  const candidates: unknown[] = [
-    txn?.product?.duration,
-    txn?.subscription_details?.duration,
-    txn?.subscription_duration,
-  ];
-  return candidates.some((d) => stringHasExplicitPositiveIntegerDuration(d));
+function transactionRequiresGenerationHorizonDays(txn: any, isWithdrawalTxn: boolean): boolean {
+  // When Product.duration is empty, backend treats the contract as "no explicit duration"
+  // and generation_horizon_days becomes required for predictable windows.
+  //
+  // UX requirement: ask for horizon BEFORE calling generate-rates in that case.
+  if (isWithdrawalTxn) {
+    return !txn?.product || productDurationIsMissing(txn);
+  }
+  if (!isInvestmentTransferTransaction(txn)) return false;
+  return !txn?.product || productDurationIsMissing(txn);
 }
 
 function getTransactionTransferTo(txn: any): string | null {
@@ -194,7 +188,13 @@ interface PositionGenerationModalProps {
   isWithdrawal?: boolean; // If true, this is a withdrawal transaction
 }
 
-type Step = 'loading-rates' | 'review-rates' | 'loading-positions' | 'review-positions' | 'saving';
+type Step =
+  | 'await-horizon'
+  | 'loading-rates'
+  | 'review-rates'
+  | 'loading-positions'
+  | 'review-positions'
+  | 'saving';
 
 export function PositionGenerationModal({
   isOpen,
@@ -250,7 +250,6 @@ export function PositionGenerationModal({
   useEffect(() => {
     if (isOpen && transaction) {
       // Reset state when modal opens
-      setStep('loading-rates');
       setRates([]);
       setEditedRates({});
       setPositions([]);
@@ -271,9 +270,14 @@ export function PositionGenerationModal({
       generationHorizonDaysRef.current = '30';
       setGenerationHorizonDays('30');
 
-      // For both investments and withdrawals, generate rates
-      // For withdrawals, rates will be generated for the source product
-      generateRates();
+      if (transactionRequiresGenerationHorizonDays(transaction, isWithdrawal)) {
+        setStep('await-horizon');
+      } else {
+        setStep('loading-rates');
+        // For both investments and withdrawals, generate rates
+        // For withdrawals, rates will be generated for the source product
+        generateRates();
+      }
     }
     return () => {
       abortControllerRef.current?.abort();
@@ -306,12 +310,7 @@ export function PositionGenerationModal({
         product: transaction.product
       });
 
-      const product = transaction?.product;
-      const isInvestment = isInvestmentTransferTransaction(transaction);
-      // Important: some callers provide a transaction object without `product` populated.
-      // In that case we still want to offer (and send) the horizon for indefinite products.
-      const useHorizon =
-        Boolean(isInvestment) && !transactionHasExplicitContractDuration(transaction);
+      const useHorizon = transactionRequiresGenerationHorizonDays(transaction, isWithdrawal);
       let parsedHorizon = parseInt(generationHorizonDaysRef.current.trim(), 10);
       if (!Number.isFinite(parsedHorizon)) parsedHorizon = GENERATION_HORIZON_MIN;
       parsedHorizon = Math.min(
@@ -426,7 +425,7 @@ export function PositionGenerationModal({
     abortControllerRef.current = null;
     if (step === 'loading-positions') {
       setStep('review-rates');
-    } else if (step === 'loading-rates') {
+    } else if (step === 'loading-rates' || step === 'await-horizon') {
       onClose();
     }
   };
@@ -491,10 +490,7 @@ export function PositionGenerationModal({
         manual_regeneration: true,
       };
 
-      const productForHorizon = transaction?.product;
-      const isInvestmentForPositions = isInvestmentTransferTransaction(transaction);
-      const useHorizonForPositions =
-        Boolean(isInvestmentForPositions) && !transactionHasExplicitContractDuration(transaction);
+      const useHorizonForPositions = transactionRequiresGenerationHorizonDays(transaction, isWithdrawal);
       if (useHorizonForPositions) {
         let hz = parseInt(generationHorizonDaysRef.current.trim(), 10);
         if (!Number.isFinite(hz)) hz = GENERATION_HORIZON_MIN;
@@ -808,10 +804,17 @@ export function PositionGenerationModal({
 
   const cumulativeInterestTakenIntoAccount = Boolean(selectedInterestPeriod);
 
-  const isInvestmentUi = isInvestmentTransferTransaction(transaction);
-  const useHorizonForProduct = Boolean(
-    isInvestmentUi && !transactionHasExplicitContractDuration(transaction)
-  );
+  const useHorizonForProduct = transactionRequiresGenerationHorizonDays(transaction, isWithdrawal);
+
+  const handleGenerationHorizonInputChange = (raw: string) => {
+    generationHorizonDaysRef.current = raw;
+    setGenerationHorizonDays(raw);
+    // If we're in the "no periods" failure path, editing horizon should clear the stale error banner
+    // until the user explicitly regenerates.
+    if (useHorizonForProduct && rates.length === 0) {
+      setError(null);
+    }
+  };
 
   const calculateTargetProfit = (rate: PeriodRate, editedRate: string | undefined): string => {
     // Use edited rate if available and valid, otherwise use baseRatePct
@@ -993,6 +996,64 @@ export function PositionGenerationModal({
             </div>
           )}
 
+          {step === 'await-horizon' && (
+            <div>
+              <div
+                style={{
+                  padding: '14px',
+                  backgroundColor: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  borderRadius: '8px',
+                  marginBottom: '16px',
+                  fontSize: '14px',
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: '8px', color: '#14532d' }}>
+                  Horizon de génération requis
+                </div>
+                <Label htmlFor="generation-horizon-days-pre" style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>
+                  Horizon de génération (jours)
+                </Label>
+                <Input
+                  id="generation-horizon-days-pre"
+                  type="number"
+                  min={GENERATION_HORIZON_MIN}
+                  max={GENERATION_HORIZON_MAX}
+                  value={generationHorizonDays}
+                  onChange={(e) => handleGenerationHorizonInputChange(e.target.value)}
+                  style={{ maxWidth: '200px', marginBottom: '8px' }}
+                />
+                <p style={{ color: '#166534', marginBottom: '12px', lineHeight: 1.5 }}>
+                  {transaction?.product
+                    ? "La durée contractuelle du produit n’est pas renseignée sur la fiche produit."
+                    : "Les informations produit (dont la durée) ne sont pas disponibles sur cette transaction."}{' '}
+                  Indiquez sur combien de jours générer les périodes avant de calculer les taux. Plage autorisée :{' '}
+                  {GENERATION_HORIZON_MIN} à {GENERATION_HORIZON_MAX} jours.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <Button type="button" variant="outline" onClick={() => onClose()}>
+                    Annuler
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      let hz = parseInt(generationHorizonDaysRef.current.trim(), 10);
+                      if (!Number.isFinite(hz)) hz = GENERATION_HORIZON_MIN;
+                      hz = Math.min(GENERATION_HORIZON_MAX, Math.max(GENERATION_HORIZON_MIN, hz));
+                      generationHorizonDaysRef.current = String(hz);
+                      setGenerationHorizonDays(String(hz));
+                      setError(null);
+                      setStep('loading-rates');
+                      generateRates();
+                    }}
+                  >
+                    Continuer
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div style={{ 
               padding: '12px', 
@@ -1037,17 +1098,16 @@ export function PositionGenerationModal({
                     min={GENERATION_HORIZON_MIN}
                     max={GENERATION_HORIZON_MAX}
                     value={generationHorizonDays}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      generationHorizonDaysRef.current = v;
-                      setGenerationHorizonDays(v);
-                    }}
+                    onChange={(e) => handleGenerationHorizonInputChange(e.target.value)}
                     style={{ maxWidth: '200px', marginBottom: '8px' }}
                   />
                   <p style={{ color: '#166534', marginBottom: '12px', lineHeight: 1.5 }}>
-                    Ce produit n’a pas de durée contractuelle fixe. Indiquez sur combien de jours générer les
-                    périodes (ex. 270 jours pour environ neuf « mois » de 30 jours, utile avec une rentabilité
-                    trimestrielle). Plage autorisée : {GENERATION_HORIZON_MIN} à {GENERATION_HORIZON_MAX} jours.
+                    {transaction?.product
+                      ? "La durée contractuelle du produit n’est pas renseignée sur la fiche produit."
+                      : "Les informations produit (dont la durée) ne sont pas disponibles sur cette transaction."}{' '}
+                    Ajustez l’horizon (jours) pour couvrir la fenêtre de génération souhaitée (ex. 270 jours pour environ
+                    neuf « mois » de 30 jours, utile avec une rentabilité trimestrielle). Plage autorisée :{' '}
+                    {GENERATION_HORIZON_MIN} à {GENERATION_HORIZON_MAX} jours.
                   </p>
                   <Button
                     type="button"
@@ -1058,6 +1118,8 @@ export function PositionGenerationModal({
                       hz = Math.min(GENERATION_HORIZON_MAX, Math.max(GENERATION_HORIZON_MIN, hz));
                       generationHorizonDaysRef.current = String(hz);
                       setGenerationHorizonDays(String(hz));
+                      setRates([]);
+                      setEditedRates({});
                       generateRates();
                     }}
                   >
@@ -1088,7 +1150,7 @@ export function PositionGenerationModal({
                           <li>La transaction est un investissement (transfert vers un produit)</li>
                           <li>
                             {useHorizonForProduct
-                              ? 'L’horizon de génération (jours) est cohérent avec la rentabilité du produit'
+                              ? 'L’horizon de génération (jours) couvre bien la période attendue (durée produit absente)'
                               : 'Le produit a une durée configurée (ou un horizon de génération suffisant)'}
                           </li>
                           <li>Le capital investi est supérieur à 0</li>

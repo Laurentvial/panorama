@@ -2,9 +2,12 @@
 Cron HTTP endpoints for Coolify Scheduled Tasks.
 
 These endpoints trigger Django management commands and are protected by
-CRON_SECRET_TOKEN. Coolify runs curl to hit these URLs on a schedule.
+CRON_SECRET_TOKEN. Schedulers often use curl to POST to these URLs; if the
+runtime has no curl (e.g. minimal image), run the same commands inside the
+backend container instead: ``python manage.py process_positions`` and
+``python manage.py refresh_external_asset_prices`` (see COOLIFY_DEPLOYMENT.md).
 
-Usage in Coolify Scheduled Task:
+HTTP examples (when curl is available):
   curl --fail -X POST "https://api.yourdomain.com/api/cron/refresh-prices/?token=YOUR_CRON_SECRET_TOKEN"
   curl --fail -X POST "https://api.yourdomain.com/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN"
 """

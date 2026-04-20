@@ -3625,7 +3625,19 @@ def _to_decimal(value) -> Decimal | None:
     if value is None or value == '':
         return None
     try:
-        return Decimal(str(value))
+        if isinstance(value, Decimal):
+            return value
+        s = str(value).strip()
+        if not s:
+            return None
+        # Support common FR formatting: "1 234,56", "1234,56", "1.234,56"
+        s = s.replace('\u00a0', ' ').replace(' ', '')
+        if ',' in s and '.' in s:
+            # Assume dot thousands, comma decimals
+            s = s.replace('.', '').replace(',', '.')
+        elif ',' in s and '.' not in s:
+            s = s.replace(',', '.')
+        return Decimal(s)
     except (InvalidOperation, TypeError, ValueError):
         return None
 
@@ -3672,6 +3684,23 @@ def _get_fx_rate_eur_to_ccy(
         pass
 
     return None
+
+
+def _description_indicates_withdrawal_to_balance(description: str | None) -> bool:
+    """
+    Heuristic for withdrawal temp transactions that reuse an "investment-shaped" ORM row
+    (transfer_from='solde', transfer_to=product.id).
+
+    IMPORTANT: do NOT use naive substring checks like `'vers solde' in desc.lower()` because
+    legitimate investment descriptions can contain fragments like "de Solde vers <produit>".
+    """
+    if not description:
+        return False
+    # Python's default re engine doesn't support \p{L}; use ASCII-ish word boundaries instead.
+    # This still avoids the common false positive "de Solde vers ...".
+    return bool(
+        re.search(r"(?i)(?:^|[^a-z0-9])(vers\s+le\s+solde|vers\s+solde)(?:[^a-z0-9]|$)", description)
+    )
 
 
 def build_investment_context(
@@ -3844,11 +3873,12 @@ def build_investment_context(
     # - Normal investment: transfer_from='solde' (or None), transfer_to=product.id, description doesn't contain "vers Solde"
     # - Withdrawal temp: transfer_from='solde', transfer_to=product.id, AND (_is_withdrawal_temp=True OR description contains "vers Solde")
     is_withdrawal_temp_transaction = (
-        getattr(txn, '_is_withdrawal_temp', False) or
-        (txn.transfer_from == 'solde' and 
-         txn.transfer_to == product.id and
-         ('vers Solde' in (txn.description or '') or 
-          'vers solde' in (txn.description or '').lower()))
+        getattr(txn, '_is_withdrawal_temp', False)
+        or (
+            txn.transfer_from == 'solde'
+            and txn.transfer_to == product.id
+            and _description_indicates_withdrawal_to_balance(txn.description)
+        )
     )
     
     # Debug logging for withdrawal detection
@@ -5202,3 +5232,167 @@ def create_interest_transaction_for_period_if_complete(
         )
         return None
 
+
+def _run_interest_transfers_for_closed_position_ids(
+    position_ids: list[str],
+    *,
+    interest_trigger: str = 'sync_position_statuses',
+) -> int:
+    """
+    After bulk-closing positions, create grouped interest transfers where applicable.
+    Mirrors the logic in ``process_positions`` management command.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    if not position_ids:
+        return 0
+
+    closed_positions = (
+        Position.objects.filter(id__in=position_ids, status='done')
+        .select_related('client', 'product', 'transaction')
+    )
+
+    transactions_to_check: dict[str, Transaction] = {}
+    for position in closed_positions:
+        if not position.transaction_id or position.period_index is None:
+            continue
+        if position.transaction_id not in transactions_to_check:
+            transactions_to_check[position.transaction_id] = position.transaction
+
+    interest_transactions_created = 0
+    for txn_id, txn in transactions_to_check.items():
+        try:
+            if not txn:
+                continue
+
+            product = txn.product
+            if not product and txn.transfer_to and txn.transfer_to != 'solde':
+                product = Product.objects.filter(id=txn.transfer_to).first()
+            if not product:
+                continue
+
+            period_summaries = generate_rates_for_investment(txn)
+            if not period_summaries:
+                continue
+
+            payment_periods = _group_calculation_periods_by_payment_period(
+                txn, product, period_summaries
+            )
+
+            for payment_group in payment_periods:
+                calculation_periods = payment_group.get('calculationPeriods', [])
+                if not calculation_periods:
+                    continue
+
+                all_done = True
+                for calc_period_idx in calculation_periods:
+                    positions_in_calc_period = Position.objects.filter(
+                        transaction_id=txn_id,
+                        period_index=calc_period_idx,
+                    )
+                    if positions_in_calc_period.exists():
+                        total = positions_in_calc_period.count()
+                        done = positions_in_calc_period.filter(status='done').count()
+                        if done < total:
+                            all_done = False
+                            break
+
+                if not all_done:
+                    continue
+
+                representative_period_idx = calculation_periods[-1]
+
+                interest_txn = create_interest_transaction_for_period_if_complete(
+                    txn,
+                    representative_period_idx,
+                    trigger=interest_trigger,
+                )
+
+                if interest_txn:
+                    interest_transactions_created += 1
+
+        except Exception as e:
+            logger.error(
+                'Failed to create interest transaction for transaction %s: %s',
+                txn_id,
+                e,
+                exc_info=True,
+            )
+
+    return interest_transactions_created
+
+
+def sync_position_statuses_from_schedule(
+    base_qs,
+    *,
+    dry_run: bool = False,
+    run_interest_for_closed: bool = True,
+    interest_trigger: str = 'sync_position_statuses',
+) -> dict:
+    """
+    Align ``Position.status`` with ``opened_at`` / ``closed_at`` vs ``timezone.now()``.
+
+    Scheduled trade positions are created as ``pending``; without a periodic job they would
+    stay ``pending`` even after their window has passed. This helper applies the same rules as
+    ``manage.py process_positions`` on an arbitrary queryset (e.g. one client).
+
+    Rows with ``opened_at`` NULL are unchanged (legacy monthly positions).
+
+    Returns counts and ``now`` (aware datetime used for comparisons).
+    """
+    now = timezone.now()
+    base = base_qs.exclude(status='cancelled')
+
+    close_qs = base.filter(
+        opened_at__isnull=False,
+        opened_at__lte=now,
+        closed_at__isnull=False,
+        closed_at__lte=now,
+    ).exclude(status='done')
+
+    open_qs = (
+        base.filter(opened_at__isnull=False, opened_at__lte=now)
+        .filter(Q(closed_at__isnull=True) | Q(closed_at__gt=now))
+        .exclude(status='open')
+    )
+
+    pending_qs = base.filter(
+        opened_at__isnull=False,
+        opened_at__gt=now,
+    ).exclude(status='pending')
+
+    if dry_run:
+        return {
+            'now': now,
+            'to_pending': pending_qs.count(),
+            'to_open': open_qs.count(),
+            'to_done': close_qs.count(),
+            'closed_ids': [],
+        }
+
+    positions_to_close_ids = list(close_qs.values_list('id', flat=True))
+
+    pending_n = pending_qs.update(status='pending')
+    opened_n = open_qs.update(status='open')
+    closed_n = (
+        Position.objects.filter(id__in=positions_to_close_ids).update(status='done')
+        if positions_to_close_ids
+        else 0
+    )
+
+    interest_created = 0
+    if run_interest_for_closed and positions_to_close_ids:
+        interest_created = _run_interest_transfers_for_closed_position_ids(
+            positions_to_close_ids,
+            interest_trigger=interest_trigger,
+        )
+
+    return {
+        'now': now,
+        'to_pending': pending_n,
+        'to_open': opened_n,
+        'to_done': closed_n,
+        'closed_ids': positions_to_close_ids,
+        'interest_transactions_created': interest_created,
+    }

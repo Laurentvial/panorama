@@ -220,9 +220,25 @@ Trigger build and deploy.
 
 ## 8. Scheduled Tasks (Cron)
 
-Coolify Scheduled Tasks run `curl` to hit HTTP endpoints. The backend exposes cron endpoints protected by `CRON_SECRET_TOKEN`.
+Scheduled tasks can either call the HTTP cron endpoints (with `curl` or another HTTP client) or run Django management commands **inside the backend container** (recommended when `curl` is not installed in the image).
 
-### Create tasks
+The backend exposes cron URLs protected by `CRON_SECRET_TOKEN` (see `backend/api/cron_views.py`).
+
+### Option A — Management command in the backend container (no `curl`)
+
+If Coolify lets you attach the schedule to the **backend** service and set a working directory:
+
+1. **process-positions**
+   - **Command**: `python manage.py process_positions`
+   - **Working directory**: `backend` (or wherever `manage.py` lives in your image)
+   - **Schedule**: e.g. `*/15 * * * *` every 15 minutes, or `0 * * * *` hourly (same idea as Render’s `render.yaml`).
+
+2. **refresh-prices** (if you use that command)
+   - **Command**: `python manage.py refresh_external_asset_prices` (add flags as needed; see optional params below).
+
+This avoids `curl: not found` entirely because nothing calls the shell HTTP client.
+
+### Option B — HTTP with `curl` (host or image that includes `curl`)
 
 1. Coolify → Scheduled Tasks (or within the backend application)
 2. Add Task 1:
@@ -236,7 +252,13 @@ Coolify Scheduled Tasks run `curl` to hit HTTP endpoints. The backend exposes cr
 
 Replace `YOUR_CRON_SECRET_TOKEN` with the value you set in the backend env.
 
-**Note**: Coolify runs tasks from the host. Ensure `curl` is available (it usually is on Ubuntu). If `curl` is not found, install it: `apt-get install -y curl`.
+**Note**: Some runners use a minimal image where `curl` is missing (`sh: 1: curl: not found`). Either use **Option A**, install `curl` in the image used for the task, or use `wget` if available, for example:
+
+`wget -qO- --post-data='' "http://YOUR_SERVER_IP/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN"`
+
+Or a one-shot POST with Python (no extra packages):
+
+`python -c "import urllib.request; u='http://YOUR_SERVER_IP/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN'; urllib.request.urlopen(urllib.request.Request(u, method='POST'), timeout=120).read()"`
 
 ### Optional query params for refresh-prices
 
@@ -297,8 +319,9 @@ Then redeploy.
 
 ### Cron tasks fail
 
-- Verify `CRON_SECRET_TOKEN` matches in backend env and curl command
-- Test manually: `curl -X POST "http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN"`
+- If the log shows **`curl: not found`**, the scheduled job shell has no `curl`. Prefer running **`python manage.py process_positions`** on the backend service (see §8 Option A), or use `wget`/Python POST (§8), or add `curl` to the image used for that task.
+- Verify `CRON_SECRET_TOKEN` matches in backend env and HTTP command (if using Option B).
+- Test manually from a shell that matches production: `curl -X POST "http://YOUR_SERVER_IP/api/cron/refresh-prices/?token=YOUR_TOKEN"` or open the backend container terminal and run `python manage.py process_positions`.
 - Check Coolify logs for the scheduled task
 
 ### 500 Internal Server Error on /api/clients/

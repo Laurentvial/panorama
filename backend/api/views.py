@@ -90,6 +90,7 @@ from .position_service import (
     save_position_generation_history,
     recalculate_positions_for_product_withdrawal,
     calculate_withdrawal_recalculation_metadata,
+    sync_position_statuses_from_schedule,
 )
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
@@ -7273,6 +7274,21 @@ def client_positions(request, client_id):
         if err:
             return err
 
+    # Align pending/open/done with real time so the portal stays correct if cron is late or missing.
+    try:
+        with db_transaction.atomic():
+            sync_position_statuses_from_schedule(
+                Position.objects.filter(client=client),
+                run_interest_for_closed=True,
+                interest_trigger='client_positions_view',
+            )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            'sync_position_statuses_from_schedule failed for client %s',
+            client_id,
+        )
+
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
     # Platform client must never see cancelled positions (even if requested via status filter).
     if is_client_token:
@@ -9659,6 +9675,106 @@ def transaction_generate_rates(request, client_id, transaction_id):
                 transaction,
                 generation_horizon_days=generation_horizon_days,
             )
+
+        if not rates:
+            # `generate_rates_for_investment` returns [] for several distinct reasons.
+            # Previously the API returned an empty list without an error key, which made the UI
+            # fall back to a generic "no periods" message even when the root cause was known
+            # (e.g. invested capital parsed as 0, product not resolved, empty trading window).
+            from .position_service import (
+                build_investment_context,
+                _position_generation_window_start_dt,
+                _trading_days_between,
+            )
+
+            txn_for_ctx = transaction
+            if is_withdrawal:
+                # Rebuild the same temp txn used above (best-effort) for diagnostics only.
+                product = None
+                if transaction.transfer_from and transaction.transfer_from != 'solde':
+                    try:
+                        from .models import Product
+
+                        product = Product.objects.get(id=transaction.transfer_from)
+                    except Exception:
+                        product = None
+
+                if product is None and transaction.product:
+                    product = transaction.product
+
+                if product is not None:
+                    txn_for_ctx = Transaction(
+                        id=transaction.id,
+                        client_id=transaction.client_id,
+                        type='transfert',
+                        amount=transaction.amount,
+                        description=transaction.description,
+                        status=transaction.status,
+                        datetime=transaction.datetime,
+                        transfer_to=product.id,
+                        transfer_from='solde',
+                        product=product,
+                        subscription_details=transaction.subscription_details or {},
+                    )
+                    txn_for_ctx._is_withdrawal_temp = True
+                    if withdrawal_metadata:
+                        txn_for_ctx._withdrawal_recalc_metadata = withdrawal_metadata
+                        txn_for_ctx._capital_cutoff_datetime = transaction.datetime or timezone.now()
+
+            ctx = build_investment_context(txn_for_ctx, generation_horizon_days=generation_horizon_days)
+            if ctx is None:
+                return Response(
+                    {
+                        'rates': [],
+                        'error': (
+                            "Impossible de générer des périodes : le contexte d'investissement n'a pas pu être "
+                            f"construit pour la transaction {transaction.id} (produit introuvable ou transfert invalide)."
+                        ),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            if ctx.invested_amount is None or ctx.invested_amount <= 0:
+                return Response(
+                    {
+                        'rates': [],
+                        'error': (
+                            "Impossible de générer des périodes : le capital investi calculé est nul ou négatif "
+                            f"({ctx.invested_amount}). Vérifiez le montant de la transaction, le sens du transfert "
+                            "(investissement vs retrait) et le format du montant."
+                        ),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            start_dt = _position_generation_window_start_dt(txn_for_ctx)
+            end_dt = start_dt + timezone.timedelta(days=int(ctx.duration_days or 0))
+            trading_days = _trading_days_between(start_dt, end_dt)
+            if not trading_days:
+                return Response(
+                    {
+                        'rates': [],
+                        'error': (
+                            "Impossible de générer des périodes : aucun jour ouvré (lun-ven) trouvé entre "
+                            f"{start_dt.date().isoformat()} et {end_dt.date().isoformat()} "
+                            f"(duration_days={ctx.duration_days}). Vérifiez la date/heure de la transaction et l'horizon."
+                        ),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            return Response(
+                {
+                    'rates': [],
+                    'error': (
+                        "Impossible de générer des périodes : aucune période n'a pu être construite malgré un capital "
+                        f"positif ({ctx.invested_amount}) et {len(trading_days)} jour(s) ouvré(s). "
+                        "Vérifiez la périodicité de rentabilité du produit et les dates."
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
         response_payload = {'rates': rates}
         if withdrawal_metadata:
             response_payload['withdrawal_recalculation'] = withdrawal_metadata
