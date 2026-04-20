@@ -301,7 +301,8 @@ export function PlatformDashboard() {
             return;
           }
 
-          setPositions(allPositionsList);
+          // Cancelled positions must never appear on the client platform.
+          setPositions((allPositionsList || []).filter((p: any) => String(p?.status || '') !== 'cancelled'));
           setAllTransactions(allTransactionsList);
 
           const clientAssetsData = (clientAssetsResponse as any)?.assets || [];

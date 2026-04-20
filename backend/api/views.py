@@ -6507,6 +6507,59 @@ def client_document_delete(request, client_id, document_id):
     document.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def client_document_replace(request, client_id, document_id):
+    """Remplacer le fichier (et optionnellement le nom/description) d'un document client existant."""
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    document = get_object_or_404(ClientDocument, id=document_id, client=client)
+    file = request.FILES.get('file')
+    if not file:
+        return Response({'error': 'Le fichier est requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Optional metadata updates
+    name = request.data.get('name', None)
+    description = request.data.get('description', None)
+    if name is not None:
+        name = str(name).strip()
+        if not name:
+            return Response({'error': 'Le nom du document ne peut pas être vide'}, status=status.HTTP_400_BAD_REQUEST)
+        document.name = name
+    if description is not None:
+        document.description = str(description)
+
+    # Replace file (keep same document id-based filename convention)
+    try:
+        if document.file:
+            try:
+                document.file.delete(save=False)
+            except Exception as e:
+                print(f"Warning: Could not delete previous file: {str(e)}")
+
+        original_filename = file.name
+        _, ext = os.path.splitext(original_filename)
+        custom_filename = f'{document_id}{ext}'
+        print(f"Replacing document file: {original_filename} as {custom_filename}")
+
+        document.file.save(custom_filename, file, save=True)
+        document.uploaded_by = request.user
+        document.save()
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"Error replacing document file: {error_msg}")
+        print(traceback.format_exc())
+        return Response({'error': f'Erreur lors du remplacement du fichier: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    serializer = ClientDocumentSerializer(document, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
 # Useful Links endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -7007,6 +7060,32 @@ def positions_list(request):
     })
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_position_cancel(request, client_id, position_id):
+    """
+    Annuler (soft-delete) une position: status -> 'cancelled'.
+    Accessible uniquement aux utilisateurs authentifiés (admin/gestionnaire) ayant accès au client.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    pos = get_object_or_404(
+        Position.objects.select_related('client', 'product', 'transaction', 'asset'),
+        id=position_id,
+        client=client,
+    )
+
+    if pos.status != 'cancelled':
+        pos.status = 'cancelled'
+        pos.save(update_fields=['status', 'updated_at'])
+
+    serializer = PositionSerializer(pos)
+    return Response({'position': serializer.data})
+
+
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
 @permission_classes([AllowAny])
@@ -7019,7 +7098,8 @@ def client_positions(request, client_id):
     auth_header = request.headers.get('Authorization', '')
     token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else request.GET.get('token', '')
 
-    if token and token.startswith('client_'):
+    is_client_token = bool(token and token.startswith('client_'))
+    if is_client_token:
         token_client_id = token.replace('client_', '')
         if token_client_id != client_id:
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
@@ -7050,11 +7130,17 @@ def client_positions(request, client_id):
             return err
 
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
+    # Platform client must never see cancelled positions (even if requested via status filter).
+    if is_client_token:
+        qs = qs.exclude(status='cancelled')
 
     # Determine sorting based on status filter
     statuses = []
     if status_param:
         statuses = [s.strip() for s in str(status_param).split(',') if s.strip()]
+        if is_client_token and statuses:
+            # Enforce: cancelled never returned to platform clients.
+            statuses = [s for s in statuses if s != 'cancelled']
         if statuses:
             qs = qs.filter(status__in=statuses)
             # For pending positions only, sort ascending (sooner to later)

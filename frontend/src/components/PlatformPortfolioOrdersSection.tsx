@@ -72,7 +72,9 @@ export function PlatformPortfolioOrdersSection({
   const visiblePositions = useMemo(() => {
     return (effectivePositions || []).filter((p: any) => {
       if (p?.status === 'pending') return false;
-      if (p?.status === 'done' || p?.status === 'cancelled') return true;
+      // Cancelled positions must never appear on the client platform.
+      if (p?.status === 'cancelled') return false;
+      if (p?.status === 'done') return true;
       if (p?.status === 'open') {
         const entryPriceNum =
           p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);

@@ -66,7 +66,8 @@ export function PlatformPortfolio() {
         apiCall(`/api/clients/${clientId}/documents/`).catch(() => ({ documents: [] })),
       ]);
 
-      setPositions(allPositionsList);
+      // Cancelled positions must never appear on the client platform.
+      setPositions((allPositionsList || []).filter((p: any) => String(p?.status || '') !== 'cancelled'));
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
         (a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
       );

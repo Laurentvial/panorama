@@ -126,6 +126,7 @@ urlpatterns = [
     path('clients/<str:client_id>/documents/', api_views.client_documents, name='client-documents'),
     path('clients/<str:client_id>/documents/create/', api_views.client_document_create, name='client-document-create'),
     path('clients/<str:client_id>/documents/<str:document_id>/delete/', api_views.client_document_delete, name='client-document-delete'),
+    path('clients/<str:client_id>/documents/<str:document_id>/replace/', api_views.client_document_replace, name='client-document-replace'),
     # Useful Links endpoints
     path('useful-links/', api_views.useful_link_list, name='useful-link-list'),
     path('useful-links/create/', api_views.useful_link_create, name='useful-link-create'),
@@ -141,6 +142,7 @@ urlpatterns = [
     # Positions endpoints
     path('positions/', api_views.positions_list, name='positions-list'),
     path('clients/<str:client_id>/positions/', api_views.client_positions, name='client-positions'),
+    path('clients/<str:client_id>/positions/<str:position_id>/cancel/', api_views.client_position_cancel, name='client-position-cancel'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),

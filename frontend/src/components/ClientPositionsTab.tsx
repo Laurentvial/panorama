@@ -3,6 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 import { apiCall } from '../utils/api';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
@@ -75,11 +85,12 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [assets, setAssets] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed' | 'cancelled'>('upcoming');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
   const openStatuses = useMemo(() => new Set(['open']), []);
-  const closedStatuses = useMemo(() => new Set(['done', 'cancelled']), []);
+  const closedStatuses = useMemo(() => new Set(['done']), []);
+  const cancelledStatuses = useMemo(() => new Set(['cancelled']), []);
 
   // Load all positions for counts (paginate through all pages)
   async function loadAllPositionsForCounts() {
@@ -112,18 +123,24 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
     }
   }
 
-  async function loadPositions(page: number = 1, limit: number = 50) {
+  async function loadPositionsForTab(
+    tab: 'upcoming' | 'open' | 'closed' | 'cancelled',
+    page: number = 1,
+    limit: number = 50
+  ) {
     try {
       setLoading(true);
       // Pass status filter to backend for proper sorting
       // For upcoming tab, pass status=pending so backend sorts ascending (sooner to later)
       let url = `/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`;
-      if (activeTab === 'upcoming') {
+      if (tab === 'upcoming') {
         url += '&status=pending';
-      } else if (activeTab === 'open') {
+      } else if (tab === 'open') {
         url += '&status=open';
-      } else if (activeTab === 'closed') {
-        url += '&status=done,cancelled';
+      } else if (tab === 'closed') {
+        url += '&status=done';
+      } else if (tab === 'cancelled') {
+        url += '&status=cancelled';
       }
       const data = await apiCall(url);
       setPositions((data as any)?.positions || []);
@@ -139,6 +156,14 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
     }
   }
 
+  async function loadPositions(page: number = 1, limit: number = 50) {
+    return loadPositionsForTab(activeTab, page, limit);
+  }
+
+  async function cancelPosition(positionId: string) {
+    await apiCall(`/api/clients/${clientId}/positions/${positionId}/cancel/`, { method: 'POST' });
+  }
+
   // Load all positions for counts on mount and when clientId changes
   useEffect(() => {
     loadAllPositionsForCounts();
@@ -147,7 +172,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
 
   // Load paginated positions when tab changes
   useEffect(() => {
-    loadPositions(1, 50);
+    loadPositionsForTab(activeTab, 1, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, activeTab]);
 
@@ -207,25 +232,29 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
       const isUpcoming = upcomingStatuses.has(p.status);
       const isOpen = openStatuses.has(p.status);
       const isClosed = closedStatuses.has(p.status);
+      const isCancelled = cancelledStatuses.has(p.status);
       if (activeTab === 'upcoming' && !isUpcoming) return false;
       if (activeTab === 'open' && !isOpen) return false;
       if (activeTab === 'closed' && !isClosed) return false;
+      if (activeTab === 'cancelled' && !isCancelled) return false;
       return true;
     });
-  }, [filteredPaginatedByProduct, activeTab, upcomingStatuses, openStatuses, closedStatuses]);
+  }, [filteredPaginatedByProduct, activeTab, upcomingStatuses, openStatuses, closedStatuses, cancelledStatuses]);
 
   // Counts should reflect filtered positions by product, but not by active tab
   const counts = useMemo(() => {
     let upcoming = 0;
     let open = 0;
     let closed = 0;
+    let cancelled = 0;
     for (const p of filteredByProduct) {
       if (upcomingStatuses.has(p.status)) upcoming += 1;
       else if (openStatuses.has(p.status)) open += 1;
       else if (closedStatuses.has(p.status)) closed += 1;
+      else if (cancelledStatuses.has(p.status)) cancelled += 1;
     }
-    return { upcoming, open, closed };
-  }, [filteredByProduct, upcomingStatuses, openStatuses, closedStatuses]);
+    return { upcoming, open, closed, cancelled };
+  }, [filteredByProduct, upcomingStatuses, openStatuses, closedStatuses, cancelledStatuses]);
 
   return (
     <Card>
@@ -278,6 +307,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                 <TabsTrigger value="upcoming">À venir ({counts.upcoming})</TabsTrigger>
                 <TabsTrigger value="open">Ouvertes ({counts.open})</TabsTrigger>
                 <TabsTrigger value="closed">Fermées ({counts.closed})</TabsTrigger>
+                <TabsTrigger value="cancelled">Annulées ({counts.cancelled})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="upcoming" className="mt-4">
@@ -288,7 +318,24 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
+                  <PositionsTable
+                    rows={filtered}
+                    assets={assets}
+                    accountCurrency={accountCurrency}
+                    onCancel={async (row) => {
+                      try {
+                        await cancelPosition(row.id);
+                        toast.success('Position annulée');
+                        // After cancellation, switch to the "closed" tab so the user sees it immediately.
+                        setActiveTab('cancelled');
+                        await loadAllPositionsForCounts();
+                        await loadPositionsForTab('cancelled', 1, pagination.limit);
+                      } catch (error: any) {
+                        console.error('Error cancelling position:', error);
+                        toast.error(error?.message || "Erreur lors de l'annulation");
+                      }
+                    }}
+                  />
                 )}
               </TabsContent>
               <TabsContent value="open" className="mt-4">
@@ -299,7 +346,24 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
+                  <PositionsTable
+                    rows={filtered}
+                    assets={assets}
+                    accountCurrency={accountCurrency}
+                    onCancel={async (row) => {
+                      try {
+                        await cancelPosition(row.id);
+                        toast.success('Position annulée');
+                        // After cancellation, switch to the "closed" tab so the user sees it immediately.
+                        setActiveTab('cancelled');
+                        await loadAllPositionsForCounts();
+                        await loadPositionsForTab('cancelled', 1, pagination.limit);
+                      } catch (error: any) {
+                        console.error('Error cancelling position:', error);
+                        toast.error(error?.message || "Erreur lors de l'annulation");
+                      }
+                    }}
+                  />
                 )}
               </TabsContent>
               <TabsContent value="closed" className="mt-4">
@@ -310,7 +374,49 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                 ) : !filtered.length ? (
                   <div className="text-sm text-slate-600">Aucune position.</div>
                 ) : (
-                  <PositionsTable rows={filtered} assets={assets} accountCurrency={accountCurrency} />
+                  <PositionsTable
+                    rows={filtered}
+                    assets={assets}
+                    accountCurrency={accountCurrency}
+                    onCancel={async (row) => {
+                      try {
+                        await cancelPosition(row.id);
+                        toast.success('Position annulée');
+                        await loadAllPositionsForCounts();
+                        // Stay on "closed" and refresh current page.
+                        await loadPositionsForTab('closed', pagination.page, pagination.limit);
+                      } catch (error: any) {
+                        console.error('Error cancelling position:', error);
+                        toast.error(error?.message || "Erreur lors de l'annulation");
+                      }
+                    }}
+                  />
+                )}
+              </TabsContent>
+              <TabsContent value="cancelled" className="mt-4">
+                {loading && positions.length > 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <LoadingIndicator />
+                  </div>
+                ) : !filtered.length ? (
+                  <div className="text-sm text-slate-600">Aucune position.</div>
+                ) : (
+                  <PositionsTable
+                    rows={filtered}
+                    assets={assets}
+                    accountCurrency={accountCurrency}
+                    onCancel={async (row) => {
+                      try {
+                        await cancelPosition(row.id);
+                        toast.success('Position annulée');
+                        await loadAllPositionsForCounts();
+                        await loadPositionsForTab('cancelled', pagination.page, pagination.limit);
+                      } catch (error: any) {
+                        console.error('Error cancelling position:', error);
+                        toast.error(error?.message || "Erreur lors de l'annulation");
+                      }
+                    }}
+                  />
                 )}
               </TabsContent>
             </Tabs>
@@ -416,7 +522,17 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   );
 }
 
-function PositionsTable({ rows, assets, accountCurrency = 'EUR' }: { rows: ClientPositionRow[]; assets: any[]; accountCurrency?: string }) {
+function PositionsTable({
+  rows,
+  assets,
+  accountCurrency = 'EUR',
+  onCancel,
+}: {
+  rows: ClientPositionRow[];
+  assets: any[];
+  accountCurrency?: string;
+  onCancel: (row: ClientPositionRow) => Promise<void>;
+}) {
   // Créer un Map pour accéder rapidement aux assets par ID
   const assetsById = new Map<string, any>();
   assets.forEach((asset) => {
@@ -425,8 +541,97 @@ function PositionsTable({ rows, assets, accountCurrency = 'EUR' }: { rows: Clien
     }
   });
 
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelRow, setCancelRow] = useState<ClientPositionRow | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [ackDone, setAckDone] = useState(false);
+
+  const cancelRiskText = (status: string) => {
+    if (status === 'pending') {
+      return "Risque: cette annulation peut créer un trou de période et la position peut réapparaître si une régénération/recalcul est relancé.";
+    }
+    if (status === 'open') {
+      return "Risque élevé: annuler une position ouverte peut impacter le suivi en cours et les calculs/affichages associés.";
+    }
+    if (status === 'done') {
+      return "Risque très élevé: annuler une position terminée modifie l'historique et peut affecter des logiques aval (ex: complétude de période, intérêts).";
+    }
+    return "Cette action annule la position (soft-delete) et peut impacter des affichages ou calculs.";
+  };
+
   return (
     <div className="overflow-x-auto">
+      <AlertDialog
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          setCancelOpen(open);
+          if (!open) {
+            setCancelRow(null);
+            setCancelBusy(false);
+            setAckDone(false);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Annuler cette position ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cancelRow ? (
+                <div className="space-y-2">
+                  <div>
+                    Cette action mettra la position <span className="font-medium">{cancelRow.id}</span> au statut{' '}
+                    <span className="font-medium">Annulée</span>.
+                  </div>
+                  <div className="text-amber-700">{cancelRiskText(cancelRow.status)}</div>
+                  {cancelRow.status === 'done' && (
+                    <label className="flex items-start gap-2 pt-2">
+                      <input
+                        type="checkbox"
+                        checked={ackDone}
+                        onChange={(e) => setAckDone(e.target.checked)}
+                        disabled={cancelBusy}
+                        className="mt-1"
+                      />
+                      <span>Je comprends le risque et je souhaite annuler une position terminée.</span>
+                    </label>
+                  )}
+                </div>
+              ) : (
+                'Sélectionnez une position.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={cancelBusy}
+              className="bg-transparent border-0 shadow-none underline underline-offset-4 text-slate-600 hover:text-slate-900 hover:bg-transparent"
+            >
+              Annuler
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                cancelBusy ||
+                !cancelRow ||
+                cancelRow.status === 'cancelled' ||
+                (cancelRow.status === 'done' && !ackDone)
+              }
+              onClick={async () => {
+                if (!cancelRow) return;
+                try {
+                  setCancelBusy(true);
+                  await onCancel(cancelRow);
+                  setCancelOpen(false);
+                } finally {
+                  setCancelBusy(false);
+                }
+              }}
+            >
+              Confirmer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200">
@@ -437,6 +642,7 @@ function PositionsTable({ rows, assets, accountCurrency = 'EUR' }: { rows: Clien
             <th className="text-right py-2 px-3">P&amp;L</th>
             <th className="text-left py-2 px-3">Statut</th>
             <th className="text-left py-2 px-3">Transaction</th>
+            <th className="text-right py-2 px-3">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -547,6 +753,23 @@ function PositionsTable({ rows, assets, accountCurrency = 'EUR' }: { rows: Clien
                           : p.status}
                 </td>
                 <td className="py-2 px-3">{p.transactionId || '-'}</td>
+                <td className="py-2 pl-0 pr-3 text-right">
+                  {p.status === 'cancelled' ? (
+                    <span className="text-slate-400">—</span>
+                  ) : (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
+                      onClick={() => {
+                        setCancelRow(p);
+                        setCancelOpen(true);
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                  )}
+                </td>
               </tr>
             );
           })}
