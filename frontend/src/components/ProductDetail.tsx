@@ -478,8 +478,10 @@ export function ProductDetail() {
   const calculateGains = (product: any, amount: number, basePrice: number): number => {
     // Backward-compat wrapper kept for existing call sites.
     // The simulator now uses per-period profitability and optional compounding.
+    const variableMax = parseFinancialValue(product?.variableProfitability);
+    const useVariableMode = product?.isVariableProfitability === 'Oui' && variableMax > 0;
     const sim = simulateProfitability(product, basePrice, {
-      rateMode: simulatorRateMode,
+      rateMode: useVariableMode ? simulatorRateMode : 'avg',
       interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     return sim.totalProfit;
@@ -1173,8 +1175,10 @@ export function ProductDetail() {
     const maxInvestment = parseFinancialValue(product.maxEntryValue);
     
     const basePriceNum = parseFinancialValue(simulatorBasePrice) || 0;
+    const simulatorHasVariableRate =
+      product?.isVariableProfitability === 'Oui' && parseFinancialValue(product?.variableProfitability) > 0;
     const sim = simulateProfitability(product, basePriceNum, {
-      rateMode: simulatorRateMode,
+      rateMode: simulatorHasVariableRate ? simulatorRateMode : 'avg',
       interestPeriod: subscriptionData.interestPeriod || product?.interestPeriod || product?.interest_period || '',
     });
     const calculatedGains = sim.totalProfit;
@@ -1469,24 +1473,32 @@ export function ProductDetail() {
                     />
                   </div>
 
-                  {/* Taux (min/avg/max) */}
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
-                    <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
-                      <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux utilisé</div>
-                      <Select
-                        value={simulatorRateMode}
-                        onValueChange={(v) => setSimulatorRateMode(v as 'min' | 'avg' | 'max')}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choisir" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="min">Minimum</SelectItem>
-                          <SelectItem value="avg">Moyen</SelectItem>
-                          <SelectItem value="max">Maximum</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {/* Taux (min/avg/max) — sélecteur seulement si rentabilité variable */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: isMobile ? '1fr' : simulatorHasVariableRate ? '1fr 1fr' : '1fr',
+                      gap: '12px',
+                    }}
+                  >
+                    {simulatorHasVariableRate && (
+                      <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
+                        <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux utilisé</div>
+                        <Select
+                          value={simulatorRateMode}
+                          onValueChange={(v) => setSimulatorRateMode(v as 'min' | 'avg' | 'max')}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Choisir" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="min">Minimum</SelectItem>
+                            <SelectItem value="avg">Moyen</SelectItem>
+                            <SelectItem value="max">Maximum</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
 
                     <div style={{ padding: '8px 12px', backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
                       <div style={{ fontSize: '14px', color: '#374151', fontWeight: 500, marginBottom: 6 }}>Taux (%)</div>
