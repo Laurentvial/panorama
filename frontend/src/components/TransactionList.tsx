@@ -4,6 +4,8 @@ import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle, Layers } from 'lucide
 import { useNavigate } from 'react-router-dom';
 import { getStatusLabel, getTypeLabel, getStatusColors } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
+import { apiCall } from '../utils/api';
+import { toast } from 'sonner';
 
 // Helper functions for French labels
 const getTypeColors = (type: string): { bg: string; text: string } => {
@@ -63,6 +65,7 @@ interface TransactionListProps {
   assets?: any[];
   products?: any[];
   clients?: any[];
+  clientId?: string;
   transactionDocuments?: Record<string, any[]>;
   showContractColumn?: boolean;
   showClientColumn?: boolean;
@@ -73,6 +76,7 @@ interface TransactionListProps {
   onValidateAndGenerate?: (transaction: any) => void;
   /** Ouvre le modal de génération de positions (même flux que valider un transfert) */
   onRecoverPositions?: (transaction: any) => void | Promise<void>;
+  onContractDocumentsChanged?: () => void;
   emptyMessage?: string;
 }
 
@@ -81,6 +85,7 @@ export function TransactionList({
   assets = [],
   products = [],
   clients = [],
+  clientId,
   transactionDocuments = {},
   showContractColumn = false,
   showClientColumn = false,
@@ -90,10 +95,50 @@ export function TransactionList({
   onEdit,
   onValidateAndGenerate,
   onRecoverPositions,
+  onContractDocumentsChanged,
   emptyMessage = 'Aucune transaction trouvée'
 }: TransactionListProps) {
   const navigate = useNavigate();
   const defaultCcy = (accountCurrencyProp || 'EUR').toString().trim().toUpperCase();
+  const fileInputRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
+
+  const getRelevantTransferProductLabel = (tx: any): string => {
+    if (!tx) return '';
+    const rawSub = (tx.subscription_details ?? tx.subscriptionDetails ?? null) as any;
+    let sub: any = rawSub;
+    if (typeof rawSub === 'string') {
+      try {
+        sub = JSON.parse(rawSub);
+      } catch {
+        sub = null;
+      }
+    }
+
+    const transferToId = String(tx.to ?? tx.transfer_to ?? tx.to_field ?? tx.transferTo ?? '');
+    const transferFromId = String(tx.from ?? tx.transfer_from ?? tx.from_field ?? '');
+    const productIdFromSub = sub?.productId ?? sub?.product_id ?? sub?.product?.id ?? null;
+    const directProductId = tx.productId ?? tx.product_id ?? tx.product?.id ?? null;
+
+    const candidateId =
+      (transferToId && transferToId !== 'solde' && transferToId !== 'trading' ? transferToId : '') ||
+      (transferFromId && transferFromId !== 'solde' && transferFromId !== 'trading' ? transferFromId : '') ||
+      (productIdFromSub ? String(productIdFromSub) : '') ||
+      (directProductId ? String(directProductId) : '');
+
+    if (candidateId) {
+      const p = products.find((x: any) => String(x?.id) === String(candidateId));
+      if (p?.name) return `${p.name}${p.reference ? ` (${p.reference})` : ''}`;
+    }
+
+    const nameFallback =
+      tx.productName ??
+      tx.product_name ??
+      tx.subscription_product_name ??
+      tx.subscription_details?.productName ??
+      tx.subscriptionDetails?.productName ??
+      '';
+    return nameFallback ? String(nameFallback) : '';
+  };
 
   // Find asset/product ID by name
   const findAssetProductId = (name: string, reference: string | null): string | null => {
@@ -138,6 +183,7 @@ export function TransactionList({
             const client = clients.find(c => c.id === transaction.clientId);
             const contractDocs = transactionDocuments[String(transaction.id)] || [];
             const hasContract = contractDocs.length > 0;
+            const isTransfer = transaction.type === 'transfert';
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
             const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
             const showRecoverPositions =
@@ -270,17 +316,128 @@ export function TransactionList({
                 </td>
                 {showContractColumn && (
                   <td className="py-3 px-4">
-                    {hasContract && contractDocs[0]?.fileUrl ? (
-                      <a
-                        href={contractDocs[0].fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline"
-                      >
-                        <FileText className="w-4 h-4" />
-                        Voir le contrat
-                      </a>
+                    {hasContract ? (
+                      <div className="flex items-center gap-2">
+                        {contractDocs[0]?.fileUrl ? (
+                          <a
+                            href={contractDocs[0].fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 hover:underline"
+                          >
+                            <FileText className="w-4 h-4" />
+                            Voir le contrat
+                          </a>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+
+                        <input
+                          ref={(el) => {
+                            fileInputRefs.current[String(transaction.id)] = el;
+                          }}
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx"
+                          className="hidden"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={async (e) => {
+                            e.stopPropagation();
+                            const file = e.target.files?.[0] || null;
+                            // Allow selecting same file again next time
+                            e.target.value = '';
+                            if (!file) return;
+                            const docId = contractDocs[0]?.id;
+                            if (!clientId || !docId) {
+                              toast.error('Impossible de remplacer le document (client/document manquant).');
+                              return;
+                            }
+                            try {
+                              const form = new FormData();
+                              form.append('file', file);
+                              await apiCall(`/api/clients/${clientId}/documents/${docId}/replace/`, {
+                                method: 'POST',
+                                body: form,
+                              });
+                              toast.success('Contrat remplacé avec succès');
+                              onContractDocumentsChanged?.();
+                            } catch (err: any) {
+                              console.error('Error replacing contract document:', err);
+                              toast.error(err?.message || 'Erreur lors du remplacement du contrat');
+                            }
+                          }}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const input = fileInputRefs.current[String(transaction.id)];
+                            input?.click();
+                          }}
+                          className="text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium"
+                          title="Remplacer le document lié à cette transaction"
+                        >
+                          Remplacer
+                        </button>
+                      </div>
+                    ) : isTransfer ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={(el) => {
+                            fileInputRefs.current[`add:${String(transaction.id)}`] = el;
+                          }}
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx"
+                          className="hidden"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={async (e) => {
+                            e.stopPropagation();
+                            const file = e.target.files?.[0] || null;
+                            e.target.value = '';
+                            if (!file) return;
+                            if (!clientId) {
+                              toast.error('Impossible d’ajouter le document (client manquant).');
+                              return;
+                            }
+                            try {
+                              const productLabel = getRelevantTransferProductLabel(transaction);
+                              const docName = productLabel
+                                ? `Contrat - ${productLabel}`
+                                : `Contrat - Transaction ${transaction.id}`;
+
+                              const form = new FormData();
+                              form.append('name', docName);
+                              form.append('documentType', 'contract');
+                              form.append('transactionId', String(transaction.id));
+                              form.append('description', '');
+                              form.append('file', file);
+                              await apiCall(`/api/clients/${clientId}/documents/create/`, {
+                                method: 'POST',
+                                body: form,
+                              });
+                              toast.success('Contrat ajouté avec succès');
+                              onContractDocumentsChanged?.();
+                            } catch (err: any) {
+                              console.error('Error creating contract document:', err);
+                              toast.error(err?.message || 'Erreur lors de l’ajout du contrat');
+                            }
+                          }}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const input = fileInputRefs.current[`add:${String(transaction.id)}`];
+                            input?.click();
+                          }}
+                          className="text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium"
+                          title="Ajouter un contrat lié à cette transaction"
+                        >
+                          Ajouter
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-slate-400">-</span>
                     )}

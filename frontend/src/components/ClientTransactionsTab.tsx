@@ -1503,11 +1503,15 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 transactions={filteredTransactions}
                 assets={assets}
                 products={products}
+                clientId={clientId}
                 transactionDocuments={contractDocumentsByTransaction}
                 showContractColumn={true}
                 accountCurrency={accountCurrency}
                 showClientColumn={false}
                 showIcons={false}
+                onContractDocumentsChanged={() => {
+                  loadContractDocuments();
+                }}
                 onView={(transaction) => {
                   setSelectedTransaction(transaction);
                   setIsViewTransactionModalOpen(true);

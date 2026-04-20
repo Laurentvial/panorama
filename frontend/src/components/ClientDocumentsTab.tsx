@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Trash2, X, FileText } from 'lucide-react';
+import { Plus, Trash2, X, FileText, Edit } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
@@ -51,6 +51,9 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingDocument, setEditingDocument] = useState<Document | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -58,8 +61,62 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
     description: '',
     transactionId: '',
     productId: '',
+    createdAt: '',
+    updatedAt: '',
     file: null as File | null,
   });
+
+  const [editForm, setEditForm] = useState({
+    name: '',
+    documentType: 'other',
+    description: '',
+    transactionId: '',
+    productId: '',
+    createdAt: '',
+    updatedAt: '',
+    file: null as File | null, // optional replacement
+  });
+
+  const toDateDisplay = (value: string): string => {
+    if (!value) return '';
+    const isoMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      // Avoid timezone shifts by formatting from the ISO date portion directly.
+      return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+    }
+    try {
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return '';
+      const da = String(d.getDate()).padStart(2, '0');
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      const y = d.getFullYear();
+      return `${da}/${mo}/${y}`;
+    } catch {
+      return '';
+    }
+  };
+
+  // Parse DD/MM/YYYY -> {y,m,d} or null; validates real calendar dates
+  const parseDate = (s: string): { y: number; m: number; d: number } | null => {
+    const t = String(s || '').trim();
+    const match = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    return { y: year, m: month, d: day };
+  };
+
+  const fromDateDisplayToISO = (value: string): string => {
+    const parsed = parseDate(value);
+    if (!parsed) return '';
+    const mo = String(parsed.m).padStart(2, '0');
+    const da = String(parsed.d).padStart(2, '0');
+    return `${parsed.y}-${mo}-${da}T00:00:00`;
+  };
 
   useEffect(() => {
     loadDocuments();
@@ -151,6 +208,14 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
       toast.error('Veuillez sélectionner un fichier');
       return;
     }
+    if (formData.createdAt && !parseDate(formData.createdAt)) {
+      toast.error('Format de date de création invalide. Utilisez JJ/MM/AAAA.');
+      return;
+    }
+    if (formData.updatedAt && !parseDate(formData.updatedAt)) {
+      toast.error('Format de date de mise à jour invalide. Utilisez JJ/MM/AAAA.');
+      return;
+    }
 
     setUploading(true);
     try {
@@ -164,6 +229,12 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
       if (formData.productId) {
         formDataToSend.append('productId', formData.productId);
       }
+      if (formData.createdAt) {
+        formDataToSend.append('createdAt', fromDateDisplayToISO(formData.createdAt));
+      }
+      if (formData.updatedAt) {
+        formDataToSend.append('updatedAt', fromDateDisplayToISO(formData.updatedAt));
+      }
       formDataToSend.append('file', formData.file);
 
       const created = await apiCall(`/api/clients/${clientId}/documents/create/`, {
@@ -174,7 +245,16 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
 
       toast.success('Document ajouté avec succès');
       setIsAddDialogOpen(false);
-      setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
+      setFormData({
+        name: '',
+        documentType: 'other',
+        description: '',
+        transactionId: '',
+        productId: '',
+        createdAt: '',
+        updatedAt: '',
+        file: null
+      });
       // Instantly refresh list with the newly added document (optimistic update)
       const doc = (created as any)?.document ?? created;
       if (doc?.id) {
@@ -388,14 +468,38 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                         {document.uploadedByName ? ` par ${document.uploadedByName}` : ''}
                       </td>
                       <td className="py-3 px-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(document.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingDocument(document);
+                              setEditForm({
+                                name: document.name || '',
+                                documentType: document.documentType || 'other',
+                                description: document.description || '',
+                                transactionId: document.transactionId || '',
+                                productId: document.productId || '',
+                                createdAt: toDateDisplay(document.createdAt),
+                                updatedAt: toDateDisplay(document.updatedAt),
+                                file: null,
+                              });
+                              setIsEditDialogOpen(true);
+                            }}
+                            title="Modifier"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(document.id)}
+                            className="text-red-600 hover:text-red-700"
+                            title="Supprimer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -419,7 +523,16 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                 className="modal-close"
                 onClick={() => {
                   setIsAddDialogOpen(false);
-                  setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
+                  setFormData({
+                    name: '',
+                    documentType: 'other',
+                    description: '',
+                    transactionId: '',
+                    productId: '',
+                    createdAt: '',
+                    updatedAt: '',
+                    file: null
+                  });
                 }}
               >
                 <X className="planning-icon-md" />
@@ -565,6 +678,26 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                   </p>
                 )}
               </div>
+
+              <div className="modal-form-field">
+                <Label>Date de création (optionnel)</Label>
+                <Input
+                  type="text"
+                  placeholder="JJ/MM/AAAA"
+                  value={formData.createdAt}
+                  onChange={(e) => setFormData({ ...formData, createdAt: e.target.value })}
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label>Date de mise à jour (optionnel)</Label>
+                <Input
+                  type="text"
+                  placeholder="JJ/MM/AAAA"
+                  value={formData.updatedAt}
+                  onChange={(e) => setFormData({ ...formData, updatedAt: e.target.value })}
+                />
+              </div>
               
               <div className="modal-form-field">
                 <Label htmlFor="document-description">Description</Label>
@@ -583,13 +716,284 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                   variant="outline"
                   onClick={() => {
                     setIsAddDialogOpen(false);
-                    setFormData({ name: '', documentType: 'other', description: '', transactionId: '', productId: '', file: null });
+                    setFormData({
+                      name: '',
+                      documentType: 'other',
+                      description: '',
+                      transactionId: '',
+                      productId: '',
+                      createdAt: '',
+                      updatedAt: '',
+                      file: null
+                    });
                   }}
                 >
                   Annuler
                 </Button>
                 <Button type="submit" disabled={uploading}>
                   {uploading ? 'Ajout en cours...' : 'Ajouter'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Document Dialog */}
+      {isEditDialogOpen && editingDocument && (
+        <div className="modal-overlay" onClick={() => {
+          setIsEditDialogOpen(false);
+          setEditingDocument(null);
+          setSavingEdit(false);
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '32rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Modifier le document</h2>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="modal-close"
+                onClick={() => {
+                  setIsEditDialogOpen(false);
+                  setEditingDocument(null);
+                  setSavingEdit(false);
+                }}
+              >
+                <X className="planning-icon-md" />
+              </Button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editingDocument) return;
+                if (savingEdit) return;
+                if (!editForm.name.trim()) {
+                  toast.error('Le nom du document est requis');
+                  return;
+                }
+                if (!editForm.createdAt.trim() || !editForm.updatedAt.trim()) {
+                  toast.error('Les dates (création et mise à jour) sont requises');
+                  return;
+                }
+                if (!parseDate(editForm.createdAt) || !parseDate(editForm.updatedAt)) {
+                  toast.error('Format de date invalide. Utilisez JJ/MM/AAAA.');
+                  return;
+                }
+                setSavingEdit(true);
+                try {
+                  // Optional file replacement first
+                  if (editForm.file) {
+                    const fd = new FormData();
+                    fd.append('file', editForm.file);
+                    await apiCall(`/api/clients/${clientId}/documents/${editingDocument.id}/replace/`, {
+                      method: 'POST',
+                      body: fd,
+                    });
+                  }
+
+                  const payload: any = {
+                    name: editForm.name.trim(),
+                    documentType: editForm.documentType,
+                    description: editForm.description || '',
+                    transactionId: editForm.transactionId || null,
+                    productId: editForm.productId || null,
+                    createdAt: fromDateDisplayToISO(editForm.createdAt),
+                    updatedAt: fromDateDisplayToISO(editForm.updatedAt),
+                  };
+
+                  const updated = await apiCall(`/api/clients/${clientId}/documents/${editingDocument.id}/update/`, {
+                    method: 'PUT',
+                    body: JSON.stringify(payload),
+                  }) as any;
+
+                  const doc = (updated as any)?.document ?? updated;
+                  if (doc?.id) {
+                    setDocuments((prev) => prev.map((d) => (d.id === doc.id ? (doc as Document) : d)));
+                  } else {
+                    await loadDocuments();
+                  }
+                  toast.success('Document modifié avec succès');
+                  setIsEditDialogOpen(false);
+                  setEditingDocument(null);
+                  onRefresh();
+                } catch (error: any) {
+                  console.error('Error updating document:', error);
+                  toast.error(error?.message || 'Erreur lors de la modification du document');
+                } finally {
+                  setSavingEdit(false);
+                }
+              }}
+              className="modal-form"
+            >
+              <div className="modal-form-field">
+                <Label>Nom du document *</Label>
+                <Input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label>Type de document *</Label>
+                <Select
+                  value={editForm.documentType}
+                  onValueChange={(value) => {
+                    setEditForm((prev) => ({
+                      ...prev,
+                      documentType: value,
+                      ...(value !== 'contract' ? { transactionId: '', productId: '' } : {}),
+                    }));
+                  }}
+                >
+                  <SelectTrigger onClick={(e) => e.stopPropagation()}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="z-[1001]" style={{ zIndex: 1001 }}>
+                    {DOCUMENT_TYPES.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {editForm.documentType === 'contract' && (
+                <>
+                  <div className="modal-form-field">
+                    <Label>Transaction (optionnel)</Label>
+                    <Select
+                      value={editForm.transactionId || 'none'}
+                      onValueChange={(value) => {
+                        const tid = value === 'none' ? '' : value;
+                        setEditForm((prev) => ({
+                          ...prev,
+                          transactionId: tid,
+                          ...(tid ? { productId: '' } : {}),
+                        }));
+                      }}
+                    >
+                      <SelectTrigger onClick={(e) => e.stopPropagation()}>
+                        <SelectValue placeholder="Sélectionner une transaction" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[1001]" style={{ zIndex: 1001 }}>
+                        <SelectItem value="none">Aucune</SelectItem>
+                        {transactions
+                          .filter((t: any) => t.type === 'transfert')
+                          .map((t: any) => (
+                            <SelectItem key={t.id} value={String(t.id)}>
+                              {formatTransactionLabel(t)}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Lié à une transaction de type « transfert », ou bien à un produit ci-dessous — pas les deux.
+                    </p>
+                  </div>
+
+                  <div className="modal-form-field">
+                    <Label>Produit (optionnel)</Label>
+                    <Select
+                      value={editForm.productId || 'none'}
+                      onValueChange={(value) => {
+                        const pid = value === 'none' ? '' : value;
+                        setEditForm((prev) => ({
+                          ...prev,
+                          productId: pid,
+                          ...(pid ? { transactionId: '' } : {}),
+                        }));
+                      }}
+                      disabled={loadingProducts}
+                    >
+                      <SelectTrigger onClick={(e) => e.stopPropagation()}>
+                        <SelectValue placeholder={loadingProducts ? 'Chargement des produits…' : 'Sélectionner un produit'} />
+                      </SelectTrigger>
+                      <SelectContent className="z-[1001]" style={{ zIndex: 1001 }}>
+                        <SelectItem value="none">Aucun</SelectItem>
+                        {catalogProducts
+                          .filter((p: any) => p?.id)
+                          .map((p: any) => {
+                            const ref = p.reference ? ` (${p.reference})` : '';
+                            return (
+                              <SelectItem key={p.id} value={String(p.id)}>
+                                {p.name}
+                                {ref}
+                              </SelectItem>
+                            );
+                          })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+
+              <div className="modal-form-field">
+                <Label>Remplacer le fichier (optionnel)</Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setEditForm((p) => ({ ...p, file }));
+                  }}
+                />
+                {editForm.file && (
+                  <p className="mt-1 text-sm text-slate-500">
+                    Fichier sélectionné: {editForm.file.name}
+                  </p>
+                )}
+              </div>
+
+              <div className="modal-form-field">
+                <Label>Date de création *</Label>
+                <Input
+                  type="text"
+                  value={editForm.createdAt}
+                  onChange={(e) => setEditForm((p) => ({ ...p, createdAt: e.target.value }))}
+                  placeholder="JJ/MM/AAAA"
+                  required
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label>Date de mise à jour *</Label>
+                <Input
+                  type="text"
+                  value={editForm.updatedAt}
+                  onChange={(e) => setEditForm((p) => ({ ...p, updatedAt: e.target.value }))}
+                  placeholder="JJ/MM/AAAA"
+                  required
+                />
+              </div>
+
+              <div className="modal-form-field">
+                <Label>Description</Label>
+                <Textarea
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+
+              <div className="modal-form-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditDialogOpen(false);
+                    setEditingDocument(null);
+                    setSavingEdit(false);
+                  }}
+                  disabled={savingEdit}
+                >
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={savingEdit}>
+                  {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
                 </Button>
               </div>
             </form>

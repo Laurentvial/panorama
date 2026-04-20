@@ -125,6 +125,7 @@ urlpatterns = [
     # Client Documents endpoints
     path('clients/<str:client_id>/documents/', api_views.client_documents, name='client-documents'),
     path('clients/<str:client_id>/documents/create/', api_views.client_document_create, name='client-document-create'),
+    path('clients/<str:client_id>/documents/<str:document_id>/update/', api_views.client_document_update, name='client-document-update'),
     path('clients/<str:client_id>/documents/<str:document_id>/delete/', api_views.client_document_delete, name='client-document-delete'),
     path('clients/<str:client_id>/documents/<str:document_id>/replace/', api_views.client_document_replace, name='client-document-replace'),
     # Useful Links endpoints

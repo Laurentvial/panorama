@@ -6396,6 +6396,9 @@ def client_documents(request, client_id):
 @parser_classes([MultiPartParser, FormParser])
 def client_document_create(request, client_id):
     """Créer un nouveau document pour un client"""
+    from django.utils.dateparse import parse_datetime
+    from django.utils import timezone
+
     client = get_object_or_404(Client, id=client_id)
     err = _check_gestionnaire_client_access(request, client)
     if err:
@@ -6412,6 +6415,8 @@ def client_document_create(request, client_id):
     description = request.data.get('description', '')
     transaction_id = request.data.get('transactionId', None) or None
     product_id = request.data.get('productId', None) or None
+    created_at_raw = request.data.get('createdAt', None)
+    updated_at_raw = request.data.get('updatedAt', None)
     if transaction_id == '':
         transaction_id = None
     if product_id == '':
@@ -6483,6 +6488,38 @@ def client_document_create(request, client_id):
         print(traceback.format_exc())
         document.delete()
         return Response({'error': f'Erreur lors de l\'upload du fichier: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _parse_dt(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            val = val.strip()
+            if not val:
+                return None
+        dt = parse_datetime(str(val))
+        if not dt:
+            return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    # Allow overriding dates (useful for admin backfills / CRM consistency).
+    updates = {}
+    if created_at_raw is not None:
+        dt = _parse_dt(created_at_raw)
+        if not dt:
+            document.delete()
+            return Response({'error': 'createdAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['created_at'] = dt
+    if updated_at_raw is not None:
+        dt = _parse_dt(updated_at_raw)
+        if not dt:
+            document.delete()
+            return Response({'error': 'updatedAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['updated_at'] = dt
+    if updates:
+        ClientDocument.objects.filter(id=document.id, client=client).update(**updates)
+        document.refresh_from_db()
     
     serializer = ClientDocumentSerializer(document, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -6506,6 +6543,113 @@ def client_document_delete(request, client_id, document_id):
     
     document.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def client_document_update(request, client_id, document_id):
+    """Mettre à jour un document client (métadonnées + dates)."""
+    from django.utils.dateparse import parse_datetime
+    from django.utils import timezone
+
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    document = get_object_or_404(ClientDocument, id=document_id, client=client)
+
+    name = request.data.get('name', None)
+    document_type = request.data.get('documentType', None)
+    description = request.data.get('description', None)
+    transaction_id = request.data.get('transactionId', None)
+    product_id = request.data.get('productId', None)
+    created_at_raw = request.data.get('createdAt', None)
+    updated_at_raw = request.data.get('updatedAt', None)
+
+    if transaction_id == '' or transaction_id == 'none':
+        transaction_id = None
+    if product_id == '' or product_id == 'none':
+        product_id = None
+
+    if transaction_id and product_id:
+        return Response(
+            {'error': 'Choisir soit une transaction, soit un produit — pas les deux à la fois.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    updates = {}
+
+    if name is not None:
+        name = str(name).strip()
+        if not name:
+            return Response({'error': 'Le nom du document est requis'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['name'] = name
+
+    if document_type is not None:
+        allowed_doc_types = {c[0] for c in ClientDocument.DOCUMENT_TYPES}
+        document_type = str(document_type).strip()
+        if document_type not in allowed_doc_types:
+            return Response({'error': 'Type de document invalide'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['document_type'] = document_type
+
+    if description is not None:
+        updates['description'] = str(description)
+
+    if transaction_id is not None:
+        if transaction_id:
+            try:
+                Transaction.objects.get(id=transaction_id, client=client)
+            except Transaction.DoesNotExist:
+                return Response({'error': 'Transaction introuvable ou n\'appartient pas au client'}, status=status.HTTP_404_NOT_FOUND)
+            updates['transaction_id'] = transaction_id
+            updates['product_id'] = None
+        else:
+            updates['transaction_id'] = None
+
+    if product_id is not None:
+        if product_id:
+            try:
+                Product.objects.get(id=product_id)
+            except Product.DoesNotExist:
+                return Response({'error': 'Produit introuvable'}, status=status.HTTP_404_NOT_FOUND)
+            updates['product_id'] = product_id
+            updates['transaction_id'] = None
+        else:
+            updates['product_id'] = None
+
+    def _parse_dt(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            val = val.strip()
+            if not val:
+                return None
+        dt = parse_datetime(str(val))
+        if not dt:
+            return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    if created_at_raw is not None:
+        dt = _parse_dt(created_at_raw)
+        if not dt:
+            return Response({'error': 'createdAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['created_at'] = dt
+
+    if updated_at_raw is not None:
+        dt = _parse_dt(updated_at_raw)
+        if not dt:
+            return Response({'error': 'updatedAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['updated_at'] = dt
+
+    if updates:
+        ClientDocument.objects.filter(id=document.id, client=client).update(**updates)
+
+    document = ClientDocument.objects.select_related('transaction', 'product', 'uploaded_by').get(id=document.id, client=client)
+    serializer = ClientDocumentSerializer(document, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
