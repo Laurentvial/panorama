@@ -606,6 +606,10 @@
     field-sizing: content;
   }
 
+  .field-sizing-fixed {
+    field-sizing: fixed;
+  }
+
   .size-2 {
     width: calc(var(--spacing) * 2);
     height: calc(var(--spacing) * 2);

@@ -68,16 +68,26 @@ class Command(BaseCommand):
             )
             return
 
-        # Get IDs of positions to close before updating (since .update() doesn't return objects)
-        positions_to_close_ids = list(close_qs.values_list('id', flat=True))
-        
+        # IMPORTANT (concurrency):
+        # We must not close rows that we won't later process for interest transfers.
+        # If we run `close_qs.update(...)` directly, a concurrently-created Position that
+        # matches the close criteria could be updated to "done" but not be present in
+        # a previously captured ID list. To avoid skipping interest transfers, we:
+        # 1) capture the IDs we intend to close
+        # 2) close ONLY those IDs
+        positions_to_close_ids = list(close_qs.values_list("id", flat=True))
+
         pending = pending_qs.update(status="pending")
         opened = open_qs.update(status="open")
-        closed = close_qs.update(status="done")
-        
-        # After closing positions, create interest transfers for completed periods
-        # Note: .update() doesn't trigger signals, so we need to process manually
-        if closed > 0 and positions_to_close_ids:
+        closed = (
+            Position.objects.filter(id__in=positions_to_close_ids).update(status="done")
+            if positions_to_close_ids
+            else 0
+        )
+
+        # After closing positions, create interest transfers for completed periods.
+        # Note: .update() doesn't trigger signals, so we need to process manually.
+        if closed > 0:
             self._create_interest_transfers_for_closed_positions(positions_to_close_ids)
 
         # Also handle validated transfer transactions that may legitimately have no generated

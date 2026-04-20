@@ -12,6 +12,7 @@ interface RichTextEditorProps {
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  fixedHeight?: boolean;
   onGenerateAI?: () => Promise<string>;
 }
 
@@ -22,6 +23,7 @@ export function RichTextEditor({
   onChange,
   placeholder,
   rows = 6,
+  fixedHeight = false,
   onGenerateAI
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -183,14 +185,12 @@ export function RichTextEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        rows={isFocused ? rows : Math.max(4, Math.floor(rows * 0.5))}
+        rows={rows}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        className={`font-mono text-sm whitespace-pre-wrap resize-y transition-all duration-200 ${
-          isFocused 
-            ? 'max-h-none overflow-y-auto' 
-            : ''
-        }`}
+        className={`font-mono text-sm whitespace-pre-wrap transition-all duration-200 overflow-y-auto ${
+          fixedHeight ? 'h-40 resize-none field-sizing-fixed' : 'resize-y'
+        } ${isFocused ? '' : ''}`}
       />
     </div>
   );

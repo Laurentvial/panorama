@@ -70,6 +70,24 @@ export function AddProduct() {
     maxEntryValue: ''
   });
 
+  function recalibrateAssetAllocationsEqual(
+    allocations: Array<{ assetId: string; proportion: string; asset?: any }>,
+    decimals = 2
+  ) {
+    const n = allocations.length;
+    if (n === 0) return allocations;
+
+    const factor = Math.pow(10, decimals);
+    const totalUnits = 100 * factor;
+    const base = Math.floor(totalUnits / n);
+    const remainder = totalUnits - base * n;
+
+    return allocations.map((row, idx) => {
+      const units = idx === n - 1 ? base + remainder : base;
+      return { ...row, proportion: (units / factor).toFixed(decimals) };
+    });
+  }
+
   useEffect(() => {
     loadCategories();
   }, []);
@@ -756,6 +774,7 @@ export function AddProduct() {
               onChange={(value) => setFormData({ ...formData, description: value })}
               placeholder="Description détaillée du produit d'investissement..."
               rows={10}
+              fixedHeight
               onGenerateAI={generateAIDescription}
             />
 
@@ -766,6 +785,7 @@ export function AddProduct() {
               onChange={(value) => setFormData({ ...formData, cgv: value })}
               placeholder="Conditions générales de vente du produit..."
               rows={10}
+              fixedHeight
               onGenerateAI={generateAICGV}
             />
 
@@ -1158,6 +1178,17 @@ export function AddProduct() {
                         <Plus className="w-4 h-4 mr-2" />
                         Ajouter plusieurs actifs
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setAssetAllocations(recalibrateAssetAllocationsEqual(assetAllocations));
+                        }}
+                        disabled={assetAllocations.length === 0}
+                        title="Répartit automatiquement à parts égales pour retomber sur 100%"
+                      >
+                        Recalibrer les proportions
+                      </Button>
                     </div>
 
                     {(() => {
@@ -1286,22 +1317,10 @@ export function AddProduct() {
                             asset
                           };
                         });
-                        
-                        // Calculer automatiquement les proportions
-                        const totalAssets = assetAllocations.length + newAllocations.length;
-                        const proportionPerAsset = totalAssets > 0 ? (100 / totalAssets).toFixed(2) : '0';
-                        
-                        // Mettre à jour les proportions existantes et nouvelles
-                        const updatedExisting = assetAllocations.map(a => ({
-                          ...a,
-                          proportion: proportionPerAsset
-                        }));
-                        const updatedNew = newAllocations.map(a => ({
-                          ...a,
-                          proportion: proportionPerAsset
-                        }));
-                        
-                        setAssetAllocations([...updatedExisting, ...updatedNew]);
+
+                        setAssetAllocations(
+                          recalibrateAssetAllocationsEqual([...assetAllocations, ...newAllocations])
+                        );
                         setSelectedAssetsInModal([]);
                         setAssetSearchQuery('');
                         setShowAssetModal(false);
@@ -1411,7 +1430,16 @@ export function AddProduct() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">Toutes les catégories</SelectItem>
-                            {(Array.from(new Set(allAssets.map((a: any) => a.category).filter(Boolean))) as string[]).sort().map((category: string) => (
+                            {(Array.from(new Set(
+                              allAssets
+                                .map((a: any) => a.category)
+                                .filter((c: any) => {
+                                  if (!c) return false;
+                                  const label = String(c).trim().toLowerCase();
+                                  // Some legacy/erroneous imports stored "Sous catégorie" as a category label.
+                                  return !['sous catégorie', 'sous-catégorie', 'sous categorie'].includes(label);
+                                })
+                            )) as string[]).sort().map((category: string) => (
                               <SelectItem key={category} value={category}>{category}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1587,22 +1615,10 @@ export function AddProduct() {
                             asset
                           };
                         });
-                        
-                        // Calculer automatiquement les proportions
-                        const totalAssets = assetAllocations.length + newAllocations.length;
-                        const proportionPerAsset = totalAssets > 0 ? (100 / totalAssets).toFixed(2) : '0';
-                        
-                        // Mettre à jour les proportions existantes et nouvelles
-                        const updatedExisting = assetAllocations.map(a => ({
-                          ...a,
-                          proportion: proportionPerAsset
-                        }));
-                        const updatedNew = newAllocations.map(a => ({
-                          ...a,
-                          proportion: proportionPerAsset
-                        }));
-                        
-                        setAssetAllocations([...updatedExisting, ...updatedNew]);
+
+                        setAssetAllocations(
+                          recalibrateAssetAllocationsEqual([...assetAllocations, ...newAllocations])
+                        );
                         // S'assurer que la checkbox "Lier le produit à des actifs" est cochée
                         if (!formData.linkToAssets) {
                           setFormData({ ...formData, linkToAssets: true });
