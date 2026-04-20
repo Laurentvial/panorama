@@ -2508,7 +2508,7 @@ def save_generated_positions(
     # Log to verify the transaction ID is correct
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"DEBUG: save_generated_positions called for transaction {txn.id}, "
+    logger.debug(f"DEBUG: save_generated_positions called for transaction {txn.id}, "
                f"ctx.transaction_id={ctx.transaction_id}, "
                f"txn.id={txn.id}")
     
@@ -2555,7 +2555,7 @@ def save_generated_positions(
         
         # Get total count
         total_pending_count = base_queryset.count()
-        logger.info(f"DEBUG: Found {total_pending_count} pending positions for product {ctx.product_id} and client {ctx.client_id}")
+        logger.debug(f"DEBUG: Found {total_pending_count} pending positions for product {ctx.product_id} and client {ctx.client_id}")
         
         if total_pending_count > 0:
             # Get breakdown by transaction before deletion
@@ -2568,12 +2568,12 @@ def save_generated_positions(
                 count = item['count']
                 deleted_by_transaction[txn_id] = count
             
-            logger.info(f"DEBUG: Breakdown by transaction: {deleted_by_transaction}")
+            logger.debug(f"DEBUG: Breakdown by transaction: {deleted_by_transaction}")
             
             # Get detailed position information for display (limit to first 100 for performance)
             # Use select_related for efficient fetching
             positions_to_delete = list(base_queryset.select_related('transaction', 'asset')[:100])
-            logger.info(f"DEBUG: Fetched {len(positions_to_delete)} positions for display (out of {total_pending_count})")
+            logger.debug(f"DEBUG: Fetched {len(positions_to_delete)} positions for display (out of {total_pending_count})")
             
             for pos in positions_to_delete:
                 deleted_positions_info.append({
@@ -2590,22 +2590,22 @@ def save_generated_positions(
                 })
             
             # Get all IDs to delete (for verification and logging)
-            logger.info(f"DEBUG: Fetching all pending position IDs...")
+            logger.debug(f"DEBUG: Fetching all pending position IDs...")
             all_pending_ids = list(base_queryset.values_list('id', flat=True))
-            logger.info(f"DEBUG: Retrieved {len(all_pending_ids)} position IDs to delete")
+            logger.debug(f"DEBUG: Retrieved {len(all_pending_ids)} position IDs to delete")
             
             if len(all_pending_ids) != total_pending_count:
                 logger.error(f"ERROR: Mismatch! Count says {total_pending_count} but got {len(all_pending_ids)} IDs")
             
             deleted_ids_sample = all_pending_ids[:20]
             
-            logger.info(f"DEBUG: About to delete {len(all_pending_ids)} pending positions (sample IDs: {deleted_ids_sample[:10]}{'...' if len(deleted_ids_sample) > 10 else ''}) "
+            logger.debug(f"DEBUG: About to delete {len(all_pending_ids)} pending positions (sample IDs: {deleted_ids_sample[:10]}{'...' if len(deleted_ids_sample) > 10 else ''}) "
                        f"for product {ctx.product_id} and client {ctx.client_id} before regeneration. "
                        f"Breakdown by transaction: {deleted_by_transaction}")
             
             # CRITICAL: Delete all pending positions directly using a fresh queryset
             # Recreate the queryset to ensure it's up-to-date and not cached
-            logger.info(f"DEBUG: Executing delete() on fresh queryset with {total_pending_count} positions...")
+            logger.debug(f"DEBUG: Executing delete() on fresh queryset with {total_pending_count} positions...")
             with position_deletion_audit('save_generated_positions'):
                 delete_queryset = Position.objects.filter(
                     product_id=ctx.product_id,
@@ -2616,15 +2616,15 @@ def save_generated_positions(
             deleted_count = deleted_result[0] if isinstance(deleted_result, tuple) else deleted_result
             deleted_by_model = deleted_result[1] if isinstance(deleted_result, tuple) and len(deleted_result) > 1 else {}
             
-            logger.info(f"DEBUG: Delete operation completed. Result: {deleted_result}")
-            logger.info(f"DEBUG: Deleted {deleted_count} positions. Details by model: {deleted_by_model}")
+            logger.debug(f"DEBUG: Delete operation completed. Result: {deleted_result}")
+            logger.debug(f"DEBUG: Deleted {deleted_count} positions. Details by model: {deleted_by_model}")
             
             logger.info(f"Successfully deleted {deleted_count} pending positions (expected {total_pending_count}, IDs count: {len(all_pending_ids)}) "
                        f"across {len(deleted_by_transaction)} transactions "
                        f"on product {ctx.product_id} before regenerating positions for transaction {txn.id}")
             
             # Verify deletion immediately after
-            logger.info(f"DEBUG: Verifying deletion...")
+            logger.debug(f"DEBUG: Verifying deletion...")
             remaining_queryset = Position.objects.filter(
                 product_id=ctx.product_id,
                 client_id=ctx.client_id,
@@ -2648,7 +2648,7 @@ def save_generated_positions(
                 logger.warning(f"WARNING: Deleted {deleted_count} positions but expected {total_pending_count}. "
                              f"Some positions may have been deleted by another process.")
             else:
-                logger.info(f"DEBUG: Verification passed! All {deleted_count} positions were successfully deleted.")
+                logger.debug(f"DEBUG: Verification passed! All {deleted_count} positions were successfully deleted.")
         else:
             logger.info(f"No pending positions to delete for product {ctx.product_id} and client {ctx.client_id}")
     else:
@@ -2671,13 +2671,13 @@ def save_generated_positions(
         client_id=ctx.client_id,
         status='pending'
     ).count() if ctx.product_id else 0
-    logger.info(f"DEBUG: Total pending positions for product {ctx.product_id} BEFORE creating new positions: {total_pending_before_create}")
+    logger.debug(f"DEBUG: Total pending positions for product {ctx.product_id} BEFORE creating new positions: {total_pending_before_create}")
 
     # Performance: avoid one SELECT + one INSERT per position.
     # Collisions on UUID4 (12 chars) are effectively impossible; if they happen, we retry on IntegrityError.
     from django.db import IntegrityError
 
-    logger.info(f"DEBUG: About to create {len(positions_data)} new positions for transaction {txn.id}")
+    logger.debug(f"DEBUG: About to create {len(positions_data)} new positions for transaction {txn.id}")
 
     transaction_id_to_use = txn.id  # Always use the transaction passed as parameter
     if positions_data:
@@ -2747,7 +2747,7 @@ def save_generated_positions(
             created = Position.objects.bulk_create(instances, batch_size=500)
             break
 
-    logger.info(f"DEBUG: Created {len(created)} positions for transaction {txn.id}")
+    logger.debug(f"DEBUG: Created {len(created)} positions for transaction {txn.id}")
     
     # Verify that all created positions have the correct transaction_id
     if created:
@@ -2769,9 +2769,9 @@ def save_generated_positions(
         transaction_id=txn.id,
         status='pending'
     ).count()
-    logger.info(f"DEBUG: Total pending positions for product {ctx.product_id} AFTER creating new positions: {total_pending_after_create} "
+    logger.debug(f"DEBUG: Total pending positions for product {ctx.product_id} AFTER creating new positions: {total_pending_after_create} "
                f"(expected: {total_pending_before_create} + {len(created)} = {total_pending_before_create + len(created)})")
-    logger.info(f"DEBUG: Pending positions for current transaction {txn.id}: {positions_for_current_txn} (expected: {len(created)})")
+    logger.debug(f"DEBUG: Pending positions for current transaction {txn.id}: {positions_for_current_txn} (expected: {len(created)})")
 
     # IMPORTANT: When capital changes on a product, all other investment transactions
     # on the same product must have their future positions recalculated.
@@ -2799,7 +2799,7 @@ def save_generated_positions(
         # This ensures that when capital changes, all future positions are recalculated
         # with the updated total invested capital
         # NOTE: Pending positions for these transactions have already been deleted above
-        logger.info(f"DEBUG: About to regenerate positions for {other_investment_transactions.count()} other transactions")
+        logger.debug(f"DEBUG: About to regenerate positions for {other_investment_transactions.count()} other transactions")
         
         # Check pending positions count before regeneration
         pending_before_regen = Position.objects.filter(
@@ -2807,7 +2807,7 @@ def save_generated_positions(
             client_id=ctx.client_id,
             status='pending'
         ).count()
-        logger.info(f"DEBUG: Pending positions count BEFORE regeneration of other transactions: {pending_before_regen}")
+        logger.debug(f"DEBUG: Pending positions count BEFORE regeneration of other transactions: {pending_before_regen}")
         
         # Track failed regenerations to prevent data loss
         failed_regenerations = []
@@ -2819,7 +2819,7 @@ def save_generated_positions(
                 transaction_id=other_txn.id,
                 status='pending'
             ).count()
-            logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_before} pending positions before regeneration")
+            logger.debug(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_before} pending positions before regeneration")
             
             # Attempt regeneration with retries
             regeneration_successful = False
@@ -2832,7 +2832,7 @@ def save_generated_positions(
                     # This will use the updated capital (which includes the change from the current transaction)
                     # delete_pending=False because we already deleted all pending positions above (for all transactions)
                     created_positions = create_positions_for_investment(other_txn, trigger="capital_update_recalculation", delete_pending=False)
-                    logger.info(f"DEBUG: Transaction {other_txn.id}: Created {len(created_positions)} new positions (attempt {attempt + 1}/{max_retries + 1})")
+                    logger.debug(f"DEBUG: Transaction {other_txn.id}: Created {len(created_positions)} new positions (attempt {attempt + 1}/{max_retries + 1})")
                     
                     # Verify that positions were actually created
                     pending_for_txn_after = Position.objects.filter(
@@ -2844,7 +2844,7 @@ def save_generated_positions(
                     # Success criteria: either positions were created, or there were no positions before (normal case)
                     if len(created_positions) > 0 or pending_for_txn_before == 0:
                         regeneration_successful = True
-                        logger.info(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_after} pending positions after regeneration (expected {len(created_positions)})")
+                        logger.debug(f"DEBUG: Transaction {other_txn.id}: {pending_for_txn_after} pending positions after regeneration (expected {len(created_positions)})")
                         logger.info(f"Regenerated positions for investment transaction {other_txn.id} after capital update")
                         break  # Success, exit retry loop
                     else:
@@ -2917,8 +2917,8 @@ def save_generated_positions(
             transaction_id=txn.id,
             status='pending'
         ).count()
-        logger.info(f"DEBUG: Pending positions count AFTER regeneration of other transactions: {pending_after_regen}")
-        logger.info(f"DEBUG: Pending positions for current transaction {txn.id} AFTER recalculation: {positions_for_current_txn_after_regen} "
+        logger.debug(f"DEBUG: Pending positions count AFTER regeneration of other transactions: {pending_after_regen}")
+        logger.debug(f"DEBUG: Pending positions for current transaction {txn.id} AFTER recalculation: {positions_for_current_txn_after_regen} "
                    f"(expected: {len(created)})")
         
         if positions_for_current_txn_after_regen != len(created):
@@ -2932,16 +2932,16 @@ def save_generated_positions(
                          f"This includes positions from other transactions that were regenerated.")
         
         # Final summary log
-        logger.info(f"DEBUG: === FINAL SUMMARY FOR TRANSACTION {txn.id} ===")
-        logger.info(f"DEBUG: - Started with {total_pending_count} pending positions to delete")
-        logger.info(f"DEBUG: - Deleted {deleted_count} pending positions")
-        logger.info(f"DEBUG: - Created {len(created)} new positions for current transaction")
-        logger.info(f"DEBUG: - Regenerated positions for {other_investment_transactions.count()} other transactions")
-        logger.info(f"DEBUG: - Failed regenerations: {len(failed_regenerations)}")
-        logger.info(f"DEBUG: - Final pending positions count: {pending_after_regen}")
+        logger.debug(f"DEBUG: === FINAL SUMMARY FOR TRANSACTION {txn.id} ===")
+        logger.debug(f"DEBUG: - Started with {total_pending_count} pending positions to delete")
+        logger.debug(f"DEBUG: - Deleted {deleted_count} pending positions")
+        logger.debug(f"DEBUG: - Created {len(created)} new positions for current transaction")
+        logger.debug(f"DEBUG: - Regenerated positions for {other_investment_transactions.count()} other transactions")
+        logger.debug(f"DEBUG: - Failed regenerations: {len(failed_regenerations)}")
+        logger.debug(f"DEBUG: - Final pending positions count: {pending_after_regen}")
         if failed_regenerations:
             logger.error(f"DEBUG: - WARNING: {len(failed_regenerations)} transaction(s) have lost positions and need manual regeneration!")
-        logger.info(f"DEBUG: ============================================")
+        logger.debug(f"DEBUG: ============================================")
     
     # Record generation history in transaction (without duplicating position details)
     try:

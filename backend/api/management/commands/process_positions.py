@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.db.models import Q
 from datetime import date
 
 from api.models import Position, Transaction, Product
@@ -30,21 +31,39 @@ class Command(BaseCommand):
         now = timezone.now()
         dry_run = bool(options.get("dry_run"))
 
-        # We only process trade-like positions (those with scheduled timestamps).
-        base = Position.objects.filter(opened_at__isnull=False, closed_at__isnull=False)
+        # Keep statuses consistent for UI tabs (pending/open/done) without doing UPDATEs on GET endpoints.
+        # This command is safe to run frequently (cron) and is idempotent.
+        base = Position.objects.exclude(status="cancelled")
 
-        # 1) Close anything whose close time has passed (idempotent).
-        close_qs = base.filter(status__in=["open", "pending"], closed_at__lte=now)
-        # 2) Open anything whose open time has passed, but not yet closed.
-        open_qs = base.filter(status="pending", opened_at__lte=now).exclude(closed_at__lte=now)
+        # Done: only positions that have actually opened can be closed.
+        close_qs = base.filter(
+            opened_at__isnull=False,
+            opened_at__lte=now,
+            closed_at__isnull=False,
+            closed_at__lte=now,
+        ).exclude(status="done")
+
+        # Open: opened_at <= now and (no closed_at or closed_at in future)
+        open_qs = (
+            base.filter(opened_at__isnull=False, opened_at__lte=now)
+            .filter(Q(closed_at__isnull=True) | Q(closed_at__gt=now))
+            .exclude(status="open")
+        )
+
+        # Pending: opened_at in the future
+        pending_qs = base.filter(
+            opened_at__isnull=False,
+            opened_at__gt=now,
+        ).exclude(status="pending")
 
         to_close = close_qs.count()
         to_open = open_qs.count()
+        to_pending = pending_qs.count()
 
         if dry_run:
             self.stdout.write(
                 self.style.WARNING(
-                    f"[DRY RUN] {to_open} position(s) would OPEN, {to_close} position(s) would CLOSE. now={now.isoformat()}"
+                    f"[DRY RUN] {to_pending} position(s) would become PENDING, {to_open} would OPEN, {to_close} would CLOSE. now={now.isoformat()}"
                 )
             )
             return
@@ -52,6 +71,7 @@ class Command(BaseCommand):
         # Get IDs of positions to close before updating (since .update() doesn't return objects)
         positions_to_close_ids = list(close_qs.values_list('id', flat=True))
         
+        pending = pending_qs.update(status="pending")
         opened = open_qs.update(status="open")
         closed = close_qs.update(status="done")
         
@@ -66,7 +86,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Opened {opened} position(s), closed {closed} position(s). now={now.isoformat()}"
+                f"Pending {pending} position(s), opened {opened} position(s), closed {closed} position(s). now={now.isoformat()}"
             )
         )
     

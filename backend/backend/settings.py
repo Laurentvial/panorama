@@ -119,6 +119,7 @@ MIDDLEWARE = [
     'api.middleware.PositionAuditMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.SQLProfileMiddleware',  # Dev-only SQL profiling (SQL_PROFILE=true + DEBUG=true)
     'api.middleware.CloseDBConnectionsMiddleware',  # Close DB connections after each request
 ]
 
@@ -160,9 +161,8 @@ if DATABASE_URL:
         conn_max_age=CONN_MAX_AGE,
         ssl_require=ssl_require,
     )
-    # Explicitly set CONN_MAX_AGE to ensure it's applied (override any defaults)
-    # Force CONN_MAX_AGE to 0 to ensure connections are closed immediately
-    db_config['CONN_MAX_AGE'] = 0  # Force immediate closure
+    # Ensure CONN_MAX_AGE respects DB_CONN_MAX_AGE (do not force 0).
+    db_config['CONN_MAX_AGE'] = CONN_MAX_AGE
     # Add connection options to prevent too many connections
     db_config.setdefault('OPTIONS', {})
     db_options = {
@@ -189,7 +189,7 @@ else:
             "PASSWORD": os.getenv("DB_PASSWORD"),
             "HOST": os.getenv("DB_HOST"),
             "PORT": os.getenv("DB_PORT"),
-            "CONN_MAX_AGE": 0,  # Force immediate closure to prevent pool exhaustion
+            "CONN_MAX_AGE": CONN_MAX_AGE,
             "ATOMIC_REQUESTS": False,  # Disable atomic requests to prevent long-held connections
             "OPTIONS": {
                 'connect_timeout': 10,

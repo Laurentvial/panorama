@@ -6901,38 +6901,6 @@ def all_transactions(request):
     return Response({'transactions': serializer.data})
 
 
-def _sync_positions_statuses(qs):
-    """
-    Update Position.status in DB based on opened_at/closed_at:
-    - pending: not opened yet (opened_at in future)
-    - open: opened_at <= now < closed_at (or closed_at is null)
-    - done: closed_at <= now
-    cancelled is never touched.
-    """
-    now = timezone.now()
-
-    # Close positions whose close time has passed
-    qs.filter(
-        ~Q(status='cancelled'),
-        closed_at__isnull=False,
-        closed_at__lte=now,
-    ).exclude(status='done').update(status='done')
-
-    # Open positions that reached opened_at and are not yet closed
-    qs.filter(
-        ~Q(status='cancelled'),
-        opened_at__isnull=False,
-        opened_at__lte=now,
-    ).filter(Q(closed_at__isnull=True) | Q(closed_at__gt=now)).exclude(status='open').update(status='open')
-
-    # Upcoming positions (opened_at in the future) should be pending
-    qs.filter(
-        ~Q(status='cancelled'),
-        opened_at__isnull=False,
-        opened_at__gt=now,
-    ).exclude(status='pending').update(status='pending')
-
-
 # Positions endpoints
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -6943,9 +6911,6 @@ def positions_list(request):
     client_ids = _get_client_ids_user_has_access_to(request)
     if client_ids is not None:
         qs = qs.filter(client_id__in=client_ids)
-
-    # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
-    _sync_positions_statuses(qs)
 
     if status_param:
         # Allow comma-separated list: ?status=pending,done
@@ -6976,9 +6941,9 @@ def positions_list(request):
     # Clients list for filter dropdown (unique clients in status+product filtered queryset, before client filter)
     client_ids_in_qs = qs.exclude(client_id__isnull=True).values_list('client_id', flat=True).distinct()
     clients_data = []
-    for c in Client.objects.filter(id__in=client_ids_in_qs).only('id', 'fname', 'lname', 'email'):
-        name = f"{c.fname} {c.lname}".strip() or (c.email or '') or c.id
-        clients_data.append({'id': c.id, 'name': name})
+    for c in Client.objects.filter(id__in=client_ids_in_qs).values('id', 'fname', 'lname', 'email'):
+        name = f"{(c.get('fname') or '').strip()} {(c.get('lname') or '').strip()}".strip() or (c.get('email') or '') or c.get('id')
+        clients_data.append({'id': c.get('id'), 'name': name})
     clients_data.sort(key=lambda x: x['name'].lower())
 
     # Filter by client if requested
@@ -6990,17 +6955,16 @@ def positions_list(request):
     product_ids = qs.exclude(product_id__isnull=True).values_list('product_id', flat=True).distinct()
     products_data = list(Product.objects.filter(id__in=product_ids).values('id', 'name').order_by('name'))
 
-    # Counts per status for tab labels (before pagination, same filters except status)
+    # Counts per status for tab labels (same filters as list, but without status filter).
     from django.db.models import Count
-    counts_qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').all()
+    counts_base = Position.objects.all()
     if client_ids is not None:
-        counts_qs = counts_qs.filter(client_id__in=client_ids)
+        counts_base = counts_base.filter(client_id__in=client_ids)
     if product_id_param:
-        counts_qs = counts_qs.filter(product_id=product_id_param)
+        counts_base = counts_base.filter(product_id=product_id_param)
     if client_id_param:
-        counts_qs = counts_qs.filter(client_id=client_id_param)
-    _sync_positions_statuses(counts_qs)
-    status_counts = dict(counts_qs.values('status').annotate(c=Count('id')).values_list('status', 'c'))
+        counts_base = counts_base.filter(client_id=client_id_param)
+    status_counts = dict(counts_base.values('status').annotate(c=Count('id')).values_list('status', 'c'))
     counts_data = {
         'pending': status_counts.get('pending', 0),
         'open': status_counts.get('open', 0),
@@ -7086,9 +7050,6 @@ def client_positions(request, client_id):
             return err
 
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
-
-    # Keep statuses in sync for UI tabs (à venir / ouvertes / fermées)
-    _sync_positions_statuses(qs)
 
     # Determine sorting based on status filter
     statuses = []
