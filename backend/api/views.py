@@ -10388,8 +10388,37 @@ def transaction_save_positions(request, client_id, transaction_id):
     if not isinstance(manual_regeneration, bool):
         manual_regeneration = str(manual_regeneration).lower() in ('true', '1', 'yes', 'on')
     include_focus_transaction = manual_regeneration
+
+    skip_positions = request.data.get('skip_positions', False)
+    if not isinstance(skip_positions, bool):
+        skip_positions = str(skip_positions).lower() in ('true', '1', 'yes', 'on')
     
     try:
+        if skip_positions:
+            # "History-only" path: persist a durable marker so signals don't regenerate positions later.
+            with db_transaction.atomic():
+                save_position_generation_history(
+                    transaction,
+                    rates_used=rates_used,
+                    period_summaries=period_summaries,
+                    positions_data=positions_data,
+                )
+
+                subscription_details = transaction.subscription_details or {}
+                if not isinstance(subscription_details, dict):
+                    subscription_details = {}
+                subscription_details['skipPositions'] = True
+                transaction.subscription_details = subscription_details
+                transaction.save(update_fields=['subscription_details'])
+
+            return Response(
+                {
+                    'positions': [],
+                    'count': 0,
+                    'message': 'Historique de génération enregistré (positions ignorées)',
+                }
+            )
+
         if requires_addition_recalculation:
             # Handle addition with recalculation (existing pending positions)
             from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata

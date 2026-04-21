@@ -24,10 +24,13 @@ function transactionRequiresGenerationHorizonDays(txn: any, isWithdrawalTxn: boo
   //
   // UX requirement: ask for horizon BEFORE calling generate-rates in that case.
   if (isWithdrawalTxn) {
-    return !txn?.product || productDurationIsMissing(txn);
+    // If product info isn't attached to the transaction payload, let the backend
+    // resolve the product from transfer fields; don't force the horizon UI.
+    return !!txn?.product && productDurationIsMissing(txn);
   }
   if (!isInvestmentTransferTransaction(txn)) return false;
-  return !txn?.product || productDurationIsMissing(txn);
+  // Same rule for investments: only require horizon when we *know* the product duration is missing.
+  return !!txn?.product && productDurationIsMissing(txn);
 }
 
 function getTransactionTransferTo(txn: any): string | null {
@@ -225,6 +228,7 @@ export function PositionGenerationModal({
   const [recalculationExecution, setRecalculationExecution] = useState<RecalculationExecutionSummary | null>(null);
   const [generationHorizonDays, setGenerationHorizonDays] = useState<string>('30');
   const generationHorizonDaysRef = useRef<string>('30');
+  const [skipPositions, setSkipPositions] = useState<boolean>(false);
 
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
@@ -269,6 +273,7 @@ export function PositionGenerationModal({
       setRecalculationExecution(null);
       generationHorizonDaysRef.current = '30';
       setGenerationHorizonDays('30');
+      setSkipPositions(false);
 
       if (transactionRequiresGenerationHorizonDays(transaction, isWithdrawal)) {
         setStep('await-horizon');
@@ -450,6 +455,11 @@ export function PositionGenerationModal({
     }, API_TIMEOUT_MS);
 
     try {
+      if (skipPositions) {
+        await handleConfirm({ skipPositions: true });
+        clearTimeout(timeoutId);
+        return;
+      }
       setStep('loading-positions');
       setError(null);
 
@@ -613,7 +623,7 @@ export function PositionGenerationModal({
     await handleConfirm();
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (opts?: { skipPositions?: boolean }) => {
     try {
       setStep('saving');
       setError(null);
@@ -667,10 +677,11 @@ export function PositionGenerationModal({
         {
           method: 'POST',
           body: JSON.stringify({ 
-            positions,
+            positions: opts?.skipPositions ? [] : positions,
             rates_used: ratesUsed,
             period_summaries: recalculatedPeriodSummaries,
             manual_regeneration: true,
+            ...(opts?.skipPositions ? { skip_positions: true } : {}),
             ...(shouldSendPositionsMonthRange
               ? {
                   positions_per_month_min: parseInt(positionsPerMonthMin.trim(), 10),
@@ -717,7 +728,7 @@ export function PositionGenerationModal({
         setReadyToConfirm(false);
         setStep('review-positions');
       } else {
-        toast.success('Positions générées avec succès');
+        toast.success(opts?.skipPositions ? 'Historique enregistré (positions ignorées)' : 'Positions générées avec succès');
         handleClose();
         onSuccess();
       }
@@ -754,6 +765,7 @@ export function PositionGenerationModal({
     setRecalculationExecution(null);
     generationHorizonDaysRef.current = '30';
     setGenerationHorizonDays('30');
+    setSkipPositions(false);
     onClose();
   };
 
@@ -1165,6 +1177,31 @@ export function PositionGenerationModal({
                   <p style={{ marginBottom: '20px', color: '#64748b' }}>
                     Veuillez vérifier et modifier si nécessaire les taux de rentabilité pour chaque période :
                   </p>
+
+                  <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '14px' }}>
+                      <input
+                        type="checkbox"
+                        checked={skipPositions}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setSkipPositions(v);
+                          if (v) {
+                            setAvoidLosses(false);
+                            setPositiveGainsOnly(false);
+                            setPositionsPerMonthMin('');
+                            setPositionsPerMonthMax('');
+                            setPositionsRangeError(null);
+                          }
+                        }}
+                        style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontWeight: '600' }}>Ne pas générer de positions (intérêts automatiques uniquement)</span>
+                    </label>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', marginLeft: '24px', lineHeight: 1.4 }}>
+                      Enregistre uniquement l’historique des périodes/taux. Les transactions d’intérêts automatiques seront générées à l’échéance selon la période d’intérêt, même sans positions.
+                    </p>
+                  </div>
                   
                   <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1205,6 +1242,7 @@ export function PositionGenerationModal({
                     </table>
                   </div>
 
+                  {!skipPositions && (
                   <div style={{ marginBottom: '20px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
                     <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '14px' }}>
                       <input
@@ -1239,7 +1277,9 @@ export function PositionGenerationModal({
                       Chaque position a un gain strictement positif (aucun trade à 0 €). Exige un profit de période suffisant par rapport au nombre de trades ; sinon la génération renverra une erreur explicite.
                     </p>
                   </div>
+                  )}
 
+                  {!skipPositions && (
                   <div style={{ marginBottom: '20px', padding: '16px', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '6px' }}>
                     <h3 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#0c4a6e' }}>
                       Fourchette de positions par mois (optionnel)
@@ -1307,6 +1347,7 @@ export function PositionGenerationModal({
                       Si votre fourchette est trop élevée, elle sera automatiquement ajustée ou une erreur sera affichée.
                     </p>
                   </div>
+                  )}
                 </>
               )}
 
@@ -1316,7 +1357,7 @@ export function PositionGenerationModal({
                 </Button>
                 {rates.length > 0 && (
                   <Button type="button" onClick={handleContinue}>
-                    Continuer
+                    {skipPositions ? 'Enregistrer sans positions' : 'Continuer'}
                   </Button>
                 )}
               </div>

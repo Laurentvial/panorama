@@ -67,6 +67,14 @@ def _transaction_generate_positions_on_valide(sender, instance: Transaction, cre
     Skip generation if skip_auto_position_generation flag is set (for staged modal flow).
     """
     try:
+        subscription_details = getattr(instance, "subscription_details", None) or {}
+        if isinstance(subscription_details, dict) and subscription_details.get("skipPositions") is True:
+            logger.info(
+                "Skipping auto-position generation for transaction %s (skipPositions=true)",
+                getattr(instance, "id", None),
+            )
+            return
+
         is_investment = (
             instance.type == "transfert"
             and bool(instance.transfer_to)
@@ -123,6 +131,12 @@ def _transaction_recalculate_positions_on_withdrawal(sender, instance: Transacti
     with the new (reduced) invested capital.
     """
     try:
+        # Do NOT gate on subscription_details.skipPositions here. That flag only means
+        # "this subscription transaction should not get auto-generated positions"; it must
+        # not suppress cascade recalculation for OTHER investment transactions on the
+        # same product when a withdrawal is validated (modal can persist skipPositions on
+        # the withdrawal txn after a history-only save).
+
         # Check if this is a withdrawal (transfert from product to solde)
         # A withdrawal is specifically when transfer_to == 'solde'
         is_withdrawal = (
