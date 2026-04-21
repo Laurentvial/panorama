@@ -11,14 +11,28 @@
   overflow: hidden;
 }
 
-/* Prevent body scroll when modal is open */
-body:has(.modal-overlay) {
+/*
+ * Verrouiller le défilement du document sur <html> (pas sur <body>) pour éviter que
+ * la barre de défilement du viewport disparaisse / réapparaisse (saut de mise en page).
+ * S’appuie sur scrollbar-gutter: stable sur html dans index.css.
+ */
+html:has(.modal-overlay),
+html:has([data-slot="dialog-overlay"][data-state="open"]),
+html:has([data-slot="alert-dialog-overlay"][data-state="open"]),
+html:has([data-slot="sheet-overlay"][data-state="open"]),
+html:has([data-slot="drawer-overlay"][data-state="open"]) {
   overflow: hidden;
 }
 
-/* Prevent body scroll when Radix Dialog (e.g. trade modal) is open */
-body:has([data-slot="dialog-overlay"][data-state="open"]) {
-  overflow: hidden;
+/*
+ * Radix / Vaul peuvent appliquer overflow:hidden sur body ; combiné à notre ancienne règle,
+ * cela faisait disparaître la scrollbar. On neutralise sur body pour ne garder que le verrou html.
+ */
+body:has([data-slot="dialog-overlay"][data-state="open"]),
+body:has([data-slot="alert-dialog-overlay"][data-state="open"]),
+body:has([data-slot="sheet-overlay"][data-state="open"]),
+body:has([data-slot="drawer-overlay"][data-state="open"]) {
+  overflow: visible !important;
 }
 
 /* Modal Content */

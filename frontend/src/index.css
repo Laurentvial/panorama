@@ -2336,7 +2336,12 @@
 
 html {
   font-size: var(--font-size);
-  /* Évite le « saut » horizontal quand la barre de défilement verticale apparaît / disparaît */
+  /* Réserve l’emplacement de la scrollbar du viewport pour limiter le saut de layout à l’ouverture des modales */
+  scrollbar-gutter: stable;
+}
+
+/* Même logique si le défilement effectif se fait sur body (navigateurs / mises en page variées) */
+body {
   scrollbar-gutter: stable;
 }
 

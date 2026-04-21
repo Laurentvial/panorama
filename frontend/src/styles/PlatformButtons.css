@@ -142,8 +142,7 @@
 
 /* Bottom action buttons */
 .platform-root .platform-action-btn,
-.platform-root .platform-action-icon,
-.platform-root .platform-action-logout {
+.platform-root .platform-action-icon {
   border-radius: 14px !important;
 }
 
@@ -155,8 +154,9 @@
   filter: brightness(0.98);
 }
 
-.platform-root .platform-action-logout:hover {
-  filter: brightness(0.95);
+/* Sidebar: compact stacked dépôt / retrait */
+.platform-root .platform-sidebar-stack-actions .platform-action-btn {
+  border-radius: 8px !important;
 }
 
 /* Mobile bottom nav */

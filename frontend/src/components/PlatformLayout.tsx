@@ -571,7 +571,11 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
           gap: isMobile ? '8px' : '15px',
           flexShrink: 0,
         }}>
-          <DropdownMenu open={clientNotificationsOpen} onOpenChange={setClientNotificationsOpen}>
+          <DropdownMenu
+            modal={false}
+            open={clientNotificationsOpen}
+            onOpenChange={setClientNotificationsOpen}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -661,6 +665,37 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Button
+            type="button"
+            variant="outline"
+            size={showBottomNav ? 'icon' : 'sm'}
+            onClick={async () => {
+              if (showBottomNav) setSidebarOpen(false);
+              await handleLogout();
+            }}
+            aria-label="Se déconnecter"
+            title="Se déconnecter"
+            style={{
+              flexShrink: 0,
+              height: 40,
+              borderRadius: 9999,
+              border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
+              background: 'transparent',
+              color: 'var(--accent-foreground)',
+              ...(showBottomNav
+                ? { width: 40, padding: 0 }
+                : {
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    gap: 8,
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }),
+            }}
+          >
+            <LogOut size={showBottomNav ? 20 : 18} />
+            {!showBottomNav && <span>Se déconnecter</span>}
+          </Button>
         </div>
       </header>
 
@@ -926,19 +961,20 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   flexShrink: 0,
                   backgroundColor: 'var(--primary)',
                   color: 'var(--accent-foreground)',
-                  paddingTop: 12,
-                  paddingBottom: 12,
+                  paddingTop: 8,
+                  paddingBottom: 8,
                   borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
                 }}
               >
                 <div
+                  className="platform-sidebar-stack-actions"
                   style={{
                     display: 'flex',
-                    flexDirection: isMobile ? 'column' : 'row',
+                    flexDirection: 'column',
                     alignItems: 'stretch',
-                    gap: 10,
-                    marginLeft: isMobile ? 20 : 20,
-                    marginRight: isMobile ? 20 : 20,
+                    gap: 6,
+                    marginLeft: 16,
+                    marginRight: 16,
                   }}
                 >
                   <Link
@@ -946,84 +982,60 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                     onClick={() => showBottomNav && setSidebarOpen(false)}
                     className="platform-hoverable platform-action-btn"
                     style={{
-                      flex: isMobile ? 'none' : 1,
-                      width: isMobile ? '100%' : undefined,
-                      height: 44,
-                      padding: '0 14px',
+                      width: '100%',
+                      minHeight: 32,
+                      height: 32,
+                      padding: '0 10px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: 10,
+                      gap: 6,
                       backgroundColor: platformButtonBg,
                       border: 'none',
                       cursor: 'pointer',
                       textAlign: 'left',
-                      fontSize: isMobile ? '15px' : '16px',
+                      fontSize: '13px',
+                      lineHeight: 1.2,
                       color: 'white',
                       fontWeight: 500,
-                      borderRadius: 9999,
+                      borderRadius: 8,
                       whiteSpace: 'nowrap',
                       textDecoration: 'none',
                     }}
                   >
-                    <ArrowDown size={isMobile ? 18 : 20} />
+                    <ArrowDown size={16} />
                     Déposer des fonds
                   </Link>
                   <Link
                     to="/platform/funds?movement=retrait"
                     onClick={() => showBottomNav && setSidebarOpen(false)}
-                    className="platform-hoverable platform-action-icon"
+                    className="platform-hoverable platform-action-btn"
                     style={{
-                      width: isMobile ? '100%' : 55,
-                      height: 44,
-                      padding: isMobile ? '0 14px' : 0,
+                      width: '100%',
+                      minHeight: 32,
+                      height: 32,
+                      padding: '0 10px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: 10,
+                      gap: 6,
                       backgroundColor: platformSecondaryBg,
                       border: `1px solid color-mix(in srgb, ${platformPrimaryBg} 35%, transparent)`,
                       cursor: 'pointer',
                       textAlign: 'left',
-                      fontSize: isMobile ? '15px' : '16px',
+                      fontSize: '13px',
+                      lineHeight: 1.2,
                       color: 'var(--secondary-foreground)',
                       fontWeight: 500,
-                      borderRadius: 9999,
+                      borderRadius: 8,
                       whiteSpace: 'nowrap',
                       textDecoration: 'none',
                     }}
-                    aria-label="Retrait"
+                    aria-label="Retirer des fonds"
                   >
-                    <ArrowUp size={isMobile ? 18 : 20} />
-                    {isMobile && <span>Retirer des fonds</span>}
+                    <ArrowUp size={16} />
+                    Retirer des fonds
                   </Link>
-
-                  <button
-                    onClick={async () => {
-                      if (showBottomNav) setSidebarOpen(false);
-                      await handleLogout();
-                    }}
-                    className="platform-hoverable platform-action-icon platform-action-logout"
-                    style={{
-                      width: isMobile ? '100%' : 55,
-                      height: 44,
-                      padding: isMobile ? '0 14px' : 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 10,
-                      backgroundColor: '#ef4444',
-                      border: '1px solid #ef4444',
-                      cursor: 'pointer',
-                      color: 'white',
-                      borderRadius: 9999,
-                    }}
-                    aria-label="Déconnexion"
-                    title="Déconnexion"
-                  >
-                    <LogOut size={isMobile ? 18 : 20} />
-                    {isMobile && <span>Se deconnecter</span>}
-                  </button>
                 </div>
               </div>
 
