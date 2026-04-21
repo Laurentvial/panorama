@@ -67,7 +67,7 @@ export function PlatformTrading() {
 
   useEffect(() => {
     if (!currentUser?.id) return;
-    logPlatformAction('page_view', { route: '/platform/funds', page: 'funds' });
+    logPlatformAction('page_view', { route: '/platform/funds' });
   }, [currentUser?.id]);
 
   // Créer automatiquement le dépôt si aucun RIB n'est disponible quand le dialog s'ouvre
@@ -262,12 +262,15 @@ export function PlatformTrading() {
       return;
     }
 
-    if (movementType === 'retrait' && amountNum > withdrawableFunds) {
-      toast.error(`Fonds insuffisants. Disponible au retrait: ${formatAmount(withdrawableFunds, accountCurrency)}`);
-      return;
-    }
-
     if (movementType === 'retrait') {
+      void logPlatformAction('form_submit', {
+        form: 'funds_withdraw_intent',
+        step: 'withdraw_dialog_opened',
+        amount: amountNum,
+        accountCurrency,
+        withdrawableFundsAtIntent: formatAmount(withdrawableFunds, accountCurrency),
+        route: '/platform/funds',
+      });
       setWithdrawDialogOpen(true);
       return;
     }
@@ -276,6 +279,14 @@ export function PlatformTrading() {
     if (movementType === 'depot' && paymentMethod === 'virement') {
       setPendingAmount(amountNum);
       await loadClientRibs();
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_transfer_dialog_opened',
+        amount: amountNum,
+        accountCurrency: 'EUR',
+        paymentMethod: 'virement',
+        route: '/platform/funds',
+      });
       setTransferDialogOpen(true);
       return;
     }
@@ -283,6 +294,14 @@ export function PlatformTrading() {
     // For card payment, show dialog first
     if (movementType === 'depot' && paymentMethod === 'carte_bancaire') {
       setPendingAmount(amountNum);
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_card_dialog_opened',
+        amount: amountNum,
+        accountCurrency: 'EUR',
+        paymentMethod: 'carte_bancaire',
+        route: '/platform/funds',
+      });
       setCardDepositDialogOpen(true);
       return;
     }
@@ -331,11 +350,31 @@ export function PlatformTrading() {
         amount: pendingAmount,
         transaction: response.transaction || null
       });
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_request_created',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'carte_bancaire',
+        success: true,
+        route: '/platform/funds',
+      });
       setAmount('');
       loadData();
     } catch (error: any) {
       console.error('Error creating card deposit transaction:', error);
-      toast.error(error?.error || error?.message || 'Erreur lors de la création de la transaction');
+      const errMsg = error?.error || error?.message || 'Erreur lors de la création de la transaction';
+      toast.error(errMsg);
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_submit_failed',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'carte_bancaire',
+        success: false,
+        error: errMsg,
+        route: '/platform/funds',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -375,11 +414,31 @@ export function PlatformTrading() {
         amount: pendingAmount,
         transaction: response.transaction || null
       });
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_request_created',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'virement',
+        success: true,
+        route: '/platform/funds',
+      });
       setAmount('');
       loadData();
     } catch (error: any) {
       console.error('Error creating transfer transaction:', error);
-      toast.error(error?.error || error?.message || 'Erreur lors de la création de la transaction');
+      const errMsg = error?.error || error?.message || 'Erreur lors de la création de la transaction';
+      toast.error(errMsg);
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_submit_failed',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'virement',
+        success: false,
+        error: errMsg,
+        route: '/platform/funds',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -404,10 +463,6 @@ export function PlatformTrading() {
     const amountNum = parseFloat(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       toast.error('Montant invalide');
-      return;
-    }
-    if (amountNum > withdrawableFunds) {
-      toast.error('Fonds insuffisants');
       return;
     }
     const beneficiaryName = withdrawBeneficiaryName.trim();
@@ -501,6 +556,15 @@ export function PlatformTrading() {
         toast.warning('Le retrait a été créé mais le RIB n\'a pas pu être sauvegardé');
       }
 
+      void logPlatformAction('form_submit', {
+        form: 'funds_withdraw_intent',
+        step: 'withdraw_request_created',
+        amount: amountNum,
+        accountCurrency,
+        success: true,
+        route: '/platform/funds',
+      });
+
       toast.success('Demande de retrait envoyée');
       setWithdrawDialogOpen(false);
       // Don't clear the form fields - keep them for next time
@@ -513,7 +577,17 @@ export function PlatformTrading() {
       loadData();
     } catch (error: any) {
       console.error('Error creating withdraw transaction:', error);
-      toast.error(error?.error || error?.message || 'Erreur lors de la création du retrait');
+      const errMsg = error?.error || error?.message || 'Erreur lors de la création du retrait';
+      toast.error(errMsg);
+      void logPlatformAction('form_submit', {
+        form: 'funds_withdraw_intent',
+        step: 'withdraw_submit_failed',
+        amount: amountNum,
+        accountCurrency,
+        success: false,
+        error: errMsg,
+        route: '/platform/funds',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -522,6 +596,16 @@ export function PlatformTrading() {
   const fundsTransactions = useMemo(() => {
     return (transactions || []).filter((t: any) => t?.type === 'depot' || t?.type === 'retrait');
   }, [transactions]);
+
+  function handleSelectFundsTab(next: 'depot' | 'retrait') {
+    if (next === movementType) return;
+    void logPlatformAction('click', {
+      element: next === 'depot' ? 'funds_tab_depot' : 'funds_tab_retrait',
+      route: '/platform/funds',
+      movement: next,
+    });
+    setMovementType(next);
+  }
 
   return (
     <div>
@@ -573,7 +657,7 @@ export function PlatformTrading() {
                       <button
                         key={tab.value}
                         type="button"
-                        onClick={() => setMovementType(tab.value)}
+                        onClick={() => handleSelectFundsTab(tab.value)}
                         style={{
                           border: `1px solid ${isActive ? activeBorder : inactiveBorder}`,
                           borderBottom: `3px solid ${isActive ? activeBorder : 'transparent'}`,
@@ -678,12 +762,13 @@ export function PlatformTrading() {
               <DialogHeader>
                 <DialogTitle>Informations de retrait</DialogTitle>
                 <DialogDescription>
-                  Renseignez les informations bancaires pour recevoir votre retrait.
+                  Renseignez les informations bancaires pour recevoir votre retrait. Le montant peut dépasser le solde
+                  affiché : votre gestionnaire validera la demande selon les fonds réellement disponibles.
                 </DialogDescription>
               </DialogHeader>
 
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div>
+              <div className="min-w-0" style={{ display: 'grid', gap: 12 }}>
+                <div className="min-w-0">
                   <Label htmlFor="withdrawBeneficiaryName">Nom du titulaire</Label>
                   <Input
                     id="withdrawBeneficiaryName"
@@ -695,7 +780,7 @@ export function PlatformTrading() {
                   />
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <Label htmlFor="withdrawIban">IBAN</Label>
                   <Input
                     id="withdrawIban"
@@ -707,8 +792,15 @@ export function PlatformTrading() {
                   />
                 </div>
 
-                <div style={{ display: 'flex', gap: 12, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-                  <div style={{ flex: 1, minWidth: isMobile ? '100%' : 180 }}>
+                <div
+                  className="min-w-0"
+                  style={{
+                    display: 'grid',
+                    gap: 12,
+                    gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)',
+                  }}
+                >
+                  <div className="min-w-0">
                     <Label htmlFor="withdrawBic">BIC (optionnel)</Label>
                     <Input
                       id="withdrawBic"
@@ -718,7 +810,7 @@ export function PlatformTrading() {
                       autoComplete="off"
                     />
                   </div>
-                  <div style={{ flex: 1, minWidth: isMobile ? '100%' : 220 }}>
+                  <div className="min-w-0">
                     <Label htmlFor="withdrawBankName">Banque (optionnel)</Label>
                     <Input
                       id="withdrawBankName"
@@ -730,7 +822,7 @@ export function PlatformTrading() {
                   </div>
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <Label htmlFor="withdrawNote">Informations complémentaires (optionnel)</Label>
                   <Textarea
                     id="withdrawNote"

@@ -250,12 +250,73 @@ export function PlatformLogs() {
     }
     if (log.actionType === 'click') {
       if (log.actionDetails.element) details.push(`Élément: ${log.actionDetails.element}`);
+      if (log.actionDetails.movement === 'depot' || log.actionDetails.movement === 'retrait') {
+        details.push(`Onglet: ${log.actionDetails.movement === 'depot' ? 'Dépôt' : 'Retrait'}`);
+      }
       if (log.actionDetails.productId) details.push(`Produit ID: ${log.actionDetails.productId}`);
       if (log.actionDetails.assetId) details.push(`Actif ID: ${log.actionDetails.assetId}`);
     }
     if (log.actionType === 'form_submit') {
-      if (log.actionDetails.form) details.push(`Formulaire: ${log.actionDetails.form}`);
-      if (log.actionDetails.step) details.push(`Étape: ${log.actionDetails.step}`);
+      if (log.actionDetails.form === 'funds_withdraw_intent') {
+        const step = log.actionDetails.step;
+        const stepShort =
+          step === 'withdraw_dialog_opened'
+            ? 'RIB à compléter'
+            : step === 'withdraw_request_created'
+              ? 'enregistrée'
+              : step === 'withdraw_submit_failed'
+                ? 'échec'
+                : step || '';
+        const amt =
+          log.actionDetails.amount != null && log.actionDetails.accountCurrency
+            ? `${log.actionDetails.amount} ${log.actionDetails.accountCurrency}`
+            : log.actionDetails.amount != null
+              ? String(log.actionDetails.amount)
+              : '';
+        const dispo =
+          step === 'withdraw_dialog_opened' &&
+          (log.actionDetails.withdrawableFundsAtIntent || log.actionDetails.withdrawableFundsSnapshot != null)
+            ? `solde indica. ${log.actionDetails.withdrawableFundsAtIntent ?? log.actionDetails.withdrawableFundsSnapshot}`
+            : '';
+        const err = log.actionDetails.error ? String(log.actionDetails.error) : '';
+        const bits = ['Demande de retrait', stepShort, amt, dispo].filter(Boolean);
+        if (step === 'withdraw_submit_failed' && err) bits.push(err);
+        details.push(bits.join(' · '));
+      } else if (log.actionDetails.form === 'funds_deposit_intent') {
+        const step = log.actionDetails.step;
+        const stepShort =
+          step === 'deposit_transfer_dialog_opened'
+            ? 'suite (virement)'
+            : step === 'deposit_card_dialog_opened'
+              ? 'suite (CB)'
+              : step === 'deposit_request_created'
+                ? 'enregistrée'
+                : step === 'deposit_submit_failed'
+                  ? 'échec'
+                  : step || '';
+        const amt =
+          log.actionDetails.amount != null && log.actionDetails.accountCurrency
+            ? `${log.actionDetails.amount} ${log.actionDetails.accountCurrency}`
+            : log.actionDetails.amount != null
+              ? String(log.actionDetails.amount)
+              : '';
+        const err = log.actionDetails.error ? String(log.actionDetails.error) : '';
+        const bits = ['Demande de dépôt', stepShort, amt].filter(Boolean);
+        if (step === 'deposit_submit_failed' && err) bits.push(err);
+        details.push(bits.join(' · '));
+      } else {
+        if (log.actionDetails.form) details.push(`Formulaire: ${log.actionDetails.form}`);
+        if (log.actionDetails.step) details.push(`Étape: ${log.actionDetails.step}`);
+        if (log.actionDetails.form === 'product_subscription') {
+          if (log.actionDetails.productName) details.push(`Produit: ${log.actionDetails.productName}`);
+          if (log.actionDetails.productId) details.push(`Produit ID: ${log.actionDetails.productId}`);
+          if (log.actionDetails.amount != null) details.push(`Montant: ${log.actionDetails.amount}`);
+          if (typeof log.actionDetails.success === 'boolean') {
+            details.push(log.actionDetails.success ? 'Statut: réussite' : 'Statut: échec');
+          }
+          if (log.actionDetails.error) details.push(`Erreur: ${log.actionDetails.error}`);
+        }
+      }
     }
     if (details.length > 0) return details.join(' | ');
     return JSON.stringify(log.actionDetails);

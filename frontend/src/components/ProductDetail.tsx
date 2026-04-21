@@ -802,6 +802,14 @@ export function ProductDetail() {
       return;
     }
 
+    const subscriptionLogBase = {
+      form: 'product_subscription',
+      productId: productData.id,
+      productName: productData.name || null,
+      productReference: productData.reference || null,
+      amount,
+    };
+
     setIsSubscribing(true);
     try {
       // Calculate gains using the same simulator logic as the product page
@@ -872,6 +880,12 @@ export function ProductDetail() {
         },
       });
 
+      void logPlatformAction('form_submit', {
+        ...subscriptionLogBase,
+        success: !!response,
+        ...(!response ? { error: 'Réponse vide du serveur' } : {}),
+      });
+
       if (response) {
         setSubscriptionSuccess('Souscription effectuée avec succès !');
         // Bring the user back to the top so the success message is immediately visible.
@@ -900,7 +914,13 @@ export function ProductDetail() {
       }
     } catch (error: any) {
       console.error('Error creating transaction:', error);
-      setSubscriptionError(error?.message || 'Erreur lors de la souscription. Veuillez réessayer.');
+      const errMsg = error?.message || 'Erreur lors de la souscription. Veuillez réessayer.';
+      setSubscriptionError(errMsg);
+      void logPlatformAction('form_submit', {
+        ...subscriptionLogBase,
+        success: false,
+        error: errMsg,
+      });
     } finally {
       setIsSubscribing(false);
     }

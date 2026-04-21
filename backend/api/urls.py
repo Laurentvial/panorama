@@ -15,12 +15,13 @@ urlpatterns = [
     path('clients/create/', api_views.client_create, name='client-create'),
     path('clients/online-ids/', api_views.client_online_ids, name='client-online-ids'),
     path('platform-logs/', api_views.platform_logs_list, name='platform-logs-list'),
-    path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
+    # Sub-resources must be before clients/<client_id>/ detail (cf. products ~L170: specific before generic).
     path(
         'clients/<str:client_id>/generate-banner-message/',
         api_views.client_generate_banner_message,
         name='client-generate-banner-message',
     ),
+    path('clients/<str:client_id>/', api_views.client_detail, name='client-detail'),
     path('clients/<str:client_id>/toggle-active/', api_views.client_toggle_active, name='client-toggle-active'),
     path('clients/<str:client_id>/delete/', api_views.client_delete, name='client-delete'),
     path('clients/<str:client_id>/verification-config/', api_views.client_verification_config, name='client-verification-config'),

@@ -8,6 +8,14 @@
   border-radius: 0;
   padding: 0.7rem 0 0.55rem;
   box-shadow: none;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+/* Évite l’élargissement horizontal des textarea (field-sizing: content) dans les modales */
+[data-slot='dialog-content'] [data-slot='textarea'] {
+  field-sizing: fixed;
+  width: 100%;
 }
 
 .platform-root [data-slot='input']:focus,
