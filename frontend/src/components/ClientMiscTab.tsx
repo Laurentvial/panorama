@@ -8,6 +8,7 @@ import { Textarea } from './ui/textarea';
 import { Plus, Trash2, X, CreditCard, Link as LinkIcon, Wallet, MessageSquare, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
+import { RichTextEditor } from './RichTextEditor';
 import '../styles/Modal.css';
 import '../styles/ClientMiscRibTable.css';
 
@@ -50,6 +51,7 @@ export function ClientMiscTab({
   const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string>('');
   const [savingBannerMessage, setSavingBannerMessage] = useState(false);
+  const [aiBannerContext, setAiBannerContext] = useState('');
 
   // Initialize payment methods from client data
   useEffect(() => {
@@ -249,6 +251,17 @@ export function ClientMiscTab({
     }
   }
 
+  async function generateAIBannerMessage(): Promise<string> {
+    const response = await apiCall(`/api/clients/${clientId}/generate-banner-message/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        existingMessage: (bannerMessage || '').trim(),
+        userPrompt: (aiBannerContext || '').trim(),
+      }),
+    });
+    return response?.description || response?.text || '';
+  }
+
   async function handleSaveDisplayedRib() {
     setSavingRibDisplay(true);
     try {
@@ -425,17 +438,35 @@ export function ClientMiscTab({
             <p className="text-sm text-slate-600">
               Écrivez un message qui sera affiché comme une bannière en haut de la plateforme du client.
             </p>
-            <div className="space-y-2">
-              <Label htmlFor="bannerMessage">Message de bannière</Label>
-              <Textarea
-                id="bannerMessage"
-                value={bannerMessage}
-                onChange={(e) => setBannerMessage(e.target.value)}
-                placeholder="Entrez le message à afficher sur la plateforme du client..."
-                rows={4}
-                className="w-full"
-              />
-            </div>
+            <RichTextEditor
+              id="bannerMessage"
+              label="Message de bannière"
+              value={bannerMessage}
+              onChange={(value) => setBannerMessage(value)}
+              placeholder="Entrez le message à afficher sur la plateforme du client..."
+              rows={5}
+              onGenerateAI={generateAIBannerMessage}
+              aiContextFocusFieldId="ai-banner-context"
+              aiContextSlot={
+                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/90 p-3">
+                  <Label htmlFor="ai-banner-context" className="text-sm font-medium">
+                    Contexte pour la génération IA (optionnel)
+                  </Label>
+                  <Textarea
+                    id="ai-banner-context"
+                    value={aiBannerContext}
+                    onChange={(e) => setAiBannerContext(e.target.value)}
+                    placeholder="Ex. : information importante, maintenance, nouveau contact, rappel réglementaire…"
+                    rows={3}
+                    className="resize-y text-sm w-full"
+                    maxLength={4000}
+                  />
+                  <p className="text-xs text-slate-500">
+                    Renseignez ce bloc si besoin, puis cliquez de nouveau sur l’icône ✨ pour générer le texte.
+                  </p>
+                </div>
+              }
+            />
             <div className="pt-2">
               <Button
                 onClick={handleSaveBannerMessage}

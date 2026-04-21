@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
@@ -14,6 +14,10 @@ interface RichTextEditorProps {
   rows?: number;
   fixedHeight?: boolean;
   onGenerateAI?: () => Promise<string>;
+  /** Affiché sous la barre d’outils après le 1er clic sur ✨ (contexte optionnel avant génération) */
+  aiContextSlot?: React.ReactNode;
+  /** id du champ contexte à focus à l’ouverture du panneau (évite les collisions entre écrans) */
+  aiContextFocusFieldId?: string;
 }
 
 export function RichTextEditor({
@@ -24,10 +28,22 @@ export function RichTextEditor({
   placeholder,
   rows = 6,
   fixedHeight = false,
-  onGenerateAI
+  onGenerateAI,
+  aiContextSlot,
+  aiContextFocusFieldId = 'ai-description-context',
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [showAiContextPanel, setShowAiContextPanel] = useState(false);
+
+  useEffect(() => {
+    if (!showAiContextPanel) return;
+    const focusId = aiContextFocusFieldId || 'ai-description-context';
+    const id = window.setTimeout(() => {
+      document.getElementById(focusId)?.focus();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [showAiContextPanel, aiContextFocusFieldId]);
 
   function insertAtCursor(text: string) {
     const textarea = textareaRef.current;
@@ -97,7 +113,19 @@ export function RichTextEditor({
     insertAtCursor(`${indent}${number}. `);
   }
 
-  async function handleGenerateAI() {
+  async function handleAiSparklesClick() {
+    if (!onGenerateAI) {
+      toast.error('Génération IA non disponible');
+      return;
+    }
+    if (aiContextSlot && !showAiContextPanel) {
+      setShowAiContextPanel(true);
+      return;
+    }
+    await runGenerateAI();
+  }
+
+  async function runGenerateAI() {
     if (!onGenerateAI) {
       toast.error('Génération IA non disponible');
       return;
@@ -170,8 +198,12 @@ export function RichTextEditor({
               type="button"
               variant="ghost"
               size="sm"
-              onClick={handleGenerateAI}
-              title="Générer avec l'IA"
+              onClick={handleAiSparklesClick}
+              title={
+                aiContextSlot && !showAiContextPanel
+                  ? "Afficher le contexte pour l'IA"
+                  : "Générer avec l'IA"
+              }
               className="h-8 w-8 p-0"
             >
               <Sparkles className="w-4 h-4" />
@@ -179,6 +211,7 @@ export function RichTextEditor({
           )}
         </div>
       </div>
+      {aiContextSlot && showAiContextPanel ? aiContextSlot : null}
       <Textarea
         ref={textareaRef}
         id={id}

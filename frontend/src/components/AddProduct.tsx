@@ -25,6 +25,7 @@ export function AddProduct() {
   const [productImage, setProductImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [technicalSheet, setTechnicalSheet] = useState<File | null>(null);
+  const [aiDescriptionContext, setAiDescriptionContext] = useState('');
   const [assets, setAssets] = useState<any[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetAllocations, setAssetAllocations] = useState<Array<{ assetId: string; proportion: string; asset?: any }>>([]);
@@ -272,7 +273,8 @@ export function AddProduct() {
           availableFunds: formData.availableFunds,
           availabilityStart: formData.availabilityStart,
           availabilityEnd: formData.availabilityEnd,
-          existingDescription: (formData.description || '').trim()
+          existingDescription: (formData.description || '').trim(),
+          userPrompt: (aiDescriptionContext || '').trim(),
         })
       });
       return response?.description || response?.text || '';
@@ -825,6 +827,25 @@ export function AddProduct() {
               rows={10}
               fixedHeight
               onGenerateAI={generateAIDescription}
+              aiContextSlot={
+                <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/90 p-3">
+                  <Label htmlFor="ai-description-context" className="text-sm font-medium">
+                    Contexte pour la génération IA (recommandé)
+                  </Label>
+                  <Textarea
+                    id="ai-description-context"
+                    value={aiDescriptionContext}
+                    onChange={(e) => setAiDescriptionContext(e.target.value)}
+                    placeholder="Décrivez le produit, le public cible, les garanties, le secteur, ce qui le différencie… L’IA s’appuiera sur ce texte en plus des champs du formulaire (nom, durée, rentabilité, etc.)."
+                    rows={4}
+                    className="resize-y text-sm min-h-[88px]"
+                    maxLength={6000}
+                  />
+                  <p className="text-xs text-slate-500">
+                    Renseignez ce bloc si besoin, puis cliquez de nouveau sur l’icône ✨ pour lancer la génération. Laisser le contexte vide reste possible.
+                  </p>
+                </div>
+              }
             />
 
             <RichTextEditor

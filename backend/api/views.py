@@ -12351,6 +12351,9 @@ def product_generate_description(request):
         availability_end = request.data.get('availabilityEnd', '')
         existing_description = (request.data.get('existingDescription') or request.data.get('description') or '').strip()
         is_improve_mode = bool(existing_description)
+        user_prompt_raw = (request.data.get('userPrompt') or request.data.get('aiUserPrompt') or '').strip()
+        if len(user_prompt_raw) > 6000:
+            user_prompt_raw = user_prompt_raw[:6000]
         
         # Get category name if available
         category_name = ''
@@ -12364,11 +12367,19 @@ def product_generate_description(request):
         # Format interest period (périodes de rentabilité disponibles)
         interest_period_str = ', '.join(interest_period) if isinstance(interest_period, list) and interest_period else (interest_period if isinstance(interest_period, str) else '')
         
-        # Format duration (vide = durée indéterminée)
+        # Format duration (vide = durée indéterminée) — jours seuls si ≤ 30, sinon jours + équivalent mois
         duration_clean = (str(duration) or '').strip()
-        duration_str = 'durée indéterminée' if not duration_clean else (
-            f"{int(duration_clean)} jours ({round(int(duration_clean) / 30)} mois)" if duration_clean.isdigit() else duration_clean
-        )
+        if not duration_clean:
+            duration_str = 'durée indéterminée'
+        elif duration_clean.isdigit():
+            d_int = int(duration_clean)
+            if d_int <= 30:
+                duration_str = f'{d_int} jour{"s" if d_int != 1 else ""}'
+            else:
+                months_equiv = max(1, round(d_int / 30))
+                duration_str = f'{d_int} jours (soit environ {months_equiv} mois)'
+        else:
+            duration_str = duration_clean
         
         # Rentabilité: variable ou fixe
         if no_profitability:
@@ -12387,6 +12398,14 @@ def product_generate_description(request):
         if availability_start or availability_end:
             availability_str = f"Disponible du {availability_start or 'Aucun'} au {availability_end or 'Aucun'}"
         
+        user_prompt_block = ''
+        if user_prompt_raw:
+            user_prompt_block = f"""
+
+--- INSTRUCTIONS / CONTEXTE FOURNI PAR LE RÉDACTEUR (à intégrer fidèlement dans le fond, sans inventer de chiffres) ---
+{user_prompt_raw}
+--- FIN DU CONTEXTE RÉDACTEUR ---"""
+
         product_info_block = f"""- Nom: {name or 'Non spécifié'}
 - Type: {product_type or 'Non spécifié'}
 - Référence: {reference or 'Non spécifiée'}
@@ -12399,7 +12418,10 @@ def product_generate_description(request):
 - Période de rentabilité: {profitability_period or 'Non spécifiée'}
 - Périodes d'intérêt disponibles: {interest_period_str or 'Non spécifiées'}
 - Fonds disponibles: {funds_str}
-{f'- Période de disponibilité: {availability_str}' if availability_str else ''}"""
+{f'- Période de disponibilité: {availability_str}' if availability_str else ''}{user_prompt_block}"""
+
+        length_guidance = """- Longueur: développe le texte sur plusieurs paragraphes courts (viser environ 8 à 15 phrases au total, ou plus si le contexte rédacteur est riche). Ne te limite pas à quelques phrases: reste clair, sans répétitions inutiles.
+- Si un contexte rédacteur est fourni, exploite-le pour enrichir le propos (cible, risques, garanties, secteur, modalités) tout en restant cohérent avec les données chiffrées ci-dessus."""
 
         if is_improve_mode:
             prompt = f"""Tu dois AMÉLIORER la description de produit existante ci-dessous en utilisant TOUTES les informations produit fournies. Mets à jour les valeurs (durée, rentabilité, plafonds, etc.) avec les données exactes. Conserve le ton professionnel. Pas de #, *, - ou puces. Texte pur.
@@ -12412,6 +12434,8 @@ def product_generate_description(request):
 
 --- FIN DE LA DESCRIPTION EXISTANTE ---
 
+{length_guidance}
+
 Génère la description améliorée (remplace entièrement par la version améliorée):"""
         else:
             prompt = f"""Génère une description professionnelle et attrayante en français pour un produit d'investissement financier avec les caractéristiques suivantes:
@@ -12421,7 +12445,7 @@ Génère la description améliorée (remplace entièrement par la version améli
 La description doit être:
 - Professionnelle et rassurante
 - Mise en avant des avantages pour l'investisseur
-- Environ 3-4 phrases
+{length_guidance}
 - En français
 - Sans caractères spéciaux de formatage (pas de markdown)
 - INTERDICTION ABSOLUE d'utiliser des symboles spéciaux:
@@ -12460,6 +12484,96 @@ Description:"""
         return Response(
             {'error': f'Error generating description: {str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_generate_banner_message(request, client_id):
+    """Proposer un texte de bannière (plateforme client) avec Gemini — réservé aux gestionnaires."""
+    crm_client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, crm_client)
+    if err:
+        return err
+    try:
+        from google import genai
+
+        if not settings.GEMINI_API_KEY:
+            return Response(
+                {'error': 'GEMINI_API_KEY not configured'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        genai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        user_prompt_raw = (request.data.get('userPrompt') or request.data.get('aiUserPrompt') or '').strip()
+        if len(user_prompt_raw) > 4000:
+            user_prompt_raw = user_prompt_raw[:4000]
+
+        existing = (
+            (request.data.get('existingMessage') or request.data.get('bannerMessage') or '')
+            .strip()
+        )
+
+        display_name = f'{crm_client.fname or ""} {crm_client.lname or ""}'.strip() or 'Client'
+        civility = (crm_client.civility or '').strip()
+        account_currency = getattr(crm_client, 'account_currency', '') or 'EUR'
+
+        user_block = ''
+        if user_prompt_raw:
+            user_block = f"""
+
+--- Consignes / contexte fourni par le gestionnaire ---
+{user_prompt_raw}
+--- Fin du contexte ---"""
+
+        improve_block = ''
+        if existing:
+            improve_block = f"""
+
+--- Message actuel (à améliorer ou remplacer; conserve l’esprit si pertinent) ---
+{existing}
+--- Fin du message actuel ---"""
+
+        prompt = f"""Tu rédiges un court message en français pour une bannière informative en haut de l’espace client d’une plateforme d’investissement / gestion de patrimoine.
+
+Informations sur le destinataire (ne pas citer de données sensibles inutilement; ton professionnel et bienveillant):
+- Identité affichée (référence): {civility or '—'} {display_name}
+- Devise du compte: {account_currency}
+{user_block}{improve_block}
+
+Contraintes:
+- Texte court adapté à une bannière lisible en un coup d’œil: viser 2 à 4 phrases courtes OU environ 250 à 450 caractères au total (pas de pavé).
+- Ton: clair, rassurant, professionnel; vouvoiement « vous ».
+- Pas de markdown, pas de #, pas d’astérisques *, pas de listes à puces ni numérotation.
+- Pas de guillemets englobant tout le message.
+- Une seule idée principale par phrase si possible.
+
+Génère uniquement le texte de la bannière, rien d’autre:"""
+
+        response = genai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        text = (response.text or '').strip()
+
+        import re
+
+        text = re.sub(r'\*+', '', text)
+        text = re.sub(r'#+', '', text)
+        text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+        text = re.sub(r' {2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        if len(text) > 2000:
+            text = text[:2000].rstrip()
+
+        return Response({'description': text, 'text': text})
+    except ImportError:
+        return Response(
+            {'error': 'google-genai package not installed. Run: pip install google-genai'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error generating banner text: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
