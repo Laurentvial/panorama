@@ -1219,8 +1219,6 @@ def _create_trade_positions_compounding(
     invested_total = ctx.invested_amount
     if invested_total <= 0:
         return []
-    remaining_budget = invested_total.quantize(Decimal('0.01'))
-    remaining_budget = invested_total.quantize(Decimal('0.01'))
 
     max_per_day = 3
     rng = random.Random(str(txn.id))
@@ -1347,22 +1345,11 @@ def _create_trade_positions_compounding(
         created_profit_this_period = Decimal('0.00')
         created_count_this_period = 0
         if trade_specs:
-            invested_amounts: list[Decimal] = []
-            for day, slot in trade_specs:
-                amt_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:amt")
-                pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
-                amt = ((capital if does_compound else invested_total) * pct).quantize(Decimal('0.01'))
-                if amt < Decimal('50.00'):
-                    amt = Decimal('50.00')
-                invested_amounts.append(amt)
-
-            pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts, avoid_losses=False)
-            created_profit_this_period = _safe_decimal_sum(pnl_parts).quantize(Decimal('0.01'))
-            created_count_this_period = len(pnl_parts)
-
-            for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
-                if remaining_budget <= 0:
-                    break
+            # IMPORTANT:
+            # Capital is reusable across time. We should cap *concurrent* exposure to invested_total,
+            # not the cumulative sum of invested amounts across all positions.
+            planned_trades: list[dict] = []
+            for (day, slot) in trade_specs:
                 # Determine asset first to get market-specific hours
                 asset_obj = None
                 if assets_weighted:
@@ -1399,16 +1386,74 @@ def _create_trade_positions_compounding(
                     continue
                 opened_at, closed_at = overlap_resolved
 
-                amt_desired = Decimal(str(amt)).quantize(Decimal('0.01'))
-                pnl_desired = Decimal(str(pnl)).quantize(Decimal('0.01'))
-                amt, remaining_budget = _clamp_amount_to_remaining_budget(
-                    amt_desired,
-                    remaining_budget=remaining_budget,
+                planned_trades.append(
+                    {
+                        "day": day,
+                        "slot": int(slot),
+                        "asset_obj": asset_obj,
+                        "opened_at": opened_at,
+                        "closed_at": closed_at,
+                    }
                 )
+
+            # Allocate capital to maximize utilization under a concurrent exposure cap.
+            planned_trades.sort(key=lambda x: x["opened_at"])
+            active: list[dict] = []  # active planned_trades entries
+            for t in planned_trades:
+                opened_at = t["opened_at"]
+                # Drop positions that have closed before this one opens
+                active = [a for a in active if a.get("closed_at") and a["closed_at"] > opened_at]
+
+                if not active:
+                    amt = capital_base.quantize(Decimal("0.01"))
+                    t["amt"] = amt
+                    active.append(t)
+                    continue
+
+                # If this trade overlaps with others, rebalance the concurrent exposure so that
+                # the total invested at any instant stays close to capital_base (max utilization)
+                # while keeping each overlapping trade non-zero when possible.
+                k = Decimal(len(active) + 1)
+                base = (capital_base / k).quantize(Decimal("0.01"))
+                # If the equal-split would fall below the minimum, just keep equal-split anyway
+                # (or less if capital_base is too small), but never force skipping.
+                if base < Decimal("0.00"):
+                    base = Decimal("0.00")
+
+                for a in active:
+                    a["amt"] = base
+                # Last one gets the remainder so the sum stays exactly capital_base
+                remainder = (capital_base - (base * Decimal(len(active)))).quantize(Decimal("0.01"))
+                if remainder < Decimal("0.00"):
+                    remainder = Decimal("0.00")
+                t["amt"] = remainder
+                active.append(t)
+
+                # We will re-collect invested_amounts after allocation (since rebalancing changes prior ones)
+
+            # Re-collect final invested amounts (after rebalancing)
+            invested_amounts = [
+                Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01"))
+                for t in planned_trades
+                if Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01")) > 0
+            ]
+
+            if invested_amounts:
+                pnl_parts = _distribute_pnl_total_capped(profit_remaining, invested_amounts, avoid_losses=False)
+                created_profit_this_period = _safe_decimal_sum(pnl_parts).quantize(Decimal("0.01"))
+                created_count_this_period = len(pnl_parts)
+            else:
+                pnl_parts = []
+
+            pnl_iter = iter(pnl_parts)
+            for t in planned_trades:
+                amt = Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01"))
                 if amt <= 0:
                     continue
-                ratio = (amt / amt_desired) if amt_desired > 0 else Decimal('0')
-                pnl = (pnl_desired * ratio).quantize(Decimal('0.01'))
+                pnl = Decimal(str(next(pnl_iter, Decimal("0.00")))).quantize(Decimal("0.01"))
+                asset_obj = t.get("asset_obj")
+                opened_at = t["opened_at"]
+                closed_at = t["closed_at"]
 
                 asset_currency = None
                 fx_rate = None
@@ -1787,6 +1832,11 @@ def _create_period_positions_simple(
                 rng
             )
             
+            # Collect all planned windows first, then allocate invested amounts by concurrent exposure.
+            # This avoids treating invested capital as a "cumulative budget" across positions (wrong when
+            # positions overlap in time), and ensures we invest as much as possible at any instant.
+            planned_positions: list[dict] = []
+            
             # Create positions with realistic market hours timing
             for day_idx, day in enumerate(period_days):
                 count_for_day = positions_per_day[day_idx]
@@ -1907,9 +1957,6 @@ def _create_period_positions_simple(
                             pos_invested_desired = Decimal(str(pos_data['invested'])).quantize(Decimal('0.01'))
                             pos_profit_desired = Decimal(str(pos_data['profit'])).quantize(Decimal('0.01'))
 
-                            if remaining_budget <= 0:
-                                break
-
                             overlap_resolved = _resolve_product_overlap_window(
                                 product_id=ctx.product_id,
                                 opened_at=retry_opened_at,
@@ -1918,57 +1965,16 @@ def _create_period_positions_simple(
                             if overlap_resolved is None:
                                 continue
                             retry_opened_at, retry_closed_at = overlap_resolved
-
-                            pos_invested, remaining_budget = _clamp_amount_to_remaining_budget(
-                                pos_invested_desired,
-                                remaining_budget=remaining_budget,
+                            
+                            planned_positions.append(
+                                {
+                                    "asset": asset_obj,
+                                    "opened_at": retry_opened_at,
+                                    "closed_at": retry_closed_at,
+                                    "invested_desired": pos_invested_desired,
+                                    "profit_desired": pos_profit_desired,
+                                }
                             )
-                            if pos_invested <= 0:
-                                continue
-
-                            # Keep profit proportional to the clamped invested amount.
-                            ratio = (pos_invested / pos_invested_desired) if pos_invested_desired > 0 else Decimal('0')
-                            pos_profit = (pos_profit_desired * ratio).quantize(Decimal('0.01'))
-                            
-                            # FX conversion
-                            fx_rate = None
-                            invested_amount_asset_currency = None
-                            now = timezone.now()
-                            is_future = retry_opened_at > now
-                            if asset_obj is not None and not is_future:
-                                asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
-                                fx_rate = _get_fx_rate_eur_to_ccy(asset_currency or '')
-                                if fx_rate is not None:
-                                    try:
-                                        invested_amount_asset_currency = (
-                                            Decimal(str(pos_invested)) * fx_rate
-                                        ).quantize(Decimal('0.00000001'))
-                                    except Exception:
-                                        invested_amount_asset_currency = None
-                            
-                            position_id = uuid.uuid4().hex[:12]
-                            while Position.objects.filter(id=position_id).exists():
-                                position_id = uuid.uuid4().hex[:12]
-                            
-                            created.append(
-                                Position.objects.create(
-                                    id=position_id,
-                                    client_id=ctx.client_id,
-                                    product_id=ctx.product_id,
-                                    transaction_id=txn.id,
-                                    asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                                    opened_at=retry_opened_at,
-                                    closed_at=retry_closed_at,
-                                    invested_amount=pos_invested,
-                                    fx_rate_eur_to_asset=fx_rate,
-                                    invested_amount_asset_currency=invested_amount_asset_currency,
-                                    profit_loss=pos_profit,
-                                    period_index=next_idx,
-                                    period_date=retry_opened_at.date(),
-                                    status='pending',
-                                )
-                            )
-                            next_idx += 1
                         
                         # Remove successfully scheduled positions from skipped list
                         skipped_positions = skipped_positions[len(retry_windows):]
@@ -1987,9 +1993,6 @@ def _create_period_positions_simple(
                     pos_invested_desired = Decimal(str(pos_data['invested'])).quantize(Decimal('0.01'))
                     pos_profit_desired = Decimal(str(pos_data['profit'])).quantize(Decimal('0.01'))
 
-                    if remaining_budget <= 0:
-                        break
-
                     overlap_resolved = _resolve_product_overlap_window(
                         product_id=ctx.product_id,
                         opened_at=opened_at,
@@ -1998,18 +2001,72 @@ def _create_period_positions_simple(
                     if overlap_resolved is None:
                         continue
                     opened_at, closed_at = overlap_resolved
-
-                    pos_invested, remaining_budget = _clamp_amount_to_remaining_budget(
-                        pos_invested_desired,
-                        remaining_budget=remaining_budget,
+                    
+                    planned_positions.append(
+                        {
+                            "asset": asset_obj,
+                            "opened_at": opened_at,
+                            "closed_at": closed_at,
+                            "invested_desired": pos_invested_desired,
+                            "profit_desired": pos_profit_desired,
+                        }
                     )
+            
+            if planned_positions:
+                planned_positions.sort(key=lambda x: x["opened_at"])
+                
+                # Allocate invested amounts by maximizing concurrent utilization:
+                # - if no overlap: invest full capital_base on the position
+                # - if overlap: split capital_base across concurrent positions (rebalance on each new overlap)
+                exposure_cap = capital_base.quantize(Decimal("0.01"))
+                active: list[dict] = []
+                for t in planned_positions:
+                    opened_at = t["opened_at"]
+                    active = [a for a in active if a.get("closed_at") and a["closed_at"] > opened_at]
+                    if not active:
+                        t["invested_amount"] = exposure_cap
+                        active.append(t)
+                        continue
+                    k = Decimal(len(active) + 1)
+                    base = (exposure_cap / k).quantize(Decimal("0.01"))
+                    for a in active:
+                        a["invested_amount"] = base
+                    remainder = (exposure_cap - (base * Decimal(len(active)))).quantize(Decimal("0.01"))
+                    t["invested_amount"] = remainder
+                    active.append(t)
+                
+                invested_amounts_final = [
+                    Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01"))
+                    for p in planned_positions
+                    if Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01")) > 0
+                ]
+                if invested_amounts_final:
+                    if avoid_losses:
+                        pnl_parts_final = _distribute_pnl_total_capped(
+                            profit_with_variability,
+                            invested_amounts_final,
+                            avoid_losses=True,
+                            positive_only=positive_only,
+                        )
+                    else:
+                        pnl_parts_final = _distribute_pnl_total_capped(
+                            profit_with_variability,
+                            invested_amounts_final,
+                            avoid_losses=False,
+                        )
+                else:
+                    pnl_parts_final = []
+                
+                pnl_iter = iter(pnl_parts_final)
+                for p in planned_positions:
+                    pos_invested = Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01"))
                     if pos_invested <= 0:
                         continue
-
-                    ratio = (pos_invested / pos_invested_desired) if pos_invested_desired > 0 else Decimal('0')
-                    pos_profit = (pos_profit_desired * ratio).quantize(Decimal('0.01'))
+                    pos_profit = Decimal(str(next(pnl_iter, Decimal("0.00")))).quantize(Decimal("0.01"))
+                    asset_obj = p.get("asset")
+                    opened_at = p["opened_at"]
+                    closed_at = p["closed_at"]
                     
-                    # FX conversion (for non-EUR assets)
                     fx_rate = None
                     invested_amount_asset_currency = None
                     now = timezone.now()
@@ -2486,36 +2543,21 @@ def generate_positions_with_rates(
                 trade_specs.append((day, slot))
 
         if trade_specs:
-            invested_amounts: list[Decimal] = []
-            for day, slot in trade_specs:
-                amt_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:amt")
-                pct = Decimal(str(amt_rng.uniform(0.05, 0.25)))
-                amt = ((capital if does_compound else invested_total) * pct).quantize(Decimal('0.01'))
-                if amt < Decimal('50.00'):
-                    amt = Decimal('50.00')
-                invested_amounts.append(amt)
-
-            pnl_parts = _distribute_pnl_total_capped(
-                profit_remaining,
-                invested_amounts,
-                avoid_losses=avoid_losses,
-                positive_only=positive_only,
-            )
-
-            for (day, slot), amt, pnl in zip(trade_specs, invested_amounts, pnl_parts):
-                # Determine asset first to get market-specific hours
+            # Same rule as _create_trade_positions_compounding: capital is reusable in time.
+            # Cap *concurrent* exposure to capital_base (principal or compounded base for the period),
+            # then distribute period P/L across final notionals.
+            exposure_cap = capital_base.quantize(Decimal("0.01"))
+            planned_trades: list[dict] = []
+            for (day, slot) in trade_specs:
                 asset_obj = None
                 if assets_weighted:
                     asset_rng = random.Random(f"{txn.id}:{period_idx}:{day.isoformat()}:{slot}:asset")
                     asset_obj = _weighted_choice_with_rng(assets_weighted, asset_rng)
-                    # Ensure asset_obj is an Asset object, not None
                     if asset_obj is None and assets_weighted:
-                        # Fallback: use first asset if weighted choice fails
                         asset_obj = assets_weighted[0][0]
-                
-                # Get market hours for this specific asset (in French time)
+
                 market_open, market_close = _get_market_hours_for_asset(asset_obj, reference_date=day)
-                
+
                 win = _day_market_window(
                     day=day,
                     start_dt=start_dt,
@@ -2534,11 +2576,77 @@ def generate_positions_with_rates(
                     continue
                 opened_at, closed_at = windows[0]
 
+                overlap_resolved = _resolve_product_overlap_window(
+                    product_id=ctx.product_id,
+                    opened_at=opened_at,
+                    closed_at=closed_at,
+                )
+                if overlap_resolved is None:
+                    continue
+                opened_at, closed_at = overlap_resolved
+
+                planned_trades.append(
+                    {
+                        "day": day,
+                        "slot": int(slot),
+                        "asset_obj": asset_obj,
+                        "opened_at": opened_at,
+                        "closed_at": closed_at,
+                    }
+                )
+
+            planned_trades.sort(key=lambda x: x["opened_at"])
+            active: list[dict] = []
+            for t in planned_trades:
+                opened_at = t["opened_at"]
+                active = [a for a in active if a.get("closed_at") and a["closed_at"] > opened_at]
+
+                if not active:
+                    t["amt"] = exposure_cap
+                    active.append(t)
+                    continue
+
+                k = Decimal(len(active) + 1)
+                base = (exposure_cap / k).quantize(Decimal("0.01"))
+                if base < Decimal("0.00"):
+                    base = Decimal("0.00")
+                for a in active:
+                    a["amt"] = base
+                remainder = (exposure_cap - (base * Decimal(len(active)))).quantize(Decimal("0.01"))
+                if remainder < Decimal("0.00"):
+                    remainder = Decimal("0.00")
+                t["amt"] = remainder
+                active.append(t)
+
+            invested_amounts = [
+                Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01"))
+                for t in planned_trades
+                if Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01")) > 0
+            ]
+
+            if invested_amounts:
+                pnl_parts = _distribute_pnl_total_capped(
+                    profit_remaining,
+                    invested_amounts,
+                    avoid_losses=avoid_losses,
+                    positive_only=positive_only,
+                )
+            else:
+                pnl_parts = []
+
+            pnl_iter = iter(pnl_parts)
+            for t in planned_trades:
+                amt = Decimal(str(t.get("amt", Decimal("0.00")))).quantize(Decimal("0.01"))
+                if amt <= 0:
+                    continue
+                pnl = Decimal(str(next(pnl_iter, Decimal("0.00")))).quantize(Decimal("0.01"))
+                asset_obj = t.get("asset_obj")
+                opened_at = t["opened_at"]
+                closed_at = t["closed_at"]
+
                 asset_currency = None
                 fx_rate = None
                 invested_amount_asset_currency = None
-                # Ne pas enregistrer les conversions FX pour les positions futures
-                # car on ne peut pas connaître le taux de change dans le futur
                 now = timezone.now()
                 is_future_position = opened_at > now
                 if asset_obj is not None and not is_future_position:
@@ -2555,15 +2663,14 @@ def generate_positions_with_rates(
                     while Position.objects.filter(id=position_id).exists():
                         position_id = uuid.uuid4().hex[:12]
 
-                    # CRITICAL: Always use txn.id for transaction_id to ensure correct linkage
                     transaction_id_to_use = txn.id
-                    
+
                     created.append(
                         Position.objects.create(
                             id=position_id,
                             client_id=ctx.client_id,
                             product_id=ctx.product_id,
-                            transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
+                            transaction_id=transaction_id_to_use,
                             asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
                             opened_at=opened_at,
                             closed_at=closed_at,
@@ -2577,7 +2684,6 @@ def generate_positions_with_rates(
                         )
                     )
                 else:
-                    # Return dict representation with asset info
                     asset_info = {}
                     if asset_obj is not None:
                         asset_info = {
@@ -2586,7 +2692,7 @@ def generate_positions_with_rates(
                             'asset_reference': getattr(asset_obj, 'reference', None) or '',
                             'asset_type': getattr(asset_obj, 'type', None) or '',
                         }
-                    
+
                     created.append({
                         'id': position_id,
                         'client_id': ctx.client_id,
@@ -3906,62 +4012,67 @@ def build_investment_context(
         # The capital base should be the capital AFTER the withdrawal
         capital_before_subtraction = real_invested_capital
         real_invested_capital -= current_txn_amount
-        logger.info(f"Withdrawal temp transaction detected for txn {txn.id}: "
-                    f"capital before={capital_before_subtraction}, "
-                    f"subtracting {current_txn_amount}, "
-                    f"capital after withdrawal: {real_invested_capital}")
-        # Verify the subtraction succeeded (for debugging/logging purposes)
+        logger.info(
+            f"Withdrawal temp transaction detected for txn {txn.id}: "
+            f"capital before={capital_before_subtraction}, "
+            f"subtracting {current_txn_amount}, "
+            f"capital after withdrawal: {real_invested_capital}"
+        )
         expected_capital = capital_before_subtraction - current_txn_amount
         if real_invested_capital != expected_capital:
-            logger.error(f"Subtraction validation failed for transaction {txn.id}: "
-                        f"expected {expected_capital}, got {real_invested_capital}. "
-                        f"capital_before={capital_before_subtraction}, "
-                        f"current_txn_amount={current_txn_amount}")
-            # Correct the value to prevent downstream issues
-            real_invested_capital = expected_capital
-    elif (txn.transfer_to == product.id or txn.transfer_to is None) and not is_withdrawal_temp_transaction:
-        # This is an investment: add the investment amount to the capital
-        #
-        # IMPORTANT: some records resolve `product` via subscription_details (or description parsing)
-        # while `transfer_to` may be missing/None in the ORM instance. In that case we still must
-        # treat this as an investment and include the current transaction amount, otherwise
-        # invested_amount stays 0 and rate generation returns no periods.
-        is_investment_into_product = (
-            txn.transfer_to == product.id
-            or (
-                txn.transfer_to not in ('solde', 'trading', None, '')
-                and str(txn.transfer_to) == str(product.id)
+            logger.error(
+                f"Subtraction validation failed for transaction {txn.id}: "
+                f"expected {expected_capital}, got {real_invested_capital}. "
+                f"capital_before={capital_before_subtraction}, "
+                f"current_txn_amount={current_txn_amount}"
             )
+            real_invested_capital = expected_capital
+    else:
+        is_direct_withdrawal_from_product = (
+            (txn.transfer_to == 'solde' and txn.transfer_from == product.id)
             or (
-                (txn.transfer_to is None or str(txn.transfer_to).strip() == '')
-                and str(getattr(txn, 'transfer_from', None) or '') in ('', 'solde', 'trading', None)
-                and isinstance(txn.subscription_details, dict)
-                and str(txn.subscription_details.get('productId') or '').strip() == str(product.id)
+                txn.transfer_to == 'solde'
+                and txn.transfer_from not in (None, '', 'solde', 'trading')
+                and str(txn.transfer_from) == str(product.id)
             )
         )
-        if is_investment_into_product:
-            real_invested_capital += current_txn_amount
+        if is_direct_withdrawal_from_product:
+            # Direct withdrawal FROM this product TO balance.
+            real_invested_capital -= current_txn_amount
             logger.info(
-                f"Investment detected for txn {txn.id}: adding {current_txn_amount} to capital "
-                f"(transfer_to={txn.transfer_to!r}, product.id={product.id}). "
-                f"Capital after investment: {real_invested_capital}"
+                f"Direct withdrawal detected for txn {txn.id}: subtracting {current_txn_amount} from capital. "
+                f"Capital after withdrawal: {real_invested_capital}"
             )
         else:
-            logger.warning(
-                f"Investment capital add skipped for txn {txn.id}: "
-                f"transfer_to={txn.transfer_to!r}, product.id={product.id}, "
-                f"transfer_from={getattr(txn, 'transfer_from', None)!r}, "
-                f"subscription_details={getattr(txn, 'subscription_details', None)}"
+            # Investment detection (including inconsistent transfer_to values).
+            is_investment_into_product = (
+                txn.transfer_to == product.id
+                or (
+                    txn.transfer_to not in ('solde', 'trading', None, '')
+                    and str(txn.transfer_to) == str(product.id)
+                )
+                or (
+                    str(getattr(txn, 'product_id', '') or '').strip()
+                    and str(getattr(txn, 'product_id', '')).strip() == str(product.id)
+                )
+                or (
+                    str(getattr(txn, 'transfer_from', None) or '') in ('', 'solde', None)
+                    and isinstance(txn.subscription_details, dict)
+                    and str(txn.subscription_details.get('productId') or '').strip() == str(product.id)
+                )
             )
-    elif txn.transfer_to == 'solde' or txn.transfer_from == product.id:
-        # This is a direct withdrawal: subtract the withdrawal amount from the capital
-        real_invested_capital -= current_txn_amount
-        logger.info(f"Direct withdrawal detected for txn {txn.id}: subtracting {current_txn_amount} from capital. "
-                    f"Capital after withdrawal: {real_invested_capital}")
-    else:
-        # This should not happen, but log it for debugging
-        logger.warning(f"No condition matched for txn {txn.id}: transfer_to={txn.transfer_to}, "
-                      f"transfer_from={txn.transfer_from}, is_withdrawal_temp_transaction={is_withdrawal_temp_transaction}")
+            if is_investment_into_product:
+                real_invested_capital += current_txn_amount
+                logger.info(
+                    f"Investment detected for txn {txn.id}: adding {current_txn_amount} to capital "
+                    f"(transfer_to={txn.transfer_to!r}, product.id={product.id}). "
+                    f"Capital after investment: {real_invested_capital}"
+                )
+            else:
+                logger.warning(
+                    f"No condition matched for txn {txn.id}: transfer_to={txn.transfer_to}, "
+                    f"transfer_from={txn.transfer_from}, is_withdrawal_temp_transaction={is_withdrawal_temp_transaction}"
+                )
     
     # Use real invested capital instead of just this transaction's amount
     # This ensures that when capital is added/removed, we use the net invested amount
