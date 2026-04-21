@@ -1,35 +1,38 @@
 /* Button component styles */
 
-/* Base button styles - cursor pointer */
-button[data-slot="button"]:not(:disabled) {
+/* Base styles — use [data-slot="button"] so `Button asChild` (e.g. <a>) gets the same rules as <button> */
+[data-slot="button"]:not(:disabled) {
   cursor: pointer;
 }
 
-/* Default button size - height 2.25rem (h-9), padding horizontal 1.5rem, vertical 0.5rem */
-button[data-slot="button"].button-size-default {
-  height: 2.25rem !important; /* h-9 = 36px = 2.25rem */
+/* Default size — min-height keeps label + icon comfortable; padding applies to buttons and links */
+[data-slot="button"].button-size-default {
+  min-height: 2.25rem !important;
   padding: 0.5rem 1.5rem !important;
+  box-sizing: border-box !important;
 }
 
-/* Small button size - height 2.25rem (h-9), padding horizontal 1.25rem, vertical 0.5rem */
-button[data-slot="button"].button-size-sm {
-  height: 2.25rem !important; /* h-9 = 36px = 2.25rem */
+/* Small button size */
+[data-slot="button"].button-size-sm {
+  min-height: 2.25rem !important;
   padding: 0.5rem 1.25rem !important;
+  box-sizing: border-box !important;
 }
 
-/* Large button size - height 2.5rem (h-10), padding horizontal 2rem, vertical 0.5rem */
-button[data-slot="button"].button-size-lg {
-  height: 2.5rem !important; /* h-10 = 40px = 2.5rem */
+/* Large button size */
+[data-slot="button"].button-size-lg {
+  min-height: 2.5rem !important;
   padding: 0.5rem 2rem !important;
+  box-sizing: border-box !important;
 }
 
 /* Icon button - no padding */
-button[data-slot="button"].button-size-icon {
+[data-slot="button"].button-size-icon {
   padding: 0 !important;
 }
 
-/* Hover effect - reduce opacity */
-button[data-slot="button"]:not(:disabled):hover {
+/* Hover effect - reduce opacity (anchors are never :disabled; still match) */
+[data-slot="button"]:not(:disabled):hover {
   opacity: 0.9;
   transition: opacity 0.2s ease;
 }

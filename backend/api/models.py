@@ -692,7 +692,13 @@ class Product(models.Model):
     description = models.TextField(default="", blank=True)  # Description du produit
     cgv = models.TextField(default="", blank=True)  # Conditions Générales de Vente
     image = models.ImageField(upload_to='products/', storage=product_storage, null=True, blank=True)  # Image du produit
-    
+    technical_sheet = models.FileField(
+        upload_to='products/technical_sheets/',
+        storage=product_storage,
+        null=True,
+        blank=True,
+    )  # Fiche technique (PDF)
+
     # Gestion de la rentabilité
     no_profitability = models.BooleanField(default=True)  # Produit sans rentabilité (True = pas de rentabilité, False = avec rentabilité)
     is_variable_profitability = models.CharField(max_length=10, default='Non')  # Rentabilité variable (Oui/Non)

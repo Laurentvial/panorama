@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
-import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, Check, ExternalLink, X } from 'lucide-react';
+import { ChevronLeft, TrendingUp, TrendingDown, BarChart3, FileText, Newspaper, DollarSign, Check, ExternalLink, X, Download } from 'lucide-react';
 import '../styles/Modal.css';
 import '../styles/ProductDetail.css';
 import '../styles/PlatformPortfolio.css';
@@ -1370,7 +1370,7 @@ export function ProductDetail() {
                   
                 </div>
                 
-                <div style={{ marginTop: '20px', display: 'flex', gap: '12px' }}>
+                <div style={{ marginTop: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                   <Button 
                     variant="outline" 
                     style={{ fontSize: '14px' }}
@@ -1379,6 +1379,23 @@ export function ProductDetail() {
                     <FileText className="h-4 w-4" style={{ marginRight: '8px' }} />
                     Conditions générales
                   </Button>
+                  {(product.technicalSheetUrl || product.technical_sheet_url) && (
+                    <Button
+                      variant="outline"
+                      className="gap-2"
+                      style={{ fontSize: '14px' }}
+                      asChild
+                    >
+                      <a
+                        href={product.technicalSheetUrl || product.technical_sheet_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Download className="h-4 w-4 shrink-0" />
+                        Télécharger la fiche technique
+                      </a>
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

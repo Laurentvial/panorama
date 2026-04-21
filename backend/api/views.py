@@ -309,6 +309,22 @@ def _sanitize_product_subcategory(raw_sub) -> str:
     return json.dumps([s]) if s else ''
 
 
+TECHNICAL_SHEET_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _validate_product_technical_sheet_upload(uploaded_file):
+    """Validate PDF fiche technique upload. Raises ValueError if invalid."""
+    if not uploaded_file:
+        raise ValueError('Fichier manquant.')
+    size = getattr(uploaded_file, 'size', None) or 0
+    if size > TECHNICAL_SHEET_MAX_BYTES:
+        raise ValueError('La fiche technique ne doit pas dépasser 20 Mo.')
+    fname = (uploaded_file.name or '').lower()
+    if not fname.endswith('.pdf'):
+        raise ValueError('La fiche technique doit être un fichier PDF.')
+    return uploaded_file
+
+
 def _add_months_keep_day(d: date, months: int) -> date:
     year = d.year + (d.month - 1 + months) // 12
     month = (d.month - 1 + months) % 12 + 1
@@ -11125,6 +11141,24 @@ def product_create(request):
             print(f"Error uploading image: {error_msg}")
             print(traceback.format_exc())
             return Response({'error': f'Error uploading image: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Handle fiche technique (PDF) upload
+    if 'technicalSheet' in request.FILES:
+        try:
+            ts_file = _validate_product_technical_sheet_upload(request.FILES['technicalSheet'])
+            custom_ts_name = f'{product_id}_fiche_technique.pdf'
+            if product.technical_sheet:
+                product.technical_sheet.delete(save=False)
+            product.technical_sheet.save(custom_ts_name, ts_file, save=True)
+            product.refresh_from_db(fields=['technical_sheet'])
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            print(f"Error uploading technical sheet: {error_msg}")
+            print(traceback.format_exc())
+            return Response({'error': f'Erreur lors de l\'upload de la fiche technique: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     # If product is marked as default, add it to all existing clients
     if product.default:
@@ -11900,6 +11934,34 @@ def product_update(request, product_id):
             if product.image:
                 product.image.delete(save=False)
             product.image = None
+
+    # Handle fiche technique (PDF) upload or removal
+    if 'technicalSheet' in request.FILES:
+        try:
+            ts_file = _validate_product_technical_sheet_upload(request.FILES['technicalSheet'])
+            custom_ts_name = f'{product_id}_fiche_technique.pdf'
+            if product.technical_sheet:
+                product.technical_sheet.delete(save=False)
+                product.technical_sheet = None
+                product.save(update_fields=['technical_sheet'])
+            product.technical_sheet.save(custom_ts_name, ts_file, save=True)
+            product.refresh_from_db(fields=['technical_sheet'])
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            print(f"Error uploading technical sheet: {error_msg}")
+            print(traceback.format_exc())
+            return Response({'error': f'Erreur lors de l\'upload de la fiche technique: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    elif 'removeTechnicalSheet' in request.data:
+        remove_ts = request.data.get('removeTechnicalSheet')
+        if isinstance(remove_ts, str):
+            remove_ts = remove_ts.lower() == 'true'
+        if remove_ts:
+            if product.technical_sheet:
+                product.technical_sheet.delete(save=False)
+            product.technical_sheet = None
     
     # Gestion de la rentabilité
     if 'noProfitability' in request.data:
@@ -12208,7 +12270,20 @@ def product_duplicate(request, product_id):
             print(f"Warning: Could not copy image for product {new_product_id}: {str(e)}")
             import traceback
             print(traceback.format_exc())
-    
+
+    # Copy technical sheet (PDF) if it exists
+    if original_product.technical_sheet:
+        try:
+            original_ts = original_product.technical_sheet
+            new_ts_name = f'{new_product_id}_fiche_technique.pdf'
+            if original_ts.storage.exists(original_ts.name):
+                with original_ts.open('rb') as original_file:
+                    duplicated_product.technical_sheet.save(new_ts_name, original_file, save=True)
+        except Exception as e:
+            print(f"Warning: Could not copy technical sheet for product {new_product_id}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+
     # Copy ProductAssetAllocation entries if link_to_assets is 'Oui'
     if original_product.link_to_assets == 'Oui':
         try:

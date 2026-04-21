@@ -1183,6 +1183,7 @@ class ProductSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     imageUrl = serializers.SerializerMethodField()
+    technicalSheetUrl = serializers.SerializerMethodField()
     assetAllocations = serializers.SerializerMethodField()
     
     class Meta:
@@ -1190,6 +1191,7 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'reference', 'type', 'categoryId', 'categoryTitle', 'subcategory', 'status', 
             'profitability', 'duration', 'description', 'cgv', 'image', 'imageUrl',
+            'technical_sheet', 'technicalSheetUrl',
             'no_profitability', 'is_variable_profitability', 'variable_profitability', 'profitability_period',
             'interest_period',
             'availability_start', 'availability_end',
@@ -1198,11 +1200,15 @@ class ProductSerializer(serializers.ModelSerializer):
             'assetAllocations',
             'createdAt', 'updatedAt'
         ]
-        read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl']
+        read_only_fields = ['id', 'createdAt', 'updatedAt', 'imageUrl', 'technicalSheetUrl']
     
     def get_imageUrl(self, obj):
         request = self.context.get('request')
         return _get_media_url_for_field(request, obj.image)
+
+    def get_technicalSheetUrl(self, obj):
+        request = self.context.get('request')
+        return _get_media_url_for_field(request, obj.technical_sheet)
 
     def get_assetAllocations(self, obj):
         request = self.context.get('request')
@@ -1287,6 +1293,14 @@ class ProductSerializer(serializers.ModelSerializer):
             ret['imageUrl'] = None
         elif ret.get('imageUrl') == '':
             ret['imageUrl'] = None
+        # Fiche technique (PDF)
+        ret['technicalSheetUrl'] = ret.get('technicalSheetUrl') or None
+        if not instance.technical_sheet:
+            ret['technicalSheetUrl'] = None
+        elif ret.get('technicalSheetUrl') == '':
+            ret['technicalSheetUrl'] = None
+        # Ne pas exposer le chemin brut du fichier
+        ret.pop('technical_sheet', None)
         return ret
 
 class ClientProductSerializer(serializers.ModelSerializer):

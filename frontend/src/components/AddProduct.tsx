@@ -24,6 +24,7 @@ export function AddProduct() {
   const [categories, setCategories] = useState<any[]>([]);
   const [productImage, setProductImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [technicalSheet, setTechnicalSheet] = useState<File | null>(null);
   const [assets, setAssets] = useState<any[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [assetAllocations, setAssetAllocations] = useState<Array<{ assetId: string; proportion: string; asset?: any }>>([]);
@@ -222,6 +223,25 @@ export function AddProduct() {
   function handleRemoveImage() {
     setProductImage(null);
     setImagePreview(null);
+  }
+
+  function handleTechnicalSheetChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        toast.error('Veuillez sélectionner un fichier PDF');
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        toast.error('La fiche technique ne doit pas dépasser 20 Mo');
+        return;
+      }
+      setTechnicalSheet(file);
+    }
+  }
+
+  function handleRemoveTechnicalSheet() {
+    setTechnicalSheet(null);
   }
 
   async function generateAIDescription(): Promise<string> {
@@ -438,8 +458,8 @@ export function AddProduct() {
         }
       }
 
-      // Use FormData if image is uploaded, otherwise use JSON
-      if (productImage) {
+      // Use FormData if image or fiche technique is uploaded, otherwise use JSON
+      if (productImage || technicalSheet) {
         const formDataToSend = new FormData();
         formDataToSend.append('name', formData.name);
         formDataToSend.append('reference', formData.reference);
@@ -483,7 +503,12 @@ export function AddProduct() {
         }
         if (formData.minEntryValue) formDataToSend.append('minEntryValue', formData.minEntryValue);
         if (formData.maxEntryValue) formDataToSend.append('maxEntryValue', formData.maxEntryValue);
-        formDataToSend.append('image', productImage);
+        if (productImage) {
+          formDataToSend.append('image', productImage);
+        }
+        if (technicalSheet) {
+          formDataToSend.append('technicalSheet', technicalSheet);
+        }
         
         await apiCall('/api/products/create/', {
           method: 'POST',
@@ -765,6 +790,30 @@ export function AddProduct() {
                 </div>
               )}
               <p className="text-sm text-gray-500">Formats acceptés: JPG, PNG, GIF (max 5MB)</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="product-technical-sheet">Fiche technique (PDF)</Label>
+              {technicalSheet ? (
+                <div className="space-y-2">
+                  <div className="text-sm text-slate-700 border border-slate-200 rounded-md px-3 py-2 bg-slate-50">
+                    {technicalSheet.name}
+                  </div>
+                  <Button type="button" variant="outline" onClick={handleRemoveTechnicalSheet}>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Retirer le PDF
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  id="product-technical-sheet"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={handleTechnicalSheetChange}
+                  className="cursor-pointer max-w-xs"
+                />
+              )}
+              <p className="text-sm text-gray-500">PDF uniquement (max 20 Mo)</p>
             </div>
 
             <RichTextEditor
