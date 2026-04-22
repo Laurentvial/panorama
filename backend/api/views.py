@@ -368,7 +368,12 @@ def _profitability_text_for_contract(*, product: Product, duration_days: int) ->
         except Exception:
             return Decimal('0')
 
-    # Convert annual % -> period % (simple pro-rata on 365d, matches profits calc).
+    # If the product profitability is expressed "Fin de contrat", interpret it as
+    # the yield over the contract duration (NOT annualized), so keep raw %.
+    if "fin" in period.lower() and "contrat" in period.lower():
+        return _profitability_text_for_product(product)
+
+    # Otherwise: convert annual % -> period % (simple pro-rata on 365d).
     prorata = (Decimal(duration_days) / Decimal('365'))
     min_rate = _to_decimal_percent(product.profitability)
     min_period = (min_rate * prorata).quantize(Decimal('0.01'))
@@ -428,9 +433,15 @@ def _build_subscription_details_defaults(
     duration_str = product.duration or ''
     duration_days = _parse_days_from_duration(duration_str)
 
-    # Profit estimation (best effort: annual rate prorated by days/365)
+    # Profit estimation:
+    # - if profitability period is "Fin de contrat", treat rate as over the contract duration
+    # - otherwise treat it as annualized and prorate by days/365
     rate = _profitability_rate_for_calc(product)
-    profits = (amount * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))).quantize(Decimal('0.01'))
+    period_label = (product.profitability_period or '').strip().lower()
+    if 'fin' in period_label and 'contrat' in period_label:
+        profits = (amount * (rate / Decimal('100'))).quantize(Decimal('0.01'))
+    else:
+        profits = (amount * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))).quantize(Decimal('0.01'))
     total = (amount + profits).quantize(Decimal('0.01'))
 
     try:
@@ -8773,16 +8784,34 @@ def _client_transaction_create_impl(request, client_id):
             # Profitability
             is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
             profitability_period = product.profitability_period or 'mensuel'
-            
-            if is_variable and product.variable_profitability:
-                min_profit = float(product.profitability or 0)
-                max_profit = float(product.variable_profitability)
-                profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
-            elif product.profitability is not None:
-                profit = float(product.profitability)
-                profitability_text = f"{profit:.2f}% NET {profitability_period}"
+            period_label = (profitability_period or '').strip().lower()
+            prorata = (Decimal(duration_days) / Decimal('365')) if duration_days else Decimal('0')
+
+            # If profitability is expressed "Fin de contrat", rate is over the contract duration.
+            if 'fin' in period_label and 'contrat' in period_label:
+                if is_variable and product.variable_profitability:
+                    min_profit = float(product.profitability or 0)
+                    max_profit = float(product.variable_profitability)
+                    profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
+                elif product.profitability is not None:
+                    profit = float(product.profitability)
+                    profitability_text = f"{profit:.2f}% NET {profitability_period}"
+                else:
+                    profitability_text = ''
             else:
-                profitability_text = ''
+                # Otherwise treat the product rate as annualized and prorate for display consistency.
+                if is_variable and product.variable_profitability:
+                    min_profit = float(product.profitability or 0)
+                    max_profit = float(product.variable_profitability)
+                    min_period = float((Decimal(str(min_profit)) * prorata).quantize(Decimal('0.01')))
+                    max_period = float((Decimal(str(max_profit)) * prorata).quantize(Decimal('0.01')))
+                    profitability_text = f"{min_period:.2f}% NET variable jusqu'à {max_period:.2f}% NET {profitability_period}"
+                elif product.profitability is not None:
+                    profit = float(product.profitability)
+                    period_profit = float((Decimal(str(profit)) * prorata).quantize(Decimal('0.01')))
+                    profitability_text = f"{period_profit:.2f}% NET {profitability_period}"
+                else:
+                    profitability_text = ''
             
             # Calculate contract dates
             contract_start_date = transaction_datetime.date()
@@ -8791,9 +8820,13 @@ def _client_transaction_create_impl(request, client_id):
             
             # Calculate interest
             rate = _profitability_rate_for_calc(product)
-            interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
+            if 'fin' in period_label and 'contrat' in period_label:
+                interest_amount = Decimal(str(amount)) * (rate / Decimal('100'))
+                profitability_rate = float(rate)
+            else:
+                interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
+                profitability_rate = float((rate * prorata).quantize(Decimal('0.01'))) if duration_days else 0.0
             interest_amount = float(interest_amount.quantize(Decimal('0.01')))
-            profitability_rate = float(rate)
             
             # Interest period
             interest_period = subscription_details_data.get('interestPeriod', '') if subscription_details_data else (product.interest_period or 'Fin de contrat')
@@ -11421,16 +11454,34 @@ def product_contract_pdf(request, product_id):
     # Profitability
     is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
     profitability_period = product.profitability_period or 'mensuel'
-    
-    if is_variable and product.variable_profitability:
-        min_profit = float(product.profitability or 0)
-        max_profit = float(product.variable_profitability)
-        profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
-    elif product.profitability is not None:
-        profit = float(product.profitability)
-        profitability_text = f"{profit:.2f}% NET {profitability_period}"
+    period_label = (profitability_period or '').strip().lower()
+    prorata = (Decimal(duration_days) / Decimal('365')) if duration_days else Decimal('0')
+
+    if 'fin' in period_label and 'contrat' in period_label:
+        # Rate is already for the contract duration.
+        if is_variable and product.variable_profitability:
+            min_profit = float(product.profitability or 0)
+            max_profit = float(product.variable_profitability)
+            profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
+        elif product.profitability is not None:
+            profit = float(product.profitability)
+            profitability_text = f"{profit:.2f}% NET {profitability_period}"
+        else:
+            profitability_text = ''
     else:
-        profitability_text = ''
+        # Annualized -> prorated display.
+        if is_variable and product.variable_profitability:
+            min_profit = float(product.profitability or 0)
+            max_profit = float(product.variable_profitability)
+            min_period = float((Decimal(str(min_profit)) * prorata).quantize(Decimal('0.01')))
+            max_period = float((Decimal(str(max_profit)) * prorata).quantize(Decimal('0.01')))
+            profitability_text = f"{min_period:.2f}% NET variable jusqu'à {max_period:.2f}% NET {profitability_period}"
+        elif product.profitability is not None:
+            profit = float(product.profitability)
+            period_profit = float((Decimal(str(profit)) * prorata).quantize(Decimal('0.01')))
+            profitability_text = f"{period_profit:.2f}% NET {profitability_period}"
+        else:
+            profitability_text = ''
     
     # Calculate contract dates
     contract_start_date = date.today()
@@ -11439,9 +11490,13 @@ def product_contract_pdf(request, product_id):
     
     # Calculate interest
     rate = _profitability_rate_for_calc(product)
-    interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
+    if 'fin' in period_label and 'contrat' in period_label:
+        interest_amount = Decimal(str(amount)) * (rate / Decimal('100'))
+        profitability_rate = float(rate)
+    else:
+        interest_amount = Decimal(str(amount)) * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))
+        profitability_rate = float((rate * prorata).quantize(Decimal('0.01'))) if duration_days else 0.0
     interest_amount = float(interest_amount.quantize(Decimal('0.01')))
-    profitability_rate = float(rate)
     
     # Interest period
     interest_period = subscription_interest_period or product.interest_period or 'Fin de contrat'
