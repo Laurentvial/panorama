@@ -11274,7 +11274,7 @@ def product_detail(request, product_id):
     serializer = ProductSerializer(product, context={'request': request})
     return Response({'product': serializer.data}, status=status.HTTP_200_OK)
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
 @permission_classes([AllowAny])
 def product_contract_pdf(request, product_id):
@@ -11326,16 +11326,18 @@ def product_contract_pdf(request, product_id):
     
     product = get_object_or_404(Product, id=product_id)
     
-    # Get subscription data from query parameters or use defaults from user/client
-    subscription_first_name = request.GET.get('firstName', '')
-    subscription_last_name = request.GET.get('lastName', '')
-    subscription_birth_date = request.GET.get('birthDate', '')
-    subscription_city = request.GET.get('city', '')
-    subscription_amount = request.GET.get('amount', '')
-    subscription_interest_period = request.GET.get('interestPeriod', '')
-    subscription_signature = request.GET.get('signature', '')  # Base64 encoded signature image
+    # Get subscription data from body (POST) or querystring (GET).
+    payload = request.data if request.method == 'POST' else request.GET
+    subscription_first_name = (payload.get('firstName') or '').strip()
+    subscription_last_name = (payload.get('lastName') or '').strip()
+    subscription_birth_date = (payload.get('birthDate') or '').strip()
+    subscription_city = (payload.get('city') or '').strip()
+    subscription_amount = (payload.get('amount') or '').strip()
+    subscription_interest_period = (payload.get('interestPeriod') or '').strip()
+    # Base64 encoded signature image (often a data URL) - keep out of URL to avoid 414/Request-Line-too-large.
+    subscription_signature = (payload.get('signature') or '').strip()
     # Currency for contract amounts (EUR, USD, CHF)
-    contract_currency_raw = request.GET.get('currency', '').strip().upper()
+    contract_currency_raw = (payload.get('currency') or '').strip().upper()
     if not contract_currency_raw and current_client:
         contract_currency_raw = (getattr(current_client, 'account_currency', None) or '').strip().upper()
     contract_currency = contract_currency_raw if contract_currency_raw in ('EUR', 'USD', 'CHF') else 'EUR'

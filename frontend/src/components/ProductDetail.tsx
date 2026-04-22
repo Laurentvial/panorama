@@ -868,7 +868,7 @@ export function ProductDetail() {
   };
 
   // Open contract PDF in new tab
-  const openContractPDF = () => {
+  const openContractPDF = async () => {
     if (dataType !== 'product' || !data || !currentUser) {
       toast.error('Données manquantes pour générer le contrat');
       return;
@@ -903,40 +903,51 @@ export function ProductDetail() {
     if (!token) {
       token = localStorage.getItem(ACCESS_TOKEN);
     }
-    
-    // Build query parameters
-    const params = new URLSearchParams();
-    if (token) {
-      params.append('token', token);
+
+    try {
+      const response = await fetch(`${apiUrl}/api/products/${product.id}/contract-pdf/`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          firstName: subscriptionData.firstName || '',
+          lastName: subscriptionData.lastName || '',
+          birthDate: subscriptionData.birthDate || '',
+          city: subscriptionData.city || '',
+          amount: subscriptionData.amount || '',
+          interestPeriod: subscriptionData.interestPeriod || '',
+          signature: signature || '',
+          currency: accountCurrency,
+        }),
+      });
+
+      if (!response.ok) {
+        // Backend typically returns JSON errors; fall back to status text if not.
+        const err = await response.json().catch(() => null);
+        const msg =
+          err?.detail ||
+          err?.error ||
+          err?.message ||
+          response.statusText ||
+          'Erreur lors de la génération du contrat';
+        toast.error(msg);
+        return;
+      }
+
+      const pdfBlob = await response.blob();
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const newWindow = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        toast.error("Impossible d'ouvrir le PDF. Veuillez vérifier les paramètres de votre navigateur.");
+      }
+      // Revoke after a bit to allow the new tab to load.
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (error) {
+      console.error('Error opening contract PDF:', error);
+      toast.error('Erreur lors de la génération du contrat');
     }
-    if (subscriptionData.firstName) {
-      params.append('firstName', subscriptionData.firstName);
-    }
-    if (subscriptionData.lastName) {
-      params.append('lastName', subscriptionData.lastName);
-    }
-    if (subscriptionData.birthDate) {
-      params.append('birthDate', subscriptionData.birthDate);
-    }
-    if (subscriptionData.city) {
-      params.append('city', subscriptionData.city);
-    }
-    if (subscriptionData.amount) {
-      params.append('amount', subscriptionData.amount);
-    }
-    if (subscriptionData.interestPeriod) {
-      params.append('interestPeriod', subscriptionData.interestPeriod);
-    }
-    if (signature) {
-      params.append('signature', signature);
-    }
-    params.append('currency', accountCurrency);
-    
-    // Build URL
-    const pdfUrl = `${apiUrl}/api/products/${product.id}/contract-pdf/?${params.toString()}`;
-    
-    // Open in new tab
-    window.open(pdfUrl, '_blank');
   };
 
   const openImportedContractDocument = (doc: any) => {
