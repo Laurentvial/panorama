@@ -5917,6 +5917,21 @@ def assets_bulk_update_prices(request):
         'errors': errors
     }, status=status.HTTP_200_OK)
 
+
+def _base_symbol_for_duplicate_asset_import(symbol: str) -> str:
+    """
+    Strip exchange-style suffix (.PA, .DE, .L) for duplicate checks.
+    Keep US share-class tickers intact (e.g. BRK.B, BF.B).
+    """
+    sym = (symbol or '').strip().upper()
+    if '.' not in sym:
+        return sym
+    head, tail = sym.rsplit('.', 1)
+    if len(tail) >= 2 and tail.isalpha() and tail.isupper():
+        return head
+    return sym
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def assets_bulk_import_from_index(request):
@@ -5968,8 +5983,7 @@ def assets_bulk_import_from_index(request):
             
             # Check if asset already exists (check both exact symbol and base symbol without exchange suffix)
             if skip_duplicates:
-                # Extract base symbol (remove exchange suffix like .PA, .DE, .L, etc.)
-                base_symbol = symbol.split('.')[0] if '.' in symbol else symbol
+                base_symbol = _base_symbol_for_duplicate_asset_import(symbol)
                 
                 # Check for exact match or base symbol match
                 from django.db.models import Q

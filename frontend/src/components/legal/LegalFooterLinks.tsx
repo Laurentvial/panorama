@@ -50,7 +50,8 @@ export function LegalFooterLinks({
         flexWrap: isColumn ? 'nowrap' : 'wrap',
         gap: isColumn ? 8 : '10px 16px',
         justifyContent: isColumn ? 'flex-start' : 'center',
-        alignItems: isColumn ? 'stretch' : 'center',
+        alignItems: isColumn ? 'center' : 'center',
+        textAlign: isColumn ? 'center' : undefined,
         fontSize: variant === 'login' ? 13 : 12,
         lineHeight: 1.4,
       }}

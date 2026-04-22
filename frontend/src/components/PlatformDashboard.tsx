@@ -280,7 +280,7 @@ export function PlatformDashboard() {
             return { stepsConfig: {} };
           });
 
-          const documentsResult = await apiCall(`/api/clients/${clientId}/documents/`, { signal }).catch((err: any) => {
+          const documentsResult = await apiCall(`/api/clients/${clientId}/documents/?excludeProductOnly=1`, { signal }).catch((err: any) => {
             if (err?.name === 'AbortError') throw err;
             return { documents: [] };
           });

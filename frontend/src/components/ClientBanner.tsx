@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useLayoutEffect } from 'react';
 import { Megaphone, X } from 'lucide-react';
 import { Button } from './ui/button';
+import { useIsPhone } from './ui/use-mobile';
 import { useUser } from '../contexts/UserContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -12,6 +13,7 @@ interface ClientBannerProps {
 export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerProps) {
   const { currentUser } = useUser();
   const { settings } = useTheme();
+  const isPhone = useIsPhone();
   const bannerRef = useRef<HTMLDivElement | null>(null);
   const [dismissed, setDismissed] = React.useState(false);
   const isInline = variant === 'inline';
@@ -27,7 +29,7 @@ export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerP
     }
   }, [dismissedKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isInline) return; // Inline variant does not set --client-banner-height
     const root = document.documentElement;
     const update = () => {
@@ -48,7 +50,7 @@ export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerP
       window.removeEventListener('resize', update);
       root.style.setProperty('--client-banner-height', '0px');
     };
-  }, [dismissed, currentUser?.bannerMessage, isInline]);
+  }, [dismissed, currentUser?.bannerMessage, isInline, isPhone]);
 
   const handleDismiss = () => {
     if (dismissedKey) {
@@ -70,12 +72,11 @@ export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerP
     borderBottom: '1px solid rgba(245, 158, 11, 0.38)',
     boxShadow:
       '0 10px 28px -12px rgba(180, 83, 9, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.75)',
-    padding: isInline ? '14px 18px' : '14px 20px',
+    padding: isInline ? (isPhone ? '10px 12px' : '14px 18px') : isPhone ? '10px 12px' : '14px 20px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    borderLeft: `4px solid ${brandStripe}`,
     boxSizing: 'border-box',
   };
 
@@ -99,37 +100,39 @@ export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerP
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '14px',
+          gap: isPhone ? '8px' : '14px',
           width: '100%',
           maxWidth: 'min(960px, 100%)',
-          paddingLeft: 48,
-          paddingRight: 48,
+          paddingLeft: isPhone ? 12 : 48,
+          paddingRight: isPhone ? 36 : 48,
           boxSizing: 'border-box',
         }}
       >
-        <div
-          aria-hidden
-          style={{
-            flexShrink: 0,
-            width: 42,
-            height: 42,
-            borderRadius: 14,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(150deg, #f97316 0%, #ea580c 55%, #c2410c 100%)',
-            boxShadow: '0 4px 14px rgba(234, 88, 12, 0.45)',
-          }}
-        >
-          <Megaphone size={22} color="#ffffff" strokeWidth={2.25} />
-        </div>
+        {!isPhone && (
+          <div
+            aria-hidden
+            style={{
+              flexShrink: 0,
+              width: 42,
+              height: 42,
+              borderRadius: 14,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(150deg, #f97316 0%, #ea580c 55%, #c2410c 100%)',
+              boxShadow: '0 4px 14px rgba(234, 88, 12, 0.45)',
+            }}
+          >
+            <Megaphone size={22} color="#ffffff" strokeWidth={2.25} />
+          </div>
+        )}
         <div style={{ minWidth: 0, textAlign: 'center' }}>
           <p
             style={{
               margin: 0,
-              fontSize: '15px',
+              fontSize: isPhone ? '13px' : '15px',
               fontWeight: 600,
-              lineHeight: 1.45,
+              lineHeight: isPhone ? 1.35 : 1.45,
               letterSpacing: '-0.01em',
               color: '#451a03',
               textAlign: 'center',
@@ -145,18 +148,18 @@ export function ClientBanner({ topOffset = 0, variant = 'fixed' }: ClientBannerP
         onClick={handleDismiss}
         style={{
           position: 'absolute',
-          right: 10,
+          right: isPhone ? 6 : 10,
           top: '50%',
           transform: 'translateY(-50%)',
           fontSize: '14px',
           color: '#78350f',
-          minWidth: '40px',
-          height: '40px',
+          minWidth: isPhone ? '34px' : '40px',
+          height: isPhone ? '34px' : '40px',
           borderRadius: 9999,
           zIndex: 2,
         }}
       >
-        <X className="w-5 h-5" strokeWidth={2} />
+        <X className={isPhone ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2} />
       </Button>
     </div>
   );

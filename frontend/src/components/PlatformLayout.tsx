@@ -1126,6 +1126,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                 textTransform: 'uppercase',
                 marginBottom: 10,
                 color: 'color-mix(in srgb, var(--foreground) 55%, transparent)',
+                textAlign: 'center',
               }}
             >
               Informations légales
@@ -1201,7 +1202,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-around',
-            padding: '8px 8px 12px',
+            padding: isPhone ? '6px 6px 10px' : '8px 8px 12px',
           }}
           aria-label="Navigation mobile"
         >
@@ -1221,24 +1222,37 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  padding: '8px 4px',
+                  padding: isPhone ? '6px 2px' : '8px 4px',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '4px',
+                  gap: isPhone ? '2px' : '4px',
                   color: isActive ? '#111827' : '#6b7280',
+                  minWidth: 0,
                 }}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <span
                   className="material-symbols-outlined"
-                  style={{ fontSize: 22 }}
+                  style={{ fontSize: isPhone ? 20 : 22 }}
                   aria-hidden
                 >
                   {item.iconChar}
                 </span>
-                <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    fontSize: isPhone ? '10px' : '11px',
+                    lineHeight: 1,
+                    whiteSpace: 'nowrap',
+                    wordBreak: 'keep-all',
+                    overflowWrap: 'normal',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '100%',
+                    display: 'block',
+                  }}
+                >
                   {item.label}
                 </span>
               </button>

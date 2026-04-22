@@ -1,7 +1,7 @@
 """
 Index Constituent Service for fetching stock lists from market indices
 Supports US indices via Financial Modeling Prep API and European indices via pytickersymbols
-When FMP returns 403, falls back to free public CSV sources (S&P 500, NASDAQ-100)
+When FMP returns 401/403 (auth / forbidden), falls back to free public CSV sources (S&P 500, NASDAQ-100)
 Crypto: Binance spot lists (USDT/EUR); CoinGecko top 100 by market cap (no API key; rate-limited).
 """
 import csv
@@ -55,7 +55,7 @@ EURONEXT_100_STATIC = [
     ('TEL.OL', 'Telenor'), ('MOWI.OL', 'Mowi'), ('ORK.OL', 'Orkla'),
 ]
 
-# Free fallback URLs when FMP returns 403 (no API key required)
+# Free fallback URLs when FMP auth fails (401/403) or legacy parse errors (no API key required)
 FALLBACK_CSV_URLS = {
     'sp500_constituent': 'https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv',
     'nasdaq_constituent': 'https://raw.githubusercontent.com/mhyavas/SP500-NASDAQ100/main/nasdaq100.csv',
@@ -251,7 +251,7 @@ class IndexConstituentService:
     def _fetch_from_fmp(self, endpoint: str) -> List[Dict]:
         """
         Fetch index constituents from Financial Modeling Prep API.
-        Tries stable endpoint first (free plan), falls back to v3 (legacy), then free CSV when FMP returns 403.
+        Tries stable endpoint first (free plan), falls back to v3 (legacy), then free CSV when FMP returns 401/403.
         For S&P 500 and NASDAQ-100, works without FMP_API_KEY using free public CSV.
         """
         # When no FMP key and fallback exists, use free CSV directly
@@ -300,16 +300,14 @@ class IndexConstituentService:
             last_error = e
             logger.warning(f"FMP v3 parse error: {e}")
         
-        # Try free CSV fallback when FMP returns 403 or error in response body (e.g. invalid API key)
+        # Try free CSV fallback when FMP returns 401/403 (invalid key, plan, or legacy gating) or parse errors
         can_fallback = endpoint in FALLBACK_CSV_URLS
-        is_403 = (
-            last_error is not None
-            and hasattr(last_error, 'response')
-            and last_error.response is not None
-            and last_error.response.status_code == 403
-        )
+        fmp_status = None
+        if last_error and hasattr(last_error, 'response') and last_error.response is not None:
+            fmp_status = last_error.response.status_code
+        is_fmp_auth_or_forbidden = fmp_status in (401, 403)
         is_parse_error = isinstance(last_error, ValueError)
-        if last_error and can_fallback and (is_403 or is_parse_error):
+        if last_error and can_fallback and (is_fmp_auth_or_forbidden or is_parse_error):
             try:
                 logger.info(f"FMP returned error, using free CSV fallback for {endpoint}")
                 return self._fetch_from_fallback_csv(endpoint)
@@ -321,27 +319,27 @@ class IndexConstituentService:
         logger.error(f"FMP fetch failed: {err_msg}")
         if last_error and hasattr(last_error, 'response') and last_error.response is not None:
             status = last_error.response.status_code
-            if status == 403:
+            if status in (401, 403):
                 if endpoint in FALLBACK_CSV_URLS:
                     raise ValueError(
-                        "FMP API returned 403 and the free fallback also failed. "
+                        "FMP API returned 401/403 and the free fallback also failed. "
                         "For S&P 500 and NASDAQ-100, ensure GitHub is accessible. "
                         "Or set a valid FMP_API_KEY: https://site.financialmodelingprep.com/developer/docs"
                     )
                 raise ValueError(
-                    "FMP API returned 403 Forbidden. Dow Jones requires a valid FMP API key. "
+                    "FMP API returned 401/403. Dow Jones requires a valid FMP API key. "
                     "Set FMP_API_KEY in your environment: https://site.financialmodelingprep.com/developer/docs"
                 )
         raise ValueError(f"Error fetching from FMP: {err_msg}")
 
     def _fetch_from_fallback_csv(self, endpoint: str) -> List[Dict]:
-        """Fetch index constituents from free public CSV when FMP returns 403."""
+        """Fetch index constituents from free public CSV when FMP auth fails or returns 403."""
         url = FALLBACK_CSV_URLS.get(endpoint)
         if not url:
             raise ValueError(f"No fallback available for {endpoint}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        content = response.text
+        content = response.content.decode('utf-8-sig')
         reader = csv.DictReader(io.StringIO(content))
         rows = list(reader)
         constituents = []

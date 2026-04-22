@@ -22,6 +22,17 @@ import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { formatAmount, getCurrencySymbol } from '../utils/currency';
 
+/** Map pointer coordinates to canvas bitmap space (CSS size often differs from width/height). */
+function canvasPointFromClient(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
+  return {
+    x: (clientX - rect.left) * sx,
+    y: (clientY - rect.top) * sy,
+  };
+}
+
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -50,7 +61,6 @@ export function ProductDetail() {
   const [showCGVModal, setShowCGVModal] = useState(false);
   const [signature, setSignature] = useState<string | null>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
   const isDrawingRef = useRef(false);
   const hasDrawnStrokeRef = useRef(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -610,75 +620,6 @@ export function ProductDetail() {
     return { durationDays, periodMonths, compound, pickedRatePct, rows, totalProfit, endCapital, annualizedPct };
   };
 
-  // Initialize signature canvas
-  useEffect(() => {
-    const canvas = signatureCanvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-      }
-
-      // Add touch event listeners manually with { passive: false } to allow preventDefault
-      const handleTouchStart = (e: TouchEvent) => {
-        e.preventDefault();
-        isDrawingRef.current = true;
-        hasDrawnStrokeRef.current = false;
-        setIsDrawing(true);
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        const touch = e.touches[0];
-        ctx.beginPath();
-        ctx.moveTo(
-          touch.clientX - rect.left,
-          touch.clientY - rect.top
-        );
-      };
-
-      const handleTouchMove = (e: TouchEvent) => {
-        e.preventDefault();
-        if (!isDrawingRef.current) return;
-        hasDrawnStrokeRef.current = true;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        const touch = e.touches[0];
-        ctx.lineTo(
-          touch.clientX - rect.left,
-          touch.clientY - rect.top
-        );
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-      };
-
-      const handleTouchEnd = (e: TouchEvent) => {
-        e.preventDefault();
-        isDrawingRef.current = false;
-        setIsDrawing(false);
-        updateSignatureFromCanvas(canvas);
-      };
-
-      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
-
-      return () => {
-        canvas.removeEventListener('touchstart', handleTouchStart);
-        canvas.removeEventListener('touchmove', handleTouchMove);
-        canvas.removeEventListener('touchend', handleTouchEnd);
-      };
-    }
-  }, []);
-
   // Initialize simulator when product loads
   useEffect(() => {
     if (dataType === 'product' && data) {
@@ -1235,7 +1176,7 @@ export function ProductDetail() {
           minWidth: 0,
         }}
       >
-        <h1 className="platform-portfolioPageTitle">{product.name || 'Produit'}</h1>
+        {!isPhone && <h1 className="platform-portfolioPageTitle">{product.name || 'Produit'}</h1>}
         {/* Breadcrumb */}
         <div style={{ 
           marginBottom: isPhone ? '12px' : isMobile ? '16px' : '20px', 
@@ -1998,50 +1939,58 @@ export function ProductDetail() {
                                 cursor: 'crosshair',
                                 touchAction: 'none',
                               }}
-                              onMouseDown={(e) => {
+                              onPointerDown={(e) => {
+                                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                                e.preventDefault();
+                                const canvas = e.currentTarget;
+                                try {
+                                  canvas.setPointerCapture(e.pointerId);
+                                } catch {
+                                  /* ignore if capture unsupported */
+                                }
                                 isDrawingRef.current = true;
                                 hasDrawnStrokeRef.current = false;
-                                setIsDrawing(true);
-                                const canvas = signatureCanvasRef.current;
-                                if (!canvas) return;
-                                const rect = canvas.getBoundingClientRect();
                                 const ctx = canvas.getContext('2d');
                                 if (!ctx) return;
+                                const { x, y } = canvasPointFromClient(canvas, e.clientX, e.clientY);
                                 ctx.beginPath();
-                                ctx.moveTo(
-                                  e.clientX - rect.left,
-                                  e.clientY - rect.top
-                                );
+                                ctx.moveTo(x, y);
                               }}
-                              onMouseMove={(e) => {
+                              onPointerMove={(e) => {
                                 if (!isDrawingRef.current) return;
-                                hasDrawnStrokeRef.current = true;
-                                const canvas = signatureCanvasRef.current;
-                                if (!canvas) return;
-                                const rect = canvas.getBoundingClientRect();
+                                const canvas = e.currentTarget;
                                 const ctx = canvas.getContext('2d');
                                 if (!ctx) return;
-                                ctx.lineTo(
-                                  e.clientX - rect.left,
-                                  e.clientY - rect.top
-                                );
+                                hasDrawnStrokeRef.current = true;
+                                const { x, y } = canvasPointFromClient(canvas, e.clientX, e.clientY);
+                                ctx.lineTo(x, y);
                                 ctx.strokeStyle = '#000';
                                 ctx.lineWidth = 2;
                                 ctx.lineCap = 'round';
                                 ctx.lineJoin = 'round';
                                 ctx.stroke();
                               }}
-                              onMouseUp={() => {
+                              onPointerUp={(e) => {
+                                if (!isDrawingRef.current) return;
                                 isDrawingRef.current = false;
-                                setIsDrawing(false);
-                                const canvas = signatureCanvasRef.current;
-                                updateSignatureFromCanvas(canvas);
+                                try {
+                                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                                    e.currentTarget.releasePointerCapture(e.pointerId);
+                                  }
+                                } catch {
+                                  /* ignore */
+                                }
+                                updateSignatureFromCanvas(e.currentTarget);
                               }}
-                              onMouseLeave={() => {
+                              onPointerCancel={(e) => {
                                 isDrawingRef.current = false;
-                                setIsDrawing(false);
-                                const canvas = signatureCanvasRef.current;
-                                updateSignatureFromCanvas(canvas);
+                                updateSignatureFromCanvas(e.currentTarget);
+                              }}
+                              onLostPointerCapture={(e) => {
+                                if (isDrawingRef.current) {
+                                  isDrawingRef.current = false;
+                                  updateSignatureFromCanvas(e.currentTarget);
+                                }
                               }}
                             />
                             <div style={{ 
@@ -3019,7 +2968,7 @@ export function ProductDetail() {
                       assetName={asset.name || asset.reference}
                       assetType={asset.type || asset.assetType}
                       width="100%"
-                      height={isPhone ? 260 : isMobile ? 400 : 500}
+                      height={isPhone ? 340 : isMobile ? 400 : 500}
                       chartType="area"
                       showVolume={false}
                       timeframe={selectedTimeframe}
@@ -3028,7 +2977,7 @@ export function ProductDetail() {
                   </div>
                 ) : (
                   <div style={{
-                    height: '300px',
+                    height: isPhone ? '340px' : '300px',
                     backgroundColor: '#f9fafb',
                     borderRadius: '8px',
                     display: 'flex',
