@@ -139,9 +139,13 @@ export function PlatformPortfolioTransactionsSection({
         const filteredTransactions = sortedTransactions.filter((t: any) => {
           const status = String(t?.status || '').toLowerCase();
           const isUpcomingStatus = status === 'en_attente_paiement';
+          const type = String(t?.type || '').toLowerCase();
+          const isDeposit = type === 'depot';
           const dt = new Date(t?.datetime).getTime();
           const isFuture = Number.isFinite(dt) && dt > now;
-          return !isFuture && !isUpcomingStatus;
+          // On the platform Transactions page, deposits must be visible even when not validated yet.
+          // Keep the legacy behavior of hiding "en_attente_paiement" for other transaction types.
+          return !isFuture && (!isUpcomingStatus || isDeposit);
         });
         setTransactions(filteredTransactions);
 
@@ -239,7 +243,16 @@ export function PlatformPortfolioTransactionsSection({
                                       ? 'Intérêts'
                                       : t.type;
                       const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
-                      const amountColor = Number.isFinite(amountNum)
+                      const amountAbs = Number.isFinite(amountNum) ? Math.abs(amountNum) : amountNum;
+                      const amountPrefix =
+                        String(t?.type || '').toLowerCase() === 'depot'
+                          ? '+'
+                          : String(t?.type || '').toLowerCase() === 'retrait'
+                            ? '-'
+                            : '';
+                      const amountColor = String(t?.type || '').toLowerCase() === 'transfert'
+                        ? '#111827'
+                        : Number.isFinite(amountNum)
                         ? amountNum >= 0
                           ? '#10b981'
                           : '#ef4444'
@@ -260,7 +273,11 @@ export function PlatformPortfolioTransactionsSection({
                             className="platform-portfolioTd platform-portfolioAlignRight"
                             style={{ fontWeight: 800, color: amountColor }}
                           >
-                            {formatAmount(amountNum, t.amountCurrency || t.amount_currency || accountCurrency)}
+                            {amountPrefix}
+                            {formatAmount(
+                              amountPrefix ? amountAbs : amountNum,
+                              t.amountCurrency || t.amount_currency || accountCurrency
+                            )}
                           </td>
                           <td className="platform-portfolioTd">
                             <span
@@ -330,7 +347,16 @@ export function PlatformPortfolioTransactionsSection({
                                 ? 'Intérêts'
                                 : t.type;
                 const amountNum = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
-                const amountColor = Number.isFinite(amountNum)
+                const amountAbs = Number.isFinite(amountNum) ? Math.abs(amountNum) : amountNum;
+                const amountPrefix =
+                  String(t?.type || '').toLowerCase() === 'depot'
+                    ? '+'
+                    : String(t?.type || '').toLowerCase() === 'retrait'
+                      ? '-'
+                      : '';
+                const amountColor = String(t?.type || '').toLowerCase() === 'transfert'
+                  ? '#111827'
+                  : Number.isFinite(amountNum)
                   ? amountNum >= 0
                     ? '#10b981'
                     : '#ef4444'
@@ -351,7 +377,11 @@ export function PlatformPortfolioTransactionsSection({
                       <div className="platform-portfolioTransactionCardMainItem">
                         <span className="platform-portfolioTransactionCardLabel">Montant</span>
                         <span className="platform-portfolioTransactionCardValue" style={{ color: amountColor }}>
-                          {formatAmount(amountNum, t.amountCurrency || t.amount_currency || accountCurrency)}
+                          {amountPrefix}
+                          {formatAmount(
+                            amountPrefix ? amountAbs : amountNum,
+                            t.amountCurrency || t.amount_currency || accountCurrency
+                          )}
                         </span>
                       </div>
                       <div className="platform-portfolioTransactionCardMainItem">

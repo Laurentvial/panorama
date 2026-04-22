@@ -346,6 +346,43 @@ def _profitability_text_for_product(product: Product) -> str:
     return f"{base} {period}".strip()
 
 
+def _profitability_text_for_contract(*, product: Product, duration_days: int) -> str:
+    """
+    Contract recap must be internally consistent:
+    - profits are estimated using an annual rate prorated by (duration_days / 365)
+    - the displayed profitability should match that same period yield
+    """
+    period = (product.profitability_period or '').strip()
+    try:
+        is_var = str(product.is_variable_profitability or '').lower() == 'oui'
+    except Exception:
+        is_var = False
+
+    # If duration is missing/invalid, fall back to the raw product text.
+    if not isinstance(duration_days, int) or duration_days <= 0:
+        return _profitability_text_for_product(product)
+
+    def _to_decimal_percent(v) -> Decimal:
+        try:
+            return Decimal(str(v or 0))
+        except Exception:
+            return Decimal('0')
+
+    # Convert annual % -> period % (simple pro-rata on 365d, matches profits calc).
+    prorata = (Decimal(duration_days) / Decimal('365'))
+    min_rate = _to_decimal_percent(product.profitability)
+    min_period = (min_rate * prorata).quantize(Decimal('0.01'))
+
+    if is_var and product.variable_profitability:
+        max_rate = _to_decimal_percent(product.variable_profitability)
+        max_period = (max_rate * prorata).quantize(Decimal('0.01'))
+        base = f"{min_period}% à {max_period}%"
+    else:
+        base = f"{min_period}%"
+
+    return f"{base} {period}".strip()
+
+
 def _format_amount_for_contract(amount: float, currency: str | None) -> str:
     """Format amount for contract PDF (French locale: 1 234,56 € / 1 234,56 CHF / 1 234,56 $)."""
     ccy = (currency or 'EUR').strip().upper()
@@ -434,7 +471,7 @@ def _build_subscription_details_defaults(
         'subscriptionDate': subscription_date,
         'duration': duration_str,
         'interestPeriod': product.interest_period or '',
-        'profitability': _profitability_text_for_product(product),
+        'profitability': _profitability_text_for_contract(product=product, duration_days=duration_days),
         'investment': float(amount),
         'profits': float(profits),
         'total': float(total),
@@ -9007,7 +9044,6 @@ def _client_transaction_create_impl(request, client_id):
             story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
             story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_days} {'jours' if duration_days > 1 else 'jour'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
             story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
-            story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
             story.append(Spacer(1, 5*mm))
             
             # Payment - start on new page to avoid heading isolated at bottom of previous page
@@ -11657,7 +11693,6 @@ def product_contract_pdf(request, product_id):
     story.append(Paragraph("2/ DURÉE DU CONTRAT", heading_style))
     story.append(Paragraph(f"a. Le présent contrat prend effet à compter du jour de la signature des présentes et ce pour une durée de :<br/><b>{duration_days} {'jours' if duration_days > 1 else 'jour'}</b> avec une rentabilité garantie de <b>{profitability_text}</b>.", normal_style))
     story.append(Paragraph(f"b. La date d'échéance est donc fixée au <b>{contract_end_date_str}</b>.", normal_style))
-    story.append(Paragraph(f"c. Reconduction automatique du contrat : <b>{auto_renewal}</b>.", normal_style))
     story.append(Spacer(1, 5*mm))
     
     # Payment - start on new page to avoid heading isolated at bottom of previous page

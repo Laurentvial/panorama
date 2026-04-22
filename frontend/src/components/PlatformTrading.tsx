@@ -714,6 +714,7 @@ export function PlatformTrading() {
                       onChange={(e) => setAmount(e.target.value)}
                       placeholder="0.00"
                       required
+                      className="h-14 px-4 text-lg md:text-lg placeholder:text-lg"
                     />
                   </div>
 
@@ -1219,114 +1220,7 @@ export function PlatformTrading() {
             </DialogContent>
           </Dialog>
 
-          <Card style={roundedCardStyle}>
-            <CardHeader>
-              <CardTitle>Historique</CardTitle>
-              <CardDescription>Vos dépôts et retraits</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {fundsTransactions.length === 0 ? (
-                <p>Aucune transaction</p>
-              ) : (
-                <>
-                  {/* Desktop: tableau (visible >= 768px) */}
-                  <div className="platform-fundsHistoryTableDesktop">
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Date</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Type</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Description</th>
-                            <th style={{ textAlign: 'right', padding: '10px 8px' }}>Montant</th>
-                            <th style={{ textAlign: 'left', padding: '10px 8px' }}>Statut</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {fundsTransactions.map((t: any) => {
-                            const amt = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
-                            const amountColor = Number.isFinite(amt) ? (t.type === 'depot' ? '#10b981' : '#ef4444') : '#111827';
-                            return (
-                              <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                <td style={{ padding: '10px 8px', whiteSpace: 'nowrap' }}>
-                                  {new Date(t.datetime).toLocaleDateString('fr-FR', {
-                                    day: '2-digit',
-                                    month: '2-digit',
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </td>
-                                <td style={{ padding: '10px 8px' }}>{t.type === 'depot' ? 'Dépôt' : 'Retrait'}</td>
-                                <td style={{ padding: '10px 8px' }}>{t.description || '—'}</td>
-                                <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: amountColor }}>
-                                  {Number.isFinite(amt)
-                                    ? `${t.type === 'depot' ? '+' : '-'}${formatAmount(Math.abs(amt), t.amountCurrency || t.amount_currency || accountCurrency)}`
-                                    : '-'}
-                                </td>
-                                <td style={{ padding: '10px 8px' }}>
-                                  {(() => {
-                                    const { text } = getStatusColors(t.status, t.type);
-                                    return <span style={{ color: text, fontWeight: 600 }}>{getStatusLabel(t.status, t.type)}</span>;
-                                  })()}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Mobile: cartes (visible < 768px) */}
-                  <div className="platform-fundsHistoryCards">
-                    {fundsTransactions.map((t: any) => {
-                      const amt = typeof t.amount === 'string' ? parseFloat(t.amount) : Number(t.amount);
-                      const amountColor = Number.isFinite(amt) ? (t.type === 'depot' ? '#10b981' : '#ef4444') : '#111827';
-                      const dateLabel = new Date(t.datetime).toLocaleDateString('fr-FR', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      });
-                      const { text: statusColor } = getStatusColors(t.status, t.type);
-                      return (
-                        <div key={t.id} className="platform-fundsHistoryCard">
-                          <div className="platform-fundsHistoryCardHeader">
-                            <span className="platform-fundsHistoryCardType">{t.type === 'depot' ? 'Dépôt' : 'Retrait'}</span>
-                            <span className="platform-fundsHistoryCardDate">{dateLabel}</span>
-                          </div>
-                          <div className="platform-fundsHistoryCardMain">
-                            <div className="platform-fundsHistoryCardMainItem">
-                              <span className="platform-fundsHistoryCardLabel">Montant</span>
-                              <span className="platform-fundsHistoryCardValue" style={{ color: amountColor }}>
-                                {Number.isFinite(amt)
-                                  ? `${t.type === 'depot' ? '+' : '-'}${formatAmount(Math.abs(amt), t.amountCurrency || t.amount_currency || accountCurrency)}`
-                                  : '-'}
-                              </span>
-                            </div>
-                            <div className="platform-fundsHistoryCardMainItem">
-                              <span className="platform-fundsHistoryCardLabel">Statut</span>
-                              <span className="platform-fundsHistoryCardValue" style={{ color: statusColor }}>
-                                {getStatusLabel(t.status, t.type)}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="platform-fundsHistoryCardSecondary">
-                            <div className="platform-fundsHistoryCardSecondaryItem">
-                              <span>Description</span>
-                              <span>{t.description || '—'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {/* Historique (table/cards) retiré de "Mon solde" */}
         </>
       )}
     </div>
