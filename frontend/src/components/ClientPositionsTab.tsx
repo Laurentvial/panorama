@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { apiCall, clearApiCache } from '../utils/api';
+import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -45,33 +46,16 @@ const formatMoney = (value: any, currency: string | undefined, opts?: Intl.Numbe
   return formatAmount(n, currency || 'EUR', opts);
 };
 
-const formatDateTime = (iso: string) => {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
-};
-
 const formatPositionRange = (p: ClientPositionRow) => {
   if (p.opened_at) {
-    const start = formatDateTime(p.opened_at);
-    const end = p.closed_at ? formatDateTime(p.closed_at) : '-';
+    const start = formatPositionDateTime(p.opened_at);
+    const end = p.closed_at ? formatPositionDateTime(p.closed_at) : '-';
     return `${start} → ${end}`;
   }
   if (p.period_date) {
     const d = new Date(p.period_date);
     if (!Number.isNaN(d.getTime())) {
-      return new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }).format(d);
+      return formatPositionDateOnly(p.period_date);
     }
     return p.period_date;
   }

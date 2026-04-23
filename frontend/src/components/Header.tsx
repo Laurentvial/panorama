@@ -177,7 +177,7 @@ export function Header({ user }: HeaderProps) {
             {/* Notifications */}
             <DropdownMenu open={notificationsOpen} onOpenChange={setNotificationsOpen}>
               <DropdownMenuTrigger asChild>
-                <Button className="header-button header-button-notifications" aria-label="Notifications">
+                <Button size="icon" className="header-button header-button-notifications" aria-label="Notifications">
                   <HiOutlineBell />
                   {unreadCount > 0 && (
                     <span className="header-notification-badge" aria-hidden>
@@ -228,7 +228,7 @@ export function Header({ user }: HeaderProps) {
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className="header-button header-button-user">
+                <Button size="icon" className="header-button header-button-user" aria-label="Menu utilisateur">
                   <Avatar className="header-user-avatar">
                     <AvatarImage src={profilePhotoUrl} alt={mainUserDisplay} />
                     <AvatarFallback className="header-user-avatar-fallback" aria-label={mainUserDisplay}>

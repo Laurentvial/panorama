@@ -3,6 +3,7 @@ import { useUser } from '../contexts/UserContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { apiCall } from '../utils/api';
+import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import '../styles/PlatformPortfolio.css';
 
@@ -21,19 +22,6 @@ export type PlatformPortfolioOrdersSectionProps = {
   productsIndex?: any[];
   parentLoading?: boolean;
 };
-
-function formatDateTime(iso: string) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
-}
 
 export function PlatformPortfolioOrdersSection({
   embedded,
@@ -348,11 +336,11 @@ export function PlatformPortfolioOrdersSection({
                           investedNum != null && Number.isFinite(investedNum) ? formatAccountAmount(investedNum) : '-';
                       }
                       const openedLabel = p.opened_at
-                        ? formatDateTime(p.opened_at)
+                        ? formatPositionDateTime(p.opened_at)
                         : p.period_date
-                          ? formatDateTime(p.period_date)
+                          ? formatPositionDateOnly(p.period_date)
                           : '-';
-                      const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
+                      const closedLabel = p.closed_at ? formatPositionDateTime(p.closed_at) : '-';
                       return (
                         <tr key={p.id} className="platform-portfolioTbodyRow">
                           <td className="platform-portfolioTd">{assetLabel}</td>
@@ -503,11 +491,11 @@ export function PlatformPortfolioOrdersSection({
                     investedNum != null && Number.isFinite(investedNum) ? formatAccountAmount(investedNum) : '-';
                 }
                 const openedLabel = p.opened_at
-                  ? formatDateTime(p.opened_at)
+                  ? formatPositionDateTime(p.opened_at)
                   : p.period_date
-                    ? formatDateTime(p.period_date)
+                    ? formatPositionDateOnly(p.period_date)
                     : '-';
-                const closedLabel = p.closed_at ? formatDateTime(p.closed_at) : '-';
+                const closedLabel = p.closed_at ? formatPositionDateTime(p.closed_at) : '-';
                 const statusLabel =
                   p.status === 'open'
                     ? 'Ouverte'

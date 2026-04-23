@@ -18,6 +18,24 @@ import '../styles/Modal.css';
 /** Hauteur fixe (px) du tableau des actifs liés — styles inline pour éviter tout souci de purge Tailwind. */
 const LINKED_ASSETS_TABLE_HEIGHT_PX = 360;
 
+/** API may return numeric ids; state must compare consistently or unselect / select-all breaks. */
+function formatAssetId(id: string | number | undefined | null): string {
+  return id == null ? '' : String(id);
+}
+
+function isAssetIdInList(list: string[], assetId: string | number | undefined | null): boolean {
+  const key = formatAssetId(assetId);
+  return key !== '' && list.some((x) => formatAssetId(x) === key);
+}
+
+function toggleAssetIdInList(list: string[], assetId: string | number | undefined | null): string[] {
+  const key = formatAssetId(assetId);
+  if (!key) return list;
+  return isAssetIdInList(list, key)
+    ? list.filter((x) => formatAssetId(x) !== key)
+    : [...list, key];
+}
+
 export function EditProduct() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -1731,6 +1749,19 @@ export function EditProduct() {
                       >
                         Recalibrer les proportions
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setAssetAllocations([]);
+                          toast.success('Tous les actifs liés ont été retirés');
+                        }}
+                        disabled={assetAllocations.length === 0}
+                        title="Retirer tous les actifs de la composition du produit"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Tout retirer
+                      </Button>
                     </div>
 
                     {(() => {
@@ -1781,31 +1812,61 @@ export function EditProduct() {
                       <div className="text-center py-8 text-accent-foreground">Chargement...</div>
                     ) : (
                       <div className="space-y-2">
+                        {selectedAssetsInModal.length > 0 && (
+                          <div className="flex justify-end -mt-1 mb-1">
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setSelectedAssetsInModal([]);
+                              }}
+                              className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                            >
+                              Tout désélectionner
+                            </a>
+                          </div>
+                        )}
                         {assets.map((asset: any) => {
-                            const isSelected = selectedAssetsInModal.includes(asset.id);
-                            const isAlreadyAdded = assetAllocations.some(a => a.assetId === asset.id);
+                            const isSelected = isAssetIdInList(selectedAssetsInModal, asset.id);
+                            const isAlreadyAdded = assetAllocations.some(
+                              (a) => formatAssetId(a.assetId) === formatAssetId(asset.id)
+                            );
                             return (
                               <div
                                 key={asset.id}
                                 className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                                  isSelected
+                                  isSelected && !isAlreadyAdded
                                     ? 'border-blue-500 bg-blue-50'
                                     : isAlreadyAdded
-                                    ? 'border-slate-200 bg-slate-50 opacity-50'
+                                    ? 'border-emerald-200 bg-emerald-50/80 hover:bg-emerald-50'
                                     : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
+                                title={
+                                  isAlreadyAdded
+                                    ? "Décocher pour retirer cet actif du produit"
+                                    : undefined
+                                }
                               >
                                 <Checkbox
-                                  checked={isSelected}
-                                  onCheckedChange={(checked) => {
-                                    if (isAlreadyAdded) return;
-                                    if (checked) {
-                                      setSelectedAssetsInModal(prev => [...prev, asset.id]);
-                                    } else {
-                                      setSelectedAssetsInModal(prev => prev.filter(id => id !== asset.id));
+                                  checked={isSelected || isAlreadyAdded}
+                                  onCheckedChange={() => {
+                                    if (isAlreadyAdded) {
+                                      setAssetAllocations((prev) => {
+                                        const next = prev.filter(
+                                          (a) =>
+                                            formatAssetId(a.assetId) !== formatAssetId(asset.id)
+                                        );
+                                        return recalibrateAssetAllocationsEqual(next);
+                                      });
+                                      setSelectedAssetsInModal((prev) =>
+                                        prev.filter(
+                                          (x) => formatAssetId(x) !== formatAssetId(asset.id)
+                                        )
+                                      );
+                                      return;
                                     }
+                                    setSelectedAssetsInModal((prev) => toggleAssetIdInList(prev, asset.id));
                                   }}
-                                  disabled={isAlreadyAdded}
                                 />
                                 {asset.logoUrl ? (
                                   <img 
@@ -1829,7 +1890,9 @@ export function EditProduct() {
                                   </div>
                                 </div>
                                 {isAlreadyAdded && (
-                                  <span className="text-xs text-accent-foreground">Déjà ajouté</span>
+                                  <span className="text-xs text-emerald-800/90">
+                                    Lié — décocher pour retirer
+                                  </span>
                                 )}
                               </div>
                             );
@@ -1851,8 +1914,10 @@ export function EditProduct() {
                     <Button
                       type="button"
                       onClick={() => {
-                        const newAllocations = selectedAssetsInModal.map(assetId => {
-                          const asset = assets.find(a => a.id === assetId);
+                        const newAllocations = selectedAssetsInModal.map((assetId) => {
+                          const asset = assets.find(
+                            (a) => formatAssetId(a.id) === formatAssetId(assetId)
+                          );
                           return {
                             assetId,
                             proportion: '',
@@ -1873,7 +1938,7 @@ export function EditProduct() {
                       }}
                       disabled={selectedAssetsInModal.length === 0}
                     >
-                      Ajouter ({selectedAssetsInModal.length})
+                      Mettre à jour ({selectedAssetsInModal.length})
                     </Button>
                   </div>
                 </div>
@@ -2031,44 +2096,58 @@ export function EditProduct() {
                     });
 
                     // Actifs disponibles (non déjà ajoutés)
-                    const availableAssets = filteredAssets.filter((asset: any) => 
-                      !assetAllocations.some(a => a.assetId === asset.id)
+                    const availableAssets = filteredAssets.filter(
+                      (asset: any) =>
+                        !assetAllocations.some(
+                          (a) => formatAssetId(a.assetId) === formatAssetId(asset.id)
+                        )
                     );
                     const availableAssetIds = availableAssets.map((a: any) => a.id);
-                    const allAvailableSelected = availableAssetIds.length > 0 && 
-                      availableAssetIds.every(id => selectedAssetsInBulkModal.includes(id));
+                    const allAvailableSelected =
+                      availableAssetIds.length > 0 &&
+                      availableAssetIds.every((id) => isAssetIdInList(selectedAssetsInBulkModal, id));
 
                     return (
                       <>
-                        {!loadingAllAssets && filteredAssets.length > 0 && availableAssets.length > 0 && (
-                          <div className="flex items-center justify-between mb-3">
+                        {!loadingAllAssets && filteredAssets.length > 0 && (
+                          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                             <span className="text-sm text-accent-foreground">
                               {filteredAssets.length} actif{filteredAssets.length > 1 ? 's' : ''} trouvé{filteredAssets.length > 1 ? 's' : ''}
                               {availableAssets.length < filteredAssets.length && (
                                 <span className="text-slate-500"> ({availableAssets.length} disponible{availableAssets.length > 1 ? 's' : ''})</span>
                               )}
                             </span>
-                            <a
-                              href="#"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                if (allAvailableSelected) {
-                                  // Désélectionner tous les actifs disponibles
-                                  setSelectedAssetsInBulkModal(prev => 
-                                    prev.filter(id => !availableAssetIds.includes(id))
-                                  );
-                                } else {
-                                  // Sélectionner tous les actifs disponibles
-                                  setSelectedAssetsInBulkModal(prev => {
-                                    const newIds = availableAssetIds.filter(id => !prev.includes(id));
-                                    return [...prev, ...newIds];
-                                  });
-                                }
-                              }}
-                              className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
-                            >
-                              {allAvailableSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
-                            </a>
+                            <div className="flex items-center gap-3 text-sm">
+                              {selectedAssetsInBulkModal.length > 0 && (
+                                <a
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    setSelectedAssetsInBulkModal([]);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                >
+                                  Tout désélectionner
+                                </a>
+                              )}
+                              {availableAssetIds.length > 0 && !allAvailableSelected && (
+                                <a
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    setSelectedAssetsInBulkModal((prev) => {
+                                      const newIds = availableAssetIds.filter(
+                                        (aid) => !isAssetIdInList(prev, aid)
+                                      );
+                                      return [...prev, ...newIds.map((x) => formatAssetId(x))];
+                                    });
+                                  }}
+                                  className="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                >
+                                  Tout sélectionner
+                                </a>
+                              )}
+                            </div>
                           </div>
                         )}
                         <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
@@ -2078,30 +2157,52 @@ export function EditProduct() {
                             filteredAssets.length > 0 ? (
                               <div className="space-y-2">
                                 {filteredAssets.map((asset: any) => {
-                                  const isSelected = selectedAssetsInBulkModal.includes(asset.id);
-                                  const isAlreadyAdded = assetAllocations.some(a => a.assetId === asset.id);
+                                  const isSelected = isAssetIdInList(
+                                    selectedAssetsInBulkModal,
+                                    asset.id
+                                  );
+                                  const isAlreadyAdded = assetAllocations.some(
+                                    (a) => formatAssetId(a.assetId) === formatAssetId(asset.id)
+                                  );
                                   return (
                                     <div
                                       key={asset.id}
                                       className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                                        isSelected
+                                        isSelected && !isAlreadyAdded
                                           ? 'border-blue-500 bg-blue-50'
                                           : isAlreadyAdded
-                                          ? 'border-slate-200 bg-slate-50 opacity-50'
+                                          ? 'border-emerald-200 bg-emerald-50/80 hover:bg-emerald-50'
                                           : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                       }`}
+                                      title={
+                                        isAlreadyAdded
+                                          ? "Décocher pour retirer cet actif du produit"
+                                          : undefined
+                                      }
                                     >
                                       <Checkbox
-                                        checked={isSelected}
-                                        onCheckedChange={(checked) => {
-                                          if (isAlreadyAdded) return;
-                                          if (checked) {
-                                            setSelectedAssetsInBulkModal(prev => [...prev, asset.id]);
-                                          } else {
-                                            setSelectedAssetsInBulkModal(prev => prev.filter(id => id !== asset.id));
+                                        checked={isSelected || isAlreadyAdded}
+                                        onCheckedChange={() => {
+                                          if (isAlreadyAdded) {
+                                            setAssetAllocations((prev) => {
+                                              const next = prev.filter(
+                                                (a) =>
+                                                  formatAssetId(a.assetId) !== formatAssetId(asset.id)
+                                              );
+                                              return recalibrateAssetAllocationsEqual(next);
+                                            });
+                                            setSelectedAssetsInBulkModal((prev) =>
+                                              prev.filter(
+                                                (x) =>
+                                                  formatAssetId(x) !== formatAssetId(asset.id)
+                                              )
+                                            );
+                                            return;
                                           }
+                                          setSelectedAssetsInBulkModal((prev) =>
+                                            toggleAssetIdInList(prev, asset.id)
+                                          );
                                         }}
-                                        disabled={isAlreadyAdded}
                                       />
                                       {asset.logoUrl ? (
                                         <img 
@@ -2127,7 +2228,9 @@ export function EditProduct() {
                                         </div>
                                       </div>
                                       {isAlreadyAdded && (
-                                        <span className="text-xs text-accent-foreground">Déjà ajouté</span>
+                                        <span className="text-xs text-emerald-800/90">
+                                          Lié — décocher pour retirer
+                                        </span>
                                       )}
                                     </div>
                                   );
@@ -2153,8 +2256,10 @@ export function EditProduct() {
                     <Button
                       type="button"
                       onClick={() => {
-                        const newAllocations = selectedAssetsInBulkModal.map(assetId => {
-                          const asset = allAssets.find(a => a.id === assetId);
+                        const newAllocations = selectedAssetsInBulkModal.map((assetId) => {
+                          const asset = allAssets.find(
+                            (a) => formatAssetId(a.id) === formatAssetId(assetId)
+                          );
                           return {
                             assetId,
                             proportion: '',
@@ -2174,7 +2279,7 @@ export function EditProduct() {
                       }}
                       disabled={selectedAssetsInBulkModal.length === 0}
                     >
-                      Ajouter ({selectedAssetsInBulkModal.length})
+                      Mettre à jour ({selectedAssetsInBulkModal.length})
                     </Button>
                   </div>
                 </div>

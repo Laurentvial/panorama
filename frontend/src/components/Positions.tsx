@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiCall } from '../utils/api';
+import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { toast } from 'sonner';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
@@ -57,34 +58,17 @@ const formatPnlWithPct = (pnlValue: any, amountValue: any) => {
   return `${pnlText} (${pctText})`;
 };
 
-const formatDateTime = (isoDate: string) => {
-  if (!isoDate) return '-';
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return isoDate;
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
-};
-
-const formatPositionDateTime = (p: PositionRow) => {
+const formatPositionDateRange = (p: PositionRow) => {
   if (p.opened_at) {
-    const start = formatDateTime(p.opened_at);
-    const end = p.closed_at ? formatDateTime(p.closed_at) : '-';
+    const start = formatPositionDateTime(p.opened_at);
+    const end = p.closed_at ? formatPositionDateTime(p.closed_at) : '-';
     return `${start} → ${end}`;
   }
   // Fallback for legacy monthly positions
   if (p.period_date) {
     const d = new Date(p.period_date);
     if (!Number.isNaN(d.getTime())) {
-      return new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }).format(d);
+      return formatPositionDateOnly(p.period_date);
     }
     return p.period_date;
   }
@@ -352,7 +336,7 @@ function PositionsTable({ rows }: { rows: PositionRow[] }) {
         <tbody>
           {rows.map((p) => (
             <tr key={p.id} className="border-b border-slate-100">
-              <td className="py-2 px-3">{formatPositionDateTime(p)}</td>
+              <td className="py-2 px-3">{formatPositionDateRange(p)}</td>
               <td className="py-2 px-3">{p.clientName || p.clientId}</td>
               <td className="py-2 px-3">{p.productName || p.productId}</td>
               <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>

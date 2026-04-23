@@ -4,6 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { X, Loader2 } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { formatPositionDateTime } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
@@ -784,22 +785,6 @@ export function PositionGenerationModal({
     }
   };
 
-  const formatDateTime = (dateStr: string | null) => {
-    if (!dateStr) return '-';
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
   const selectedInterestPeriod = (() => {
     const details = transaction?.subscription_details || {};
     return (
@@ -1439,7 +1424,7 @@ export function PositionGenerationModal({
                                   {formatCurrency(pos.profit_loss)}
                                 </td>
                                 <td style={{ padding: '6px', fontSize: '10px' }}>
-                                  {pos.opened_at ? formatDateTime(pos.opened_at) : 'Aucun'}
+                                  {pos.opened_at ? formatPositionDateTime(pos.opened_at) : 'Aucun'}
                                 </td>
                               </tr>
                             ))}
@@ -1587,8 +1572,8 @@ export function PositionGenerationModal({
                             <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun actif</span>
                           )}
                         </td>
-                        <td style={{ padding: '8px' }}>{formatDateTime(pos.opened_at)}</td>
-                        <td style={{ padding: '8px' }}>{formatDateTime(pos.closed_at)}</td>
+                        <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.opened_at)}</td>
+                        <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.closed_at)}</td>
                         <td style={{ padding: '8px' }}>{formatCurrency(pos.invested_amount)}</td>
                         <td style={{ 
                           padding: '8px', 
