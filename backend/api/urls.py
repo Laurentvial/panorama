@@ -149,6 +149,7 @@ urlpatterns = [
     # Positions endpoints
     path('positions/', api_views.positions_list, name='positions-list'),
     path('clients/<str:client_id>/positions/', api_views.client_positions, name='client-positions'),
+    path('clients/<str:client_id>/process-positions/', api_views.client_process_positions, name='client-process-positions'),
     path('clients/<str:client_id>/positions/<str:position_id>/cancel/', api_views.client_position_cancel, name='client-position-cancel'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),

@@ -1496,6 +1496,9 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
     productId = serializers.SerializerMethodField()
     productName = serializers.SerializerMethodField()
     uploadedBy = serializers.PrimaryKeyRelatedField(source='uploaded_by', read_only=True)
+    documentCreatedOn = serializers.DateField(
+        source='document_created_on', read_only=True, allow_null=True, format='%Y-%m-%d'
+    )
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
@@ -1504,10 +1507,10 @@ class ClientDocumentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'documentType', 'file', 'fileUrl', 'description',
             'transactionId', 'productId', 'productName',
-            'uploadedBy', 'uploadedByName', 'createdAt', 'updatedAt',
+            'uploadedBy', 'uploadedByName', 'documentCreatedOn', 'createdAt', 'updatedAt',
         ]
         read_only_fields = [
-            'id', 'createdAt', 'updatedAt', 'uploadedBy', 'fileUrl', 'uploadedByName',
+            'id', 'documentCreatedOn', 'createdAt', 'updatedAt', 'uploadedBy', 'fileUrl', 'uploadedByName',
             'transactionId', 'productId', 'productName',
         ]
         extra_kwargs = {

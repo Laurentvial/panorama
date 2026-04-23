@@ -131,6 +131,28 @@ export function PlatformDashboard() {
     return `${day}/${month}/${year}`;
   };
 
+  /** Date de création du document (métier), pas la date d'ajout en base — évite les décalages fuseau. */
+  const formatDocumentCreatedOnForDisplay = (doc: { documentCreatedOn?: string | null; createdAt?: string | null }): string => {
+    const ymd = doc.documentCreatedOn;
+    if (ymd) {
+      const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+    }
+    if (doc.createdAt) {
+      const iso = String(doc.createdAt);
+      const m2 = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m2) {
+        const d = new Date(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3]));
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+      return new Date(doc.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return '';
+  };
+
   const featuredItems = React.useMemo(() => {
     const items: Array<{
       kind: 'asset' | 'product';
@@ -1833,6 +1855,7 @@ export function PlatformDashboard() {
                         other: 'Autre',
                       };
                       const typeLabel = typeLabels[doc.documentType] || doc.documentType || 'Document';
+                      const creationLabel = formatDocumentCreatedOnForDisplay(doc);
                       return (
                         <div
                           key={doc.id}
@@ -1853,9 +1876,9 @@ export function PlatformDashboard() {
                             </div>
                             <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2 }}>
                               {typeLabel}
-                              {doc.createdAt && (
+                              {creationLabel && (
                                 <span style={{ marginLeft: 8 }}>
-                                  • {new Date(doc.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  • {creationLabel}
                                 </span>
                               )}
                             </div>

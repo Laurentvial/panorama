@@ -980,10 +980,14 @@ export function ProductDetail() {
         )) as { documents?: any[] };
         if (cancelled) return;
         const docs = (res.documents || []).filter((d: any) => d?.documentType === 'contract' && d?.fileUrl);
-        docs.sort(
-          (a: any, b: any) =>
-            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
+        const docDateTs = (d: any) => {
+          if (d?.documentCreatedOn) {
+            const m = String(d.documentCreatedOn).match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
+          }
+          return new Date(d?.createdAt || 0).getTime();
+        };
+        docs.sort((a: any, b: any) => docDateTs(b) - docDateTs(a));
         setImportedProductContracts(docs);
       } catch {
         if (!cancelled) setImportedProductContracts([]);

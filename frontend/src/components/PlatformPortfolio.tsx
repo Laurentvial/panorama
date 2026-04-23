@@ -75,9 +75,14 @@ export function PlatformPortfolio() {
       const filteredTransactions = sortedTransactions.filter((t: any) => {
         const status = String(t?.status || '').toLowerCase();
         const isUpcomingStatus = status === 'en_attente_paiement';
+        const type = String(t?.type || '').toLowerCase();
+        const isDeposit = type === 'depot';
+        const isWithdrawal = type === 'retrait';
         const dt = new Date(t?.datetime).getTime();
         const isFuture = Number.isFinite(dt) && dt > now;
-        return !isFuture && !isUpcomingStatus;
+        // Show withdrawals waiting for payment in the client platform transactions table.
+        // Keep legacy behavior of hiding other "en_attente_paiement" types.
+        return !isFuture && (!isUpcomingStatus || isDeposit || isWithdrawal);
       });
       setTransactions(filteredTransactions);
 

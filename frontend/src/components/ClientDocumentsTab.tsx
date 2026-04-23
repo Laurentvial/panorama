@@ -28,6 +28,8 @@ interface Document {
   productName?: string | null;
   uploadedBy: number | null;
   uploadedByName: string;
+  /** Date métier (YYYY-MM-DD) — distincte de l'ajout en base (createdAt). */
+  documentCreatedOn?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -310,6 +312,14 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
     }
   }
 
+  function formatDocumentCreatedOnOnly(ymd: string | null | undefined): string {
+    if (!ymd) return '—';
+    const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '—';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return d.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
   function isImageFile(url: string): boolean {
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
     return imageExtensions.some(ext => url.toLowerCase().includes(ext));
@@ -436,6 +446,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                     <th className="text-left py-3 px-3">Transaction</th>
                     <th className="text-left py-3 px-3">Produit</th>
                     <th className="text-left py-3 px-3">Fichier</th>
+                    <th className="text-left py-3 px-3">Date de création</th>
                     <th className="text-left py-3 px-3">Ajouté le</th>
                     <th className="text-right py-3 px-3">Actions</th>
                   </tr>
@@ -464,6 +475,9 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                         {renderDocumentFileLink(document)}
                       </td>
                       <td className="py-3 px-3 text-slate-500">
+                        {formatDocumentCreatedOnOnly(document.documentCreatedOn ?? null)}
+                      </td>
+                      <td className="py-3 px-3 text-slate-500">
                         {formatDate(document.createdAt)}
                         {document.uploadedByName ? ` par ${document.uploadedByName}` : ''}
                       </td>
@@ -480,7 +494,11 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
                                 description: document.description || '',
                                 transactionId: document.transactionId || '',
                                 productId: document.productId || '',
-                                createdAt: toDateDisplay(document.createdAt),
+                                createdAt: toDateDisplay(
+                                  (document as Document).documentCreatedOn
+                                    ? String((document as Document).documentCreatedOn)
+                                    : document.createdAt
+                                ),
                                 updatedAt: toDateDisplay(document.updatedAt),
                                 file: null,
                               });

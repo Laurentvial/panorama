@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -126,10 +126,11 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   async function loadPositionsForTab(
     tab: 'upcoming' | 'open' | 'closed' | 'cancelled',
     page: number = 1,
-    limit: number = 50
+    limit: number = 50,
+    manageLoading: boolean = true
   ) {
     try {
-      setLoading(true);
+      if (manageLoading) setLoading(true);
       // Pass status filter to backend for proper sorting
       // For upcoming tab, pass status=pending so backend sorts ascending (sooner to later)
       let url = `/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`;
@@ -152,7 +153,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
       toast.error(error?.message || 'Erreur lors du chargement des positions');
       setPositions([]);
     } finally {
-      setLoading(false);
+      if (manageLoading) setLoading(false);
     }
   }
 
@@ -162,6 +163,22 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
 
   async function cancelPosition(positionId: string) {
     await apiCall(`/api/clients/${clientId}/positions/${positionId}/cancel/`, { method: 'POST' });
+  }
+
+  async function handleRefresh() {
+    setLoading(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/process-positions/`, { method: 'POST' });
+      clearApiCache(`clients/${clientId}/positions`);
+      await loadAllPositionsForCounts();
+      await loadPositionsForTab(activeTab, pagination.page, pagination.limit, false);
+      toast.success('Positions mises à jour (traitement planifié exécuté pour ce client).');
+    } catch (error: any) {
+      console.error('Error processing client positions:', error);
+      toast.error(error?.message || 'Échec du traitement des positions');
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Load all positions for counts on mount and when clientId changes
@@ -260,10 +277,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle>Positions ({loading ? '...' : pagination.total})</CardTitle>
-        <Button variant="outline" onClick={() => {
-          loadAllPositionsForCounts();
-          loadPositions(pagination.page, pagination.limit);
-        }} disabled={loading}>
+        <Button variant="outline" onClick={() => { void handleRefresh(); }} disabled={loading}>
           <RefreshCw className="w-4 h-4 mr-2" />
           {loading ? 'Chargement...' : 'Rafraîchir'}
         </Button>

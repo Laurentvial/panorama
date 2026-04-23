@@ -60,7 +60,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
 from django.utils import timezone
 from django.core import signing
-from django.db.models import Count, Q
+from django.db.models import Count, Q, F
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -6466,7 +6466,7 @@ def client_documents(request, client_id):
     if document_type and document_type in allowed_doc_types:
         documents = documents.filter(document_type=document_type)
     
-    documents = documents.order_by('-created_at')
+    documents = documents.order_by(F('document_created_on').desc(nulls_last=True), '-created_at')
     serializer = ClientDocumentSerializer(documents, many=True, context={'request': request})
     return Response({'documents': serializer.data})
 
@@ -6496,6 +6496,10 @@ def client_document_create(request, client_id):
     product_id = request.data.get('productId', None) or None
     created_at_raw = request.data.get('createdAt', None)
     updated_at_raw = request.data.get('updatedAt', None)
+    if isinstance(created_at_raw, str) and not str(created_at_raw).strip():
+        created_at_raw = None
+    if isinstance(updated_at_raw, str) and not str(updated_at_raw).strip():
+        updated_at_raw = None
     if transaction_id == '':
         transaction_id = None
     if product_id == '':
@@ -6582,14 +6586,18 @@ def client_document_create(request, client_id):
             dt = timezone.make_aware(dt, timezone.get_current_timezone())
         return dt
 
-    # Allow overriding dates (useful for admin backfills / CRM consistency).
+    # Date de création du document (métier) : document_created_on. created_at n'est pas modifié (horodatage d'ajout en base).
     updates = {}
     if created_at_raw is not None:
         dt = _parse_dt(created_at_raw)
         if not dt:
             document.delete()
             return Response({'error': 'createdAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
-        updates['created_at'] = dt
+        updates['document_created_on'] = dt.date()
+    else:
+        document.refresh_from_db()
+        if document.created_at:
+            updates['document_created_on'] = document.created_at.date()
     if updated_at_raw is not None:
         dt = _parse_dt(updated_at_raw)
         if not dt:
@@ -6715,7 +6723,7 @@ def client_document_update(request, client_id, document_id):
         dt = _parse_dt(created_at_raw)
         if not dt:
             return Response({'error': 'createdAt invalide (attendu ISO datetime)'}, status=status.HTTP_400_BAD_REQUEST)
-        updates['created_at'] = dt
+        updates['document_created_on'] = dt.date()
 
     if updated_at_raw is not None:
         dt = _parse_dt(updated_at_raw)
@@ -7307,6 +7315,35 @@ def client_position_cancel(request, client_id, position_id):
 
     serializer = PositionSerializer(pos)
     return Response({'position': serializer.data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_process_positions(request, client_id):
+    """
+    Exécute la même logique que ``manage.py process_positions`` pour ce client uniquement
+    (mise à jour des statuts + intérêts de secours). CRM (JWT + droits gestionnaire).
+    """
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    from .process_positions_runner import run_process_positions
+
+    try:
+        result = run_process_positions(
+            client_id=client_id,
+            dry_run=False,
+            interest_trigger="process_positions_client_refresh",
+        )
+    except Exception as e:
+        logger.exception("client_process_positions failed for client %s", client_id)
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response({"status": "ok", **result})
 
 
 @api_view(['GET'])

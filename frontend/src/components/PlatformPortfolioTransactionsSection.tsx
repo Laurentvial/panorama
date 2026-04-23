@@ -141,11 +141,13 @@ export function PlatformPortfolioTransactionsSection({
           const isUpcomingStatus = status === 'en_attente_paiement';
           const type = String(t?.type || '').toLowerCase();
           const isDeposit = type === 'depot';
+          const isWithdrawal = type === 'retrait';
           const dt = new Date(t?.datetime).getTime();
           const isFuture = Number.isFinite(dt) && dt > now;
           // On the platform Transactions page, deposits must be visible even when not validated yet.
+          // Also show withdrawals waiting for payment.
           // Keep the legacy behavior of hiding "en_attente_paiement" for other transaction types.
-          return !isFuture && (!isUpcomingStatus || isDeposit);
+          return !isFuture && (!isUpcomingStatus || isDeposit || isWithdrawal);
         });
         setTransactions(filteredTransactions);
 

@@ -788,6 +788,8 @@ class ClientDocument(models.Model):
     file = models.FileField(upload_to='client_documents/', storage=client_profile_storage, null=True, blank=True)
     description = models.TextField(default="", blank=True)  # Description du document
     uploaded_by = models.ForeignKey(DjangoUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_documents')
+    # Date de création « métier » (saisie / contrat) — affichage client. created_at = horodatage d’enregistrement.
+    document_created_on = models.DateField(null=True, blank=True, verbose_name="Date de création du document")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
