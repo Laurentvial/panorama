@@ -31,6 +31,73 @@ interface ManagerChatWidgetProps {
   variant?: 'floating' | 'page';
 }
 
+type ManagerDaySchedule = { start: string; end: string };
+
+const JS_DAY_INDEX_TO_KEY: Record<number, string> = {
+  0: 'sunday',
+  1: 'monday',
+  2: 'tuesday',
+  3: 'wednesday',
+  4: 'thursday',
+  5: 'friday',
+  6: 'saturday',
+};
+
+function todayDayKey(d = new Date()): string {
+  return JS_DAY_INDEX_TO_KEY[d.getDay()] ?? 'monday';
+}
+
+function parseHHMMToMinutes(s: string | undefined): number | null {
+  const t = (s && s.trim()) || '';
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) return null;
+  const h = parseInt(m[1]!, 10);
+  const min = parseInt(m[2]!, 10);
+  if (Number.isNaN(h) || Number.isNaN(min) || h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function nowMinutes(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/** true if calendrier messagerie non renseigné; sinon aujourd’hui avec créneau et heure actuelle dans [start, end]. */
+function isWithinMessengerAgenda(
+  sched: Record<string, ManagerDaySchedule> | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!sched || typeof sched !== 'object') return true;
+  const st = (x: string | undefined) => (x && x.trim()) || '';
+  const hasConfiguredDay = Object.keys(sched).some((k) => {
+    const v = sched[k] as ManagerDaySchedule | undefined;
+    return v && st(v.start) && st(v.end);
+  });
+  if (!hasConfiguredDay) return true;
+
+  const key = todayDayKey(now);
+  const day = sched[key] as ManagerDaySchedule | undefined;
+  if (!day) return false;
+  const a = st(day.start);
+  const b = st(day.end);
+  if (!a || !b) return false;
+  const startM = parseHHMMToMinutes(a);
+  const endM = parseHHMMToMinutes(b);
+  if (startM === null || endM === null) return false;
+  const n = nowMinutes(now);
+  if (endM < startM) {
+    return n >= startM || n <= endM;
+  }
+  return n >= startM && n <= endM;
+}
+
+function mergeManagerAvailabilityFromResponse(data: { manager?: unknown } | null | undefined) {
+  const asched = (data?.manager as { availabilitySchedule?: unknown } | null)?.availabilitySchedule;
+  if (asched && typeof asched === 'object' && !Array.isArray(asched)) {
+    return asched as Record<string, ManagerDaySchedule>;
+  }
+  return {};
+}
+
 export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: ManagerChatWidgetProps) {
   const location = useLocation();
   const isPage = variant === 'page';
@@ -54,7 +121,12 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
   const [managerPhoto, setManagerPhoto] = useState<string>('');
   const [managerStatus, setManagerStatus] = useState<'online' | 'away' | 'offline'>('offline');
   const [managerPhone, setManagerPhone] = useState<string>('');
+  const [managerAvailability, setManagerAvailability] = useState<Record<string, ManagerDaySchedule>>({});
+  /** null = not loaded yet; false = no CRM manager (managed_by). */
+  const [hasAssignedManager, setHasAssignedManager] = useState<boolean | null>(null);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  /** Re-tick périodiquement pour mettre à jour le point (passage d’un créneau / jour). */
+  const [agendaTick, setAgendaTick] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const isPhone = useIsPhone();
@@ -65,6 +137,39 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
   }, [bottomOffsetPx]);
 
   const canShow = Boolean(clientId) && (currentUser?.userType === 'client' || String(currentUser?.id || '').length > 0);
+
+  const inMessengerWindow = useMemo(
+    () => isWithinMessengerAgenda(managerAvailability, new Date()),
+    // agendaTick: recalcul quand l’heure a pu changer
+    [managerAvailability, agendaTick],
+  );
+
+  const statusDot = useMemo(() => {
+    if (hasAssignedManager === false) {
+      return { bg: '#9ca3af' as const, title: 'Aucun gestionnaire assigné' };
+    }
+    if (hasAssignedManager === null) {
+      return { bg: '#9ca3af' as const, title: undefined as string | undefined };
+    }
+    if (!inMessengerWindow) {
+      return {
+        bg: '#9ca3af' as const,
+        title:
+          managerStatus === 'online'
+            ? 'En ligne — hors plage du calendrier messagerie'
+            : 'Hors plage du calendrier messagerie',
+      };
+    }
+    if (managerStatus === 'online') return { bg: '#10b981' as const, title: 'En ligne' };
+    if (managerStatus === 'away') return { bg: '#f59e0b' as const, title: 'Absent' };
+    return { bg: '#9ca3af' as const, title: 'Déconnecté' };
+  }, [hasAssignedManager, inMessengerWindow, managerStatus]);
+
+  useEffect(() => {
+    if (!effectiveOpen) return;
+    const t = setInterval(() => setAgendaTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, [effectiveOpen]);
 
   async function loadConversations() {
     if (!clientId) return;
@@ -83,6 +188,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
       }
       const phone = data?.manager?.phone;
       if (typeof phone === 'string') setManagerPhone(phone);
+      setHasAssignedManager(Boolean(data?.manager?.id));
+      setManagerAvailability(mergeManagerAvailabilityFromResponse(data));
 
       // Default selection: first conversation (often "legacy") if present.
       if (!selectedConversationId && convs.length > 0) {
@@ -126,6 +233,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
       }
       const phone = data?.manager?.phone;
       if (typeof phone === 'string') setManagerPhone(phone);
+      setHasAssignedManager(Boolean(data?.manager?.id));
+      setManagerAvailability(mergeManagerAvailabilityFromResponse(data));
       // Rafraîchir le badge après consultation (le backend a marqué les messages comme lus)
       fetchUnreadCount();
     } catch (e) {
@@ -169,6 +278,8 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
         if (typeof photo === 'string') setManagerPhoto(photo);
         const phone = data?.manager?.phone;
         if (typeof phone === 'string') setManagerPhone(phone);
+        setHasAssignedManager(Boolean(data?.manager?.id));
+        setManagerAvailability(mergeManagerAvailabilityFromResponse(data));
       } catch {
         // ignore
       }
@@ -380,21 +491,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                       width: 8,
                       height: 8,
                       borderRadius: '50%',
-                      backgroundColor:
-                        managerStatus === 'online'
-                          ? '#10b981'
-                          : managerStatus === 'away'
-                          ? '#f59e0b'
-                          : '#9ca3af',
+                      backgroundColor: statusDot.bg,
                       flexShrink: 0,
                     }}
-                    title={
-                      managerStatus === 'online'
-                        ? 'En ligne'
-                        : managerStatus === 'away'
-                        ? 'Absent'
-                        : 'Déconnecté'
-                    }
+                    title={statusDot.title}
                   />
                 </div>
                 {managerPhone && (

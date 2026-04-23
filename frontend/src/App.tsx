@@ -1,4 +1,5 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense } from 'react';
+import { lazy } from './utils/lazyImport';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -7,6 +8,7 @@ import { AdminRoleProtectedRoute } from './components/RoleProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
+import LoadingIndicator from './components/LoadingIndicator';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './utils/constants';
 import './styles/Card.css';
 
@@ -68,6 +70,24 @@ const ROLES_ADMIN_AND_TEAMLEADER = ['admin', 'teamleader'] as const;
 const LoadingFallback = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
     <div>Chargement...</div>
+  </div>
+);
+
+/** Shown in the main area only while a lazy /platform/* page chunk loads (layout stays mounted). */
+const PlatformPageLoading = () => (
+  <div
+    style={{
+      display: 'flex',
+      flex: 1,
+      minHeight: '36vh',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'column',
+      gap: 12,
+    }}
+  >
+    <LoadingIndicator />
+    <span style={{ fontSize: 14, color: '#6b7280' }}>Chargement de la page…</span>
   </div>
 );
 
@@ -354,166 +374,121 @@ function App() {
                             </Suspense>
                         </AdminRoleProtectedRoute>
                     } />
-                    <Route path="/platform" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformDashboard />
-                                        </Suspense>
-                                    </PlatformLayout>
+                    {/*
+                      Single /platform parent + nested child routes: PlatformLayout stays mounted
+                      and only the page component lazy-loads on navigation (no re-fetching layout data).
+                    */}
+                    <Route
+                        path="/platform"
+                        element={
+                            <ClientProtectedRoute>
+                                <PlatformSearchProvider>
+                                    <Suspense fallback={<LoadingFallback />}>
+                                        <PlatformLayout />
+                                    </Suspense>
+                                </PlatformSearchProvider>
+                            </ClientProtectedRoute>
+                        }
+                    >
+                        <Route
+                            index
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformDashboard />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/portfolio" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformPortfolio />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="portfolio"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformPortfolio />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/transactions" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformTransactionsPage />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="transactions"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformTransactionsPage />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/positions" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformPositionsPage />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="positions"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformPositionsPage />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/messaging" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformMessagingPage />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="messaging"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformMessagingPage />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/verification" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformAccountVerification />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="verification"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformAccountVerification />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/profile" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformProfilePage />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="profile"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformProfilePage />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/transfert-propriete" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformTransfertProprietePage />
-                                        </Suspense>
-                                    </PlatformLayout>
+                            }
+                        />
+                        <Route
+                            path="transfert-propriete"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformTransfertProprietePage />
                                 </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    {/* Legacy route redirect */}
+                            }
+                        />
+                        <Route
+                            path="funds"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformTrading />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="discover"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformDiscover />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="useful-links"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <PlatformUsefulLinks />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="product/:id"
+                            element={
+                                <Suspense fallback={<PlatformPageLoading />}>
+                                    <ProductDetail />
+                                </Suspense>
+                            }
+                        />
+                    </Route>
                     <Route path="/platform/trading" element={<Navigate to="/platform/funds" replace />} />
                     <Route path="/platform/trading/*" element={<Navigate to="/platform/funds" replace />} />
-
-                    <Route path="/platform/funds" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformTrading />
-                                        </Suspense>
-                                    </PlatformLayout>
-                                </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/discover" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformDiscover />
-                                        </Suspense>
-                                    </PlatformLayout>
-                                </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/useful-links" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <PlatformUsefulLinks />
-                                        </Suspense>
-                                    </PlatformLayout>
-                                </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
-                    <Route path="/platform/product/:id" element={
-                        <ClientProtectedRoute>
-                            <PlatformSearchProvider>
-                                <Suspense fallback={<LoadingFallback />}>
-                                    <PlatformLayout>
-                                        <Suspense fallback={<LoadingFallback />}>
-                                            <ProductDetail />
-                                        </Suspense>
-                                    </PlatformLayout>
-                                </Suspense>
-                            </PlatformSearchProvider>
-                        </ClientProtectedRoute>
-                    } />
                     
                     {/* Legacy route redirects - redirect old routes to /admin */}
                     <Route path="/clients" element={<Navigate to="/admin/clients" replace />} />

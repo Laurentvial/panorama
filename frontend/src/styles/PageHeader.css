@@ -42,3 +42,9 @@
   color: #000000 !important;
 }
 
+/* Mon profil — full-screen save overlay: ensure inner panel keeps padding (some resets target flex). */
+.mon-profil-saving-panel {
+  padding: 2.5rem 3rem !important;
+  box-sizing: border-box;
+}
+

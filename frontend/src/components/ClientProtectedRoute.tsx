@@ -1,5 +1,5 @@
-import React from 'react';
-import { Navigate } from "react-router-dom";
+import React, { useRef } from 'react';
+import { Navigate, useLocation } from "react-router-dom";
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from "../utils/constants";
 import { useState, useEffect } from "react";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
@@ -74,12 +74,19 @@ function setCachedClientAuth(isAuthenticated: boolean, tokenHash: string, storag
 
 function ClientProtectedRoute({ children }: ClientProtectedRouteProps) { 
     const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+    const location = useLocation();
+    /** Previous pathname: used so only real in-app navigations revalidate (not duplicate Strict Mode effect on first paint). */
+    const prevPathnameRef = useRef<string | null>(null);
 
     useEffect(() => {
-        authenticate();
-    }, []);
+        const path = location.pathname;
+        const hadPrevious = prevPathnameRef.current !== null;
+        const isRouteChange = hadPrevious && prevPathnameRef.current !== path;
+        prevPathnameRef.current = path;
+        void authenticate(isRouteChange);
+    }, [location.pathname]);
 
-    const authenticate = async () => {
+    const authenticate = async (forceRevalidate: boolean) => {
         // Prefer per-tab client session (sessionStorage) to allow an admin to stay
         // logged into the admin panel while opening client panels in other tabs.
         const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
@@ -100,12 +107,16 @@ function ClientProtectedRoute({ children }: ClientProtectedRouteProps) {
         const userType = isSessionClient ? sessionUserType : (token ? 'client' : null);
         const tokenHash = getTokenHash(token);
         
-        // Check cache first
-        const cachedAuth = getCachedClientAuth(storageType);
-        if (cachedAuth && cachedAuth.tokenHash === tokenHash) {
-            console.log('ClientProtectedRoute: Using cached authentication result');
-            setIsAuthenticated(cachedAuth.isAuthenticated);
-            return;
+        // Check cache first (skip on route changes so a stale "authenticated" cache cannot hide expiry)
+        if (!forceRevalidate) {
+            const cachedAuth = getCachedClientAuth(storageType);
+            if (cachedAuth && cachedAuth.tokenHash === tokenHash) {
+                console.log('ClientProtectedRoute: Using cached authentication result');
+                setIsAuthenticated(cachedAuth.isAuthenticated);
+                return;
+            }
+        } else {
+            console.log('ClientProtectedRoute: Revalidating (route change or forced check)');
         }
         
         if (!token) {

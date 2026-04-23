@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link, Outlet } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -33,11 +33,12 @@ import '../styles/Modal.css';
 
 const UI_COMPACT_SHELL_PLATFORM_CLASS = 'ui-compact-shell-platform';
 
-interface PlatformLayoutProps {
-  children: React.ReactNode;
-}
-
-export function PlatformLayout({ children }: PlatformLayoutProps) {
+/**
+ * Renders the shell (header, sidebar) and the active child route via <Outlet />.
+ * Nested under App.tsx `/platform/*` so the layout is not unmounted on every page change
+ * (avoids re-fetching search index + notifications on each navigation).
+ */
+export function PlatformLayout() {
   const MOBILE_BOTTOM_NAV_HEIGHT = 72;
   // Bottom nav is mobile-only; tablet/desktop keep the sidebar visible.
   const BOTTOM_NAV_BREAKPOINT = 768;
@@ -1106,7 +1107,7 @@ export function PlatformLayout({ children }: PlatformLayoutProps) {
               flexDirection: 'column',
             }}
           >
-            {children}
+            <Outlet />
           </div>
           <footer
             style={{

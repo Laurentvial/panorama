@@ -12,6 +12,8 @@ import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
 import { useIsMobile } from './ui/use-mobile';
 
+import { cn } from './ui/utils';
+
 import { Card, CardContent, CardHeader } from './ui/card';
 import { Badge } from './ui/badge';
 
@@ -120,6 +122,52 @@ const PREFERENCE_OPTIONS: Array<{
   { id: 'indices', label: 'Indices', Icon: BarChart3 },
 
 ];
+
+
+
+const verificationCircleToggleBaseStyle: React.CSSProperties = {
+
+  width: 34,
+
+  height: 34,
+
+  borderRadius: '999px',
+
+  display: 'flex',
+
+  alignItems: 'center',
+
+  justifyContent: 'center',
+
+  boxSizing: 'border-box',
+
+  padding: 0,
+
+  marginTop: 10,
+
+  marginBottom: 10,
+
+  cursor: 'pointer',
+
+};
+
+
+
+function verificationCircleToggleStyle(selected: boolean): React.CSSProperties {
+
+  return {
+
+    ...verificationCircleToggleBaseStyle,
+
+    border: selected ? 'none' : '1px solid #cbd5e1',
+
+    backgroundColor: selected ? '#16a34a' : 'transparent',
+
+    color: selected ? '#fff' : '#0f172a',
+
+  };
+
+}
 
 
 
@@ -1273,7 +1321,7 @@ export function PlatformAccountVerification() {
   // render a lightweight placeholder so the manual selection screen never appears.
   if (step === null) {
     return (
-      <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 980, margin: '0 auto' }}>
+      <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: isMobile ? '100%' : 1200, width: '100%', margin: '0 auto' }}>
         <h1 className="platform-portfolioPageTitle">Vérification du compte</h1>
         <Card style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#ffffff' }}>
           <CardContent style={{ paddingTop: 18 }}>
@@ -1293,7 +1341,7 @@ export function PlatformAccountVerification() {
 
   return (
 
-    <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 980, margin: '0 auto' }}>
+    <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: isMobile ? '100%' : 1200, width: '100%', margin: '0 auto' }}>
       <h1 className="platform-portfolioPageTitle">Vérification du compte</h1>
 
       {/* Top progress header (inspired by screenshot) */}
@@ -1358,7 +1406,12 @@ export function PlatformAccountVerification() {
 
         <CardHeader style={{ paddingBottom: 8 }}>
 
-          <div className="platform-page-title">
+          <div
+            className={cn(
+              'platform-page-title',
+              step === 2 && 'verification-flow-step-title',
+            )}
+          >
 
             {step === null
               ? 'Vérification du compte'
@@ -1721,7 +1774,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting} variant="platform">
 
@@ -1807,7 +1860,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting} variant="platform">
 
@@ -2001,29 +2054,7 @@ export function PlatformAccountVerification() {
 
                           aria-label={selected ? 'Sélectionné' : 'Sélectionner'}
 
-                          style={{
-
-                            width: 34,
-
-                            height: 34,
-
-                            borderRadius: '999px',
-
-                            display: 'flex',
-
-                            alignItems: 'center',
-
-                            justifyContent: 'center',
-
-                            border: selected ? 'none' : '1px solid #cbd5e1',
-
-                            backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                            color: selected ? '#fff' : '#0f172a',
-
-                            cursor: 'pointer',
-
-                          }}
+                          style={verificationCircleToggleStyle(selected)}
 
                         >
 
@@ -2109,29 +2140,7 @@ export function PlatformAccountVerification() {
 
                           aria-label={selected ? 'Sélectionné' : 'Sélectionner'}
 
-                          style={{
-
-                            width: 34,
-
-                            height: 34,
-
-                            borderRadius: '999px',
-
-                            display: 'flex',
-
-                            alignItems: 'center',
-
-                            justifyContent: 'center',
-
-                            border: selected ? 'none' : '1px solid #cbd5e1',
-
-                            backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                            color: selected ? '#fff' : '#0f172a',
-
-                            cursor: 'pointer',
-
-                          }}
+                          style={verificationCircleToggleStyle(selected)}
 
                         >
 
@@ -2151,7 +2160,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button
 
@@ -2175,7 +2184,7 @@ export function PlatformAccountVerification() {
 
             <form onSubmit={handlePreferencesSubmit}>
 
-              <div style={{ marginTop: 6 }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5" style={{ marginTop: 6 }}>
 
                 {PREFERENCE_OPTIONS.map(({ id, label, Icon }) => {
 
@@ -2187,35 +2196,21 @@ export function PlatformAccountVerification() {
 
                       key={id}
 
-                      style={{
-
-                        display: 'flex',
-
-                        alignItems: 'center',
-
-                        justifyContent: 'space-between',
-
-                        padding: '18px 8px',
-
-                        borderTop: '1px solid #eef2f7',
-
-                      }}
+                      className="flex min-h-[3.75rem] min-w-0 items-center justify-between gap-5 rounded-xl border border-slate-200/90 bg-slate-50/40 px-6 py-5 sm:min-h-[4rem] sm:px-8 sm:py-6"
 
                     >
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div className="flex min-w-0 flex-1 items-center gap-4 pr-2">
 
-                        <div style={{ width: 26, display: 'flex', justifyContent: 'center' }}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100/80 text-slate-600">
 
-                          <Icon size={18} className="text-slate-600" />
+                          <Icon size={20} className="text-slate-600" />
 
                         </div>
 
-                        <div style={{ color: '#0f172a', fontSize: 15 }}>{label}</div>
+                        <div className="min-w-0 text-[15px] text-slate-900">{label}</div>
 
                       </div>
-
-
 
                       <button
 
@@ -2225,29 +2220,9 @@ export function PlatformAccountVerification() {
 
                         aria-label={selected ? 'Retirer' : 'Ajouter'}
 
-                        style={{
+                        className="shrink-0"
 
-                          width: 34,
-
-                          height: 34,
-
-                          borderRadius: '999px',
-
-                          display: 'flex',
-
-                          alignItems: 'center',
-
-                          justifyContent: 'center',
-
-                          border: selected ? 'none' : '1px solid #cbd5e1',
-
-                          backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                          color: selected ? '#fff' : '#0f172a',
-
-                          cursor: 'pointer',
-
-                        }}
+                        style={verificationCircleToggleStyle(selected)}
 
                       >
 
@@ -2265,7 +2240,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting} variant="platform">
 
@@ -2343,29 +2318,7 @@ export function PlatformAccountVerification() {
 
                           aria-label={selected ? 'Sélectionné' : 'Sélectionner'}
 
-                          style={{
-
-                            width: 34,
-
-                            height: 34,
-
-                            borderRadius: '999px',
-
-                            display: 'flex',
-
-                            alignItems: 'center',
-
-                            justifyContent: 'center',
-
-                            border: selected ? 'none' : '1px solid #cbd5e1',
-
-                            backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                            color: selected ? '#fff' : '#0f172a',
-
-                            cursor: 'pointer',
-
-                          }}
+                          style={verificationCircleToggleStyle(selected)}
 
                         >
 
@@ -2449,29 +2402,7 @@ export function PlatformAccountVerification() {
 
                           aria-label={selected ? 'Sélectionné' : 'Sélectionner'}
 
-                          style={{
-
-                            width: 34,
-
-                            height: 34,
-
-                            borderRadius: '999px',
-
-                            display: 'flex',
-
-                            alignItems: 'center',
-
-                            justifyContent: 'center',
-
-                            border: selected ? 'none' : '1px solid #cbd5e1',
-
-                            backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                            color: selected ? '#fff' : '#0f172a',
-
-                            cursor: 'pointer',
-
-                          }}
+                          style={verificationCircleToggleStyle(selected)}
 
                         >
 
@@ -2491,7 +2422,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting} variant="platform">
 
@@ -2557,7 +2488,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting || complianceFamilyFlags.length === 0} variant="platform">
 
@@ -2645,29 +2576,7 @@ export function PlatformAccountVerification() {
 
                         aria-label={selected ? 'Retirer' : 'Ajouter'}
 
-                        style={{
-
-                          width: 34,
-
-                          height: 34,
-
-                          borderRadius: '999px',
-
-                          display: 'flex',
-
-                          alignItems: 'center',
-
-                          justifyContent: 'center',
-
-                          border: selected ? 'none' : '1px solid #cbd5e1',
-
-                          backgroundColor: selected ? '#16a34a' : 'transparent',
-
-                          color: selected ? '#fff' : '#0f172a',
-
-                          cursor: 'pointer',
-
-                        }}
+                        style={verificationCircleToggleStyle(selected)}
 
                       >
 
@@ -2685,7 +2594,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting || fundsSources.length === 0} variant="platform">
 
@@ -3073,7 +2982,7 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
 
                 <Button type="submit" disabled={submitting || isMissingRequestedKycDocs} variant="platform">
 

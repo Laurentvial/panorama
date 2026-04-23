@@ -9,3 +9,10 @@
   margin: 0;
 }
 
+/* Account verification — long step titles: calmer scale + balanced wraps on wide viewports */
+.verification-flow-step-title {
+  font-size: clamp(17px, 1.2vw, 22px);
+  line-height: 1.28;
+  text-wrap: balance;
+}
+

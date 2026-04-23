@@ -156,7 +156,14 @@ function getCacheKey(endpoint: string, options: RequestInit): string {
 /** Client-specific mutable lists: never cache GET (key ignores auth, stale data is confusing). */
 function shouldSkipGetResponseCache(endpoint: string): boolean {
   const path = endpoint.split('?')[0];
-  return path === '/api/client/successors' || path === '/api/client/successors/';
+  if (path === '/api/client/successors' || path === '/api/client/successors/') {
+    return true;
+  }
+  // Current user changes after profile PATCH; caching would keep stale fields until TTL expires.
+  if (path === '/api/user/current' || path === '/api/user/current/') {
+    return true;
+  }
+  return false;
 }
 
 // Get cached data if available and valid

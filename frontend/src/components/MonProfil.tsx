@@ -6,10 +6,10 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Checkbox } from './ui/checkbox';
 import { HiOutlineUser, HiOutlineCamera } from 'react-icons/hi';
 import { toast } from 'sonner';
+import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -23,6 +23,48 @@ const DAY_LABELS: { [key: string]: string } = {
   sunday: 'Dimanche',
 };
 
+/** Mon–Fri = travail, sam–dim = jour de repos (coche) — when API sends no schedule. */
+const DEFAULT_WEEKDAY_SCHEDULE: { [key: string]: { start: string; end: string } } = {
+  monday: { start: '09:00', end: '18:00' },
+  tuesday: { start: '09:00', end: '18:00' },
+  wednesday: { start: '09:00', end: '18:00' },
+  thursday: { start: '09:00', end: '18:00' },
+  friday: { start: '09:00', end: '18:00' },
+};
+
+function coalesceAvailabilitySchedule(
+  s: { [key: string]: { start: string; end: string } } | null | undefined,
+): { [key: string]: { start: string; end: string } } {
+  if (s && Object.keys(s).length > 0) {
+    return { ...s };
+  }
+  return { ...DEFAULT_WEEKDAY_SCHEDULE };
+}
+
+type ProfilePatchPayload = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  status?: string;
+  profilePhoto?: string;
+  availabilitySchedule?: { [key: string]: { start: string; end: string } } | null;
+};
+
+function formStateFromUserDetailsPayload(data: ProfilePatchPayload) {
+  const st = data.status;
+  const status: 'online' | 'away' | 'offline' =
+    st === 'online' || st === 'away' || st === 'offline' ? st : 'offline';
+  return {
+    firstName: data.firstName ?? '',
+    lastName: data.lastName ?? '',
+    email: data.email ?? '',
+    phone: data.phone ?? '',
+    status,
+    availabilitySchedule: coalesceAvailabilitySchedule(data.availabilitySchedule),
+  };
+}
+
 export function MonProfil() {
   const { currentUser, refreshUser } = useUser();
   const [loading, setLoading] = useState(false);
@@ -35,7 +77,7 @@ export function MonProfil() {
     email: '',
     phone: '',
     status: 'offline' as 'online' | 'away' | 'offline',
-    availabilitySchedule: {} as { [key: string]: { start: string; end: string } },
+    availabilitySchedule: { ...DEFAULT_WEEKDAY_SCHEDULE },
   });
   
   const [profilePhoto, setProfilePhoto] = useState<string>('');
@@ -49,7 +91,7 @@ export function MonProfil() {
         email: currentUser.email || '',
         phone: currentUser.phone || '',
         status: currentUser.status || 'offline',
-        availabilitySchedule: currentUser.availabilitySchedule || {},
+        availabilitySchedule: coalesceAvailabilitySchedule(currentUser.availabilitySchedule),
       });
       setProfilePhoto(currentUser.profilePhoto || '');
     }
@@ -146,14 +188,22 @@ export function MonProfil() {
         formDataToSend.append('profilePhoto', profilePhotoFile);
       }
 
-      await apiCall('/api/user/profile/', {
+      const updated = (await apiCall('/api/user/profile/', {
         method: 'PATCH',
         body: formDataToSend,
         headers: {}, // Don't set Content-Type, browser will set it with boundary for FormData
-      });
+      })) as ProfilePatchPayload;
 
-      toast.success('Profil mis à jour avec succès');
+      // Apply server response immediately (GET /user/current/ was cached; refreshUser is fixed too).
+      setFormData(formStateFromUserDetailsPayload(updated));
+      if (typeof updated.profilePhoto === 'string' && updated.profilePhoto.length > 0) {
+        setProfilePhoto(updated.profilePhoto);
+      } else {
+        setProfilePhoto(currentUser?.profilePhoto || '');
+      }
+      setProfilePhotoFile(null);
       await refreshUser();
+      toast.success('Profil mis à jour avec succès');
     } catch (error: any) {
       console.error('Error updating profile:', error);
       toast.error(error?.message || 'Erreur lors de la mise à jour du profil');
@@ -183,13 +233,29 @@ export function MonProfil() {
   }
 
   return (
-    <div className="mon-profil-container" style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div
+      className="mon-profil-container relative"
+      style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}
+    >
+      {saving && (
+        <div
+          className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="mon-profil-saving-panel flex min-w-[min(100vw-2rem,20rem)] flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card shadow-lg">
+            <LoadingIndicator />
+            <p className="m-0 w-full text-center text-sm font-medium text-foreground">Enregistrement en cours…</p>
+          </div>
+        </div>
+      )}
       <div className="page-header-section">
         <h1 className="page-title">Mon Profil</h1>
         <p className="page-subtitle">Gérez vos informations personnelles et votre disponibilité</p>
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-busy={saving}>
         <div className="grid gap-6">
           {/* Informations personnelles */}
           <Card>
@@ -198,19 +264,55 @@ export function MonProfil() {
               <CardDescription>Modifiez vos informations de base</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Photo de profil */}
-              <div className="flex items-center gap-6">
-                <div className="relative">
-                  <Avatar style={{ width: '72px', height: '72px' }}>
-                    <AvatarImage src={profilePhoto} alt={`${formData.firstName} ${formData.lastName}`} />
-                    <AvatarFallback className="text-sm">
-                      {getInitials() || <HiOutlineUser className="w-5 h-5" />}
-                    </AvatarFallback>
-                  </Avatar>
+              {/* Photo de profil — flex + gap inline (grid gap pouvait ne pas s’appliquer selon le parent) */}
+              <div
+                className="flex flex-row flex-nowrap items-center"
+                style={{ gap: '2rem' }}
+              >
+                <div
+                  className="relative shrink-0"
+                  style={{ width: 72, minWidth: 72, maxWidth: 72, height: 72, flexShrink: 0 }}
+                >
+                  {/*
+                    img global reset (index.css) sets height: auto + max-width: 100%, which
+                    can stretch the parent into a tall non-square box; rounded-full then looks
+                    like a vertical oval. Keep a fixed square container + explicit img sizing.
+                  */}
+                  <div
+                    className="overflow-hidden rounded-full bg-muted"
+                    style={{ width: 72, height: 72, aspectRatio: 1, flexShrink: 0 }}
+                  >
+                    {profilePhoto ? (
+                      <img
+                        src={profilePhoto}
+                        alt={
+                          [formData.firstName, formData.lastName].filter(Boolean).join(' ').trim() ||
+                          'Photo de profil'
+                        }
+                        decoding="async"
+                        style={{
+                          display: 'block',
+                          width: 72,
+                          height: 72,
+                          maxWidth: 72,
+                          minHeight: 72,
+                          objectFit: 'cover',
+                          objectPosition: 'center',
+                        }}
+                      />
+                    ) : (
+                      <div
+                        className="flex h-full w-full items-center justify-center text-sm text-muted-foreground"
+                        style={{ width: 72, height: 72 }}
+                      >
+                        {getInitials() || <HiOutlineUser className="h-5 w-5" />}
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="absolute bottom-0 right-0 p-1.5 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition-colors shadow-sm"
+                    className="absolute bottom-0 right-0 z-10 p-1.5 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition-colors shadow-sm"
                     title="Changer la photo"
                   >
                     <HiOutlineCamera className="w-3 h-3" />
@@ -223,7 +325,7 @@ export function MonProfil() {
                     className="hidden"
                   />
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0" style={{ flex: '1 1 0', minWidth: 0 }}>
                   <p className="text-sm font-medium mb-1">Photo de profil</p>
                   <p className="text-sm text-muted-foreground mb-3">JPG, PNG ou GIF. Max 5 Mo</p>
                   <Button
@@ -431,6 +533,7 @@ export function MonProfil() {
             <Button
               type="button"
               variant="outline"
+              disabled={saving}
               onClick={() => {
                 if (currentUser) {
                   setFormData({
@@ -439,7 +542,7 @@ export function MonProfil() {
                     email: currentUser.email || '',
                     phone: currentUser.phone || '',
                     status: currentUser.status || 'offline',
-                    availabilitySchedule: currentUser.availabilitySchedule || {},
+                    availabilitySchedule: coalesceAvailabilitySchedule(currentUser.availabilitySchedule),
                   });
                   setProfilePhoto(currentUser.profilePhoto || '');
                   setProfilePhotoFile(null);
@@ -449,7 +552,7 @@ export function MonProfil() {
               Annuler
             </Button>
             <Button type="submit" disabled={saving}>
-              {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+              {saving ? 'Enregistrement…' : 'Enregistrer les modifications'}
             </Button>
           </div>
         </div>

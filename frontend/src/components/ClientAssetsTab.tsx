@@ -36,8 +36,12 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
-  // Add asset modal: search (assetSearchQuery is modal-only)
+  // Add asset modal: filters + search + multi-select (modal-only; ne pas mélanger avec filterType/filterCategory du tableau)
   const [assetSearchQuery, setAssetSearchQuery] = useState<string>('');
+  const [selectedAssetIdsInModal, setSelectedAssetIdsInModal] = useState<Set<string>>(new Set());
+  const [filterAssetTypeInModal, setFilterAssetTypeInModal] = useState<string>('all');
+  const [filterAssetCategoryInModal, setFilterAssetCategoryInModal] = useState<string>('all');
+  const [filterAssetSubcategoryInModal, setFilterAssetSubcategoryInModal] = useState<string>('all');
   // Add product modal: multi-select state (productSearchQuery is modal-only)
   const [selectedProductIdsInModal, setSelectedProductIdsInModal] = useState<Set<string>>(new Set());
   const [productSearchQuery, setProductSearchQuery] = useState<string>('');
@@ -233,29 +237,55 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   function closeAddAssetModal() {
     setIsAddAssetDialogOpen(false);
     setAssetSearchQuery('');
+    setSelectedAssetIdsInModal(new Set());
+    setFilterAssetTypeInModal('all');
+    setFilterAssetCategoryInModal('all');
+    setFilterAssetSubcategoryInModal('all');
   }
 
-  async function handleAddAsset(assetId: string) {
-    const asset = availableAssets.find((a: any) => a.id === assetId);
-    const tempId = `pending-${assetId}-${Date.now()}`;
-    if (asset) {
-      setLocalClientAssets((prev) => [...prev, { id: tempId, asset, featured: false }]);
-    }
+  async function handleAddAssets(assetIds: string[]) {
+    if (assetIds.length === 0) return;
+    const baseTime = Date.now();
+    const assetsToAdd = assetIds
+      .map((id) => availableAssets.find((a: any) => a.id === id))
+      .filter(Boolean) as any[];
+    const tempItems = assetsToAdd.map((asset: any, i: number) => ({
+      id: `pending-${asset.id}-${baseTime}-${i}`,
+      asset,
+      featured: false,
+    }));
+    setLocalClientAssets((prev) => [...prev, ...tempItems]);
     closeAddAssetModal();
+    let addedCount = 0;
+    let skippedCount = 0;
     try {
-      await apiCall(`/api/clients/${clientId}/assets/add/`, {
-        method: 'POST',
-        body: JSON.stringify({ assetId }),
-        headers: { 'Content-Type': 'application/json' }
+      const results = await Promise.allSettled(
+        assetIds.map((assetId) =>
+          apiCall(`/api/clients/${clientId}/assets/add/`, {
+            method: 'POST',
+            body: JSON.stringify({ assetId }),
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )
+      );
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') addedCount++;
+        else {
+          const err = (result as PromiseRejectedResult).reason;
+          const msg = String(err?.message || err || '');
+          if (msg.includes('already') || msg.includes('déjà') || msg.includes('assign')) skippedCount++;
+        }
       });
-      toast.success('Actif ajouté avec succès');
       onRefresh();
-    } catch (error: any) {
-      if (asset) {
-        setLocalClientAssets((prev) => prev.filter((ca: any) => ca.id !== tempId));
+      if (skippedCount > 0) {
+        toast.success(`${addedCount} actif(s) ajouté(s), ${skippedCount} déjà assigné(s)`);
+      } else {
+        toast.success(`${addedCount} actif(s) ajouté(s) avec succès`);
       }
-      console.error('Error adding asset:', error);
-      toast.error(error.message || 'Erreur lors de l\'ajout de l\'actif');
+    } catch (error: any) {
+      onRefresh();
+      console.error('Error adding assets:', error);
+      toast.error(error.message || "Erreur lors de l'ajout des actifs");
     }
   }
 
@@ -491,7 +521,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
             {isAddAssetDialogOpen && (
               <div className="modal-overlay" onClick={closeAddAssetModal}>
-                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '42rem', maxHeight: '90vh' }}>
+                <div className="modal-content modal-content--scrollable" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '50rem', maxHeight: '90vh' }}>
                   <div className="modal-header">
                     <h2 className="modal-title">Ajouter un actif</h2>
                     <Button
@@ -504,55 +534,223 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                       <X className="planning-icon-md" />
                     </Button>
                   </div>
-                  <div className="modal-form">
-                    <div className="modal-form-field">
-                      <Label>Rechercher un actif</Label>
+
+                  <div className="space-y-4 mb-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="asset-filter-type">Type</Label>
+                        <Select
+                          value={filterAssetTypeInModal}
+                          onValueChange={(value) => {
+                            setFilterAssetTypeInModal(value);
+                            setFilterAssetSubcategoryInModal('all');
+                          }}
+                        >
+                          <SelectTrigger id="asset-filter-type">
+                            <SelectValue placeholder="Tous les types" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Tous les types</SelectItem>
+                            {(Array.from(new Set(availableAssets.map((a: any) => a.type).filter(Boolean))) as string[])
+                              .sort()
+                              .map((type: string) => (
+                                <SelectItem key={type} value={type}>
+                                  {type}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="asset-filter-category">Catégorie</Label>
+                        <Select
+                          value={filterAssetCategoryInModal}
+                          onValueChange={(value) => {
+                            setFilterAssetCategoryInModal(value);
+                            setFilterAssetSubcategoryInModal('all');
+                          }}
+                        >
+                          <SelectTrigger id="asset-filter-category">
+                            <SelectValue placeholder="Toutes les catégories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les catégories</SelectItem>
+                            {(
+                              Array.from(
+                                new Set(
+                                  availableAssets
+                                    .map((a: any) => a.category)
+                                    .filter((c: any) => {
+                                      if (!c) return false;
+                                      const label = String(c).trim().toLowerCase();
+                                      return !['sous catégorie', 'sous-catégorie', 'sous categorie'].includes(label);
+                                    })
+                                )
+                              ) as string[]
+                            )
+                              .sort()
+                              .map((cat: string) => (
+                                <SelectItem key={cat} value={cat}>
+                                  {cat}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="asset-filter-subcategory">Sous-catégorie</Label>
+                        <Select value={filterAssetSubcategoryInModal} onValueChange={setFilterAssetSubcategoryInModal}>
+                          <SelectTrigger id="asset-filter-subcategory">
+                            <SelectValue placeholder="Toutes les sous-catégories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Toutes les sous-catégories</SelectItem>
+                            {(() => {
+                              const assignedIds = new Set(localClientAssets.map((ca: any) => ca.asset?.id).filter(Boolean));
+                              const unassigned = availableAssets.filter((a: any) => !assignedIds.has(a.id));
+                              const filteredForSub = unassigned.filter(
+                                (a: any) =>
+                                  (filterAssetTypeInModal === 'all' || a.type === filterAssetTypeInModal) &&
+                                  (filterAssetCategoryInModal === 'all' || a.category === filterAssetCategoryInModal)
+                              );
+                              return (Array.from(new Set(filteredForSub.map((a: any) => a.subcategory).filter(Boolean))) as string[])
+                                .sort()
+                                .map((sub: string) => (
+                                  <SelectItem key={sub} value={sub}>
+                                    {sub}
+                                  </SelectItem>
+                                ));
+                            })()}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="asset-search">Rechercher</Label>
                       <Input
+                        id="asset-search"
                         type="text"
-                        placeholder="Rechercher par nom, type ou référence..."
+                        placeholder="Rechercher par nom, type, référence ou catégorie..."
                         value={assetSearchQuery}
                         onChange={(e) => setAssetSearchQuery(e.target.value)}
                         className="w-full"
                       />
                     </div>
-                    <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
-                      {(() => {
-                        const assignedIds = new Set(localClientAssets.map((ca: any) => ca.asset?.id).filter(Boolean));
-                        const q = assetSearchQuery.trim().toLowerCase();
-                        const filteredAssets = availableAssets.filter((asset: any) => {
-                          if (assignedIds.has(asset.id)) return false;
-                          const searchMatch = !q || (asset.name || '').toLowerCase().includes(q) || (asset.type || '').toLowerCase().includes(q) || (asset.reference || '').toLowerCase().includes(q);
-                          return searchMatch;
-                        });
-                        return filteredAssets.length > 0 ? (
-                          <div className="space-y-2">
-                            {filteredAssets.map((asset: any) => (
-                              <div
-                                key={asset.id}
-                                className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 cursor-pointer transition-colors"
-                                onClick={() => handleAddAsset(asset.id)}
-                              >
-                                <div className="flex-1">
-                                  <div className="font-medium text-slate-900">{asset.name}</div>
-                                  <div className="text-sm text-slate-500">
-                                    {asset.type || 'Aucun'} • {asset.reference || 'Aucune référence'}
+                  </div>
+
+                  {(() => {
+                    const assignedIds = new Set(localClientAssets.map((ca: any) => ca.asset?.id).filter(Boolean));
+                    const q = assetSearchQuery.trim().toLowerCase();
+                    const filteredAssets = availableAssets.filter((asset: any) => {
+                      if (assignedIds.has(asset.id)) return false;
+                      const typeMatch = filterAssetTypeInModal === 'all' || asset.type === filterAssetTypeInModal;
+                      const categoryMatch = filterAssetCategoryInModal === 'all' || asset.category === filterAssetCategoryInModal;
+                      const subMatch = filterAssetSubcategoryInModal === 'all' || asset.subcategory === filterAssetSubcategoryInModal;
+                      const searchMatch =
+                        !q ||
+                        (asset.name || '').toLowerCase().includes(q) ||
+                        (asset.type || '').toLowerCase().includes(q) ||
+                        (asset.reference || '').toLowerCase().includes(q) ||
+                        (asset.category || '').toLowerCase().includes(q) ||
+                        (asset.subcategory || '').toLowerCase().includes(q);
+                      return typeMatch && categoryMatch && subMatch && searchMatch;
+                    });
+                    const availableIds = filteredAssets.map((a: any) => a.id);
+                    const allAvailableSelected =
+                      availableIds.length > 0 && availableIds.every((id: string) => selectedAssetIdsInModal.has(id));
+
+                    return (
+                      <>
+                        {filteredAssets.length > 0 && (
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm text-slate-600">
+                              {filteredAssets.length} actif{filteredAssets.length > 1 ? 's' : ''} trouvé
+                              {filteredAssets.length > 1 ? 's' : ''}
+                            </span>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (allAvailableSelected) {
+                                  setSelectedAssetIdsInModal((prev) => {
+                                    const next = new Set(prev);
+                                    availableIds.forEach((id: string) => next.delete(id));
+                                    return next;
+                                  });
+                                } else {
+                                  setSelectedAssetIdsInModal((prev) => {
+                                    const next = new Set(prev);
+                                    availableIds.forEach((id: string) => next.add(id));
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                            >
+                              {allAvailableSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                            </a>
+                          </div>
+                        )}
+                        <div style={{ maxHeight: '50vh', overflowY: 'auto', marginTop: '0.5rem' }}>
+                          {filteredAssets.length > 0 ? (
+                            <div className="space-y-2">
+                              {filteredAssets.map((asset: any) => {
+                                const isSelected = selectedAssetIdsInModal.has(asset.id);
+                                return (
+                                  <div
+                                    key={asset.id}
+                                    className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                                      isSelected
+                                        ? 'border-blue-500 bg-blue-50'
+                                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <Checkbox
+                                      checked={isSelected}
+                                      onCheckedChange={(checked) => {
+                                        setSelectedAssetIdsInModal((prev) => {
+                                          const next = new Set(prev);
+                                          if (checked) next.add(asset.id);
+                                          else next.delete(asset.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-slate-900">{asset.name}</div>
+                                      <div className="text-sm text-slate-500">
+                                        {asset.type || 'Aucun'} • {asset.reference || 'Aucune référence'}
+                                        {asset.category && ` • ${asset.category}`}
+                                        {asset.subcategory && ` • ${asset.subcategory}`}
+                                      </div>
+                                    </div>
                                   </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8 text-slate-500">
-                            {assetSearchQuery.trim() ? 'Aucun actif trouvé avec cette recherche' : 'Aucun actif disponible à ajouter'}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
-                      <Button type="button" variant="outline" onClick={closeAddAssetModal}>
-                        Annuler
-                      </Button>
-                    </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="text-center py-8 text-slate-500">
+                              {assetSearchQuery.trim() || filterAssetTypeInModal !== 'all' || filterAssetCategoryInModal !== 'all' || filterAssetSubcategoryInModal !== 'all'
+                                ? 'Aucun actif trouvé avec ces filtres'
+                                : 'Aucun actif disponible à ajouter'}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  <div className="modal-form-actions" style={{ marginTop: '1rem' }}>
+                    <Button type="button" variant="outline" onClick={closeAddAssetModal}>
+                      Annuler
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleAddAssets(Array.from(selectedAssetIdsInModal))}
+                      disabled={selectedAssetIdsInModal.size === 0}
+                    >
+                      Ajouter la sélection ({selectedAssetIdsInModal.size})
+                    </Button>
                   </div>
                 </div>
               </div>

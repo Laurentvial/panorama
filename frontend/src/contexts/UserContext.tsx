@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { apiCall } from '../utils/api';
+import { apiCall, clearApiCache } from '../utils/api';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 
@@ -325,6 +325,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const refreshUser = async () => {
     // Clear cache and force refresh
     userCache = null;
+    clearApiCache('/api/user');
     await getCurrentUser(true);
   };
 
