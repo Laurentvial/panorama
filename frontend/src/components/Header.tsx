@@ -32,8 +32,8 @@ interface HeaderProps {
 
 export function Header({ user }: HeaderProps) {
   const navigate = useNavigate();
-  const { settings, loading: settingsLoading } = useTheme();
-  const platformName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const { settings } = useTheme();
+  const platformName = (settings?.platform_name || 'Plateforme').trim();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);

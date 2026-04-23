@@ -1369,7 +1369,7 @@ export function PlatformAccountVerification() {
         {step !== null && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
 
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{progress.percent}% Terminer</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{progress.percent}% Terminé</div>
 
             <div style={{ width: '60%', maxWidth: 420, height: 3, backgroundColor: '#e5e7eb', borderRadius: 999 }}>
 

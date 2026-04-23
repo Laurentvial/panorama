@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
 import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
-import LoadingIndicator from '../components/LoadingIndicator';
-import '../styles/AppSettingsLoader.css';
 
 export interface AppSettings {
   id: string;
@@ -51,7 +49,8 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  /** False until the first settings fetch (success or default-on-error) completes. */
+  const [ready, setReady] = useState(false);
 
   const getReadableForeground = (hexColor: string): string | null => {
     const hex = (hexColor || '').trim();
@@ -81,7 +80,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const loadSettings = async () => {
     try {
-      setLoading(true);
       const data = await apiCall('/api/settings/');
       setSettings(data);
       applyTheme(data);
@@ -114,7 +112,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setSettings(defaultSettings);
       applyTheme(defaultSettings);
     } finally {
-      setLoading(false);
+      setReady(true);
     }
   };
 
@@ -185,19 +183,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
   }, []);
 
-  if (loading) {
-    return (
-      <ThemeContext.Provider value={{ settings, loading, loadSettings, updateSettings }}>
-        <div className="app-settings-loader" aria-live="polite" aria-busy="true">
-          <LoadingIndicator />
-          <p className="app-settings-loader-text">Chargement...</p>
-        </div>
-      </ThemeContext.Provider>
-    );
-  }
+  // `loading` is only true before the first settings response so pages can use optimistic
+  // fallbacks. Refetches (e.g. admin customization) do not set this back to true.
+  const loading = !ready;
 
   return (
     <ThemeContext.Provider value={{ settings, loading, loadSettings, updateSettings }}>

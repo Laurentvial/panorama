@@ -85,6 +85,19 @@
   padding: 0.15rem 0;
 }
 
+.login-banner-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.login-banner-fallback-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: rgba(2, 6, 23, 0.38);
+}
+
 .login-content {
   position: relative;
   z-index: 1;

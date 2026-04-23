@@ -9,11 +9,11 @@ import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { Layout } from './components/Layout';
 import { Toaster } from './components/ui/sonner';
 import LoadingIndicator from './components/LoadingIndicator';
+import LoginPage from './components/LoginPage';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './utils/constants';
 import './styles/Card.css';
 
 // Lazy load all route components for better performance
-const Login = lazy(() => import('./components/LoginPage'));
 const ClientForgotPasswordPage = lazy(() => import('./components/ClientForgotPasswordPage'));
 const ClientResetPasswordPage = lazy(() => import('./components/ClientResetPasswordPage'));
 const ClientOtpLoginPage = lazy(() => import('./components/ClientOtpLoginPage'));
@@ -147,11 +147,7 @@ function App() {
                     <Toaster />
                 <Routes>
                     {/* Public Routes */}
-                    <Route path="/login" element={
-                        <Suspense fallback={<LoadingFallback />}>
-                            <Login />
-                        </Suspense>
-                    } />
+                    <Route path="/login" element={<LoginPage />} />
                     <Route path="/forgot-password" element={
                         <Suspense fallback={<LoadingFallback />}>
                             <ClientForgotPasswordPage />

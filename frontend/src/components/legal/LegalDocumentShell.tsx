@@ -13,10 +13,10 @@ interface LegalDocumentShellProps {
 
 export function LegalDocumentShell({ title, children }: LegalDocumentShellProps) {
   const navigate = useNavigate();
-  const { settings, loading: settingsLoading } = useTheme();
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const { settings } = useTheme();
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName =
     rawName && rawName.toLowerCase() !== 'panorama' ? rawName : 'Plateforme';
   const buttonBg =
@@ -83,9 +83,7 @@ export function LegalDocumentShell({ title, children }: LegalDocumentShellProps)
               lineHeight: 0,
             }}
           >
-            {settingsLoading ? (
-              <span style={{ fontWeight: 600, fontSize: 15, lineHeight: 1.3 }}>{platformName}</span>
-            ) : hasLogo ? (
+            {hasLogo ? (
               <img
                 src={bannerLogoSrc}
                 alt={platformName}

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { useTheme } from '../contexts/ThemeContext';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
+import { Building2 } from 'lucide-react';
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
@@ -21,9 +22,9 @@ export function ReferralLandingPage() {
   const [success, setSuccess] = useState(false);
   const [codeValid, setCodeValid] = useState<boolean | null>(null);
 
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
@@ -33,7 +34,7 @@ export function ReferralLandingPage() {
     ['--login-button-bg' as any]: buttonBg,
     ['--platform-button-bg' as any]: buttonBg,
   };
-  if (!settingsLoading && settings?.login_background_image_url) {
+  if (settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
@@ -102,8 +103,12 @@ export function ReferralLandingPage() {
             <div className="login-banner-placeholder" aria-hidden="true" />
           ) : hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : (
+          ) : platformName ? (
             <div className="login-banner-title">{platformName}</div>
+          ) : (
+            <div className="login-banner-fallback" role="img" aria-label="Espace client">
+              <Building2 className="login-banner-fallback-icon" aria-hidden />
+            </div>
           )}
         </header>
         <div className="login-content">
@@ -130,8 +135,12 @@ export function ReferralLandingPage() {
             <div className="login-banner-placeholder" aria-hidden="true" />
           ) : hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : (
+          ) : platformName ? (
             <div className="login-banner-title">{platformName}</div>
+          ) : (
+            <div className="login-banner-fallback" role="img" aria-label="Espace client">
+              <Building2 className="login-banner-fallback-icon" aria-hidden />
+            </div>
           )}
         </header>
         <div className="login-content">
@@ -160,8 +169,12 @@ export function ReferralLandingPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : (
+        ) : platformName ? (
           <div className="login-banner-title">{platformName}</div>
+        ) : (
+          <div className="login-banner-fallback" role="img" aria-label="Espace client">
+            <Building2 className="login-banner-fallback-icon" aria-hidden />
+          </div>
         )}
       </header>
 

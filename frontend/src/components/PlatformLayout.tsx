@@ -44,8 +44,8 @@ export function PlatformLayout() {
   const BOTTOM_NAV_BREAKPOINT = 768;
   const { currentUser } = useUser();
   const { searchTerm, setSearchTerm } = usePlatformSearch();
-  const { settings, loading: settingsLoading } = useTheme();
-  const platformName = !settingsLoading ? (settings?.platform_name || 'Plateforme').trim() : '';
+  const { settings } = useTheme();
+  const platformName = (settings?.platform_name || 'Plateforme').trim();
   const platformButtonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||

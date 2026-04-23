@@ -4,7 +4,30 @@ import react from '@vitejs/plugin-react-swc';
 import path from 'path';
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    /**
+     * Vite can emit the main stylesheet after the main module script, which can allow a
+     * frame of unstyled first paint. Keep link[rel=stylesheet] at the start of <head>.
+     */
+    {
+      name: 'css-link-first-in-head',
+      apply: 'build',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html) {
+          const re = /<link[^>]+rel="stylesheet"[^>]*\/?>\s*/gi;
+          const links = html.match(re);
+          if (!links?.length) return html;
+          const without = html.replace(re, '');
+          if (/<head>/i.test(without)) {
+            return without.replace(/<head>/i, `<head>\n    ${links.join('\n    ')}`);
+          }
+          return html;
+        },
+      },
+    },
+  ],
   // Use '/' for standalone deployments (Choreo), '/static/' only if served by Django
   // For Choreo standalone frontend, always use '/'
   base: '/',

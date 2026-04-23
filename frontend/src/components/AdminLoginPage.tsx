@@ -9,6 +9,7 @@ import { useUser } from '../contexts/UserContext';
 import { ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
+import { Building2 } from 'lucide-react';
 import '../styles/LoginPage.css';
 
 export function AdminLoginPage() {
@@ -21,9 +22,9 @@ export function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ username?: boolean; password?: boolean }>({});
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
@@ -32,7 +33,7 @@ export function AdminLoginPage() {
   const containerStyle: React.CSSProperties = {
     ['--login-button-bg' as any]: buttonBg,
   };
-  if (!settingsLoading && settings?.login_background_image_url) {
+  if (settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
@@ -141,8 +142,12 @@ export function AdminLoginPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : (
+        ) : platformName ? (
           <div className="login-banner-title">{platformName}</div>
+        ) : (
+          <div className="login-banner-fallback" role="img" aria-label="Administration">
+            <Building2 className="login-banner-fallback-icon" aria-hidden />
+          </div>
         )}
       </header>
 

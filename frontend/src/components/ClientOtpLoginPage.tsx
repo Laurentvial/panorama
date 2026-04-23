@@ -9,6 +9,7 @@ import { Input } from './ui/input';
 import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 
 import { clientRequestOtp, clientVerifyOtp } from '../utils/auth';
+import { Building2 } from 'lucide-react';
 
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
@@ -23,8 +24,8 @@ export function ClientOtpLoginPage() {
 
   const emailOtpEnabled = settings?.otp_email_enabled !== false;
   const smsOtpEnabled = settings?.otp_sms_enabled !== false;
-  const bothOtpDisabled = !settingsLoading && !emailOtpEnabled && !smsOtpEnabled;
-  const showChannelToggle = !settingsLoading && emailOtpEnabled && smsOtpEnabled;
+  const bothOtpDisabled = Boolean(settings) && !emailOtpEnabled && !smsOtpEnabled;
+  const showChannelToggle = Boolean(settings) && emailOtpEnabled && smsOtpEnabled;
 
   const [step, setStep] = useState<Step>('email');
   const [channel, setChannel] = useState<Channel>('email');
@@ -41,9 +42,9 @@ export function ClientOtpLoginPage() {
     else if (emailOtpEnabled && !smsOtpEnabled) setChannel('email');
   }, [settingsLoading, emailOtpEnabled, smsOtpEnabled]);
 
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
@@ -52,7 +53,7 @@ export function ClientOtpLoginPage() {
   const containerStyle: React.CSSProperties = {
     ['--login-button-bg' as any]: buttonBg,
   };
-  if (!settingsLoading && settings?.login_background_image_url) {
+  if (settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
@@ -141,8 +142,12 @@ export function ClientOtpLoginPage() {
         <header className="login-banner">
           {hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : (
+          ) : platformName ? (
             <div className="login-banner-title">{platformName}</div>
+          ) : (
+            <div className="login-banner-fallback" role="img" aria-label="Espace client">
+              <Building2 className="login-banner-fallback-icon" aria-hidden />
+            </div>
           )}
         </header>
         <div className="login-content">
@@ -174,8 +179,12 @@ export function ClientOtpLoginPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : (
+        ) : platformName ? (
           <div className="login-banner-title">{platformName}</div>
+        ) : (
+          <div className="login-banner-fallback" role="img" aria-label="Espace client">
+            <Building2 className="login-banner-fallback-icon" aria-hidden />
+          </div>
         )}
       </header>
 

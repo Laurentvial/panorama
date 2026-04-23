@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 
 import { useTheme } from '../contexts/ThemeContext';
 import { clientConfirmPasswordReset } from '../utils/auth';
+import { Building2 } from 'lucide-react';
 
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
@@ -29,9 +30,9 @@ export function ClientResetPasswordPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
@@ -40,7 +41,7 @@ export function ClientResetPasswordPage() {
   const containerStyle: React.CSSProperties = {
     ['--login-button-bg' as any]: buttonBg,
   };
-  if (!settingsLoading && settings?.login_background_image_url) {
+  if (settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
@@ -79,8 +80,12 @@ export function ClientResetPasswordPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : (
+        ) : platformName ? (
           <div className="login-banner-title">{platformName}</div>
+        ) : (
+          <div className="login-banner-fallback" role="img" aria-label="Espace client">
+            <Building2 className="login-banner-fallback-icon" aria-hidden />
+          </div>
         )}
       </header>
 

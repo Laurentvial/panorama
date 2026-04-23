@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { clientSignIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -22,10 +21,14 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
-  const hasLogo = !settingsLoading && Boolean(settings?.logo_url);
+  const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = !settingsLoading ? (settings?.platform_name || '').trim() : '';
+  const rawName = (settings?.platform_name || '').trim();
   const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
+  const showOtpBlock = Boolean(
+    settings &&
+      (settings.otp_email_enabled !== false || settings.otp_sms_enabled !== false)
+  );
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -34,7 +37,7 @@ export function LoginPage() {
     ['--login-button-bg' as any]: buttonBg,
     ['--platform-button-bg' as any]: buttonBg,
   };
-  if (!settingsLoading && settings?.login_background_image_url) {
+  if (settings?.login_background_image_url) {
     (containerStyle as any)['--login-bg-image'] = `url("${settings.login_background_image_url}")`;
   }
 
@@ -123,8 +126,12 @@ export function LoginPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : (
+        ) : platformName ? (
           <div className="login-banner-title">{platformName}</div>
+        ) : (
+          <div className="login-banner-fallback" role="img" aria-label="Espace client">
+            <Building2 className="login-banner-fallback-icon" aria-hidden />
+          </div>
         )}
       </header>
 
@@ -224,17 +231,17 @@ export function LoginPage() {
                 </Button>
               </div>
 
-              {!settingsLoading && ((settings?.otp_email_enabled !== false) || (settings?.otp_sms_enabled !== false)) && (
-              <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem', justifyItems: 'center' }}>
-                <div style={{ color: 'rgba(2, 6, 23, 0.55)', fontSize: '0.95rem' }}>ou</div>
-                <Button
-                  type="button"
-                  className="login-button"
-                  onClick={() => navigate('/login/otp')}
-                >
-                  Connexion sans mot de passe
-                </Button>
-              </div>
+              {showOtpBlock && (
+                <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem', justifyItems: 'center' }}>
+                  <div style={{ color: 'rgba(2, 6, 23, 0.55)', fontSize: '0.95rem' }}>ou</div>
+                  <Button
+                    type="button"
+                    className="login-button"
+                    onClick={() => navigate('/login/otp')}
+                  >
+                    Connexion sans mot de passe
+                  </Button>
+                </div>
               )}
             </form>
           </CardContent>
