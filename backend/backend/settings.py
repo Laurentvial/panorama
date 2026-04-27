@@ -87,6 +87,10 @@ BACKEND_PUBLIC_URL = (
 ).strip()
 if BACKEND_PUBLIC_URL and not BACKEND_PUBLIC_URL.startswith(('http://', 'https://')):
     BACKEND_PUBLIC_URL = f'https://{BACKEND_PUBLIC_URL}'
+# Production safety: avoid mixed-content by upgrading http -> https for public URL.
+# (The admin/frontend is served over HTTPS; media proxy URLs must also be HTTPS.)
+if BACKEND_PUBLIC_URL.startswith('http://') and not DEBUG:
+    BACKEND_PUBLIC_URL = 'https://' + BACKEND_PUBLIC_URL[len('http://'):]
 BACKEND_PUBLIC_URL = BACKEND_PUBLIC_URL.rstrip('/') if BACKEND_PUBLIC_URL else ''
 
 # Behind nginx/Traefik/Coolify, Django otherwise sees http + internal Host and
