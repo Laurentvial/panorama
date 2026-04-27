@@ -39,6 +39,14 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
+
+# Add frontend domain dynamically (for production deployments)
+frontend_public_url = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
+if frontend_public_url:
+    if not frontend_public_url.startswith(('http://', 'https://')):
+        frontend_public_url = f'https://{frontend_public_url}'
+    CSRF_TRUSTED_ORIGINS.append(frontend_public_url.rstrip('/'))
+
 # Add Railway domain dynamically
 railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
 if railway_domain:

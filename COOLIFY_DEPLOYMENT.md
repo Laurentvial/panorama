@@ -198,8 +198,13 @@ Trigger build and deploy. The backend will run migrations and collectstatic on s
 1. Project → Add Resource → Application
 2. **Source**: Same repo
 3. **Build Pack**: Dockerfile
-4. **Dockerfile path**: `frontend/Dockerfile`
-5. **Root directory**: `frontend`
+4. Set **either** of these (both work; pick one):
+   - **Option A (recommended)**:
+     - **Root directory**: `frontend`
+     - **Dockerfile path**: `Dockerfile`
+   - **Option B**:
+     - **Root directory**: *(empty / repo root)*
+     - **Dockerfile path**: `frontend/Dockerfile`
 6. **Port**: 80
 
 ### Build arguments
