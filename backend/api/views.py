@@ -2909,6 +2909,7 @@ def client_update_identity(request):
 
     # Handle KYC document uploads
     update_fields_list = []
+    kyc_uploaded_labels = []
     if 'identityDocument' in request.FILES:
         identity_file = request.FILES['identityDocument']
         try:
@@ -2919,6 +2920,7 @@ def client_update_identity(request):
                 client.identity_document.delete(save=False)
             client.identity_document.save(custom_filename, identity_file, save=False)
             update_fields_list.append('identity_document')
+            kyc_uploaded_labels.append("pièce d'identité (recto)")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2934,6 +2936,7 @@ def client_update_identity(request):
                 client.identity_document_verso.delete(save=False)
             client.identity_document_verso.save(custom_filename, identity_verso_file, save=False)
             update_fields_list.append('identity_document_verso')
+            kyc_uploaded_labels.append("pièce d'identité (verso)")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2949,6 +2952,7 @@ def client_update_identity(request):
                 client.proof_of_address.delete(save=False)
             client.proof_of_address.save(custom_filename, address_file, save=False)
             update_fields_list.append('proof_of_address')
+            kyc_uploaded_labels.append("justificatif de domicile")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2964,6 +2968,7 @@ def client_update_identity(request):
                 client.selfie_photo.delete(save=False)
             client.selfie_photo.save(custom_filename, selfie_file, save=False)
             update_fields_list.append('selfie_photo')
+            kyc_uploaded_labels.append("selfie")
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2993,6 +2998,29 @@ def client_update_identity(request):
             from django.utils import timezone
             client.kyc_submitted_at = timezone.now()
             update_fields_list.append('kyc_submitted_at')
+
+    # Notify assigned manager on any KYC document upload (Step 8)
+    # Create a single notification per request even if multiple files are uploaded.
+    if kyc_uploaded_labels:
+        try:
+            manager_user = _resolve_client_manager_user(client)
+            if manager_user:
+                client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+                uploaded_str = ", ".join(kyc_uploaded_labels)
+                create_app_notification(
+                    recipient_type=AppNotification.RECIPIENT_CRM_USER,
+                    recipient_user=manager_user,
+                    notification_type=AppNotification.TYPE_CLIENT_KYC_DOCUMENT_UPLOADED,
+                    title="KYC — Pièce justificative",
+                    message=f"{client_name} a importé : {uploaded_str}.",
+                    payload={
+                        "client_id": client.id,
+                        "uploaded_fields": list(kyc_uploaded_labels),
+                        "route": f"/admin/clients?clientId={client.id}&tab=verification",
+                    },
+                )
+        except Exception as e:
+            logger.warning("KYC upload notification failed: %s", str(e))
 
     # If no legal_name provided, try to derive it from name parts
     if not (client.legal_name or '').strip():

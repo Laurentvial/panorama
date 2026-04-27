@@ -726,9 +726,11 @@ export function AddProduct() {
                 </SelectTrigger>
                 <SelectContent>
                   {getSubcategoriesForCategory(formData.categoryId)
-                    .filter(subcategory => !formData.subcategory.includes(subcategory))
-                    .map((subcategory, index) => (
-                      <SelectItem key={index} value={subcategory}>
+                    .map((subcategory) => String(subcategory ?? '').trim())
+                    .filter((subcategory) => subcategory.length > 0)
+                    .filter((subcategory) => !formData.subcategory.includes(subcategory))
+                    .map((subcategory) => (
+                      <SelectItem key={subcategory} value={subcategory}>
                         {subcategory}
                       </SelectItem>
                     ))}

@@ -104,6 +104,12 @@ export function Header({ user }: HeaderProps) {
     if (!n.read) {
       handleMarkRead(n.id);
     }
+    const route = n.payload?.route as string | undefined;
+    if (route) {
+      setNotificationsOpen(false);
+      navigate(route);
+      return;
+    }
     const clientId = n.payload?.client_id as string | undefined;
     if (clientId) {
       setNotificationsOpen(false);
