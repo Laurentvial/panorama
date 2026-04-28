@@ -230,6 +230,11 @@ export function PlatformDiscover() {
     if (type.includes('etf') || category.includes('etf')) {
       return 'etf';
     }
+
+    // Scalping
+    if (type.includes('scalping') || category.includes('scalping')) {
+      return 'scalping';
+    }
     
     // Obligations (bonds)
     if (type.includes('obligation') || type.includes('obligations') || type.includes('bond') ||
@@ -320,6 +325,16 @@ export function PlatformDiscover() {
       return 'livret';
     }
     
+    // Assurance vie
+    if (type.includes('assurance') || type.includes('vie')) {
+      return 'assurance_vie';
+    }
+
+    // Scalping
+    if (type.includes('scalping')) {
+      return 'scalping';
+    }
+    
     // Épargne (savings) - normalized comparison handles all variants: "Épargne", "Épargne Salariale", "épargne", etc.
     if (type.includes('epargne') || type.includes('savings') ||
         subcategory.includes('epargne')) {
@@ -328,11 +343,6 @@ export function PlatformDiscover() {
     
     // PEA, PEL, CEL
     if (type.includes('pea') || type.includes('pel') || type.includes('cel')) {
-      return 'epargne';
-    }
-    
-    // Assurance vie
-    if (type.includes('assurance') || type.includes('vie')) {
       return 'epargne';
     }
     
@@ -458,8 +468,10 @@ export function PlatformDiscover() {
   const allTabs = [
     { value: 'smart_portfolio', label: 'Smart Portfolios' },
     { value: 'epargne', label: 'Épargne' },
+    { value: 'assurance_vie', label: 'Assurance vie' },
     { value: 'livret', label: 'Livret' },
     { value: 'etf', label: 'ETF' },
+    { value: 'scalping', label: 'Scalping' },
     { value: 'actions', label: 'Actions' },
     { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
     { value: 'obligations', label: 'Obligations' },
@@ -502,8 +514,12 @@ export function PlatformDiscover() {
         return <DollarSign className="h-5 w-5" />;
       case 'epargne':
         return <CircleDollarSign className="h-5 w-5" />;
+      case 'assurance_vie':
+        return <CircleDollarSign className="h-5 w-5" />;
       case 'livret':
         return <CircleDollarSign className="h-5 w-5" />;
+      case 'scalping':
+        return <TrendingUp className="h-5 w-5" />;
       case 'smart_portfolio':
         return <BarChart3 className="h-5 w-5" />;
       case 'autres':
@@ -529,8 +545,12 @@ export function PlatformDiscover() {
         return { bg: '#dbeafe', text: '#1e40af', border: '#60a5fa' }; // Bleu
       case 'epargne':
         return { bg: '#dcfce7', text: '#166534', border: '#86efac' }; // Vert clair
+      case 'assurance_vie':
+        return { bg: '#fef9c3', text: '#854d0e', border: '#fde047' }; // Jaune clair
       case 'livret':
         return { bg: '#ccfbf1', text: '#0f766e', border: '#5eead4' }; // Teal
+      case 'scalping':
+        return { bg: '#fee2e2', text: '#991b1b', border: '#fca5a5' }; // Rouge clair
       case 'smart_portfolio':
         return { bg: '#f0f9ff', text: '#0c4a6e', border: '#7dd3fc' }; // Bleu ciel
       case 'autres':
@@ -556,8 +576,12 @@ export function PlatformDiscover() {
         return 'Devises';
       case 'epargne':
         return 'Épargne';
+      case 'assurance_vie':
+        return 'Assurance vie';
       case 'livret':
         return 'Livret';
+      case 'scalping':
+        return 'Scalping';
       case 'smart_portfolio':
         return 'Smart Portfolio';
       case 'autres':
