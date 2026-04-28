@@ -35,6 +35,7 @@ from .models import NewsPost
 from .models import ClientVerificationConfig
 from .models import ClientDocument
 from .models import AppNotification
+from .client_product_overrides import effective_product_for_client, merge_serialized_product_with_overrides
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
@@ -4467,11 +4468,22 @@ def client_product_add(request, client_id):
         # Create ClientProduct relationship
         # Handle potential race condition: if two concurrent requests try to add the same product,
         # the second one will hit the unique_together constraint and raise IntegrityError
+        from .client_product_overrides import normalize_overrides_incoming
+        ov_in = request.data.get('overrides', None) if request.data is not None else None
+        if ov_in is None:
+            clean_overrides = {}
+        else:
+            clean_overrides, oerr = normalize_overrides_incoming(ov_in)
+            if oerr:
+                return Response({'error': oerr}, status=status.HTTP_400_BAD_REQUEST)
+            if clean_overrides is None:
+                clean_overrides = {}
         try:
             client_product = ClientProduct.objects.create(
                 id=client_product_id,
                 client=client,
-                product=product
+                product=product,
+                overrides=clean_overrides,
             )
         except IntegrityError:
             # Another request created this relationship concurrently
@@ -8345,9 +8357,10 @@ def _client_transaction_create_impl(request, client_id):
             amount_dec = Decimal(str(request.data.get('amount') or 0))
         except Exception:
             amount_dec = Decimal('0')
+        product_for_defaults = effective_product_for_client(client, product)
         defaults = _build_subscription_details_defaults(
             client=client,
-            product=product,
+            product=product_for_defaults,
             amount=amount_dec,
             transaction_datetime=transaction_datetime,
             request=request,
@@ -8782,6 +8795,7 @@ def _client_transaction_create_impl(request, client_id):
         import logging
         logger = logging.getLogger(__name__)
         try:
+            product = effective_product_for_client(client, product)
             # Generate contract PDF using the same detailed logic as product_contract_pdf
             from io import BytesIO
             from reportlab.lib.pagesizes import A4
@@ -9594,9 +9608,10 @@ def client_transaction_update(request, client_id, transaction_id):
                 amount_dec = Decimal(str(transaction.amount or 0))
             except Exception:
                 amount_dec = Decimal('0')
+            product_for_defaults = effective_product_for_client(client, product)
             defaults = _build_subscription_details_defaults(
                 client=client,
-                product=product,
+                product=product_for_defaults,
                 amount=amount_dec,
                 transaction_datetime=transaction.datetime or timezone.now(),
                 request=request,
@@ -11370,7 +11385,16 @@ def product_detail(request, product_id):
     
     product = get_object_or_404(Product, id=product_id)
     serializer = ProductSerializer(product, context={'request': request})
-    return Response({'product': serializer.data}, status=status.HTTP_200_OK)
+    pdata = dict(serializer.data)
+    if is_client_token and client and client.active:
+        try:
+            cp = ClientProduct.objects.select_related("product").get(client=client, product=product)
+            ovr = cp.overrides or {}
+            if ovr:
+                pdata = merge_serialized_product_with_overrides(pdata, ovr)
+        except ClientProduct.DoesNotExist:
+            pass
+    return Response({'product': pdata}, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'POST'])
 @authentication_classes([])  # Disable authentication - we'll check manually to avoid 401 on invalid tokens
@@ -11423,6 +11447,8 @@ def product_contract_pdf(request, product_id):
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     product = get_object_or_404(Product, id=product_id)
+    if current_client:
+        product = effective_product_for_client(current_client, product)
     
     # Get subscription data from body (POST) or querystring (GET).
     payload = request.data if request.method == 'POST' else request.GET

@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Checkbox } from './ui/checkbox';
-import { TrendingUp, Plus, Trash2, X, Star, Calendar } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, X, Star, SlidersHorizontal } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { AssetAvailabilityModal } from './AssetAvailabilityModal';
@@ -862,9 +863,9 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                       size="sm"
                                       onClick={() => openAvailabilityModal(clientAsset)}
                                       className="text-blue-600"
-                                      title="Configurer les dates de disponibilité"
+                                      title="Configurer (disponibilité + personnalisation)"
                                     >
-                                      <Calendar className="w-4 h-4" />
+                                      <SlidersHorizontal className="w-4 h-4" />
                                     </Button>
                                     <Button
                                       variant="ghost"
@@ -1286,7 +1287,16 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                 />
                               </td>
                               <td className="py-2 px-3">{product.type || '-'}</td>
-                              <td className="py-2 px-3">{product.name || '-'}</td>
+                              <td className="py-2 px-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span>{product.name || '-'}</span>
+                                  {clientProduct.isCustomized ? (
+                                    <Badge variant="secondary" className="text-xs font-normal">
+                                      Personnalisé
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </td>
                               <td className="py-2 px-3">{product.reference || '-'}</td>
                               <td className="py-2 px-3">
                                 <div className="text-sm text-slate-900">{profitability.main}</div>
@@ -1354,9 +1364,9 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                     size="sm"
                                     onClick={() => openProductAvailabilityModal(clientProduct)}
                                     className="text-blue-600"
-                                    title="Configurer les dates de disponibilité"
+                                    title="Configurer (disponibilité + personnalisation)"
                                   >
-                                    <Calendar className="w-4 h-4" />
+                                    <SlidersHorizontal className="w-4 h-4" />
                                   </Button>
                                   <Button
                                     variant="ghost"

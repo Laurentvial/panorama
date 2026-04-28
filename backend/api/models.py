@@ -754,6 +754,8 @@ class ClientProduct(models.Model):
     featured = models.BooleanField(default=False)  # Si True, le produit est mis en avant pour ce client
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité pour ce client
     availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité pour ce client
+    # Personnalisation par client (clés camelCase allowlist, voir client_product_overrides.py)
+    overrides = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

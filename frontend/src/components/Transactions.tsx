@@ -447,6 +447,8 @@ export function Transactions() {
                 products={products}
                 clients={clients}
                 showClientColumn={true}
+                showInterestTrackingColumns={true}
+                allTransactionsForInterest={transactions}
                 onView={(transaction) => {
                   setSelectedTransaction(transaction);
                   setIsViewTransactionModalOpen(true);

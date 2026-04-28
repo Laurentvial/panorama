@@ -60,6 +60,74 @@ const extractAssetInfo = (description: string): { name: string; reference: strin
   return { name: '-', reference: null, displayText: '-' };
 };
 
+const parseTransactionDetails = (value: any): Record<string, any> => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const parseDateValue = (value: string | Date | null | undefined): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const raw = String(value).trim();
+  const frenchDateMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (frenchDateMatch) {
+    const [, day, month, year] = frenchDateMatch;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getTransactionDateValue = (transaction: any): number => {
+  const rawDate = transaction?.datetime || transaction?.createdAt || transaction?.created_at;
+  return parseDateValue(rawDate)?.getTime() || 0;
+};
+
+const formatInterestDate = (value: string | Date | null | undefined): string => {
+  const date = parseDateValue(value);
+  if (!date) return '-';
+  return date.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+};
+
+const addInterestPeriod = (date: Date, interestPeriod: string): Date | null => {
+  const normalized = String(interestPeriod || '').trim().toLowerCase();
+  if (!normalized || (normalized.includes('fin') && (normalized.includes('contrat') || normalized.includes('matur')))) {
+    return null;
+  }
+
+  const next = new Date(date);
+  if (normalized.includes('quotid') || ['daily', 'jour', 'journee'].includes(normalized)) {
+    next.setDate(next.getDate() + 1);
+  } else if (normalized.includes('hebdo') || normalized.includes('semaine') || ['weekly', 'week'].includes(normalized)) {
+    next.setDate(next.getDate() + 7);
+  } else if (normalized.includes('trim') || ['quarter', 'trimestre'].includes(normalized)) {
+    next.setMonth(next.getMonth() + 3);
+  } else if (normalized.includes('sem') || ['semester', 'semestre'].includes(normalized)) {
+    next.setMonth(next.getMonth() + 6);
+  } else if (normalized.includes('ann') || ['year', 'année', 'an'].includes(normalized)) {
+    next.setFullYear(next.getFullYear() + 1);
+  } else {
+    next.setMonth(next.getMonth() + 1);
+  }
+  return next;
+};
+
 interface TransactionListProps {
   transactions: any[];
   assets?: any[];
@@ -69,6 +137,8 @@ interface TransactionListProps {
   transactionDocuments?: Record<string, any[]>;
   showContractColumn?: boolean;
   showClientColumn?: boolean;
+  showInterestTrackingColumns?: boolean;
+  allTransactionsForInterest?: any[];
   showIcons?: boolean;
   accountCurrency?: string;
   onView?: (transaction: any) => void;
@@ -89,6 +159,8 @@ export function TransactionList({
   transactionDocuments = {},
   showContractColumn = false,
   showClientColumn = false,
+  showInterestTrackingColumns = false,
+  allTransactionsForInterest,
   showIcons = true,
   accountCurrency: accountCurrencyProp = 'EUR',
   onView,
@@ -101,6 +173,29 @@ export function TransactionList({
   const navigate = useNavigate();
   const defaultCcy = (accountCurrencyProp || 'EUR').toString().trim().toUpperCase();
   const fileInputRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
+  const interestSourceTransactions = allTransactionsForInterest || transactions;
+
+  const interestTransactionsBySourceId = React.useMemo(() => {
+    const map = new Map<string, any[]>();
+
+    interestSourceTransactions
+      .filter((transaction) => transaction?.type === 'interets')
+      .forEach((transaction) => {
+        const details = parseTransactionDetails(transaction.subscription_details ?? transaction.subscriptionDetails);
+        const sourceId = details.sourceTransactionId ?? details.source_transaction_id;
+        if (!sourceId) return;
+        const key = String(sourceId);
+        const current = map.get(key) || [];
+        current.push(transaction);
+        map.set(key, current);
+      });
+
+    map.forEach((items) => {
+      items.sort((a, b) => getTransactionDateValue(b) - getTransactionDateValue(a));
+    });
+
+    return map;
+  }, [interestSourceTransactions]);
 
   const getRelevantTransferProductLabel = (tx: any): string => {
     if (!tx) return '';
@@ -158,6 +253,42 @@ export function TransactionList({
     return null;
   };
 
+  const getLastInterestTransaction = (transferTransaction: any): any | null => {
+    const bySourceId = interestTransactionsBySourceId.get(String(transferTransaction.id));
+    if (bySourceId?.length) return bySourceId[0];
+
+    const legacyMatches = interestSourceTransactions
+      .filter((transaction) => {
+        if (transaction?.type !== 'interets') return false;
+        const description = String(transaction.description || '');
+        return description.includes(`Transaction ${transferTransaction.id}`) || description.includes(`txn ${transferTransaction.id}`);
+      })
+      .sort((a, b) => getTransactionDateValue(b) - getTransactionDateValue(a));
+
+    return legacyMatches[0] || null;
+  };
+
+  const getNextInterestDate = (transferTransaction: any, lastInterestTransaction: any | null): Date | null => {
+    const details = parseTransactionDetails(transferTransaction.subscription_details ?? transferTransaction.subscriptionDetails);
+    const interestPeriod = String(
+      transferTransaction.subscription_interest_period ||
+      details.interestPeriod ||
+      details.interest_period ||
+      ''
+    );
+    const contractEnd = transferTransaction.subscription_contract_end || details.contractEnd || details.contract_end || '';
+    const isEndOfContract = interestPeriod.toLowerCase().includes('fin') && interestPeriod.toLowerCase().includes('contrat');
+
+    if (isEndOfContract) {
+      return lastInterestTransaction ? null : parseDateValue(contractEnd);
+    }
+
+    const baseRaw = lastInterestTransaction?.datetime || lastInterestTransaction?.createdAt || transferTransaction.datetime || transferTransaction.createdAt;
+    const baseDate = parseDateValue(baseRaw);
+    if (!baseDate) return null;
+    return addInterestPeriod(baseDate, interestPeriod);
+  };
+
   if (transactions.length === 0) {
     return <p className="text-sm text-slate-500">{emptyMessage}</p>;
   }
@@ -174,6 +305,12 @@ export function TransactionList({
             <th className="text-left py-3 px-4">Description</th>
             <th className="text-left py-3 px-4">Montant</th>
             <th className="text-left py-3 px-4">Statut</th>
+            {showInterestTrackingColumns && (
+              <>
+                <th className="text-left py-3 px-4">Dernier versement d'intérêt</th>
+                <th className="text-left py-3 px-4">Prochain versement d'intérêt</th>
+              </>
+            )}
             {showContractColumn && <th className="text-left py-3 px-4">Contrat</th>}
             <th className="text-right py-3 px-4">Actions</th>
           </tr>
@@ -185,6 +322,15 @@ export function TransactionList({
             const hasContract = contractDocs.length > 0;
             const isTransfer = transaction.type === 'transfert';
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
+            const tracksInterest = isTransfer && transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
+            const lastInterestTransaction = tracksInterest ? getLastInterestTransaction(transaction) : null;
+            const nextInterestDate = tracksInterest ? getNextInterestDate(transaction, lastInterestTransaction) : null;
+            const nextInterestTimestamp = nextInterestDate?.getTime() || 0;
+            const isNextInterestOverdue =
+              tracksInterest &&
+              nextInterestTimestamp > 0 &&
+              nextInterestTimestamp < new Date(new Date().toDateString()).getTime() &&
+              transaction.status === 'valide';
             const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
             const showRecoverPositions =
               !!onRecoverPositions &&
@@ -314,6 +460,38 @@ export function TransactionList({
                     );
                   })()}
                 </td>
+                {showInterestTrackingColumns && (
+                  <>
+                    <td className="py-3 px-4">
+                      {tracksInterest && lastInterestTransaction ? (
+                        <div>
+                          <div className="font-medium text-emerald-700">
+                            {formatInterestDate(lastInterestTransaction.datetime || lastInterestTransaction.createdAt)}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {formatAmount(parseFloat(lastInterestTransaction.amount || 0), lastInterestTransaction.amountCurrency || lastInterestTransaction.amount_currency || defaultCcy)}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      {tracksInterest && nextInterestDate ? (
+                        <div>
+                          <div className={isNextInterestOverdue ? 'font-medium text-red-600' : 'font-medium text-slate-700'}>
+                            {formatInterestDate(nextInterestDate)}
+                          </div>
+                          {isNextInterestOverdue && (
+                            <div className="text-xs text-red-500">À vérifier</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                  </>
+                )}
                 {showContractColumn && (
                   <td className="py-3 px-4">
                     {hasContract ? (

@@ -2,6 +2,7 @@ from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
 from rest_framework import serializers
 from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
+from .client_product_overrides import merge_serialized_product_with_overrides, normalize_overrides_incoming
 import uuid
 from urllib.parse import urlparse, unquote, quote
 
@@ -1310,29 +1311,60 @@ class ClientProductSerializer(serializers.ModelSerializer):
     featured = serializers.BooleanField()
     availabilityStart = serializers.DateField(source='availability_start', required=False, allow_null=True)
     availabilityEnd = serializers.DateField(source='availability_end', required=False, allow_null=True)
+    overrides = serializers.JSONField(required=False, allow_null=True)
+    isCustomized = serializers.SerializerMethodField()
+    baseProduct = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
     
     class Meta:
         model = ClientProduct
-        fields = ['id', 'clientId', 'product', 'productId', 'featured', 'availabilityStart', 'availabilityEnd', 'createdAt', 'updatedAt']
-        read_only_fields = ['id', 'createdAt', 'updatedAt']
-    
+        fields = [
+            'id', 'clientId', 'product', 'productId', 'featured', 'availabilityStart', 'availabilityEnd',
+            'overrides', 'isCustomized', 'baseProduct', 'createdAt', 'updatedAt',
+        ]
+        read_only_fields = ['id', 'product', 'isCustomized', 'baseProduct', 'createdAt', 'updatedAt']
+        extra_kwargs = {
+            'overrides': {'required': False, 'allow_null': True},
+        }
+
+    def get_isCustomized(self, obj):
+        return bool(obj.overrides)
+
+    def get_baseProduct(self, obj):
+        if not obj.product or not (obj.overrides or {}):
+            return None
+        return ProductSerializer(obj.product, context=self.context).data
+
+    def validate_overrides(self, value):
+        clean, err = normalize_overrides_incoming(value)
+        if err:
+            raise serializers.ValidationError(err)
+        return {} if clean is None else clean
+
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['clientId'] = instance.client.id
-        # Pass request context to ProductSerializer for image URLs
-        # Only serialize product if it exists (handle case where product was deleted but ClientProduct remains)
         request = self.context.get('request')
         if instance.product:
-            ret['product'] = ProductSerializer(instance.product, context={'request': request}).data
+            base_data = ProductSerializer(instance.product, context={'request': request}).data
+            ovr = instance.overrides or {}
+            if ovr:
+                ret['product'] = merge_serialized_product_with_overrides(base_data, ovr)
+                ret['baseProduct'] = base_data
+            else:
+                ret['product'] = base_data
+                ret['baseProduct'] = None
             ret['productId'] = instance.product.id
         else:
             ret['product'] = None
             ret['productId'] = None
+            ret['baseProduct'] = None
         ret['featured'] = bool(instance.featured)
         ret['availabilityStart'] = instance.availability_start
         ret['availabilityEnd'] = instance.availability_end
+        ret['overrides'] = instance.overrides or {}
+        ret['isCustomized'] = bool(instance.overrides)
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret
