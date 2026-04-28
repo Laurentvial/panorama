@@ -676,6 +676,7 @@ export function AddProduct() {
                     
                     {/* Produits de placement */}
                     <SelectItem value="ETF">ETF</SelectItem>
+                    <SelectItem value="Scalping">Scalping</SelectItem>
                     
                     {/* Portefeuilles intelligents */}
                     <SelectItem value="Smart Portfolio">Smart Portfolio</SelectItem>

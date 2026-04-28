@@ -647,6 +647,13 @@ function PositionsTable({
           {rows.map((p) => {
             const pnlNum =
               p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+            const investedEur = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+            const investedAsset =
+              p.invested_amount_asset_currency == null
+                ? null
+                : typeof p.invested_amount_asset_currency === 'string'
+                  ? parseFloat(p.invested_amount_asset_currency)
+                  : Number(p.invested_amount_asset_currency);
             const assetCurrency = (p.assetCurrency || 'EUR').trim().toUpperCase();
             const fxRateNum = p.fx_rate_eur_to_asset == null ? null : typeof p.fx_rate_eur_to_asset === 'string' ? parseFloat(p.fx_rate_eur_to_asset) : Number(p.fx_rate_eur_to_asset);
             const fxRate = fxRateNum != null && Number.isFinite(fxRateNum) && fxRateNum > 0 ? fxRateNum : null;
@@ -729,9 +736,12 @@ function PositionsTable({
                 <td className="py-2 px-3">{p.productName || p.productId}</td>
                 <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
                 <td className="py-2 px-3 text-right">
-                  {p.assetId && p.invested_amount_asset_currency != null
-                    ? formatMoney(p.invested_amount_asset_currency, assetCurrency, { maximumFractionDigits: 2 })
-                    : formatAmount(typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount), accountCurrency)}
+                  <div>{Number.isFinite(investedEur) ? formatAmount(investedEur, 'EUR') : '-'}</div>
+                  {p.assetId && investedAsset != null && Number.isFinite(investedAsset) && assetCurrency !== 'EUR' && (
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      ≈ {formatMoney(investedAsset, assetCurrency, { maximumFractionDigits: 2 })}
+                    </div>
+                  )}
                 </td>
                 <td className={`py-2 px-3 text-right font-medium ${finalPnlColor}`}>
                   <div>{pnlLabelMain}</div>

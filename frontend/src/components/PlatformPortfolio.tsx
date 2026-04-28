@@ -595,12 +595,12 @@ export function PlatformPortfolio() {
       // This is the net amount invested in the product (deposits - withdrawals)
       const investedEur = p.netInvested > 0 ? p.netInvested : null;
       
-      // Calculate P&L from positions (open and done, excluding pending)
+      // Calculate P&L from closed positions only. Open positions are hidden from
+      // client-facing gains until they are actually closed.
       let totalPnl = 0;
       
       for (const pos of positions || []) {
-        // Only include open and done positions, exclude pending
-        if (pos?.status !== 'open' && pos?.status !== 'done') continue;
+        if (pos?.status !== 'done') continue;
         
         // Check if this position belongs to this product
         const posProductId = pos?.productId || pos?.product_id || null;
@@ -763,100 +763,33 @@ export function PlatformPortfolio() {
   const profitLoss = useMemo(() => {
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte)
-    // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
-    
-    // Create assets map locally for this useMemo (matching PlatformDashboard pattern)
-    const assetsMap = new Map<string, any>();
-    for (const a of assetsIndex || []) {
-      const id = a?.id != null ? String(a.id) : '';
-      if (id) assetsMap.set(id, a);
-    }
-    
+    // 2. Les positions de trading fermées (done) uniquement
     // Commencer avec le profit/loss des transactions
     let total = calculatedValues.hasCompletedTransactions ? calculatedValues.profitLoss : 0;
     
     // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      // Inclure uniquement les positions ouvertes (open) et fermées (done)
-      // Exclure toutes les positions pending
-      if (p?.status === 'pending') continue;
-      // Inclure seulement open, done, et cancelled (si elles ont un profit_loss)
-      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
+      if (p?.status !== 'done') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
       const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
       const expectedTotalNum =
         p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
-      
-      // Récupérer la devise de l'actif et le taux de change
-      const assetId = p?.assetId || p?.asset_id || p?.asset?.id || null;
-      const asset = assetId ? assetsMap.get(String(assetId)) : null;
-      const assetCurrency = (p?.assetCurrency || p?.asset_currency || p?.asset?.currency || asset?.currency || 'EUR').trim().toUpperCase();
-      const fxNum =
-        p?.fx_rate_eur_to_asset == null
-          ? null
-          : typeof p.fx_rate_eur_to_asset === 'string'
-            ? parseFloat(p.fx_rate_eur_to_asset)
-            : Number(p.fx_rate_eur_to_asset);
-      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
-
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
         // profit_loss est toujours en EUR (objectif de période)
         positionPnl = profitLossNum;
-      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+      } else if (expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
         // Calculer le P&L à partir de expected_total et invested_amount
         // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
         positionPnl = expectedTotalNum - investedNum;
-      } else if (p?.status === 'open' && assetId && asset) {
-        // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
-        const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
-        const qtyNum = p?.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
-        const investedAssetNum =
-          p?.invested_amount_asset_currency == null
-            ? null
-            : typeof p.invested_amount_asset_currency === 'string'
-              ? parseFloat(p.invested_amount_asset_currency)
-              : Number(p.invested_amount_asset_currency);
-        
-        const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
-        const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
-        const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) && investedAssetNum > 0 ? investedAssetNum : null;
-        
-        // Prix actuel de l'actif
-        const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
-        const currentPriceNum =
-          currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
-        const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
-        
-        if (currentPrice != null && qty > 0) {
-          // Calculer le P&L en devise de l'actif
-          let pnlAsset = 0;
-          if (investedAsset != null && investedAsset > 0) {
-            // Utiliser invested_amount_asset_currency si disponible
-            const marketValue = qty * currentPrice;
-            pnlAsset = marketValue - investedAsset;
-          } else if (entryPrice != null && entryPrice > 0) {
-            // Sinon utiliser entry_price
-            const marketValue = qty * currentPrice;
-            const costBasis = qty * entryPrice;
-            pnlAsset = marketValue - costBasis;
-          }
-          
-          // Convertir en EUR si nécessaire
-          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-            positionPnl = pnlAsset / fxRate;
-          } else {
-            positionPnl = pnlAsset;
-          }
-        }
       }
 
       total += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
     return total;
-  }, [positions, calculatedValues, assetsIndex]);
+  }, [positions, calculatedValues]);
 
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
