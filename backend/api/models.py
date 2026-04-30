@@ -135,6 +135,7 @@ class Client(models.Model):
     
     # Fonctionnalités diverses
     trading_enabled = models.BooleanField(default=False)  # Activer le trading (afficher le bouton Trader dans les assets)
+    show_position_prices = models.BooleanField(default=False)  # Afficher les prix d'achat/vente des positions au client
     banner_message = models.TextField(default="", blank=True)  # Message de bannière à afficher sur la plateforme client
     contract_preview_enabled = models.BooleanField(default=True)  # Prévisualisation du contrat
     imported_contract_preview_enabled = models.BooleanField(

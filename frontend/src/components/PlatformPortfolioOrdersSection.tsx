@@ -45,6 +45,7 @@ export function PlatformPortfolioOrdersSection({
     .toString()
     .trim()
     .toUpperCase();
+  const showPositionPrices = currentUser?.showPositionPrices === true;
 
   const [positions, setPositions] = useState<any[]>([]);
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
@@ -153,6 +154,58 @@ export function PlatformPortfolioOrdersSection({
     return formatAmount(n, currency || 'EUR', opts);
   };
 
+  const getPositionPriceLabels = (
+    entryPriceNum: number | null,
+    qtyNum: number | null,
+    pnlNum: number | null,
+    investedNum: number | null,
+    investedAssetNum: number | null,
+    assetCurrency: string,
+    fxRate: number | null
+  ) => {
+    const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
+    const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : null;
+    const pnl = pnlNum != null && Number.isFinite(pnlNum) ? pnlNum : null;
+    const priceOptions = { maximumFractionDigits: 8 };
+
+    if (entryPrice != null && qty != null && pnl != null) {
+      const pnlInAssetCurrency = assetCurrency === 'EUR'
+        ? pnl
+        : fxRate != null && fxRate > 0
+          ? pnl * fxRate
+          : null;
+
+      if (pnlInAssetCurrency != null) {
+        const sellPrice = entryPrice + pnlInAssetCurrency / qty;
+        return {
+          buyPriceLabel: formatMoney(entryPrice, assetCurrency, priceOptions),
+          sellPriceLabel: Number.isFinite(sellPrice) ? formatMoney(sellPrice, assetCurrency, priceOptions) : '-',
+        };
+      }
+    }
+
+    const invested = investedNum != null && Number.isFinite(investedNum) ? investedNum : null;
+    const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) ? investedAssetNum : null;
+
+    if (assetCurrency !== 'EUR' && investedAsset != null) {
+      const sellTotal = pnl != null && fxRate != null && fxRate > 0 ? investedAsset + pnl * fxRate : null;
+      return {
+        buyPriceLabel: formatMoney(investedAsset, assetCurrency, { maximumFractionDigits: 2 }),
+        sellPriceLabel: sellTotal != null && Number.isFinite(sellTotal)
+          ? formatMoney(sellTotal, assetCurrency, { maximumFractionDigits: 2 })
+          : '-',
+      };
+    }
+
+    const sellTotal = invested != null && pnl != null ? invested + pnl : null;
+    return {
+      buyPriceLabel: invested != null ? formatAccountAmount(invested) : '-',
+      sellPriceLabel: sellTotal != null && Number.isFinite(sellTotal)
+        ? formatAccountAmount(sellTotal)
+        : '-',
+    };
+  };
+
   if (loading) {
     return (
       <Card className="platform-portfolioSectionCard">
@@ -188,6 +241,12 @@ export function PlatformPortfolioOrdersSection({
                       <th className="platform-portfolioTh">Réf</th>
                       <th className="platform-portfolioTh">Date d'ouverture</th>
                       <th className="platform-portfolioTh">Date de fermeture</th>
+                      {showPositionPrices && (
+                        <>
+                          <th className="platform-portfolioTh platform-portfolioAlignRight">Prix d'achat</th>
+                          <th className="platform-portfolioTh platform-portfolioAlignRight">Prix de vente</th>
+                        </>
+                      )}
                       <th className="platform-portfolioTh platform-portfolioAlignRight">Investi</th>
                       <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
                       <th className="platform-portfolioTh">Statut</th>
@@ -330,6 +389,15 @@ export function PlatformPortfolioOrdersSection({
                           ? formatPositionDateOnly(p.period_date)
                           : '-';
                       const closedLabel = p.closed_at ? formatPositionDateTime(p.closed_at) : '-';
+                      const { buyPriceLabel, sellPriceLabel } = getPositionPriceLabels(
+                        entryPriceNum,
+                        qtyNum,
+                        pnlNum,
+                        investedNum,
+                        investedAssetNum,
+                        assetCurrency,
+                        fxRate
+                      );
                       return (
                         <tr key={p.id} className="platform-portfolioTbodyRow">
                           <td className="platform-portfolioTd">{assetLabel}</td>
@@ -337,6 +405,12 @@ export function PlatformPortfolioOrdersSection({
                           <td className="platform-portfolioTd">{refLabel}</td>
                           <td className="platform-portfolioTd platform-portfolioNowrap">{openedLabel}</td>
                           <td className="platform-portfolioTd platform-portfolioNowrap">{closedLabel}</td>
+                          {showPositionPrices && (
+                            <>
+                              <td className="platform-portfolioTd platform-portfolioAlignRight">{buyPriceLabel}</td>
+                              <td className="platform-portfolioTd platform-portfolioAlignRight">{sellPriceLabel}</td>
+                            </>
+                          )}
                           <td className="platform-portfolioTd platform-portfolioAlignRight">
                             <div style={{ fontWeight: 700 }}>{investedLabelMain}</div>
                             {investedLabelSub && (
@@ -493,6 +567,15 @@ export function PlatformPortfolioOrdersSection({
                       : p.status === 'cancelled'
                         ? 'Annulée'
                         : p.status || '-';
+                const { buyPriceLabel, sellPriceLabel } = getPositionPriceLabels(
+                  entryPriceNum,
+                  qtyNum,
+                  pnlNum,
+                  investedNum,
+                  investedAssetNum,
+                  assetCurrency,
+                  fxRate
+                );
                 return (
                   <div key={p.id} className="platform-portfolioOrderCard">
                     <div className="platform-portfolioOrderCardHeader">
@@ -528,6 +611,18 @@ export function PlatformPortfolioOrdersSection({
                         <span>Date de fermeture</span>
                         <span>{closedLabel}</span>
                       </div>
+                      {showPositionPrices && (
+                        <>
+                          <div className="platform-portfolioOrderCardSecondaryItem">
+                            <span>Prix d'achat</span>
+                            <span>{buyPriceLabel}</span>
+                          </div>
+                          <div className="platform-portfolioOrderCardSecondaryItem">
+                            <span>Prix de vente</span>
+                            <span>{sellPriceLabel}</span>
+                          </div>
+                        </>
+                      )}
                       <div className="platform-portfolioOrderCardSecondaryItem">
                         <span>Statut</span>
                         <span>{statusLabel}</span>

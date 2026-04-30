@@ -46,6 +46,8 @@ export function ClientMiscTab({
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
   const [tradingEnabled, setTradingEnabled] = useState<boolean>(false);
   const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
+  const [showPositionPrices, setShowPositionPrices] = useState<boolean>(false);
+  const [savingShowPositionPrices, setSavingShowPositionPrices] = useState(false);
   const [contractPreviewEnabled, setContractPreviewEnabled] = useState<boolean>(true);
   const [importedContractPreviewEnabled, setImportedContractPreviewEnabled] = useState<boolean>(false);
   const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
@@ -68,6 +70,11 @@ export function ClientMiscTab({
       setTradingEnabled(client.tradingEnabled);
     } else {
       setTradingEnabled(false); // Default to false
+    }
+    if (client?.showPositionPrices !== undefined) {
+      setShowPositionPrices(Boolean(client.showPositionPrices));
+    } else {
+      setShowPositionPrices(false);
     }
   }, [client]);
 
@@ -197,6 +204,27 @@ export function ClientMiscTab({
       }
     } finally {
       setSavingTradingEnabled(false);
+    }
+  }
+
+  async function handleSaveShowPositionPrices() {
+    setSavingShowPositionPrices(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ showPositionPrices }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Affichage des prix des positions mis à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving position price visibility:', error);
+      toast.error(error.message || "Erreur lors de la mise à jour de l'affichage des prix");
+      if (client?.showPositionPrices !== undefined) {
+        setShowPositionPrices(Boolean(client.showPositionPrices));
+      }
+    } finally {
+      setSavingShowPositionPrices(false);
     }
   }
 
@@ -357,6 +385,42 @@ export function ClientMiscTab({
                 size="sm"
               >
                 {savingTradingEnabled ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Position Prices Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Prix des positions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Si activé, le client verra les prix d'achat et de vente disponibles dans ses ordres/positions.
+            </p>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="showPositionPrices"
+                checked={showPositionPrices}
+                onCheckedChange={(checked) => setShowPositionPrices(checked === true)}
+              />
+              <Label htmlFor="showPositionPrices" className="font-normal cursor-pointer">
+                Afficher les prix d'achat et de vente
+              </Label>
+            </div>
+            <p className="text-xs text-slate-500">
+              Le prix de vente est affiché uniquement lorsqu'il peut être calculé de façon fiable à partir de la position.
+            </p>
+            <div className="pt-2">
+              <Button
+                onClick={handleSaveShowPositionPrices}
+                disabled={savingShowPositionPrices}
+                size="sm"
+              >
+                {savingShowPositionPrices ? 'Enregistrement...' : 'Enregistrer'}
               </Button>
             </div>
           </div>

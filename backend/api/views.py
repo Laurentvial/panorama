@@ -1619,6 +1619,11 @@ def client_detail(request, client_id):
         if 'tradingEnabled' in request.data:
             v = request.data.get('tradingEnabled')
             client.trading_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+
+        # Update position price visibility if provided
+        if 'showPositionPrices' in request.data:
+            v = request.data.get('showPositionPrices')
+            client.show_position_prices = (v.lower() == 'true') if isinstance(v, str) else bool(v)
         
         # Update banner message if provided
         if 'bannerMessage' in request.data:

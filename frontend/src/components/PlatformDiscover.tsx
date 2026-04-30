@@ -1130,7 +1130,7 @@ export function PlatformDiscover() {
                     >
                       <div style={{
                         position: 'relative',
-                        height: isMobile ? '220px' : '240px',
+                        height: '180px',
                         backgroundColor: '#ffffff',
                         overflow: 'hidden',
                         display: 'flex',
@@ -1364,7 +1364,7 @@ export function PlatformDiscover() {
                       {/* Image Header */}
                       <div style={{
                         position: 'relative',
-                        height: isMobile ? '220px' : '240px',
+                        height: '180px',
                         backgroundColor: '#ffffff',
                         overflow: 'hidden',
                         display: 'flex',
@@ -1891,7 +1891,7 @@ export function PlatformDiscover() {
                   >
                     <div style={{
                       position: 'relative',
-                      height: isMobile ? '220px' : '240px',
+                      height: '180px',
                       backgroundColor: '#ffffff',
                       overflow: 'hidden',
                       display: 'flex',
