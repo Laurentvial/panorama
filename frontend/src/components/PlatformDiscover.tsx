@@ -129,6 +129,7 @@ export function PlatformDiscover() {
         return {
           ...cp.product,
           isFeatured: parseFeatured(cp.featured),
+          showRates: cp.showRates !== false,
         };
       }).filter(Boolean);
       // Filter products shown on Discover.
@@ -643,6 +644,10 @@ export function PlatformDiscover() {
   };
 
   const getProfitabilityDisplay = (product: any): { text: string; isPositive: boolean } => {
+    if (product?.showRates === false) {
+      return { text: '', isPositive: true };
+    }
+
     const hasProfitability = product?.profitability !== null && product?.profitability !== undefined && product?.profitability !== '';
     const hasVariable =
       product?.isVariableProfitability === 'Oui' &&
@@ -1091,11 +1096,13 @@ export function PlatformDiscover() {
                           }}>
                             {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                           </p>
-                          <div style={{ marginBottom: '16px' }}>
-                            <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
-                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                          {product.showRates !== false && (
+                            <div style={{ marginBottom: '16px' }}>
+                              <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
+                                {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </CardContent>
                       </Card>
                     );
@@ -1188,11 +1195,13 @@ export function PlatformDiscover() {
                         <p style={{ fontSize: isMobile ? '13px' : '14px', color: '#6b7280', marginBottom: '16px', lineHeight: '1.5', minHeight: '40px' }}>
                           {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                         </p>
-                        <div style={{ marginBottom: '16px' }}>
-                          <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                        {product.showRates !== false && (
+                          <div style={{ marginBottom: '16px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--secondary)' }}>
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </CardContent>
                     </Card>
                   );
@@ -1322,15 +1331,17 @@ export function PlatformDiscover() {
                           }}>
                             {truncateDescription(portfolio.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                           </p>
-                          <div style={{ marginBottom: '16px'}}>
-                          <div style={{
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            color: 'var(--secondary)',
-                          }}>
-                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                          {portfolio.showRates !== false && (
+                            <div style={{ marginBottom: '16px'}}>
+                              <div style={{
+                                fontSize: '16px',
+                                fontWeight: '700',
+                                color: 'var(--secondary)',
+                              }}>
+                                {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </CardContent>
                       </Card>
                     );
@@ -1477,15 +1488,17 @@ export function PlatformDiscover() {
                         </p>
                         
                         {/* Return */}
-                        <div style={{ marginBottom: '16px'}}>
-                          <div style={{
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            color: 'var(--secondary)',
-                          }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                        {portfolio.showRates !== false && (
+                          <div style={{ marginBottom: '16px'}}>
+                            <div style={{
+                              fontSize: '16px',
+                              fontWeight: '700',
+                              color: 'var(--secondary)',
+                            }}>
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </CardContent>
                     </Card>
                   );
@@ -1850,15 +1863,17 @@ export function PlatformDiscover() {
                         }}>
                           {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                         </p>
-                        <div style={{ marginBottom: '16px'}}>
-                          <div style={{
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            color: 'var(--secondary)',
-                          }}>
-                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                        {product.showRates !== false && (
+                          <div style={{ marginBottom: '16px'}}>
+                            <div style={{
+                              fontSize: '16px',
+                              fontWeight: '700',
+                              color: 'var(--secondary)',
+                            }}>
+                              {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </CardContent>
                     </Card>
                   );
@@ -1961,15 +1976,17 @@ export function PlatformDiscover() {
                       }}>
                         {truncateDescription(product.description || 'Portefeuille intelligent diversifié pour maximiser vos rendements.', 150).text}
                       </p>
-                      <div style={{ marginBottom: '16px'}}>
-                        <div style={{
-                          fontSize: '16px',
-                          fontWeight: '700',
-                          color: 'var(--secondary)',
-                        }}>
-                          {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                      {product.showRates !== false && (
+                        <div style={{ marginBottom: '16px'}}>
+                          <div style={{
+                            fontSize: '16px',
+                            fontWeight: '700',
+                            color: 'var(--secondary)',
+                          }}>
+                            {isPositive ? '+' : ''}{profitabilityInfo.text ? profitabilityInfo.text : 'Aucun'}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </CardContent>
                   </Card>
                 );

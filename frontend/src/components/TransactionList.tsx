@@ -105,6 +105,37 @@ const formatInterestDate = (value: string | Date | null | undefined): string => 
   });
 };
 
+const extractPeriodEndFromDescription = (description: string): Date | null => {
+  if (!description) return null;
+  const rangeMatch = description.match(/\((\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})\)/);
+  if (rangeMatch?.[2]) return parseDateValue(rangeMatch[2]);
+
+  const singleDateMatch = description.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
+  if (singleDateMatch?.[1]) return parseDateValue(singleDateMatch[1]);
+
+  return null;
+};
+
+const getInterestReferenceDate = (interestTransaction: any): Date | null => {
+  if (!interestTransaction) return null;
+  const details = parseTransactionDetails(interestTransaction.subscription_details ?? interestTransaction.subscriptionDetails);
+  const detailsDate =
+    details.periodEnd ||
+    details.period_end ||
+    details.endDate ||
+    details.end_date ||
+    details.dueDate ||
+    details.due_date ||
+    details.paymentDate ||
+    details.payment_date;
+
+  return (
+    parseDateValue(detailsDate) ||
+    extractPeriodEndFromDescription(String(interestTransaction.description || '')) ||
+    parseDateValue(interestTransaction.datetime || interestTransaction.createdAt || interestTransaction.created_at)
+  );
+};
+
 const addInterestPeriod = (date: Date, interestPeriod: string): Date | null => {
   const normalized = String(interestPeriod || '').trim().toLowerCase();
   if (!normalized || (normalized.includes('fin') && (normalized.includes('contrat') || normalized.includes('matur')))) {
@@ -283,8 +314,9 @@ export function TransactionList({
       return lastInterestTransaction ? null : parseDateValue(contractEnd);
     }
 
-    const baseRaw = lastInterestTransaction?.datetime || lastInterestTransaction?.createdAt || transferTransaction.datetime || transferTransaction.createdAt;
-    const baseDate = parseDateValue(baseRaw);
+  const baseDate =
+    getInterestReferenceDate(lastInterestTransaction) ||
+    parseDateValue(transferTransaction.datetime || transferTransaction.createdAt || transferTransaction.created_at);
     if (!baseDate) return null;
     return addInterestPeriod(baseDate, interestPeriod);
   };
@@ -323,14 +355,19 @@ export function TransactionList({
             const isTransfer = transaction.type === 'transfert';
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
             const tracksInterest = isTransfer && transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
+            const isValidTransactionStatus = transaction.status === 'valide';
             const lastInterestTransaction = tracksInterest ? getLastInterestTransaction(transaction) : null;
-            const nextInterestDate = tracksInterest ? getNextInterestDate(transaction, lastInterestTransaction) : null;
+            const lastInterestReferenceDate = lastInterestTransaction ? getInterestReferenceDate(lastInterestTransaction) : null;
+            const nextInterestDate =
+              tracksInterest && isValidTransactionStatus
+                ? getNextInterestDate(transaction, lastInterestTransaction)
+                : null;
             const nextInterestTimestamp = nextInterestDate?.getTime() || 0;
             const isNextInterestOverdue =
               tracksInterest &&
               nextInterestTimestamp > 0 &&
               nextInterestTimestamp < new Date(new Date().toDateString()).getTime() &&
-              transaction.status === 'valide';
+              isValidTransactionStatus;
             const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
             const showRecoverPositions =
               !!onRecoverPositions &&
@@ -466,7 +503,7 @@ export function TransactionList({
                       {tracksInterest && lastInterestTransaction ? (
                         <div>
                           <div className="font-medium text-emerald-700">
-                            {formatInterestDate(lastInterestTransaction.datetime || lastInterestTransaction.createdAt)}
+                            {formatInterestDate(lastInterestReferenceDate)}
                           </div>
                           <div className="text-xs text-slate-500">
                             {formatAmount(parseFloat(lastInterestTransaction.amount || 0), lastInterestTransaction.amountCurrency || lastInterestTransaction.amount_currency || defaultCcy)}
@@ -477,7 +514,9 @@ export function TransactionList({
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {tracksInterest && nextInterestDate ? (
+                      {tracksInterest && !isValidTransactionStatus ? (
+                        <span />
+                      ) : tracksInterest && nextInterestDate ? (
                         <div>
                           <div className={isNextInterestOverdue ? 'font-medium text-red-600' : 'font-medium text-slate-700'}>
                             {formatInterestDate(nextInterestDate)}

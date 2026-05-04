@@ -353,6 +353,18 @@ export function ProductDetail() {
             const p = cp.product || cp;
             return String(cp.productId || p?.id || '') === String(id);
           });
+          const clientSpecificProduct = matchingCp?.product;
+          if (clientSpecificProduct && typeof clientSpecificProduct === 'object') {
+            enrichedProductData = {
+              ...enrichedProductData,
+              ...clientSpecificProduct,
+              categoryName: enrichedProductData.categoryName || clientSpecificProduct.categoryTitle,
+            };
+          }
+          enrichedProductData = {
+            ...enrichedProductData,
+            showRates: matchingCp?.showRates !== false && productData?.showRates !== false,
+          };
           const clientStart = matchingCp
             ? (matchingCp.availabilityStart ?? matchingCp.availability_start ?? null)
             : null;
@@ -472,6 +484,10 @@ export function ProductDetail() {
   };
 
   const formatProfitability = (product: any): string => {
+    if (product?.showRates === false) {
+      return 'Non communiqué';
+    }
+
     if (product.isVariableProfitability === 'Oui' && product.variableProfitability) {
       const min = parseFinancialValue(product.profitability);
       const max = parseFinancialValue(product.variableProfitability);
@@ -760,10 +776,13 @@ export function ProductDetail() {
       });
       const gains = sim.totalProfit;
       const total = sim.endCapital;
+      const showRates = productData.showRates !== false;
       
       // Format profitability for display
       let profitabilityDisplay = 'Aucun';
-      if (productData.isVariableProfitability === 'Oui' && productData.variableProfitability) {
+      if (!showRates) {
+        profitabilityDisplay = 'Non communiqué';
+      } else if (productData.isVariableProfitability === 'Oui' && productData.variableProfitability) {
         const min = parseFinancialValue(productData.profitability);
         const max = parseFinancialValue(productData.variableProfitability);
         profitabilityDisplay = `${min.toFixed(2)} à ${max.toFixed(2)}% ${productData.profitabilityPeriod || ''}`.trim();
@@ -792,8 +811,8 @@ export function ProductDetail() {
         interestPeriod: subscriptionData.interestPeriod || productData.interestPeriod || 'Aucun',
         profitability: profitabilityDisplay,
         investment: amount,
-        profits: gains,
-        total: total,
+        profits: showRates ? gains : null,
+        total: showRates ? total : null,
         contractEnd: subscriptionData.contractEnd ? formatDateToFrench(subscriptionData.contractEnd) : 'Aucun',
         hasSignature: !!signature
       };
@@ -875,6 +894,10 @@ export function ProductDetail() {
     }
 
     const product = data;
+    if (product.showRates === false) {
+      toast.error('La prévisualisation du contrat est indisponible pour ce produit');
+      return;
+    }
 
     // Get API base URL
     const apiUrl = getApiBaseUrl();
@@ -1007,6 +1030,7 @@ export function ProductDetail() {
   // Generate contract preview
   const generateContractPreview = (productData: any) => {
     if (!productData || !currentUser) return null;
+    if (productData.showRates === false) return null;
 
     const companyName = 'CIM Banque SA';
     const companyAddress = '16 rue Merle d\'Aubigné, 1207 Genève - SUISSE';
@@ -1178,6 +1202,7 @@ export function ProductDetail() {
     // Get TradingView symbol for product (if linked to assets)
     const productTradingViewSymbol = getProductTradingViewSymbol(product);
     const isProductLinkedToAssets = product.linkToAssets === 'Oui' || product.link_to_assets === 'Oui';
+    const showProductRates = product.showRates !== false;
     
     return (
       <div
@@ -1298,12 +1323,14 @@ export function ProductDetail() {
                     </div>
                   </div>
                   
-                  <div>
-                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Rentabilité</div>
-                    <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--platform-button-bg)' }}>
-                      {formatProfitability(product)}
+                  {showProductRates && (
+                    <div>
+                      <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Rentabilité</div>
+                      <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--platform-button-bg)' }}>
+                        {formatProfitability(product)}
+                      </div>
                     </div>
-                  </div>
+                  )}
                   
                   <div>
                     <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Investissement minimum</div>
@@ -1427,12 +1454,13 @@ export function ProductDetail() {
             )}
 
             {/* Profitability Simulator */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Simulateur de rentabilité</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {showProductRates && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Simulateur de rentabilité</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                   {/* Montant */}
                   <div style={{ 
                     display: 'flex', 
@@ -1690,9 +1718,10 @@ export function ProductDetail() {
                       </div>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Sidebar */}
@@ -1700,8 +1729,9 @@ export function ProductDetail() {
             position: 'sticky',
             top: isMobile ? '76px' : '88px',
             alignSelf: 'flex-start',
-            maxHeight: isMobile ? 'none' : 'calc(100% - 108px)',
-            overflowY: isMobile ? 'visible' : 'auto',
+            height: '100%',
+            maxHeight: '100%',
+            overflowY: 'visible',
             minWidth: 0,
             overflowX: 'hidden',
           }}>
@@ -2021,7 +2051,7 @@ export function ProductDetail() {
                       </div>
                     </div>
                     
-                    {(currentUser?.contractPreviewEnabled !== false ||
+                    {showProductRates && (currentUser?.contractPreviewEnabled !== false ||
                       (currentUser?.contractPreviewEnabled === false &&
                         currentUser?.importedContractPreviewEnabled === true &&
                         importedProductContracts.length > 0)) && (

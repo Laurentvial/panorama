@@ -290,6 +290,103 @@ def _should_create_interest_payment_for_date(
     return False
 
 
+def _is_payment_due_for_period_index(
+    txn: Transaction,
+    product: Product | None,
+    period_index: int,
+    check_date: date,
+) -> bool:
+    """
+    Check if the payment period containing ``period_index`` is due at ``check_date``.
+
+    Unlike ``_should_create_interest_payment_for_date`` (which answers "is at least
+    the first payment due?"), this helper computes the due date for the specific
+    payment bucket so later periods cannot be paid early.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        all_periods = generate_rates_for_investment(txn)
+    except Exception:
+        logger.warning(
+            "Cannot compute payment due date for transaction %s period %s: rate generation failed",
+            txn.id,
+            period_index,
+            exc_info=True,
+        )
+        return False
+
+    if not all_periods:
+        return False
+
+    payment_groups = _group_calculation_periods_by_payment_period(txn, product, all_periods)
+    if not payment_groups:
+        return False
+
+    target_group = None
+    for group in payment_groups:
+        calc_periods = group.get("calculationPeriods", [])
+        if period_index in calc_periods:
+            target_group = group
+            break
+
+    if target_group is None:
+        logger.warning(
+            "No payment group found for transaction %s period %s",
+            txn.id,
+            period_index,
+        )
+        return False
+
+    payment_idx = int(target_group.get("paymentPeriodIndex", 0))
+    payment_period_months = _parse_interest_payment_period_months(
+        _resolve_interest_period_for_txn(txn, product)
+    )
+    if payment_period_months == 0.0:
+        return False
+
+    contract_start = _get_contract_start_date(txn)
+    if not contract_start:
+        return False
+
+    # Due date by interest payment schedule.
+    if payment_period_months >= 1.0:
+        tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(
+            datetime.combine(contract_start, datetime.min.time()),
+            tz,
+        )
+        due_date = _add_months_dt(start_dt, payment_period_months * (payment_idx + 1)).date()
+    else:
+        period_days = max(1, round(payment_period_months * 30))
+        due_date = contract_start + timedelta(days=period_days * (payment_idx + 1))
+
+    # Safety: never pay before the generated payment group's own end date.
+    group_end_raw = target_group.get("endDate")
+    if group_end_raw:
+        try:
+            group_end_date = date.fromisoformat(str(group_end_raw))
+            if group_end_date > due_date:
+                due_date = group_end_date
+        except Exception:
+            pass
+
+    if check_date >= due_date:
+        return True
+
+    logger.debug(
+        "Skipping interest for transaction %s period %s: check_date=%s due_date=%s payment_idx=%s",
+        txn.id,
+        period_index,
+        check_date,
+        due_date,
+        payment_idx,
+    )
+    return False
+
+
 def _is_smart_portfolio(product: Product) -> bool:
     t = (product.type or '').lower()
     s = (product.subcategory or '').lower()
@@ -985,6 +1082,39 @@ def _choose_profitability_rate_pct(product: Product | None, *, rng: random.Rando
         if rate_max is not None and rate_max > rate_min:
             return _quantize_rate_pct(Decimal(str(rng.uniform(float(rate_min), float(rate_max)))))
     return _quantize_rate_pct(rate_min)
+
+
+def _effective_product_for_transaction(txn: Transaction, product: Product | None) -> Product | None:
+    """
+    Resolve the per-client product view used for position calculations.
+
+    ClientProduct.overrides can change profitability, duration, interest/profitability periods,
+    etc. Position generation must use those effective values, while keeping the same product id
+    for allocations and position links.
+    """
+    if product is None:
+        return None
+
+    try:
+        client = getattr(txn, 'client', None)
+    except Exception:
+        client = None
+
+    if client is None and getattr(txn, 'client_id', None):
+        try:
+            from .models import Client
+            client = Client.objects.filter(id=txn.client_id).first()
+        except Exception:
+            client = None
+
+    if client is None:
+        return product
+
+    try:
+        from .client_product_overrides import effective_product_for_client
+        return effective_product_for_client(client, product)
+    except Exception:
+        return product
 
 
 def _weighted_choice_with_rng(items_with_weights: list[tuple[object, Decimal]], rng: random.Random):
@@ -2172,6 +2302,7 @@ def generate_rates_for_investment(
             product = Product.objects.get(id=ctx.product_id)
         except Product.DoesNotExist:
             product = None
+    product = _effective_product_for_transaction(txn, product)
 
     # Check if product has asset allocations (for both Smart Portfolios and regular products)
     has_allocations = False
@@ -2331,6 +2462,7 @@ def generate_positions_with_rates(
             product = Product.objects.get(id=ctx.product_id)
         except Product.DoesNotExist:
             product = None
+    product = _effective_product_for_transaction(txn, product)
 
     # Always fetch asset allocations if they exist (not just for Smart Portfolios)
     allocations = None
@@ -3639,6 +3771,7 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
             product = Product.objects.get(id=ctx.product_id)
         except Product.DoesNotExist:
             return []
+    product = _effective_product_for_transaction(txn, product)
 
     if not _is_smart_portfolio(product):
         return []
@@ -3834,6 +3967,7 @@ def build_investment_context(
         product = Product.objects.filter(id=txn.transfer_to).first()
     if product is None:
         product = _extract_product_from_description(txn.description or '')
+    product = _effective_product_for_transaction(txn, product)
     
     # Log product resolution for debugging
     import logging
@@ -4226,6 +4360,7 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
             product = Product.objects.get(id=ctx.product_id)
         except Product.DoesNotExist:
             product = None
+    product = _effective_product_for_transaction(txn, product)
 
     # Check if product has external asset allocations
     if product is not None:
@@ -5234,10 +5369,9 @@ def create_interest_transaction_for_period_if_complete(
             )
             return None
         
-        # Use today's date for the payment check: we want to know if the payment is due *now*,
-        # not whether the period end date (last trading day) has passed - period_end_date can be
-        # 1 day before the calendar month boundary (e.g. March 8 vs March 9)
-        if not _should_create_interest_payment_for_date(txn, product, timezone.localdate()):
+        # Payment due check must be tied to the specific payment group containing this period,
+        # otherwise later periods can be paid too early as soon as period 1 is due.
+        if not _is_payment_due_for_period_index(txn, product, int(period_index), timezone.localdate()):
             logger.debug(
                 f"Skipping interest transaction for transaction {txn.id}, period {period_index}: "
                 f"payment not yet due based on interest_period (today={timezone.localdate().isoformat()})"

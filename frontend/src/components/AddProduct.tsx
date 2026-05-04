@@ -1090,7 +1090,7 @@ export function AddProduct() {
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="product-default"
-                    checked={formData.default}
+                    checked={formData.default === true}
                     onCheckedChange={(checked) => setFormData({ ...formData, default: checked === true })}
                   />
                   <Label htmlFor="product-default" className="cursor-pointer">

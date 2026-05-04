@@ -45,9 +45,75 @@ body:has([data-slot="drawer-overlay"][data-state="open"]) {
   margin: 0 1rem;
 }
 
+.modal-content--wide {
+  max-width: 64rem;
+}
+
+.product-availability-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+.product-availability-modal-customization {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 1rem;
+}
+
+.product-availability-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 1rem;
+}
+
+.product-availability-modal-fields > * + * {
+  margin-top: 1.25rem !important;
+}
+
+.product-availability-modal-fields .grid {
+  row-gap: 1.25rem !important;
+}
+
+.product-availability-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.product-availability-modal-field label {
+  margin-bottom: 0.5rem !important;
+}
+
+.product-availability-modal-secondary-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem !important;
+  margin-bottom: 1rem;
+}
+
+.product-availability-modal-secondary-actions > * + * {
+  margin-left: 1.5rem !important;
+}
+
+@media (min-width: 768px) {
+  .product-availability-modal-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 2rem;
+  }
+
+  .product-availability-modal-customization {
+    border-top: 0;
+    border-left: 1px solid #e2e8f0;
+    padding-top: 0;
+    padding-left: 1.75rem;
+  }
+}
+
 /* Scrollable variant (for large modals like transaction details) */
 .modal-content--scrollable {
-  max-height: 90vh;
+  max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;

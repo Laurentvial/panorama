@@ -753,6 +753,7 @@ class ClientProduct(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_products')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='client_products')
     featured = models.BooleanField(default=False)  # Si True, le produit est mis en avant pour ce client
+    show_rates = models.BooleanField(default=True)  # Afficher les taux/rentabilité à ce client
     availability_start = models.DateField(null=True, blank=True)  # Début de disponibilité pour ce client
     availability_end = models.DateField(null=True, blank=True)  # Fin de disponibilité pour ce client
     # Personnalisation par client (clés camelCase allowlist, voir client_product_overrides.py)

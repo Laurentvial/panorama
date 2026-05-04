@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Send, RefreshCw, Sparkles, Pencil, Trash2 } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
+import { toast } from 'sonner';
 import '../styles/PageHeader.css';
 
 type Client = {
@@ -46,7 +48,7 @@ type RequestItem = {
 
 export function Messagerie() {
   const { currentUser } = useUser();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState<string>('');
@@ -57,6 +59,11 @@ export function Messagerie() {
   const [sending, setSending] = useState(false);
   const [reformulating, setReformulating] = useState(false);
   const [draft, setDraft] = useState('');
+  const [newConversationClientId, setNewConversationClientId] = useState('');
+  const [newConversationSubject, setNewConversationSubject] = useState('');
+  const [newConversationMessage, setNewConversationMessage] = useState('');
+  const [newConversationError, setNewConversationError] = useState('');
+  const [creatingConversation, setCreatingConversation] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -72,6 +79,12 @@ export function Messagerie() {
   );
   const requestedClientId = searchParams.get('clientId') || '';
   const requestedConversationId = searchParams.get('conversationId') || '';
+  const requestedMode = searchParams.get('mode') || '';
+  const isNewConversationMode = requestedMode === 'new' && !!newConversationClientId;
+  const requestedClient = useMemo(
+    () => clients.find((c) => c.id === newConversationClientId) || null,
+    [clients, newConversationClientId],
+  );
 
   async function loadClients() {
     setLoadingClients(true);
@@ -124,12 +137,15 @@ export function Messagerie() {
 
       setSelectedRequestId((prev) => {
         if (prev && all.some((r) => r.id === prev)) return prev;
+        if (requestedMode === 'new' && requestedClientId) return '';
         return all.length > 0 ? all[0].id : '';
       });
+      return all;
     } catch (error) {
       console.error('Error loading requests:', error);
       setRequests([]);
       setSelectedRequestId('');
+      return [] as RequestItem[];
     } finally {
       setLoadingRequests(false);
     }
@@ -239,6 +255,61 @@ export function Messagerie() {
     }
   }
 
+  function clearNewConversationMode(clientId: string, conversationId: string) {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('clientId', clientId);
+    nextParams.set('conversationId', conversationId);
+    nextParams.delete('mode');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  async function createConversation() {
+    const subject = newConversationSubject.trim();
+    const message = newConversationMessage.trim();
+    if (!newConversationClientId) {
+      setNewConversationError('Client introuvable.');
+      return;
+    }
+    if (!subject || !message) {
+      setNewConversationError('Le sujet et le message sont requis.');
+      return;
+    }
+    setCreatingConversation(true);
+    setNewConversationError('');
+    try {
+      const response = await apiCall(`/api/clients/${newConversationClientId}/conversations/`, {
+        method: 'POST',
+        body: JSON.stringify({ subject, message }),
+      });
+
+      clearApiCache(`/api/clients/${newConversationClientId}/conversations/`);
+      const refreshedRequests = await loadRequests();
+      const conversationId = response?.conversation?.id as string | undefined;
+      const requestId =
+        (conversationId && refreshedRequests.find((r) => r.id === `${newConversationClientId}:${conversationId}`)?.id) ||
+        refreshedRequests.find((r) => r.clientId === newConversationClientId)?.id;
+
+      if (requestId) {
+        setSelectedRequestId(requestId);
+        setChatMessages([]);
+        setDraft('');
+      }
+      if (conversationId) {
+        clearNewConversationMode(newConversationClientId, conversationId);
+      }
+      setNewConversationSubject('');
+      setNewConversationMessage('');
+      setNewConversationClientId('');
+      toast.success('Conversation créée avec succès.');
+    } catch (error) {
+      console.error('Error creating conversation:', error);
+      setNewConversationError('Impossible de créer la conversation.');
+      toast.error('Impossible de créer la conversation.');
+    } finally {
+      setCreatingConversation(false);
+    }
+  }
+
   useEffect(() => {
     loadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -258,7 +329,41 @@ export function Messagerie() {
   }, [loadingClients, visibleClientIdsKey]);
 
   useEffect(() => {
+    if (requestedMode !== 'new') {
+      setNewConversationClientId('');
+      setNewConversationError('');
+      return;
+    }
+
+    if (!requestedClientId) {
+      setNewConversationClientId('');
+      setNewConversationError('Client manquant pour créer une nouvelle conversation.');
+      return;
+    }
+
+    const hasRequestedClient = clients.some((client) => client.id === requestedClientId);
+    if (!loadingClients && clients.length > 0 && !hasRequestedClient) {
+      setNewConversationClientId('');
+      setNewConversationError('Le client demandé est introuvable.');
+      return;
+    }
+
+    setSelectedRequestId('');
+    setChatMessages([]);
+    setDraft('');
+    setNewConversationError('');
+    setNewConversationClientId((previousClientId) => {
+      if (previousClientId !== requestedClientId) {
+        setNewConversationSubject('');
+        setNewConversationMessage('');
+      }
+      return requestedClientId;
+    });
+  }, [requestedMode, requestedClientId, clients, loadingClients]);
+
+  useEffect(() => {
     if (!requests.length) return;
+    if (requestedMode === 'new') return;
     if (!requestedClientId || !requestedConversationId) return;
 
     const targetId = `${requestedClientId}:${requestedConversationId}`;
@@ -268,7 +373,7 @@ export function Messagerie() {
     setSelectedRequestId(targetId);
     setDraft('');
     setChatMessages([]);
-  }, [requests, requestedClientId, requestedConversationId, selectedRequestId]);
+  }, [requests, requestedClientId, requestedConversationId, selectedRequestId, requestedMode]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -330,6 +435,9 @@ export function Messagerie() {
                         key={r.id}
                         type="button"
                         onClick={() => {
+                          if (requestedMode === 'new') {
+                            clearNewConversationMode(r.clientId, r.conversationId);
+                          }
                           setSelectedRequestId(r.id);
                           setDraft('');
                           setChatMessages([]);
@@ -357,11 +465,35 @@ export function Messagerie() {
             {/* Right: conversation */}
             <div className="flex-1 border rounded-lg bg-white" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-700 truncate">
-                {selectedRequest ? `${selectedRequest.clientName} — ${selectedRequest.subject}` : 'Sélectionnez une demande'}
+                {isNewConversationMode
+                  ? `Nouveau message — ${requestedClient?.fullName || `${requestedClient?.firstName || ''} ${requestedClient?.lastName || ''}`.trim() || requestedClient?.email || 'Client'}`
+                  : selectedRequest
+                    ? `${selectedRequest.clientName} — ${selectedRequest.subject}`
+                    : 'Sélectionnez une demande'}
               </div>
 
               <div ref={listRef} className="p-3 bg-slate-50" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                {!selectedRequest ? (
+                {isNewConversationMode ? (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border bg-white p-4">
+                      <div className="text-sm font-semibold text-slate-900">Nouveau message client</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {requestedClient
+                          ? `${requestedClient.fullName || `${requestedClient.firstName || ''} ${requestedClient.lastName || ''}`.trim() || requestedClient.email || requestedClient.id}`
+                          : 'Client introuvable'}
+                      </div>
+                    </div>
+                    {newConversationError ? (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {newConversationError}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">
+                        Renseignez un sujet et un premier message pour créer la conversation.
+                      </div>
+                    )}
+                  </div>
+                ) : !selectedRequest ? (
                   <div className="text-sm text-slate-500">Sélectionnez une demande à gauche.</div>
                 ) : loadingChat ? (
                   <div className="flex-1 flex items-center justify-center min-h-[200px]">
@@ -457,43 +589,77 @@ export function Messagerie() {
                 )}
               </div>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  sendChatMessage();
-                }}
-                className="p-3 border-t flex gap-2 items-end bg-white"
-              >
-                <Textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder={selectedRequest ? 'Écrire un message…' : 'Sélectionnez une demande…'}
-                  disabled={!selectedRequest || sending}
-                  rows={2}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={(e) => {
+              {isNewConversationMode ? (
+                <form
+                  onSubmit={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
-                    reformulateDraft();
+                    createConversation();
                   }}
-                  disabled={!draft.trim() || reformulating}
-                  title="Reformuler et corriger le message avec l'IA"
+                  className="p-3 border-t space-y-2 bg-white"
                 >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  {reformulating ? 'Reformulation…' : 'Reformuler'}
-                </Button>
-                <Button type="submit" disabled={!selectedRequest || sending || !draft.trim()}>
-                  <Send className="w-4 h-4 mr-2" />
-                  Envoyer
-                </Button>
-                <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests}>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Rafraîchir
-                </Button>
-              </form>
+                  <Input
+                    value={newConversationSubject}
+                    onChange={(e) => setNewConversationSubject(e.target.value)}
+                    placeholder="Sujet du message"
+                    disabled={!requestedClient || creatingConversation}
+                  />
+                  <Textarea
+                    value={newConversationMessage}
+                    onChange={(e) => setNewConversationMessage(e.target.value)}
+                    placeholder="Votre message..."
+                    rows={3}
+                    disabled={!requestedClient || creatingConversation}
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <Button type="submit" disabled={!requestedClient || creatingConversation || !newConversationSubject.trim() || !newConversationMessage.trim()}>
+                      <Send className="w-4 h-4 mr-2" />
+                      {creatingConversation ? 'Création…' : 'Créer la conversation'}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests || creatingConversation}>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Rafraîchir
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    sendChatMessage();
+                  }}
+                  className="p-3 border-t flex gap-2 items-end bg-white"
+                >
+                  <Textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder={selectedRequest ? 'Écrire un message…' : 'Sélectionnez une demande…'}
+                    disabled={!selectedRequest || sending}
+                    rows={2}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      reformulateDraft();
+                    }}
+                    disabled={!draft.trim() || reformulating}
+                    title="Reformuler et corriger le message avec l'IA"
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    {reformulating ? 'Reformulation…' : 'Reformuler'}
+                  </Button>
+                  <Button type="submit" disabled={!selectedRequest || sending || !draft.trim()}>
+                    <Send className="w-4 h-4 mr-2" />
+                    Envoyer
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Rafraîchir
+                  </Button>
+                </form>
+              )}
             </div>
           </div>
         </CardContent>

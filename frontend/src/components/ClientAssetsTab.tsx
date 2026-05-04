@@ -302,7 +302,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     const tempItems = productsToAdd.map((product: any) => ({
       id: `pending-${product.id}-${Date.now()}`,
       product,
-      featured: false
+      featured: false,
+      showRates: true,
     }));
     setLocalClientProducts((prev) => [...prev, ...tempItems]);
     closeAddProductModal();
@@ -426,6 +427,36 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
       );
       console.error('Error toggling featured:', error);
       toast.error(error.message || 'Erreur lors de la modification');
+    }
+  }
+
+  async function handleToggleProductRates(clientProductId: string, productId: string, currentShowRates: boolean) {
+    const nextShowRates = !currentShowRates;
+    setLocalClientProducts((prev) =>
+      prev.map((cp: any) =>
+        String(cp?.id) === String(clientProductId)
+          ? { ...cp, showRates: nextShowRates }
+          : cp
+      )
+    );
+
+    try {
+      await apiCall(`/api/clients/${clientId}/products/${productId}/availability/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ showRates: nextShowRates }),
+      });
+      toast.success(nextShowRates ? 'Taux affichés pour ce produit' : 'Taux masqués pour ce produit');
+    } catch (error: any) {
+      setLocalClientProducts((prev) =>
+        prev.map((cp: any) =>
+          String(cp?.id) === String(clientProductId)
+            ? { ...cp, showRates: currentShowRates }
+            : cp
+        )
+      );
+      console.error('Error toggling product rates:', error);
+      toast.error(error.message || 'Erreur lors de la modification des taux');
     }
   }
 
@@ -1264,6 +1295,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           <th className="text-left py-2 px-3">Durée</th>
                           <th className="text-left py-2 px-3">Statut</th>
                           <th className="text-center py-2 px-3">Mis en avant</th>
+                          <th className="text-center py-2 px-3">Afficher les taux</th>
                           <th className="text-left py-2 px-3">Dates de disponibilité</th>
                           <th className="text-left py-2 px-3">Actions</th>
                         </tr>
@@ -1273,6 +1305,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                           const product = clientProduct.product;
                           if (!product) return null; // Skip if product was deleted
                           const isFeatured = clientProduct.featured || false;
+                          const showRates = clientProduct.showRates !== false;
                           const profitability = formatProductProfitability(product);
                           const minEntry = product.minEntryValue;
                           const maxEntry = product.maxEntryValue;
@@ -1333,6 +1366,13 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                                     />
                                   )}
                                 </Button>
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <Checkbox
+                                  checked={showRates}
+                                  onCheckedChange={() => handleToggleProductRates(clientProduct.id, product.id, showRates)}
+                                  aria-label={`${showRates ? 'Masquer' : 'Afficher'} les taux de ${product.name}`}
+                                />
                               </td>
                               <td className="py-2 px-3">
                                 {clientProduct.availabilityStart || clientProduct.availabilityEnd ? (

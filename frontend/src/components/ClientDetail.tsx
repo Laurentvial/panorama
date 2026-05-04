@@ -6,6 +6,7 @@ import { ArrowLeft, User, Power, CheckCircle, XCircle, FileText, Mail } from 'lu
 import { apiCall } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import { EditPersonalInfoModal } from './EditPersonalInfoModal';
 import { EditPatrimonialInfoModal } from './EditPatrimonialInfoModal';
 import { ClientInfoTab } from './ClientInfoTab';
@@ -47,6 +48,7 @@ const CLIENT_DETAIL_TABS = [
 type ClientDetailTab = typeof CLIENT_DETAIL_TABS[number];
 
 export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
+  const navigate = useNavigate();
   const [client, setClient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ClientDetailTab>('info');
@@ -288,7 +290,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         <Button 
           size="sm" 
           variant="outline"
-          onClick={() => toast.info('Fonctionnalité à venir - Envoyer un message')}
+          onClick={() => navigate(`/admin/messagerie?clientId=${clientId}&mode=new`)}
         >
           <Mail className="w-4 h-4 mr-2" />
           Envoyer un message

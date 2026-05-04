@@ -1310,6 +1310,7 @@ class ClientProductSerializer(serializers.ModelSerializer):
     productId = serializers.CharField(write_only=True, required=False)
     clientId = serializers.CharField(source='client.id', read_only=True)
     featured = serializers.BooleanField()
+    showRates = serializers.BooleanField(source='show_rates', required=False)
     availabilityStart = serializers.DateField(source='availability_start', required=False, allow_null=True)
     availabilityEnd = serializers.DateField(source='availability_end', required=False, allow_null=True)
     overrides = serializers.JSONField(required=False, allow_null=True)
@@ -1321,7 +1322,7 @@ class ClientProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientProduct
         fields = [
-            'id', 'clientId', 'product', 'productId', 'featured', 'availabilityStart', 'availabilityEnd',
+            'id', 'clientId', 'product', 'productId', 'featured', 'showRates', 'availabilityStart', 'availabilityEnd',
             'overrides', 'isCustomized', 'baseProduct', 'createdAt', 'updatedAt',
         ]
         read_only_fields = ['id', 'product', 'isCustomized', 'baseProduct', 'createdAt', 'updatedAt']
@@ -1362,6 +1363,7 @@ class ClientProductSerializer(serializers.ModelSerializer):
             ret['productId'] = None
             ret['baseProduct'] = None
         ret['featured'] = bool(instance.featured)
+        ret['showRates'] = bool(instance.show_rates)
         ret['availabilityStart'] = instance.availability_start
         ret['availabilityEnd'] = instance.availability_end
         ret['overrides'] = instance.overrides or {}

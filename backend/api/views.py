@@ -11397,6 +11397,7 @@ def product_detail(request, product_id):
             ovr = cp.overrides or {}
             if ovr:
                 pdata = merge_serialized_product_with_overrides(pdata, ovr)
+            pdata['showRates'] = bool(cp.show_rates)
         except ClientProduct.DoesNotExist:
             pass
     return Response({'product': pdata}, status=status.HTTP_200_OK)
@@ -12444,7 +12445,7 @@ def product_duplicate(request, product_id):
         # Gestion des prix
         min_entry_value=original_product.min_entry_value,
         max_entry_value=original_product.max_entry_value,
-        default=original_product.default,
+        default=False,
         available_funds=original_product.available_funds,
     )
     
