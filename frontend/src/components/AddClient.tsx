@@ -424,6 +424,7 @@ export function AddClient() {
                   <SelectContent>
                     <SelectItem value="Monsieur">Monsieur</SelectItem>
                     <SelectItem value="Madame">Madame</SelectItem>
+                    <SelectItem value="Monsieur et Madame">Monsieur et Madame</SelectItem>
                     <SelectItem value="Mademoiselle">Mademoiselle</SelectItem>
                   </SelectContent>
                 </Select>

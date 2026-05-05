@@ -34,7 +34,7 @@ class Client(models.Model):
     
     # Informations personnelles
     profile_photo = models.ImageField(upload_to='client_profiles/', storage=client_profile_storage, null=True, blank=True)
-    civility = models.CharField(max_length=10, default="", blank=True)  # Monsieur, Madame, etc.
+    civility = models.CharField(max_length=30, default="", blank=True)  # Monsieur, Madame, etc.
     fname = models.CharField(max_length=50, default="")
     middle_name = models.CharField(max_length=80, default="", blank=True)  # Deuxième prénom (optionnel)
     lname = models.CharField(max_length=50, default="")
