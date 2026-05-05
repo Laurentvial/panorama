@@ -1399,6 +1399,38 @@ def client_detail(request, client_id):
             client.nationality = request.data.get('nationality', '') or ''
         if 'successor' in request.data:
             client.successor = request.data.get('successor', '') or ''
+        if 'kycStatus' in request.data:
+            client.kyc_status = request.data.get('kycStatus', 'pending') or 'pending'
+        if 'kycDocumentsReview' in request.data:
+            review_map = request.data.get('kycDocumentsReview')
+            if isinstance(review_map, str):
+                try:
+                    review_map = json.loads(review_map)
+                except Exception:
+                    review_map = {}
+            if not isinstance(review_map, dict):
+                review_map = {}
+            allowed_keys = {'identityDocument', 'identityDocumentVerso', 'proofOfAddress', 'selfiePhoto'}
+            allowed_values = {'pending', 'approved', 'rejected'}
+            sanitized_review_map = {}
+            for key, value in review_map.items():
+                if key not in allowed_keys:
+                    continue
+                normalized_value = (str(value or '')).strip().lower()
+                sanitized_review_map[key] = normalized_value if normalized_value in allowed_values else 'pending'
+            client.kyc_documents_review = sanitized_review_map
+        if 'kycReviewedAt' in request.data:
+            raw_reviewed_at = request.data.get('kycReviewedAt')
+            if raw_reviewed_at in (None, '', 'null'):
+                client.kyc_reviewed_at = None
+            else:
+                parsed_reviewed_at = None
+                try:
+                    parsed_reviewed_at = datetime.fromisoformat(str(raw_reviewed_at).replace('Z', '+00:00'))
+                except Exception:
+                    parsed_reviewed_at = None
+                if parsed_reviewed_at is not None:
+                    client.kyc_reviewed_at = parsed_reviewed_at
         
         # Update RIB fields
         if 'ribBankName' in request.data:
@@ -2916,6 +2948,7 @@ def client_update_identity(request):
     # Handle KYC document uploads
     update_fields_list = []
     kyc_uploaded_labels = []
+    kyc_documents_review = client.kyc_documents_review if isinstance(client.kyc_documents_review, dict) else {}
     if 'identityDocument' in request.FILES:
         identity_file = request.FILES['identityDocument']
         try:
@@ -2926,6 +2959,7 @@ def client_update_identity(request):
                 client.identity_document.delete(save=False)
             client.identity_document.save(custom_filename, identity_file, save=False)
             update_fields_list.append('identity_document')
+            kyc_documents_review['identityDocument'] = 'pending'
             kyc_uploaded_labels.append("pièce d'identité (recto)")
         except Exception as e:
             import logging
@@ -2942,6 +2976,7 @@ def client_update_identity(request):
                 client.identity_document_verso.delete(save=False)
             client.identity_document_verso.save(custom_filename, identity_verso_file, save=False)
             update_fields_list.append('identity_document_verso')
+            kyc_documents_review['identityDocumentVerso'] = 'pending'
             kyc_uploaded_labels.append("pièce d'identité (verso)")
         except Exception as e:
             import logging
@@ -2958,6 +2993,7 @@ def client_update_identity(request):
                 client.proof_of_address.delete(save=False)
             client.proof_of_address.save(custom_filename, address_file, save=False)
             update_fields_list.append('proof_of_address')
+            kyc_documents_review['proofOfAddress'] = 'pending'
             kyc_uploaded_labels.append("justificatif de domicile")
         except Exception as e:
             import logging
@@ -2974,6 +3010,7 @@ def client_update_identity(request):
                 client.selfie_photo.delete(save=False)
             client.selfie_photo.save(custom_filename, selfie_file, save=False)
             update_fields_list.append('selfie_photo')
+            kyc_documents_review['selfiePhoto'] = 'pending'
             kyc_uploaded_labels.append("selfie")
         except Exception as e:
             import logging
@@ -3004,6 +3041,11 @@ def client_update_identity(request):
             from django.utils import timezone
             client.kyc_submitted_at = timezone.now()
             update_fields_list.append('kyc_submitted_at')
+
+    if kyc_uploaded_labels:
+        client.kyc_documents_review = kyc_documents_review
+        if 'kyc_documents_review' not in update_fields_list:
+            update_fields_list.append('kyc_documents_review')
 
     # Notify assigned manager on any KYC document upload (Step 8)
     # Create a single notification per request even if multiple files are uploaded.

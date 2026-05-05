@@ -80,6 +80,8 @@ import '../styles/PlatformPortfolio.css';
 type SexValue = '' | 'male' | 'female' | 'other';
 
 type Step = 1 | 2 | 3;
+type KycDocumentField = 'identityDocument' | 'identityDocumentVerso' | 'proofOfAddress' | 'selfiePhoto';
+type KycReviewStatus = 'pending' | 'approved' | 'rejected';
 
 
 
@@ -256,11 +258,52 @@ export function PlatformAccountVerification() {
     return kycDocumentsConfig[documentKey] !== false;
   };
 
-  const isMissingRequestedKycDocs =
-    (isKycDocumentRequested('identityDocument') && !identityDocument) ||
-    (isKycDocumentRequested('identityDocumentVerso') && !identityDocumentVerso) ||
-    (isKycDocumentRequested('proofOfAddress') && !proofOfAddress) ||
-    (isKycDocumentRequested('selfiePhoto') && !selfiePhoto);
+  const kycDocumentsReview = useMemo(() => {
+    const review = (currentUser?.kycDocumentsReview || currentUser?.kyc_documents_review || {}) as Record<string, string>;
+    return review && typeof review === 'object' ? review : {};
+  }, [currentUser]);
+
+  const getExistingKycDocumentUrl = (documentKey: KycDocumentField): string => {
+    if (documentKey === 'identityDocument') return (currentUser?.identityDocument || currentUser?.identity_document || '').toString();
+    if (documentKey === 'identityDocumentVerso') return (currentUser?.identityDocumentVerso || currentUser?.identity_document_verso || '').toString();
+    if (documentKey === 'proofOfAddress') return (currentUser?.proofOfAddress || currentUser?.proof_of_address || '').toString();
+    return (currentUser?.selfiePhoto || currentUser?.selfie_photo || '').toString();
+  };
+
+  const hasKycReviewEntry = (documentKey: KycDocumentField): boolean => {
+    return Object.prototype.hasOwnProperty.call(kycDocumentsReview, documentKey);
+  };
+
+  const getKycReviewStatus = (documentKey: KycDocumentField): KycReviewStatus => {
+    const hasReviewEntry = hasKycReviewEntry(documentKey);
+    const status = (kycDocumentsReview[documentKey] || '').toString().toLowerCase();
+    if (hasReviewEntry && (status === 'approved' || status === 'rejected' || status === 'pending')) return status;
+    if (hasReviewEntry) return 'pending';
+    const hasUploadedFile = Boolean(getExistingKycDocumentUrl(documentKey));
+    if (hasUploadedFile) return 'pending';
+    return 'pending';
+  };
+
+  const isKycDocumentUploadLocked = (documentKey: KycDocumentField): boolean => {
+    const hasUploadedFile = Boolean(getExistingKycDocumentUrl(documentKey));
+    const hasReviewEntry = hasKycReviewEntry(documentKey);
+    if (!hasUploadedFile && !hasReviewEntry) return false;
+    const status = getKycReviewStatus(documentKey);
+    return status === 'pending' || status === 'approved';
+  };
+
+  const getKycDocumentLockedLabel = (documentKey: KycDocumentField): string => {
+    const status = getKycReviewStatus(documentKey);
+    if (status === 'approved') return 'Déjà validé';
+    return 'Déjà envoyé — en revue';
+  };
+
+  const getKycDocumentLockedButtonLabel = (documentKey: KycDocumentField): string => {
+    const status = getKycReviewStatus(documentKey);
+    if (status === 'approved') return 'Déjà validé';
+    return 'En revue';
+  };
+
 
 
 
@@ -757,19 +800,49 @@ export function PlatformAccountVerification() {
 
   const progress = useMemo(() => {
     if (!step) return { percent: 0, label: 'Sélection' };
+
+    const enabledSteps = ([1, 2, 3] as const).filter((stepNumber) => isStepEnabled(stepNumber));
+    const currentStepIndex = enabledSteps.indexOf(step);
+    if (currentStepIndex === -1 || enabledSteps.length === 0) {
+      return { percent: 0, label: 'Sélection' };
+    }
+
+    const enabledStep2ConfigSteps = [3, 4, 5, 6, 7].filter((configStep) => isConfigStepEnabled(configStep));
+    const step2SubStepByConfigStep: Record<number, number> = { 3: 1, 4: 2, 5: 3, 6: 4, 7: 5 };
+    const enabledStep2SubSteps = enabledStep2ConfigSteps.map((configStep) => step2SubStepByConfigStep[configStep]);
+
+    const currentStepTotalSubSteps =
+      step === 1 ? (isConfigStepEnabled(2) ? 2 : 1) :
+      step === 2 ? Math.max(enabledStep2SubSteps.length, 1) :
+      1;
+
+    const currentSubStepPosition =
+      step === 1
+        ? (isConfigStepEnabled(2) ? Math.min(Math.max(subStep, 1), 2) : 1)
+        : step === 2
+          ? (() => {
+              const step2Index = enabledStep2SubSteps.indexOf(subStep);
+              return step2Index >= 0 ? step2Index + 1 : 1;
+            })()
+          : 1;
+
+    const completedWholeSteps = currentStepIndex;
+    const intraStepProgress = (currentSubStepPosition - 1) / currentStepTotalSubSteps;
+    const percent = Math.round(((completedWholeSteps + intraStepProgress) / enabledSteps.length) * 100);
+
     if (step === 1) {
-      if (subStep === 1) return { percent: 10, label: 'Identité' };
-      return { percent: 20, label: 'Adresse' };
+      if (subStep === 1) return { percent, label: 'Identité' };
+      return { percent, label: 'Adresse' };
     }
     if (step === 2) {
-      if (subStep === 1) return { percent: 30, label: 'Profil' };
-      if (subStep === 2) return { percent: 40, label: 'Préférences' };
-      if (subStep === 3) return { percent: 50, label: 'Objectifs' };
-      if (subStep === 4) return { percent: 65, label: 'Conformité' };
-      return { percent: 75, label: 'Sources de revenus' };
+      if (subStep === 1) return { percent, label: 'Profil' };
+      if (subStep === 2) return { percent, label: 'Préférences' };
+      if (subStep === 3) return { percent, label: 'Objectifs' };
+      if (subStep === 4) return { percent, label: 'Conformité' };
+      return { percent, label: 'Sources de revenus' };
     }
-    return { percent: 90, label: 'KYC' };
-  }, [step, subStep]);
+    return { percent, label: 'KYC' };
+  }, [step, subStep, verificationConfig]);
 
 
 
@@ -938,80 +1011,34 @@ export function PlatformAccountVerification() {
 
 
 
-  const handleKYCSubmit = async (e: React.FormEvent) => {
+  const uploadSingleKycDocument = async (documentKey: KycDocumentField) => {
+    const selectedFile =
+      documentKey === 'identityDocument' ? identityDocument :
+      documentKey === 'identityDocumentVerso' ? identityDocumentVerso :
+      documentKey === 'proofOfAddress' ? proofOfAddress :
+      selfiePhoto;
 
-    e.preventDefault();
-
-
-
-    if (isKycDocumentRequested('identityDocument') && !identityDocument) {
-
-      toast.error('Veuillez télécharger votre pièce d\'identité (recto).');
-
+    if (!selectedFile) {
+      toast.error('Veuillez sélectionner un fichier avant l\'envoi.');
       return;
-
     }
-
-    if (isKycDocumentRequested('identityDocumentVerso') && !identityDocumentVerso) {
-
-      toast.error('Veuillez télécharger votre pièce d\'identité (verso).');
-
-      return;
-
-    }
-
-    if (isKycDocumentRequested('proofOfAddress') && !proofOfAddress) {
-
-      toast.error('Veuillez télécharger votre justificatif de domicile.');
-
-      return;
-
-    }
-
-    if (isKycDocumentRequested('selfiePhoto') && !selfiePhoto) {
-
-      toast.error('Veuillez télécharger votre selfie.');
-
-      return;
-
-    }
-
-
 
     try {
-
       setSubmitting(true);
-
-      const files: Record<string, File> = {};
-      if (isKycDocumentRequested('identityDocument') && identityDocument) files.identityDocument = identityDocument;
-      if (isKycDocumentRequested('identityDocumentVerso') && identityDocumentVerso) files.identityDocumentVerso = identityDocumentVerso;
-      if (isKycDocumentRequested('proofOfAddress') && proofOfAddress) files.proofOfAddress = proofOfAddress;
-      if (isKycDocumentRequested('selfiePhoto') && selfiePhoto) files.selfiePhoto = selfiePhoto;
-
-      const hasFiles = Object.keys(files).length > 0;
-      await patchClientIdentity({ kycStatus: 'submitted' }, hasFiles ? files : undefined);
-
-
-
+      await patchClientIdentity({ kycStatus: 'submitted' }, { [documentKey]: selectedFile });
       await refreshUser();
 
-      toast.success('Étape 3 complétée avec succès !');
-      
-      // Close verification and return to home page
-      setTimeout(() => {
-        navigate('/platform');
-      }, 1500);
+      if (documentKey === 'identityDocument') setIdentityDocument(null);
+      if (documentKey === 'identityDocumentVerso') setIdentityDocumentVerso(null);
+      if (documentKey === 'proofOfAddress') setProofOfAddress(null);
+      if (documentKey === 'selfiePhoto') setSelfiePhoto(null);
 
+      toast.success('Document envoyé pour revue.');
     } catch (error: any) {
-
-      toast.error(error?.message || "Erreur lors de l'enregistrement.");
-
+      toast.error(error?.message || "Erreur lors de l'envoi du document.");
     } finally {
-
       setSubmitting(false);
-
     }
-
   };
 
 
@@ -2608,7 +2635,7 @@ export function PlatformAccountVerification() {
 
           ) : step === 3 ? (
 
-            <form onSubmit={handleKYCSubmit} className="space-y-6">
+            <div className="space-y-6">
 
               <div style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
 
@@ -2649,6 +2676,7 @@ export function PlatformAccountVerification() {
                           type="file"
 
                           accept="image/*,.pdf"
+                          disabled={isKycDocumentUploadLocked('identityDocument')}
 
                           onChange={(e) => {
 
@@ -2657,8 +2685,6 @@ export function PlatformAccountVerification() {
                             if (file) setIdentityDocument(file);
 
                           }}
-
-                          required={isKycDocumentRequested('identityDocument')}
 
                           style={{
 
@@ -2702,12 +2728,35 @@ export function PlatformAccountVerification() {
 
                           <span style={{ fontSize: 14, color: '#374151' }}>
 
-                            {identityDocument ? identityDocument.name : 'Choisir un fichier'}
+                            {identityDocument
+                              ? identityDocument.name
+                              : isKycDocumentUploadLocked('identityDocument')
+                                ? getKycDocumentLockedLabel('identityDocument')
+                                : 'Choisir un fichier'}
 
                           </span>
 
                         </div>
 
+                      </div>
+
+                      {isKycDocumentUploadLocked('identityDocument') && getExistingKycDocumentUrl('identityDocument') && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+                          <a href={getExistingKycDocumentUrl('identityDocument')} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>
+                            Voir le document déjà envoyé
+                          </a>
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={submitting || !identityDocument || isKycDocumentUploadLocked('identityDocument')}
+                          onClick={() => uploadSingleKycDocument('identityDocument')}
+                        >
+                          {isKycDocumentUploadLocked('identityDocument') ? getKycDocumentLockedButtonLabel('identityDocument') : 'Envoyer pour revue'}
+                        </Button>
                       </div>
 
                     </div>
@@ -2727,6 +2776,7 @@ export function PlatformAccountVerification() {
                           type="file"
 
                           accept="image/*,.pdf"
+                          disabled={isKycDocumentUploadLocked('identityDocumentVerso')}
 
                           onChange={(e) => {
 
@@ -2735,8 +2785,6 @@ export function PlatformAccountVerification() {
                             if (file) setIdentityDocumentVerso(file);
 
                           }}
-
-                          required={isKycDocumentRequested('identityDocumentVerso')}
 
                           style={{
 
@@ -2780,12 +2828,35 @@ export function PlatformAccountVerification() {
 
                           <span style={{ fontSize: 14, color: '#374151' }}>
 
-                            {identityDocumentVerso ? identityDocumentVerso.name : 'Choisir un fichier'}
+                            {identityDocumentVerso
+                              ? identityDocumentVerso.name
+                              : isKycDocumentUploadLocked('identityDocumentVerso')
+                                ? getKycDocumentLockedLabel('identityDocumentVerso')
+                                : 'Choisir un fichier'}
 
                           </span>
 
                         </div>
 
+                      </div>
+
+                      {isKycDocumentUploadLocked('identityDocumentVerso') && getExistingKycDocumentUrl('identityDocumentVerso') && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+                          <a href={getExistingKycDocumentUrl('identityDocumentVerso')} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>
+                            Voir le document déjà envoyé
+                          </a>
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={submitting || !identityDocumentVerso || isKycDocumentUploadLocked('identityDocumentVerso')}
+                          onClick={() => uploadSingleKycDocument('identityDocumentVerso')}
+                        >
+                          {isKycDocumentUploadLocked('identityDocumentVerso') ? getKycDocumentLockedButtonLabel('identityDocumentVerso') : 'Envoyer pour revue'}
+                        </Button>
                       </div>
 
                     </div>
@@ -2818,6 +2889,7 @@ export function PlatformAccountVerification() {
                       type="file"
 
                       accept="image/*,.pdf"
+                      disabled={isKycDocumentUploadLocked('proofOfAddress')}
 
                       onChange={(e) => {
 
@@ -2826,8 +2898,6 @@ export function PlatformAccountVerification() {
                         if (file) setProofOfAddress(file);
 
                       }}
-
-                      required={isKycDocumentRequested('proofOfAddress')}
 
                       style={{
 
@@ -2871,12 +2941,35 @@ export function PlatformAccountVerification() {
 
                       <span style={{ fontSize: 14, color: '#374151' }}>
 
-                        {proofOfAddress ? proofOfAddress.name : 'Choisir un fichier'}
+                        {proofOfAddress
+                          ? proofOfAddress.name
+                          : isKycDocumentUploadLocked('proofOfAddress')
+                            ? getKycDocumentLockedLabel('proofOfAddress')
+                            : 'Choisir un fichier'}
 
                       </span>
 
                     </div>
 
+                  </div>
+
+                  {isKycDocumentUploadLocked('proofOfAddress') && getExistingKycDocumentUrl('proofOfAddress') && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+                      <a href={getExistingKycDocumentUrl('proofOfAddress')} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>
+                        Voir le document déjà envoyé
+                      </a>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={submitting || !proofOfAddress || isKycDocumentUploadLocked('proofOfAddress')}
+                      onClick={() => uploadSingleKycDocument('proofOfAddress')}
+                    >
+                      {isKycDocumentUploadLocked('proofOfAddress') ? getKycDocumentLockedButtonLabel('proofOfAddress') : 'Envoyer pour revue'}
+                    </Button>
                   </div>
 
                   {proofOfAddress && (
@@ -2914,6 +3007,7 @@ export function PlatformAccountVerification() {
                       type="file"
 
                       accept="image/*"
+                      disabled={isKycDocumentUploadLocked('selfiePhoto')}
 
                       onChange={(e) => {
 
@@ -2922,8 +3016,6 @@ export function PlatformAccountVerification() {
                         if (file) setSelfiePhoto(file);
 
                       }}
-
-                      required={isKycDocumentRequested('selfiePhoto')}
 
                       style={{
 
@@ -2967,7 +3059,11 @@ export function PlatformAccountVerification() {
 
                       <span style={{ fontSize: 14, color: '#374151' }}>
 
-                        {selfiePhoto ? selfiePhoto.name : 'Choisir un fichier'}
+                        {selfiePhoto
+                          ? selfiePhoto.name
+                          : isKycDocumentUploadLocked('selfiePhoto')
+                            ? getKycDocumentLockedLabel('selfiePhoto')
+                            : 'Choisir un fichier'}
 
                       </span>
 
@@ -2975,24 +3071,30 @@ export function PlatformAccountVerification() {
 
                   </div>
 
+                  {isKycDocumentUploadLocked('selfiePhoto') && getExistingKycDocumentUrl('selfiePhoto') && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+                      <a href={getExistingKycDocumentUrl('selfiePhoto')} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>
+                        Voir le document déjà envoyé
+                      </a>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={submitting || !selfiePhoto || isKycDocumentUploadLocked('selfiePhoto')}
+                      onClick={() => uploadSingleKycDocument('selfiePhoto')}
+                    >
+                      {isKycDocumentUploadLocked('selfiePhoto') ? getKycDocumentLockedButtonLabel('selfiePhoto') : 'Envoyer pour revue'}
+                    </Button>
+                  </div>
+
                 </div>
                 )}
 
               </div>
-
-
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-
-                <Button type="submit" disabled={submitting || isMissingRequestedKycDocs} variant="platform">
-
-                  {submitting ? 'Envoi en cours...' : 'Terminer la vérification'}
-
-                </Button>
-
-              </div>
-
-            </form>
+            </div>
 
           ) : null}
         </CardContent>

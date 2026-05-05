@@ -429,6 +429,7 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['selfiePhoto'] = _get_media_url_for_field(request, instance.selfie_photo) or ''
         
         ret['kycStatus'] = ret.get('kyc_status', 'pending') or 'pending'
+        ret['kycDocumentsReview'] = ret.get('kyc_documents_review', {}) or {}
         ret['kycSubmittedAt'] = ret.get('kyc_submitted_at', None)
         ret['kycReviewedAt'] = ret.get('kyc_reviewed_at', None)
         ret['birthDate'] = instance.birth_date.isoformat() if instance.birth_date else None

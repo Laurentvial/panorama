@@ -71,6 +71,9 @@ class Client(models.Model):
     proof_of_address = models.ImageField(upload_to='kyc/address/', storage=client_profile_storage, null=True, blank=True)  # Utility bill, bank statement, etc.
     selfie_photo = models.ImageField(upload_to='kyc/selfie/', storage=client_profile_storage, null=True, blank=True)  # Selfie for identity verification
     kyc_status = models.CharField(max_length=20, default="pending", blank=True)  # pending, submitted, approved, rejected
+    # Per-document review status managed by CRM (keys: identityDocument, identityDocumentVerso, proofOfAddress, selfiePhoto)
+    # values: pending | approved | rejected
+    kyc_documents_review = models.JSONField(default=dict, blank=True)
     kyc_submitted_at = models.DateTimeField(null=True, blank=True)
     kyc_reviewed_at = models.DateTimeField(null=True, blank=True)
 

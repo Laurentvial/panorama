@@ -819,7 +819,12 @@ export function PlatformDashboard() {
     { id: 1 as const, label: 'Inscription', enabled: isStepEnabled(1), completed: isStep1Completed },
     { id: 2 as const, label: 'Verification', enabled: isStepEnabled(2), completed: isStep2Completed },
     { id: 3 as const, label: 'Investir', enabled: isStepEnabled(3), completed: isStep3Completed },
-  ].filter((s) => s.enabled);
+  ]
+    .filter((s) => s.enabled)
+    .map((s, index) => ({
+      ...s,
+      displayNumber: index + 1,
+    }));
 
   const currentVerificationStepId =
     verificationStepperSteps.find((s) => !s.completed)?.id ?? null;
@@ -1055,7 +1060,7 @@ export function PlatformDashboard() {
                                   }}
                                   aria-label={`${s.label} (${s.completed ? 'complété' : isCurrent ? 'en cours' : 'à faire'})`}
                                 >
-                                  {s.completed ? <Check className="h-4 w-4" /> : <span style={{ fontSize: 14 }}>{s.id}</span>}
+                                  {s.completed ? <Check className="h-4 w-4" /> : <span style={{ fontSize: 14 }}>{s.displayNumber}</span>}
                                 </div>
                                 <div
                                   style={{

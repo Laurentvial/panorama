@@ -72,26 +72,61 @@ const KYC_DOCUMENT_LABELS: Record<string, string> = {
   selfiePhoto: "Selfie avec pièce d'identité",
 };
 
+const KYC_DOCUMENT_FILE_KEYS: Record<string, string[]> = {
+  identityDocument: ['identityDocument', 'identity_document'],
+  identityDocumentVerso: ['identityDocumentVerso', 'identity_document_verso'],
+  proofOfAddress: ['proofOfAddress', 'proof_of_address'],
+  selfiePhoto: ['selfiePhoto', 'selfie_photo'],
+};
+
+type KycDocumentReviewStatus = 'pending' | 'approved' | 'rejected';
+
+const KYC_DOCUMENT_REVIEW_LABELS: Record<KycDocumentReviewStatus, string> = {
+  pending: 'En attente',
+  approved: 'Validée',
+  rejected: 'Refusée',
+};
+
+const KYC_DOCUMENT_REVIEW_BADGE_CLASSES: Record<KycDocumentReviewStatus, string> = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  approved: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800',
+};
+
 const STEP_LABELS: Record<string, string> = {
-  step_1: 'Étape 1 : Identité',
-  step_2: 'Étape 2 : Adresse',
-  step_3: 'Étape 3 : Profil',
-  step_4: 'Étape 4 : Préférences',
-  step_5: 'Étape 5 : Objectifs',
-  step_6: 'Étape 6 : Conformité',
-  step_7: 'Étape 7 : Sources de revenus',
-  step_8: 'Étape 8 : Vérification KYC',
+  step_1: 'Question 1 : Identité',
+  step_2: 'Question 2 : Adresse',
+  step_3: 'Question 3 : Profil',
+  step_4: 'Question 4 : Préférences',
+  step_5: 'Question 5 : Objectifs',
+  step_6: 'Question 6 : Conformité',
+  step_7: 'Question 7 : Sources de revenus',
+  step_8: 'Question 8 : Vérification KYC',
 };
 
 export function ClientVerificationTab({ client, clientId }: ClientVerificationTabProps) {
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [reviewSavingByDocument, setReviewSavingByDocument] = useState<Record<string, boolean>>({});
   const [stepsConfig, setStepsConfig] = useState<Record<string, { enabled: boolean; questions?: Record<string, boolean> }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [originalConfig, setOriginalConfig] = useState<any>(null);
+  const [kycStatus, setKycStatus] = useState<string>((client?.kycStatus || client?.kyc_status || 'pending') as string);
+  const [kycReviewedAt, setKycReviewedAt] = useState<string | null>((client?.kycReviewedAt || client?.kyc_reviewed_at || null) as string | null);
+  const [kycDocumentsReview, setKycDocumentsReview] = useState<Record<string, KycDocumentReviewStatus>>(
+    (client?.kycDocumentsReview || client?.kyc_documents_review || {}) as Record<string, KycDocumentReviewStatus>,
+  );
 
   const actualClientId = clientId || client?.id;
+
+  useEffect(() => {
+    setKycStatus((client?.kycStatus || client?.kyc_status || 'pending') as string);
+    setKycReviewedAt((client?.kycReviewedAt || client?.kyc_reviewed_at || null) as string | null);
+    setKycDocumentsReview(
+      (client?.kycDocumentsReview || client?.kyc_documents_review || {}) as Record<string, KycDocumentReviewStatus>,
+    );
+  }, [client]);
 
   useEffect(() => {
     if (actualClientId) {
@@ -392,6 +427,65 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
     }
   };
 
+  const getKycDocumentUrl = (documentKey: string): string => {
+    const possibleKeys = KYC_DOCUMENT_FILE_KEYS[documentKey] || [];
+    for (const key of possibleKeys) {
+      const value = client?.[key];
+      if (typeof value === 'string' && value.trim() !== '') {
+        return value;
+      }
+    }
+    return '';
+  };
+
+  const getKycDocumentReviewStatus = (documentKey: string): KycDocumentReviewStatus => {
+    const statusValue = (kycDocumentsReview?.[documentKey] || 'pending') as string;
+    if (statusValue === 'approved' || statusValue === 'rejected') {
+      return statusValue;
+    }
+    return 'pending';
+  };
+
+  const handleKycDocumentReviewStatusChange = async (
+    documentKey: string,
+    nextStatus: KycDocumentReviewStatus,
+  ) => {
+    if (!actualClientId) return;
+
+    const nextDocumentsReview = {
+      ...kycDocumentsReview,
+      [documentKey]: nextStatus,
+    };
+
+    const uploadedDocumentKeys = Object.keys(KYC_DOCUMENT_LABELS).filter((key) => Boolean(getKycDocumentUrl(key)));
+    const uploadedStatuses = uploadedDocumentKeys.map((key) => nextDocumentsReview[key] || 'pending');
+    const anyRejected = uploadedStatuses.some((status) => status === 'rejected');
+    const allApproved = uploadedStatuses.length > 0 && uploadedStatuses.every((status) => status === 'approved');
+    const nextGlobalKycStatus = anyRejected ? 'rejected' : allApproved ? 'approved' : 'submitted';
+    const nextReviewedAt = new Date().toISOString();
+
+    setReviewSavingByDocument((prev) => ({ ...prev, [documentKey]: true }));
+    try {
+      await apiCall(`/api/clients/${actualClientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          kycDocumentsReview: nextDocumentsReview,
+          kycStatus: nextGlobalKycStatus,
+          kycReviewedAt: nextReviewedAt,
+        }),
+      });
+      setKycDocumentsReview(nextDocumentsReview);
+      setKycStatus(nextGlobalKycStatus);
+      setKycReviewedAt(nextReviewedAt);
+      toast.success('Statut de la pièce justificative mis à jour.');
+    } catch (error: any) {
+      console.error('Error updating KYC document review status:', error);
+      toast.error(error?.message || 'Erreur lors de la mise à jour du statut du document.');
+    } finally {
+      setReviewSavingByDocument((prev) => ({ ...prev, [documentKey]: false }));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -426,11 +520,16 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
         </Card>
       )}
 
-      {/* Étape 1: Identité */}
-      <Card>
+      <div className="space-y-4 rounded-lg border border-slate-200 p-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Étape 1 : Informations personnelles (Questions 1 à 2)</h2>
+        </div>
+
+        {/* Question 1: Identité */}
+        <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 1 : Identité</CardTitle>
+            <CardTitle className="text-lg">Question 1 : Identité</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(1)}
             </div>
@@ -465,13 +564,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
 
-      {/* Étape 2: Adresse */}
-      <Card>
+        {/* Question 2: Adresse */}
+        <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 2 : Adresse</CardTitle>
+            <CardTitle className="text-lg">Question 2 : Adresse</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(2)}
             </div>
@@ -498,13 +597,19 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
+      </div>
 
-      {/* Étape 3: Profil */}
-      <Card className={!isStepEnabled(3) ? 'opacity-60' : ''}>
+      <div className="space-y-4 rounded-lg border border-slate-200 p-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Étape 2 : Profil investisseur (Questions 3 à 7)</h2>
+        </div>
+
+        {/* Question 3: Profil */}
+        <Card className={!isStepEnabled(3) ? 'opacity-60' : ''}>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 3 : Profil</CardTitle>
+            <CardTitle className="text-lg">Question 3 : Profil</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(3)}
             </div>
@@ -535,13 +640,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
 
-      {/* Étape 4: Préférences */}
-      <Card>
+        {/* Question 4: Préférences */}
+        <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 4 : Préférences</CardTitle>
+            <CardTitle className="text-lg">Question 4 : Préférences</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(4)}
             </div>
@@ -568,13 +673,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
 
-      {/* Étape 5: Objectifs */}
-      <Card className={!isStepEnabled(5) ? 'opacity-60' : ''}>
+        {/* Question 5: Objectifs */}
+        <Card className={!isStepEnabled(5) ? 'opacity-60' : ''}>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 5 : Objectifs</CardTitle>
+            <CardTitle className="text-lg">Question 5 : Objectifs</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(5)}
             </div>
@@ -599,13 +704,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
 
-      {/* Étape 6: Conformité */}
-      <Card>
+        {/* Question 6: Conformité */}
+        <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 6 : Conformité</CardTitle>
+            <CardTitle className="text-lg">Question 6 : Conformité</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(6)}
             </div>
@@ -635,13 +740,13 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
 
-      {/* Étape 7: Sources de fonds */}
-      <Card className={!isStepEnabled(7) ? 'opacity-60' : ''}>
+        {/* Question 7: Sources de fonds */}
+        <Card className={!isStepEnabled(7) ? 'opacity-60' : ''}>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 7 : Sources de revenus</CardTitle>
+            <CardTitle className="text-lg">Question 7 : Sources de revenus</CardTitle>
             <div className="flex items-center gap-3">
               {renderStepToggleButton(7)}
             </div>
@@ -668,19 +773,25 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             </div>
           </CardContent>
         )}
-      </Card>
+        </Card>
+      </div>
 
-      {/* Étape 8: KYC */}
-      <Card>
+      <div className="space-y-4 rounded-lg border border-slate-200 p-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Étape 3 : Vérification documentaire (Question 8)</h2>
+        </div>
+
+        {/* Question 8: KYC */}
+        <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Étape 8 : Vérification KYC</CardTitle>
+            <CardTitle className="text-lg">Question 8 : Vérification KYC</CardTitle>
             <div className="flex items-center gap-3">
-              {client.kycStatus && (
-                <Badge className={KYC_STATUS_LABELS[client.kycStatus]?.color || 'bg-gray-100 text-gray-800'}>
+              {kycStatus && (
+                <Badge className={KYC_STATUS_LABELS[kycStatus]?.color || 'bg-gray-100 text-gray-800'}>
                   <span className="flex items-center gap-1">
-                    {KYC_STATUS_LABELS[client.kycStatus]?.icon}
-                    {KYC_STATUS_LABELS[client.kycStatus]?.label || client.kycStatus}
+                    {KYC_STATUS_LABELS[kycStatus]?.icon}
+                    {KYC_STATUS_LABELS[kycStatus]?.label || kycStatus}
                   </span>
                 </Badge>
               )}
@@ -721,80 +832,71 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
             <>
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide border-b pb-2">Documents KYC</h3>
-                <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-600">Pièce d'identité (recto)</Label>
-                  {client.identityDocument ? (
-                    <div className="mt-2">
-                      <a
-                        href={client.identityDocument}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                        <span>Voir le document</span>
-                      </a>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-slate-500">Non fourni</p>
-                  )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(KYC_DOCUMENT_LABELS).map(([documentKey, documentLabel]) => {
+                    const documentUrl = getKycDocumentUrl(documentKey);
+                    const reviewStatus = getKycDocumentReviewStatus(documentKey);
+                    const isSavingDocumentReview = !!reviewSavingByDocument[documentKey];
+
+                    return (
+                      <div key={documentKey} className="rounded-md border border-slate-200 p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label className="text-slate-600">{documentLabel}</Label>
+                          <Badge className={KYC_DOCUMENT_REVIEW_BADGE_CLASSES[reviewStatus]}>
+                            {KYC_DOCUMENT_REVIEW_LABELS[reviewStatus]}
+                          </Badge>
+                        </div>
+
+                        {documentUrl ? (
+                          <a
+                            href={documentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
+                          >
+                            <ImageIcon className="w-4 h-4" />
+                            <span>Voir le document</span>
+                          </a>
+                        ) : (
+                          <p className="text-slate-500">Non fourni</p>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-3 text-sm">
+                          {reviewStatus !== 'approved' && (
+                            <button
+                              type="button"
+                              onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'approved')}
+                              disabled={!documentUrl || isSavingDocumentReview}
+                              className="rounded-sm px-1 underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:bg-green-50 hover:text-green-700 hover:decoration-2 hover:decoration-green-700 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
+                            >
+                              Valider
+                            </button>
+                          )}
+                          {reviewStatus !== 'rejected' && (
+                            <button
+                              type="button"
+                              onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'rejected')}
+                              disabled={!documentUrl || isSavingDocumentReview}
+                              className="underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:text-red-700 hover:decoration-2 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
+                            >
+                              Rejeter
+                            </button>
+                          )}
+                          {reviewStatus !== 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'pending')}
+                              disabled={!documentUrl || isSavingDocumentReview}
+                              className="underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:text-amber-700 hover:decoration-2 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
+                            >
+                              En attente
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <Label className="text-slate-600">Pièce d'identité (verso)</Label>
-                  {client.identityDocumentVerso ? (
-                    <div className="mt-2">
-                      <a
-                        href={client.identityDocumentVerso}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                        <span>Voir le document</span>
-                      </a>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-slate-500">Non fourni</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-slate-600">Justificatif de domicile</Label>
-                  {client.proofOfAddress || client.proof_of_address ? (
-                    <div className="mt-2">
-                      <a
-                        href={client.proofOfAddress || client.proof_of_address}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                        <span>Voir le document</span>
-                      </a>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-slate-500">Non fourni</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-slate-600">Selfie avec pièce d'identité</Label>
-                  {client.selfiePhoto || client.selfie_photo ? (
-                    <div className="mt-2">
-                      <a
-                        href={client.selfiePhoto || client.selfie_photo}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                        <span>Voir la photo</span>
-                      </a>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-slate-500">Non fourni</p>
-                  )}
-                </div>
-              </div>
             </div>
             <div className="space-y-4 pt-4 border-t">
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide border-b pb-2">Informations de traitement</h3>
@@ -805,14 +907,15 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                 </div>
                 <div>
                   <Label className="text-slate-600">Date de révision</Label>
-                  <p className="mt-1">{formatDateTime(client.kycReviewedAt || client.kyc_reviewed_at)}</p>
+                  <p className="mt-1">{formatDateTime(kycReviewedAt)}</p>
                 </div>
               </div>
             </div>
             </>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }
