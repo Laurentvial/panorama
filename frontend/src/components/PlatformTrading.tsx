@@ -252,6 +252,15 @@ export function PlatformTrading() {
   }, [transactions]);
 
   const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds);
+  const isDepositFlow = movementType === 'depot';
+  const flowTitle = isDepositFlow ? 'Dépôt de fonds' : 'Demande de retrait';
+  const flowDescription = isDepositFlow
+    ? 'Vous allez initier un dépôt (virement ou carte selon vos moyens de paiement).'
+    : 'Vous allez envoyer une demande de retrait vers votre compte bancaire.';
+  const flowAmountLabel = isDepositFlow
+    ? `Montant du dépôt (${getCurrencySymbol('EUR')})`
+    : `Montant du retrait (${currencySym})`;
+  const flowSubmitLabel = isDepositFlow ? 'Continuer le dépôt' : 'Continuer le retrait';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -614,35 +623,44 @@ export function PlatformTrading() {
         <div>Chargement...</div>
       ) : (
         <>
-          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
-            <CardHeader>
-              <CardTitle>Solde disponible</CardTitle>
-              <CardDescription>Montant retirable sur votre compte</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div style={{ fontSize: '28px', fontWeight: 800 }}>
-                {formatAmount(withdrawableFunds, accountCurrency)}
-              </div>
-            </CardContent>
-          </Card>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : 'minmax(260px, 320px) minmax(0, 1fr)',
+              gap: 20,
+              alignItems: 'start',
+              marginBottom: '30px',
+            }}
+          >
+            <Card style={{ ...roundedCardStyle, marginBottom: 0 }}>
+              <CardHeader>
+                <CardTitle>Solde disponible</CardTitle>
+                <CardDescription>Montant retirable sur votre compte</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div style={{ fontSize: isMobile ? 22 : 24, fontWeight: 800, lineHeight: 1.2 }}>
+                  {formatAmount(withdrawableFunds, accountCurrency)}
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card style={{ ...roundedCardStyle, marginBottom: '30px' }}>
-            <CardHeader>
-              <CardTitle>
-                {availablePaymentMethods.length > 0 ? 'Dépôt / Retrait' : 'Retrait'}
-              </CardTitle>
-              <CardDescription>
-                {availablePaymentMethods.length > 0 ? 'Déposer ou retirer des fonds' : 'Retirer des fonds'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit}>
+            <Card style={{ ...roundedCardStyle, marginBottom: 0 }}>
+              <CardHeader>
+                <CardTitle style={{ fontSize: isMobile ? 19 : 21, lineHeight: 1.2, fontWeight: 800 }}>
+                  {availablePaymentMethods.length > 0 ? flowTitle : 'Demande de retrait'}
+                </CardTitle>
+                <CardDescription>
+                  {availablePaymentMethods.length > 0 ? flowDescription : 'Vous allez envoyer une demande de retrait'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmit}>
                 {/* Tabulation style (same as Découvrir) */}
                 <div style={{ marginBottom: 16, paddingBottom: 10, borderBottom: `1px solid ${tabBorderColor}` }}>
                   <div style={{ display: 'flex', gap: 10, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     {[
-                      ...(availablePaymentMethods.length > 0 ? [{ value: 'depot' as const, label: 'Dépôt' }] : []),
-                      { value: 'retrait' as const, label: 'Retrait' },
+                      ...(availablePaymentMethods.length > 0 ? [{ value: 'depot' as const, label: '+ Dépôt' }] : []),
+                      { value: 'retrait' as const, label: '− Retrait' },
                     ].map((tab) => (
                       (() => {
                         const isActive = movementType === tab.value;
@@ -662,11 +680,11 @@ export function PlatformTrading() {
                           border: `1px solid ${isActive ? activeBorder : inactiveBorder}`,
                           borderBottom: `3px solid ${isActive ? activeBorder : 'transparent'}`,
                           borderRadius: 9999,
-                          padding: isMobile ? '10px 16px' : '12px 20px',
+                          padding: isMobile ? '5px 12px' : '6px 14px',
                           backgroundColor: isActive ? activeBg : inactiveBg,
                           color: isActive ? '#ffffff' : inactiveText,
                           fontWeight: isActive ? 800 : 700,
-                          fontSize: isMobile ? 12 : 14,
+                          fontSize: isMobile ? 13 : 14,
                           cursor: 'pointer',
                           whiteSpace: 'nowrap',
                           transition: 'all 0.2s',
@@ -703,8 +721,8 @@ export function PlatformTrading() {
                     marginBottom: 12,
                   }}
                 >
-                  <div style={{ flex: 1, minWidth: isMobile ? '100%' : 240 }}>
-                    <Label htmlFor="amount">Montant ({movementType === 'depot' ? getCurrencySymbol('EUR') : currencySym})</Label>
+                  <div style={{ flex: '0 0 auto', width: isMobile ? '100%' : 320, minWidth: isMobile ? '100%' : 320 }}>
+                    <Label htmlFor="amount">{flowAmountLabel}</Label>
                     <Input
                       id="amount"
                       type="number"
@@ -712,9 +730,9 @@ export function PlatformTrading() {
                       min="0"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0.00"
+                      placeholder={isDepositFlow ? 'Ex: 500.00' : 'Ex: 250.00'}
                       required
-                      className="h-14 px-4 text-lg md:text-lg placeholder:text-lg"
+                      className="h-14 px-4 text-base md:text-base placeholder:text-base"
                     />
                   </div>
 
@@ -744,12 +762,13 @@ export function PlatformTrading() {
                     disabled={submitting} 
                     variant="platform"
                   >
-                    {submitting ? 'Traitement...' : 'Continuer'}
+                    {submitting ? 'Traitement...' : flowSubmitLabel}
                   </Button>
                 </div>
-              </form>
-            </CardContent>
-          </Card>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
 
           <Dialog
             open={withdrawDialogOpen}
@@ -882,8 +901,8 @@ export function PlatformTrading() {
                       <Check size={22} color="#16a34a" />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div style={{ fontWeight: 700, fontSize: 16 }}>Dépôt initié</div>
-                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>Dépôt initié</div>
+                      <div style={{ fontSize: 14, color: '#6b7280' }}>
                         Virement bancaire
                       </div>
                     </div>
@@ -903,13 +922,13 @@ export function PlatformTrading() {
                       </div>
                     )}
                     {transferSuccess.transaction?.id && (
-                      <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>
+                      <div style={{ marginTop: 10, fontSize: 14, color: '#6b7280' }}>
                         Référence: <strong>{transferSuccess.transaction.id}</strong>
                       </div>
                     )}
                   </div>
 
-                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af' }}>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Prochaines étapes :</div>
                     <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
                       <li>Effectuez le virement depuis votre compte bancaire</li>
@@ -947,7 +966,7 @@ export function PlatformTrading() {
                       <div style={{ display: 'grid', gap: 12 }}>
                         <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af', textAlign: 'center' }}>
                           <div style={{ fontWeight: 600, marginBottom: 8 }}>Votre demande de dépôt est en cours de traitement</div>
-                          <div style={{ fontSize: 13 }}>
+                          <div style={{ fontSize: 14 }}>
                             Montant : <strong>{formatAmount(pendingAmount, 'EUR')}</strong>
                           </div>
                         </div>
@@ -974,7 +993,7 @@ export function PlatformTrading() {
                           <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
                             Montant à virer : {formatAmount(pendingAmount, 'EUR')}
                           </div>
-                          <div style={{ fontSize: 13, color: '#6b7280' }}>
+                          <div style={{ fontSize: 14, color: '#6b7280' }}>
                             Veuillez effectuer le virement depuis votre compte bancaire en utilisant le RIB ci-dessous.
                           </div>
                         </div>
@@ -992,7 +1011,7 @@ export function PlatformTrading() {
                                   backgroundColor: '#f8fafc',
                                 }}
                               >
-                                <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+                                <div style={{ display: 'grid', gap: 6, fontSize: 14 }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <span style={{ fontWeight: 500, color: '#6b7280' }}>Titulaire du compte :</span>
                                     <span style={{ fontWeight: 600 }}>{rib.accountHolder || '-'}</span>
@@ -1031,18 +1050,18 @@ export function PlatformTrading() {
                                   )}
                                   {rib.domiciliation && (
                                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
-                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>Domiciliation :</div>
-                                      <div style={{ fontSize: 12, color: '#374151' }}>{rib.domiciliation}</div>
+                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 13 }}>Domiciliation :</div>
+                                      <div style={{ fontSize: 13, color: '#374151' }}>{rib.domiciliation}</div>
                                     </div>
                                   )}
                                   {(rib.motif || '').trim() ? (
                                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
-                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 12 }}>
+                                      <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 13 }}>
                                         Motif du virement (libellé banque) :
                                       </div>
                                       <div
                                         style={{
-                                          fontSize: 13,
+                                          fontSize: 14,
                                           color: '#111827',
                                           whiteSpace: 'pre-wrap',
                                           fontWeight: 600,
@@ -1059,7 +1078,7 @@ export function PlatformTrading() {
                           })}
                         </div>
 
-                        <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                        <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af' }}>
                           <div style={{ fontWeight: 600, marginBottom: 6 }}>Important :</div>
                           <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.6 }}>
                             <li>Effectuez le virement depuis votre compte bancaire</li>
@@ -1136,8 +1155,8 @@ export function PlatformTrading() {
                       <Check size={22} color="#16a34a" />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div style={{ fontWeight: 700, fontSize: 16 }}>Dépôt initié</div>
-                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>Dépôt initié</div>
+                      <div style={{ fontSize: 14, color: '#6b7280' }}>
                         Carte bancaire
                       </div>
                     </div>
@@ -1157,7 +1176,7 @@ export function PlatformTrading() {
                       </div>
                     )}
                     {cardDepositSuccess.transaction?.id && (
-                      <div style={{ marginTop: 10, fontSize: 13, color: '#6b7280' }}>
+                      <div style={{ marginTop: 10, fontSize: 14, color: '#6b7280' }}>
                         Référence: <strong>{cardDepositSuccess.transaction.id}</strong>
                       </div>
                     )}
@@ -1187,7 +1206,7 @@ export function PlatformTrading() {
                     </DialogDescription>
                   </DialogHeader>
 
-                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1e40af' }}>
+                  <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af' }}>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Information :</div>
                     <p style={{ margin: 0, lineHeight: 1.6 }}>
                       Le traitement du paiement par carte bancaire peut prendre quelques minutes. Vous recevrez une confirmation une fois le paiement traité.
