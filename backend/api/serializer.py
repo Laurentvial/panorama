@@ -799,6 +799,7 @@ class ClientHistoryLogSerializer(serializers.ModelSerializer):
 class ClientPlatformLogSerializer(serializers.ModelSerializer):
     """Serializer for client platform logs (actions performed BY the client)"""
     actionType = serializers.CharField(source='action_type', read_only=True)
+    origin = serializers.CharField(read_only=True)
     actionDetails = serializers.JSONField(source='action_details', read_only=True)
     ipAddress = serializers.CharField(source='ip_address', read_only=True, allow_null=True)
     userAgent = serializers.CharField(source='user_agent', read_only=True, allow_null=True)
@@ -807,12 +808,13 @@ class ClientPlatformLogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ClientPlatformLog
-        fields = ['id', 'actionType', 'actionDetails', 'ipAddress', 'userAgent', 'createdAt', 'clientId']
+        fields = ['id', 'actionType', 'origin', 'actionDetails', 'ipAddress', 'userAgent', 'createdAt', 'clientId']
         read_only_fields = ['id', 'createdAt']
     
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret['actionType'] = instance.action_type
+        ret['origin'] = instance.origin
         ret['actionDetails'] = instance.action_details if instance.action_details else {}
         ret['ipAddress'] = instance.ip_address
         ret['userAgent'] = instance.user_agent

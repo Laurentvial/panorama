@@ -1,29 +1,22 @@
 /**
- * Compare platform log IP with the CRM viewer IP (same request path as the gestionnaire
- * loading the logs). Used to heuristically label activity as conseiller vs client.
+ * Resolve actor kind from server-issued connection origin only.
  */
-export function normalizeIpForCompare(ip: string | null | undefined): string {
-  if (!ip) return '';
-  let t = ip.trim().toLowerCase();
-  if (!t || t === 'unknown') return '';
-  if (t.startsWith('::ffff:')) {
-    // Trim again: outer trim does not remove space after the prefix (e.g. "::ffff:  1.2.3.4").
-    t = t.slice(7).trim();
-  }
-  return t;
-}
 
 export type PlatformLogActorKind = 'gestionnaire' | 'client' | 'unknown';
 
+function normalizeOrigin(origin: string | null | undefined): string {
+  return String(origin || '').trim().toLowerCase();
+}
+
 export function getPlatformLogActorKind(
-  logIp: string | null | undefined,
-  viewerIp: string | null | undefined
+  logOrigin: string | null | undefined,
+  _logIp?: string | null,
+  _viewerIp?: string | null
 ): PlatformLogActorKind {
-  const a = normalizeIpForCompare(logIp);
-  const b = normalizeIpForCompare(viewerIp);
-  if (!a || !b) return 'unknown';
-  if (a === b) return 'gestionnaire';
-  return 'client';
+  const normalizedOrigin = normalizeOrigin(logOrigin);
+  if (normalizedOrigin === 'crm_impersonation') return 'gestionnaire';
+  if (normalizedOrigin === 'client_login' || normalizedOrigin === 'otp_login') return 'client';
+  return 'unknown';
 }
 
 export function getPlatformLogOriginPresentation(kind: PlatformLogActorKind): {

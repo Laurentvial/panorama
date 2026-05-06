@@ -71,6 +71,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+PLATFORM_LOG_ORIGIN_CLIENT_LOGIN = 'client_login'
+PLATFORM_LOG_ORIGIN_OTP_LOGIN = 'otp_login'
+PLATFORM_LOG_ORIGIN_CRM_IMPERSONATION = 'crm_impersonation'
+PLATFORM_LOG_ORIGIN_UNKNOWN = 'unknown'
+
+ALLOWED_PLATFORM_LOG_ORIGINS = {
+    PLATFORM_LOG_ORIGIN_CLIENT_LOGIN,
+    PLATFORM_LOG_ORIGIN_OTP_LOGIN,
+    PLATFORM_LOG_ORIGIN_CRM_IMPERSONATION,
+    PLATFORM_LOG_ORIGIN_UNKNOWN,
+}
+
 from .emailing import (
     send_resend_email,
     render_email,
@@ -692,7 +704,14 @@ def create_log_entry(event_type, user_id, request, old_value=None, new_value=Non
         logger.error(traceback.format_exc())
         # Don't re-raise - allow the main operation to succeed even if logging fails
 
-def create_platform_log(client_id, action_type, action_details, request):
+def _normalize_platform_log_origin(origin):
+    value = (origin or '').strip().lower()
+    if value in ALLOWED_PLATFORM_LOG_ORIGINS:
+        return value
+    return PLATFORM_LOG_ORIGIN_UNKNOWN
+
+
+def create_platform_log(client_id, action_type, action_details, request, forced_origin=None):
     """Create a platform log entry for a client action"""
     try:
         # Generate log ID
@@ -712,13 +731,18 @@ def create_platform_log(client_id, action_type, action_details, request):
         # Extract IP and user agent
         ip_address = get_client_ip(request)
         user_agent = request.META.get('HTTP_USER_AGENT', '')
+
+        normalized_details = dict(action_details) if isinstance(action_details, dict) else {}
+        origin = _normalize_platform_log_origin(forced_origin)
+        normalized_details['origin'] = origin
         
         # Create platform log entry
         platform_log = ClientPlatformLog.objects.create(
             id=log_id,
             client=client,
             action_type=action_type,
-            action_details=action_details if action_details else {},
+            origin=origin,
+            action_details=normalized_details,
             ip_address=ip_address if ip_address != 'Unknown' else None,
             user_agent=user_agent if user_agent else None
         )
@@ -2069,9 +2093,25 @@ def client_platform_logs(request, client_id):
         
         if not action_type:
             return Response({'error': 'actionType est requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action_type == 'login':
+            return Response(
+                {'error': "L'événement login est réservé au backend"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        normalized_action_details = dict(action_details) if isinstance(action_details, dict) else {}
+        requested_origin = normalized_action_details.pop('__sessionOrigin', '')
+        forced_origin = _normalize_platform_log_origin(requested_origin)
         
         # Create platform log
-        create_platform_log(client_id, action_type, action_details, request)
+        create_platform_log(
+            client_id,
+            action_type,
+            normalized_action_details,
+            request,
+            forced_origin=forced_origin
+        )
         
         return Response({'message': 'Log créé avec succès'}, status=status.HTTP_201_CREATED)
 
@@ -2136,7 +2176,13 @@ def client_login(request):
 
     # Create platform log for login
     try:
-        create_platform_log(client.id, 'login', {}, request)
+        create_platform_log(
+            client.id,
+            'login',
+            {'method': 'password'},
+            request,
+            forced_origin=PLATFORM_LOG_ORIGIN_CLIENT_LOGIN
+        )
     except Exception as log_error:
         # Log the error but don't fail the login
         logger.error(f"Failed to create platform log for login {client.id}: {str(log_error)}")
@@ -2613,7 +2659,13 @@ def client_login_otp_verify(request):
         return Response({'error': 'Acces refuse'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
-        create_platform_log(client.id, 'login', {'method': 'otp', 'channel': channel}, request)
+        create_platform_log(
+            client.id,
+            'login',
+            {'method': 'otp', 'channel': channel},
+            request,
+            forced_origin=PLATFORM_LOG_ORIGIN_OTP_LOGIN
+        )
     except Exception:
         pass
 
@@ -2682,7 +2734,8 @@ def get_current_client(request):
                     'mode': impersonation_mode,
                     'client_name': client_display_name,
                 },
-                request
+                request,
+                forced_origin=PLATFORM_LOG_ORIGIN_CRM_IMPERSONATION
             )
 
         serializer = ClientSerializer(client, context={'request': request})

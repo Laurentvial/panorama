@@ -112,6 +112,7 @@ export function ProductDetail() {
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const lastLoggedPageViewRef = useRef<string>('');
 
   const updateSignatureFromCanvas = (canvas: HTMLCanvasElement | null) => {
     if (!canvas) return;
@@ -210,6 +211,25 @@ export function ProductDetail() {
       loadData();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !data || !dataType) return;
+    if (currentUser?.userType !== 'client' || !currentUser?.id) return;
+
+    const route = `/platform/product/${id}`;
+    const name =
+      (data?.name || data?.title || data?.reference || '').toString().trim() || undefined;
+    const logKey = `${route}:${dataType}:${name || ''}`;
+    if (lastLoggedPageViewRef.current === logKey) return;
+    lastLoggedPageViewRef.current = logKey;
+
+    logPlatformAction('page_view', {
+      route,
+      page: dataType === 'asset' ? 'asset_detail' : 'product_detail',
+      productId: id,
+      ...(dataType === 'asset' ? { assetName: name } : { productName: name }),
+    });
+  }, [id, data, dataType, currentUser?.userType, currentUser?.id]);
 
   useEffect(() => {
     // Load categories for enriching product data

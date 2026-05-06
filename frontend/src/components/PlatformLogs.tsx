@@ -19,6 +19,7 @@ import '../styles/PlatformLogOrigin.css';
 interface PlatformLog {
   id: string;
   actionType: string;
+  origin?: string | null;
   actionDetails: any;
   ipAddress: string | null;
   userAgent: string | null;
@@ -121,7 +122,6 @@ export function PlatformLogs() {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewerIp, setViewerIp] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [filters, setFilters] = useState({
     clientId: 'all',
@@ -161,7 +161,6 @@ export function PlatformLogs() {
       const data = await apiCall(`/api/platform-logs/?${params.toString()}`);
       const logs = (data as any).platformLogs || [];
       setPlatformLogs(logs);
-      setViewerIp((data as any).viewerIp ?? null);
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
       }
@@ -216,7 +215,7 @@ export function PlatformLogs() {
   function getActionLabel(log: PlatformLog): string {
     if (log.actionType === 'login') {
       const { date, time } = formatDateParts(log.createdAt);
-      if (log.actionDetails?.source === 'crm_impersonation') {
+      if (log.origin === 'crm_impersonation' || log.actionDetails?.source === 'crm_impersonation') {
         const actorName =
           log.actionDetails?.client_name ||
           log.actionDetails?.clientName ||
@@ -234,7 +233,8 @@ export function PlatformLogs() {
       return '-';
     }
     const isCrmImpersonationLogin =
-      log.actionType === 'login' && log.actionDetails?.source === 'crm_impersonation';
+      log.actionType === 'login' &&
+      (log.origin === 'crm_impersonation' || log.actionDetails?.source === 'crm_impersonation');
     if (isCrmImpersonationLogin) {
       return '-';
     }
@@ -246,6 +246,8 @@ export function PlatformLogs() {
         getFriendlyPageNameFromRoute(log.actionDetails.url);
       const url = log.actionDetails.route || log.actionDetails.url;
       if (friendly) details.push(`Page: ${friendly}`);
+      if (log.actionDetails.productName) details.push(`Produit: ${log.actionDetails.productName}`);
+      if (log.actionDetails.assetName) details.push(`Actif: ${log.actionDetails.assetName}`);
       if (url) details.push(`URL: ${url}`);
     }
     if (log.actionType === 'click') {
@@ -409,13 +411,9 @@ export function PlatformLogs() {
         <CardHeader>
           <CardTitle>Logs</CardTitle>
           <p className="text-sm text-slate-600 mt-1 max-w-3xl">
-            La colonne <strong>Origine</strong> compare l&apos;adresse IP enregistrée dans le log à votre IP CRM
-            actuelle : <span className="text-slate-600 font-medium">même IP</span> → accès depuis votre poste /
-            réseau (conseiller, étiquette grise) ; <span className="text-green-600 font-medium">IP différente</span>{' '}
-            → accès distant (client, étiquette verte).
-            {viewerIp ? (
-              <span className="block mt-1 text-xs text-slate-500">Votre IP (session CRM) : {viewerIp}</span>
-            ) : null}
+            La colonne <strong>Origine</strong> repose d&apos;abord sur la classification serveur
+            (`client_login`, `otp_login`, `crm_impersonation`) et n&apos;utilise plus l&apos;IP
+            pour distinguer conseiller et client.
           </p>
         </CardHeader>
         <CardContent>
@@ -441,7 +439,7 @@ export function PlatformLogs() {
                   <TableBody>
                     {platformLogs.map((log) => {
                       const detailsSummary = getActionDetailsSummary(log);
-                      const originKind = getPlatformLogActorKind(log.ipAddress, viewerIp);
+                      const originKind = getPlatformLogActorKind(log.origin);
                       const origin = getPlatformLogOriginPresentation(originKind);
                       return (
                         <TableRow key={log.id} className={origin.rowClassName || undefined}>

@@ -133,6 +133,12 @@ export function PlatformLayout() {
     if (!location.pathname || !currentUser?.userType || currentUser.userType !== 'client') {
       return;
     }
+
+    // Product/asset detail views are logged from ProductDetail with enriched metadata
+    // (entity name/type) once data is loaded.
+    if (location.pathname.startsWith('/platform/product/')) {
+      return;
+    }
     
     // Ensure we have a client ID before logging
     if (!currentUser?.id) {

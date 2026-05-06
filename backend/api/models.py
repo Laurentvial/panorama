@@ -350,6 +350,7 @@ class ClientPlatformLog(models.Model):
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='platform_logs')
     action_type = models.CharField(max_length=100, default="")  # login, page_view, click, form_submit, etc.
+    origin = models.CharField(max_length=50, default="unknown", db_index=True)  # client_login, otp_login, crm_impersonation, unknown
     action_details = models.JSONField(default=dict, blank=True)  # Details of the action (page, element clicked, etc.)
     ip_address = models.CharField(max_length=50, null=True, blank=True)
     user_agent = models.CharField(max_length=500, null=True, blank=True)

@@ -18,6 +18,7 @@ interface ClientPlatformLogsTabProps {
 interface PlatformLog {
   id: string;
   actionType: string;
+  origin?: string | null;
   actionDetails: any;
   ipAddress: string | null;
   userAgent: string | null;
@@ -82,7 +83,6 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
 export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewerIp, setViewerIp] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [clientDisplayName, setClientDisplayName] = useState<string>('');
 
@@ -97,7 +97,6 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
       const data = await apiCall(`/api/clients/${clientId}/platform-logs/?page=${page}&limit=50`);
       const logs = (data as any).platformLogs || [];
       setPlatformLogs(logs);
-      setViewerIp((data as any).viewerIp ?? null);
       if ((data as any).pagination) {
         setPagination((data as any).pagination);
       }
@@ -164,7 +163,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
   function getActionLabel(log: PlatformLog): string {
     if (log.actionType === 'login') {
       const { date, time } = formatDateParts(log.createdAt);
-      if (log.actionDetails?.source === 'crm_impersonation') {
+      if (log.origin === 'crm_impersonation' || log.actionDetails?.source === 'crm_impersonation') {
         const actorName =
           log.actionDetails?.client_name ||
           log.actionDetails?.clientName ||
@@ -184,7 +183,8 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     }
 
     const isCrmImpersonationLogin =
-      log.actionType === 'login' && log.actionDetails?.source === 'crm_impersonation';
+      log.actionType === 'login' &&
+      (log.origin === 'crm_impersonation' || log.actionDetails?.source === 'crm_impersonation');
     if (isCrmImpersonationLogin) {
       return '-';
     }
@@ -198,6 +198,8 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
         getFriendlyPageNameFromRoute(log.actionDetails.url);
       const url = log.actionDetails.route || log.actionDetails.url;
       if (friendly) details.push(`Page: ${friendly}`);
+      if (log.actionDetails.productName) details.push(`Produit: ${log.actionDetails.productName}`);
+      if (log.actionDetails.assetName) details.push(`Actif: ${log.actionDetails.assetName}`);
       if (url) details.push(`URL: ${url}`);
     }
     
@@ -305,12 +307,9 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
       <CardHeader>
         <CardTitle>Logs plateforme</CardTitle>
         <p className="text-sm text-slate-600 mt-1 max-w-3xl">
-          La colonne <strong>Origine</strong> compare l&apos;IP du log à votre IP CRM actuelle :{' '}
-          <span className="text-slate-600 font-medium">même IP</span> → conseiller (gris) ;{' '}
-          <span className="text-green-600 font-medium">IP différente</span> → client (vert).
-          {viewerIp ? (
-            <span className="block mt-1 text-xs text-slate-500">Votre IP (session CRM) : {viewerIp}</span>
-          ) : null}
+          La colonne <strong>Origine</strong> utilise d&apos;abord la classification serveur de connexion
+          (`client_login`, `otp_login`, `crm_impersonation`) et n&apos;utilise plus l&apos;IP pour
+          distinguer conseiller et client.
         </p>
       </CardHeader>
       <CardContent>
@@ -335,7 +334,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
                 <TableBody>
                   {platformLogs.map((log) => {
                     const detailsSummary = getActionDetailsSummary(log);
-                    const originKind = getPlatformLogActorKind(log.ipAddress, viewerIp);
+                    const originKind = getPlatformLogActorKind(log.origin);
                     const origin = getPlatformLogOriginPresentation(originKind);
                     return (
                       <TableRow key={log.id} className={origin.rowClassName || undefined}>
