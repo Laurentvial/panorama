@@ -73,7 +73,7 @@ export function Customization() {
       setConsumerMediator(settings.consumer_mediator || '');
       setRegulatoryMentions(settings.regulatory_mentions || '');
       setCompanyCountry(
-        ['FR', 'BE', 'LU', 'CH'].includes((settings.company_country || 'FR').toUpperCase())
+        ['FR', 'BE', 'LU', 'CH', 'GR'].includes((settings.company_country || 'FR').toUpperCase())
           ? (settings.company_country || 'FR').toUpperCase()
           : 'FR'
       );
@@ -345,7 +345,7 @@ export function Customization() {
     setConsumerMediator(settings?.consumer_mediator || '');
     setRegulatoryMentions(settings?.regulatory_mentions || '');
     setCompanyCountry(
-      ['FR', 'BE', 'LU', 'CH'].includes((settings?.company_country || 'FR').toUpperCase())
+      ['FR', 'BE', 'LU', 'CH', 'GR'].includes((settings?.company_country || 'FR').toUpperCase())
         ? (settings?.company_country || 'FR').toUpperCase()
         : 'FR'
     );
@@ -456,9 +456,10 @@ export function Customization() {
           <CardTitle>Informations légales de l&apos;éditeur</CardTitle>
           <CardDescription>
             Ces champs alimentent les pages « Mentions légales », politiques et CGU côté client. L&apos;éditeur
-            peut être établi en <strong>France</strong>, en <strong>Suisse</strong>, au <strong>Luxembourg</strong>{' '}
-            ou en <strong>Belgique</strong> : renseignez uniquement les identifiants et mentions pertinents pour
-            votre pays (ex. SIREN/SIRET en France, n° IDE/UID en Suisse, BCE en Belgique, RCSL au Luxembourg).
+            peut être établi en <strong>France</strong>, en <strong>Suisse</strong>, au <strong>Luxembourg</strong>,{' '}
+            en <strong>Belgique</strong> ou en <strong>Grèce</strong> : renseignez uniquement les identifiants et
+            mentions pertinents pour votre pays (ex. SIREN/SIRET en France, n° IDE/UID en Suisse, BCE en Belgique,
+            RCSL au Luxembourg).
             Faites valider le texte juridique par un conseil local.
           </CardDescription>
         </CardHeader>
@@ -479,6 +480,7 @@ export function Customization() {
                 <option value="BE">Belgique</option>
                 <option value="LU">Luxembourg</option>
                 <option value="CH">Suisse</option>
+                <option value="GR">Grèce</option>
               </select>
               <p className="text-muted-foreground text-sm">
                 Ce choix adapte notamment le paragraphe sur les juridictions compétentes et la clause de for entre

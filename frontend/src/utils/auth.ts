@@ -4,6 +4,12 @@ import { getApiBaseUrl } from './apiBaseUrl';
 
 const apiUrl = getApiBaseUrl();
 
+function isFetchNetworkError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const message = String(error.message || '').toLowerCase();
+  return message.includes('fetch') || message.includes('network');
+}
+
 export async function signIn(username: string, password: string) {
   try {
     console.log('Attempting admin login for username:', username);
@@ -46,6 +52,12 @@ export async function signIn(username: string, password: string) {
     return data;
   } catch (error: any) {
     console.error('SignIn error:', error);
+    if (isFetchNetworkError(error)) {
+      const apiTarget = `${apiUrl}/api/token/`;
+      throw new Error(
+        `Connexion au serveur impossible (${apiTarget}). Verifiez le certificat SSL/TLS du domaine API et la variable VITE_URL.`
+      );
+    }
     throw error;
   }
 }
@@ -102,8 +114,10 @@ export async function clientSignIn(email: string, password: string) {
   } catch (error: any) {
     console.error('Client signIn error:', error);
     // Re-throw with more context if it's a network error
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      throw new Error('Erreur de connexion. Vérifiez votre connexion internet.');
+    if (isFetchNetworkError(error)) {
+      throw new Error(
+        `Connexion au serveur impossible (${apiUrl}/api/client/login/). Verifiez le certificat SSL/TLS du domaine API et la variable VITE_URL.`
+      );
     }
     throw error;
   }

@@ -13474,7 +13474,7 @@ def app_settings(request):
                     update_fields.append(attr)
             if 'company_country' in data:
                 cc = (data.get('company_country') or 'FR').strip().upper()[:2]
-                if cc not in ('FR', 'BE', 'LU', 'CH'):
+                if cc not in ('FR', 'BE', 'LU', 'CH', 'GR'):
                     cc = 'FR'
                 settings_obj.company_country = cc
                 update_fields.append('company_country')

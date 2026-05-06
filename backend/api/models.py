@@ -834,6 +834,7 @@ class AppSettings(models.Model):
             ('BE', 'Belgique'),
             ('LU', 'Luxembourg'),
             ('CH', 'Suisse'),
+            ('GR', 'Grèce'),
         ],
         default='FR',
     )
