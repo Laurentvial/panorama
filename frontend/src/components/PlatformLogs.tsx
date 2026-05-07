@@ -113,11 +113,6 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
   return '';
 }
 
-function getTodayISO(): string {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
-}
-
 export function PlatformLogs() {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -125,9 +120,9 @@ export function PlatformLogs() {
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [filters, setFilters] = useState({
     clientId: 'all',
-    actionType: 'login',
-    dateFrom: getTodayISO(),
-    dateTo: getTodayISO(),
+    actionType: 'all',
+    dateFrom: '',
+    dateTo: '',
   });
 
   const loadClients = useCallback(async () => {

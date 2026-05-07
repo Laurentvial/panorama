@@ -119,6 +119,11 @@ body:has([data-slot="drawer-overlay"][data-state="open"]) {
   overscroll-behavior: contain;
 }
 
+/* Slightly shorter viewport usage for transaction details modal */
+.modal-content--transaction-details {
+  max-height: min(82vh, 900px);
+}
+
 /* Modal Header */
 .modal-header {
   display: flex;

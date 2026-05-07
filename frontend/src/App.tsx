@@ -174,6 +174,11 @@ function App() {
                             <ReferralLandingPage />
                         </Suspense>
                     } />
+                    <Route path="/merci" element={
+                        <Suspense fallback={<LoadingFallback />}>
+                            <ReferralLandingPage />
+                        </Suspense>
+                    } />
                     <Route path="/legal/:docId" element={
                         <Suspense fallback={<LoadingFallback />}>
                             <LegalDocumentPage />

@@ -30,6 +30,16 @@ interface ViewTransactionModalProps {
   onRefresh?: () => void;
 }
 
+const resolveEffectiveChosenInterestPeriod = (value: any): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const parts = raw
+    .split(/[,;|]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts[0] || raw;
+};
+
 export function ViewTransactionModal({
   isOpen,
   transaction,
@@ -261,7 +271,11 @@ export function ViewTransactionModal({
   })();
   const transactionIp = subscriptionDetails?.ip || transaction.subscription_ip || 'Aucun';
   const chosenInterestPeriod =
-    subscriptionDetails?.interestPeriod || subscriptionDetails?.interest_period || transaction.subscription_interest_period || 'Aucun';
+    resolveEffectiveChosenInterestPeriod(
+      transaction.subscription_interest_period ||
+      subscriptionDetails?.interestPeriod ||
+      subscriptionDetails?.interest_period
+    ) || 'Aucun';
   const hasSubscriptionOrProductInfo = transaction.type === 'transfert' && Boolean(subscriptionDetails || selectedProduct || productLoadError);
 
   const findAssetOrProduct = () => {
@@ -372,7 +386,7 @@ export function ViewTransactionModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal-content modal-content--scrollable"
+        className="modal-content modal-content--scrollable modal-content--transaction-details"
         onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: '90vw', width: 'min(1200px, 90vw)' }}
       >
