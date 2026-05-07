@@ -63,6 +63,7 @@ from django.utils import timezone
 from django.core import signing
 from django.db.models import Count, Q, F
 from django.db import IntegrityError
+from django.db import connection
 from django.db import transaction as db_transaction
 from django.core.exceptions import ObjectDoesNotExist
 from urllib.parse import quote
@@ -709,6 +710,52 @@ def _normalize_platform_log_origin(origin):
     if value in ALLOWED_PLATFORM_LOG_ORIGINS:
         return value
     return PLATFORM_LOG_ORIGIN_UNKNOWN
+
+
+def _client_platform_log_has_origin_column():
+    """Return whether the DB table has the origin column (backward-compatible with old schemas)."""
+    table_name = ClientPlatformLog._meta.db_table
+    try:
+        with connection.cursor() as cursor:
+            columns = connection.introspection.get_table_description(cursor, table_name)
+        return any(col.name == 'origin' for col in columns)
+    except Exception:
+        # If introspection fails, assume current schema to avoid masking other issues.
+        return True
+
+
+def _serialize_platform_log_rows(rows, include_client_display_name=False):
+    """Serialize platform log rows without requiring model field access."""
+    client_display_names = {}
+    if include_client_display_name:
+        client_ids = {row.get('client_id') for row in rows if row.get('client_id')}
+        if client_ids:
+            for client in Client.objects.filter(id__in=client_ids).values('id', 'fname', 'lname', 'email'):
+                fname = (client.get('fname') or '').strip()
+                lname = (client.get('lname') or '').strip()
+                display_name = f'{fname} {lname}'.strip() or client.get('email') or client.get('id')
+                client_display_names[client['id']] = display_name
+
+    payload = []
+    for row in rows:
+        action_details = row.get('action_details')
+        if not isinstance(action_details, dict):
+            action_details = {}
+        origin = row.get('origin') or action_details.get('origin')
+        item = {
+            'id': row.get('id'),
+            'actionType': row.get('action_type', ''),
+            'origin': _normalize_platform_log_origin(origin),
+            'actionDetails': action_details,
+            'ipAddress': row.get('ip_address'),
+            'userAgent': row.get('user_agent'),
+            'createdAt': row.get('created_at'),
+            'clientId': row.get('client_id'),
+        }
+        if include_client_display_name:
+            item['clientDisplayName'] = client_display_names.get(item['clientId'], item['clientId'] or '')
+        payload.append(item)
+    return payload
 
 
 def create_platform_log(client_id, action_type, action_details, request, forced_origin=None):
@@ -1958,13 +2005,14 @@ def platform_logs_list(request):
 
     total_count = qs.count()
     offset = (page - 1) * limit
-    paginated_logs = qs[offset:offset + limit]
-
-    from .serializer import PlatformLogWithClientSerializer
-    serializer = PlatformLogWithClientSerializer(paginated_logs, many=True)
+    log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'created_at', 'client_id']
+    if _client_platform_log_has_origin_column():
+        log_fields.append('origin')
+    paginated_rows = list(qs.values(*log_fields)[offset:offset + limit])
+    serialized_logs = _serialize_platform_log_rows(paginated_rows, include_client_display_name=True)
     viewer_ip = get_client_ip(request)
     return Response({
-        'platformLogs': serializer.data,
+        'platformLogs': serialized_logs,
         'viewerIp': viewer_ip if viewer_ip and viewer_ip != 'Unknown' else None,
         'pagination': {
             'page': page,
@@ -2033,12 +2081,14 @@ def client_platform_logs(request, client_id):
         
         total_count = logs.count()
         offset = (page - 1) * limit
-        paginated_logs = logs[offset:offset + limit]
-        
-        serializer = ClientPlatformLogSerializer(paginated_logs, many=True)
+        log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'created_at', 'client_id']
+        if _client_platform_log_has_origin_column():
+            log_fields.append('origin')
+        paginated_rows = list(logs.values(*log_fields)[offset:offset + limit])
+        serialized_logs = _serialize_platform_log_rows(paginated_rows, include_client_display_name=False)
         viewer_ip = get_client_ip(request)
         return Response({
-            'platformLogs': serializer.data,
+            'platformLogs': serialized_logs,
             'viewerIp': viewer_ip if viewer_ip and viewer_ip != 'Unknown' else None,
             'pagination': {
                 'page': page,
