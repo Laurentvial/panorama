@@ -143,7 +143,16 @@ def _resolve_interest_period_for_txn(txn: Transaction, product: Product | None =
         or (getattr(product, 'interest_period', None) if product is not None else None)
         or 'Fin de contrat'
     )
-    return str(raw).strip()
+    value = str(raw).strip()
+    if not value:
+        return 'Fin de contrat'
+
+    parts = [part.strip() for part in re.split(r'[,;|]', value) if str(part).strip()]
+    if len(parts) > 1:
+        # Legacy tolerance: some rows store the list of available options instead of
+        # the selected cadence. Keep deterministic behavior by using the first option.
+        return parts[0]
+    return parts[0] if parts else value
 
 
 def _txn_compounds_interests(txn: Transaction, product: Product | None = None) -> bool:

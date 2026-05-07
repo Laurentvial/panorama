@@ -196,6 +196,23 @@ const addDays = (date: Date, days: number): Date => {
   return next;
 };
 
+const resolveEffectiveInterestPeriod = (value: any): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const parts = raw
+    .split(/[,;|]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  // If a list of available periods is stored instead of the selected one,
+  // use the first entry as the effective cadence (legacy tolerance).
+  if (parts.length > 1) {
+    return parts[0];
+  }
+  return parts[0] || raw;
+};
+
 interface TransactionListProps {
   transactions: any[];
   assets?: any[];
@@ -338,12 +355,13 @@ export function TransactionList({
 
   const getNextInterestDate = (transferTransaction: any, lastInterestTransaction: any | null): Date | null => {
     const details = parseTransactionDetails(transferTransaction.subscription_details ?? transferTransaction.subscriptionDetails);
-    const interestPeriod = String(
+    const interestPeriodRaw = String(
       transferTransaction.subscription_interest_period ||
       details.interestPeriod ||
       details.interest_period ||
       ''
     );
+    const interestPeriod = resolveEffectiveInterestPeriod(interestPeriodRaw);
     const contractEnd = transferTransaction.subscription_contract_end || details.contractEnd || details.contract_end || '';
     const isEndOfContract = interestPeriod.toLowerCase().includes('fin') && interestPeriod.toLowerCase().includes('contrat');
     const startDate =
