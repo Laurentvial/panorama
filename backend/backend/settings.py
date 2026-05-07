@@ -264,6 +264,9 @@ AWS_QUERYSTRING_AUTH = True
 AWS_QUERYSTRING_EXPIRE = 3600  # Presigned URL validity: 1 hour
 AWS_S3_ADDRESSING_STYLE = 'path'  # Required for MinIO
 AWS_S3_FILE_OVERWRITE = False
+# Optional per-deployment namespace for media object keys in shared buckets.
+# Example: MEDIA_KEY_PREFIX=client-a -> client-a/app_settings/logo.png
+MEDIA_KEY_PREFIX = os.getenv('MEDIA_KEY_PREFIX', '').strip().strip('/')
 
 S3_CONFIGURED = bool(
     AWS_ACCESS_KEY_ID and

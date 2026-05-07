@@ -159,6 +159,43 @@ const addInterestPeriod = (date: Date, interestPeriod: string): Date | null => {
   return next;
 };
 
+const parseDurationDays = (value: any): number | null => {
+  if (value == null) return null;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return null;
+  const match = raw.match(/(\d+)/);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  if (
+    raw.includes('mois') ||
+    raw.includes('month')
+  ) {
+    return amount * 30;
+  }
+  if (
+    raw.includes('an') ||
+    raw.includes('ans') ||
+    raw.includes('annee') ||
+    raw.includes('année') ||
+    raw.includes('year')
+  ) {
+    return amount * 365;
+  }
+  if (raw.includes('sem') || raw.includes('week')) {
+    return amount * 7;
+  }
+  return amount;
+};
+
+const addDays = (date: Date, days: number): Date => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
 interface TransactionListProps {
   transactions: any[];
   assets?: any[];
@@ -309,14 +346,48 @@ export function TransactionList({
     );
     const contractEnd = transferTransaction.subscription_contract_end || details.contractEnd || details.contract_end || '';
     const isEndOfContract = interestPeriod.toLowerCase().includes('fin') && interestPeriod.toLowerCase().includes('contrat');
+    const startDate =
+      parseDateValue(transferTransaction.datetime || transferTransaction.createdAt || transferTransaction.created_at) ||
+      parseDateValue(details.subscriptionDate || details.subscription_date);
 
     if (isEndOfContract) {
-      return lastInterestTransaction ? null : parseDateValue(contractEnd);
+      if (lastInterestTransaction) return null;
+      const parsedContractEnd = parseDateValue(contractEnd);
+      const durationRaw = String(
+        transferTransaction.subscription_duration || details.duration || details.subscriptionDuration || ''
+      ).trim();
+      const durationDays = parseDurationDays(durationRaw);
+      const computedContractEnd =
+        startDate && durationDays && durationDays > 0
+          ? addDays(startDate, durationDays)
+          : null;
+      const explicitDayUnit =
+        durationRaw.toLowerCase().includes('jour') || durationRaw.toLowerCase().includes('day');
+
+      if (!parsedContractEnd) {
+        return computedContractEnd;
+      }
+      if (!startDate || !computedContractEnd) {
+        return parsedContractEnd;
+      }
+
+      // Guardrail for inconsistent legacy rows where contract end equals start date.
+      if (parsedContractEnd.getTime() <= startDate.getTime()) {
+        return computedContractEnd;
+      }
+      if (explicitDayUnit) {
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const driftMs = Math.abs(parsedContractEnd.getTime() - computedContractEnd.getTime());
+        if (driftMs >= oneDayMs) {
+          return computedContractEnd;
+        }
+      }
+      return parsedContractEnd;
     }
 
   const baseDate =
     getInterestReferenceDate(lastInterestTransaction) ||
-    parseDateValue(transferTransaction.datetime || transferTransaction.createdAt || transferTransaction.created_at);
+    startDate;
     if (!baseDate) return null;
     return addInterestPeriod(baseDate, interestPeriod);
   };

@@ -26,6 +26,10 @@ envVarGroups:
         sync: false
       - key: AWS_S3_REGION_NAME
         sync: false
+      # Optional but recommended when multiple deployments share one bucket.
+      # Set a unique value per deployment/client, e.g. client-a, client-b.
+      - key: MEDIA_KEY_PREFIX
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: ALPHA_VANTAGE_API_KEY

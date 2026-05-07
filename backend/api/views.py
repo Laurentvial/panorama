@@ -13169,6 +13169,30 @@ Génère le document complet:"""
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def app_settings(request):
     """Get or update app settings (logo and colors)"""
+    media_key_prefix = (getattr(settings, 'MEDIA_KEY_PREFIX', '') or '').strip('/')
+
+    def app_settings_object_key(filename: str) -> str:
+        base_path = f'app_settings/{filename.lstrip("/")}'
+        return f'{media_key_prefix}/{base_path}' if media_key_prefix else base_path
+
+    def save_app_settings_image(field_name: str, uploaded_file, target_filename: str) -> None:
+        from django.core.files.base import ContentFile
+
+        field_file = getattr(settings_obj, field_name)
+
+        if field_file:
+            field_file.delete(save=False)
+
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+        object_key = app_settings_object_key(target_filename)
+        saved_name = field_file.storage.save(object_key, ContentFile(uploaded_file.read()))
+        setattr(settings_obj, field_name, saved_name)
+        settings_obj.save(update_fields=[field_name, 'updated_at'])
+
     # Require authentication for POST/PUT, but allow GET without authentication
     if request.method in ['POST', 'PUT']:
         auth_header = request.headers.get('Authorization', '')
@@ -13301,18 +13325,9 @@ def app_settings(request):
                     _, ext = os.path.splitext(original_filename)
                     # Create filename: logo{ext}
                     custom_filename = f'logo{ext}'
-                    
-                    # Delete old logo if it exists
-                    if settings_obj.logo:
-                        settings_obj.logo.delete(save=False)
-                    
-                    # Save with custom filename - load into memory first to avoid temp-file issues on Windows/Python 3.14
-                    from django.core.files.base import ContentFile
-                    try:
-                        logo_file.seek(0)
-                    except Exception:
-                        pass
-                    settings_obj.logo.save(custom_filename, ContentFile(logo_file.read()), save=True)
+
+                    # Save with custom filename and deployment namespace prefix when configured
+                    save_app_settings_image('logo', logo_file, custom_filename)
                     uploaded_file_fields.append('logo')
                     
                     # Verify the logo was saved and uploaded to storage
@@ -13344,18 +13359,9 @@ def app_settings(request):
                     _, ext = os.path.splitext(original_filename)
                     # Create filename: favicon{ext}
                     custom_filename = f'favicon{ext}'
-                    
-                    # Delete old favicon if it exists
-                    if settings_obj.favicon:
-                        settings_obj.favicon.delete(save=False)
-                    
-                    # Save with custom filename - load into memory first to avoid temp-file issues on Windows/Python 3.14
-                    from django.core.files.base import ContentFile
-                    try:
-                        favicon_file.seek(0)
-                    except Exception:
-                        pass
-                    settings_obj.favicon.save(custom_filename, ContentFile(favicon_file.read()), save=True)
+
+                    # Save with custom filename and deployment namespace prefix when configured
+                    save_app_settings_image('favicon', favicon_file, custom_filename)
                     uploaded_file_fields.append('favicon')
                     
                     # Verify the favicon was saved and uploaded to storage
@@ -13386,17 +13392,7 @@ def app_settings(request):
                     _, ext = os.path.splitext(original_filename)
                     custom_filename = f'login_background{ext}'
 
-                    # Delete old background if it exists
-                    if settings_obj.login_background_image:
-                        settings_obj.login_background_image.delete(save=False)
-
-                    # Load into memory first to avoid temp-file issues on Windows/Python 3.14
-                    from django.core.files.base import ContentFile
-                    try:
-                        bg_file.seek(0)
-                    except Exception:
-                        pass
-                    settings_obj.login_background_image.save(custom_filename, ContentFile(bg_file.read()), save=True)
+                    save_app_settings_image('login_background_image', bg_file, custom_filename)
                     uploaded_file_fields.append('login_background_image')
 
                     if not settings_obj.login_background_image:
@@ -13414,15 +13410,7 @@ def app_settings(request):
                     _, ext = os.path.splitext(original_filename)
                     custom_filename = f'platform_banner{ext}'
 
-                    if settings_obj.platform_banner_image:
-                        settings_obj.platform_banner_image.delete(save=False)
-
-                    from django.core.files.base import ContentFile
-                    try:
-                        banner_file.seek(0)
-                    except Exception:
-                        pass
-                    settings_obj.platform_banner_image.save(custom_filename, ContentFile(banner_file.read()), save=True)
+                    save_app_settings_image('platform_banner_image', banner_file, custom_filename)
                     uploaded_file_fields.append('platform_banner_image')
 
                     if not settings_obj.platform_banner_image:
