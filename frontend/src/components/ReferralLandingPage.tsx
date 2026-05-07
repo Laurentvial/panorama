@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { useTheme } from '../contexts/ThemeContext';
 import { apiCall } from '../utils/api';
@@ -9,20 +10,17 @@ import { toast } from 'sonner';
 import { Building2 } from 'lucide-react';
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
-import { trackLeadConversion, trackMarketingPageView } from '../utils/marketingEvents';
 
 export function ReferralLandingPage() {
   const { code } = useParams<{ code: string }>();
-  const location = useLocation();
-  const navigate = useNavigate();
   const { settings, loading: settingsLoading } = useTheme();
   const [fname, setFname] = useState('');
   const [lname, setLname] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [codeValid, setCodeValid] = useState<boolean | null>(null);
-  const isMerciPage = location.pathname === '/merci';
 
   const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
@@ -41,24 +39,16 @@ export function ReferralLandingPage() {
   }
 
   useEffect(() => {
-    trackMarketingPageView(location.pathname || '/');
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (isMerciPage) {
-      setCodeValid(true);
-      return;
-    }
     if (!code || code.trim() === '') {
       setCodeValid(false);
     } else {
       setCodeValid(true);
     }
-  }, [code, isMerciPage]);
+  }, [code]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!code?.trim() || isMerciPage) return;
+    if (!code?.trim()) return;
 
     const fnameTrimmed = fname.trim();
     const lnameTrimmed = lname.trim();
@@ -95,11 +85,7 @@ export function ReferralLandingPage() {
         }),
         headers: { 'Content-Type': 'application/json' },
       });
-      trackLeadConversion({
-        source: 'referral_invite',
-        invite_code: code.trim(),
-      });
-      navigate('/merci');
+      setSuccess(true);
     } catch (err: any) {
       console.error('Referral prospect submit error:', err);
       const msg = err?.message || err?.error || 'Une erreur est survenue. Veuillez réessayer.';
@@ -141,7 +127,7 @@ export function ReferralLandingPage() {
     );
   }
 
-  if (isMerciPage) {
+  if (success) {
     return (
       <div className="login-page-container login-page-container--client" style={containerStyle}>
         <header className="login-banner">
