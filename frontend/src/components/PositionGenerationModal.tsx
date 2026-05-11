@@ -9,7 +9,9 @@ import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
 import '../styles/Modal.css';
 
-const API_TIMEOUT_MS = 120_000; // 2 minutes
+// Position generation can legitimately run for several minutes on large portfolios.
+// Keep cancellation user-driven from the UI instead of hard-aborting after 2 minutes.
+const API_TIMEOUT_MS = 0;
 
 const GENERATION_HORIZON_MIN = 30;
 const GENERATION_HORIZON_MAX = 3650;
@@ -298,9 +300,11 @@ export function PositionGenerationModal({
     abortControllerRef.current = controller;
     isUserCancelRef.current = false;
 
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, API_TIMEOUT_MS);
+    const timeoutId = API_TIMEOUT_MS > 0
+      ? setTimeout(() => {
+          controller.abort();
+        }, API_TIMEOUT_MS)
+      : null;
 
     try {
       setStep('loading-rates');
@@ -392,7 +396,7 @@ export function PositionGenerationModal({
 
       setStep('review-rates');
     } catch (err: any) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       abortControllerRef.current = null;
 
       if (err?.name === 'AbortError') {
@@ -421,7 +425,7 @@ export function PositionGenerationModal({
       setStep('review-rates'); // Show review step so user can see the error
       toast.error(errorMessage);
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 
@@ -451,14 +455,16 @@ export function PositionGenerationModal({
     abortControllerRef.current = controller;
     isUserCancelRef.current = false;
 
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, API_TIMEOUT_MS);
+    const timeoutId = API_TIMEOUT_MS > 0
+      ? setTimeout(() => {
+          controller.abort();
+        }, API_TIMEOUT_MS)
+      : null;
 
     try {
       if (skipPositions) {
         await handleConfirm({ skipPositions: true });
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         return;
       }
       setStep('loading-positions');
@@ -482,7 +488,7 @@ export function PositionGenerationModal({
         }
         
         if (!Number.isFinite(rateValue)) {
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           toast.error(`Le taux pour la période ${periodIdx + 1} est invalide`);
           setStep('review-rates');
           return;
@@ -515,21 +521,21 @@ export function PositionGenerationModal({
         const maxVal = positionsPerMonthMax.trim() !== '' ? parseInt(positionsPerMonthMax.trim(), 10) : null;
         
         if (minVal !== null && (isNaN(minVal) || minVal < 0)) {
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           setPositionsRangeError('Le minimum doit être un nombre entier >= 0');
           setStep('review-rates');
           return;
         }
 
         if (maxVal !== null && (isNaN(maxVal) || maxVal < 0)) {
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           setPositionsRangeError('Le maximum doit être un nombre entier >= 0');
           setStep('review-rates');
           return;
         }
 
         if (minVal !== null && maxVal !== null && minVal > maxVal) {
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           setPositionsRangeError('Le minimum doit être <= au maximum');
           setStep('review-rates');
           return;
@@ -577,7 +583,7 @@ export function PositionGenerationModal({
       
       setStep('review-positions');
     } catch (err: any) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       abortControllerRef.current = null;
 
       if (err?.name === 'AbortError') {
@@ -605,7 +611,7 @@ export function PositionGenerationModal({
       toast.error(err?.message || 'Erreur lors de la génération des positions');
       setStep('review-rates');
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 

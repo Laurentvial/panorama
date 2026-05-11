@@ -10259,6 +10259,9 @@ def transaction_generate_positions(request, client_id, transaction_id):
     if not isinstance(manual_regeneration, bool):
         manual_regeneration = str(manual_regeneration).lower() in ('true', '1', 'yes', 'on')
     include_focus_transaction = manual_regeneration
+    include_recalculation_preview = request.data.get('include_recalculation_preview', False)
+    if not isinstance(include_recalculation_preview, bool):
+        include_recalculation_preview = str(include_recalculation_preview).lower() in ('true', '1', 'yes', 'on')
 
     # Parse positions per month override (optional)
     positions_per_month_min = request.data.get('positions_per_month_min')
@@ -10309,7 +10312,8 @@ def transaction_generate_positions(request, client_id, transaction_id):
         transaction.subscription_details = subscription_details
     
     try:
-        if requires_addition_recalculation:
+        addition_metadata = None
+        if requires_addition_recalculation and include_recalculation_preview:
             # Use the same recalculation engine for additions, in dry-run mode.
             from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
             recalculation_preview = recalculate_positions_for_product_addition(
@@ -10369,7 +10373,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 response_data['addition_recalculation'] = addition_metadata
             return Response(response_data)
 
-        if is_withdrawal:
+        if is_withdrawal and include_recalculation_preview:
             # Use the same recalculation engine as save-positions, but in dry-run mode.
             recalculation_preview = recalculate_positions_for_product_withdrawal(
                 transaction,
@@ -10428,6 +10432,26 @@ def transaction_generate_positions(request, client_id, transaction_id):
             return Response(response_data)
 
         withdrawal_metadata = None
+        if requires_addition_recalculation:
+            try:
+                from .position_service import calculate_addition_recalculation_metadata
+                addition_product = None
+                if transaction.transfer_to and transaction.transfer_to != 'solde':
+                    try:
+                        from .models import Product
+                        addition_product = Product.objects.get(id=transaction.transfer_to)
+                    except Product.DoesNotExist:
+                        addition_product = None
+                if addition_product is None and transaction.product:
+                    addition_product = transaction.product
+                if addition_product is not None:
+                    addition_metadata = calculate_addition_recalculation_metadata(
+                        addition_txn=transaction,
+                        product=addition_product,
+                    )
+            except Exception:
+                # Non-blocking metadata enrichment.
+                addition_metadata = None
         # For withdrawals, create a temporary transaction pointing to source product
         txn_to_use = transaction
         if is_withdrawal:
@@ -10630,6 +10654,8 @@ def transaction_generate_positions(request, client_id, transaction_id):
             response_data['deleted_positions'] = deleted_positions_preview
         if withdrawal_metadata:
             response_data['withdrawal_recalculation'] = withdrawal_metadata
+        if addition_metadata:
+            response_data['addition_recalculation'] = addition_metadata
         
         return Response(response_data)
     except Exception as e:
