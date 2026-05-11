@@ -3066,6 +3066,57 @@ def save_generated_positions(
     ).count() if ctx.product_id else 0
     logger.debug(f"DEBUG: Total pending positions for product {ctx.product_id} BEFORE creating new positions: {total_pending_before_create}")
 
+    # Never try to recreate periods that already exist as non-pending for this transaction
+    # (open/done). They are historical records and must remain immutable.
+    existing_locked_period_indexes = set(
+        Position.objects.filter(transaction_id=txn.id)
+        .exclude(status='pending')
+        .exclude(period_index__isnull=True)
+        .values_list('period_index', flat=True)
+    )
+    if existing_locked_period_indexes:
+        original_count = len(positions_data)
+        positions_data = [
+            pos_data
+            for pos_data in positions_data
+            if pos_data.get('period_index') not in existing_locked_period_indexes
+        ]
+        skipped = original_count - len(positions_data)
+        if skipped > 0:
+            logger.info(
+                "Skipping %s generated positions for transaction %s: period_index already exists in non-pending positions (%s).",
+                skipped,
+                txn.id,
+                sorted(existing_locked_period_indexes),
+            )
+
+    # Defensive deduplication: keep only one generated row per non-null period_index.
+    # This protects against malformed/duplicated payloads from the UI.
+    deduped_positions_data: list[dict] = []
+    deduped_by_period: dict[int, dict] = {}
+    duplicate_period_indexes: set[int] = set()
+    for pos_data in positions_data:
+        period_index = pos_data.get('period_index')
+        if period_index is None:
+            deduped_positions_data.append(pos_data)
+            continue
+        normalized_period_index = int(period_index)
+        if normalized_period_index in deduped_by_period:
+            duplicate_period_indexes.add(normalized_period_index)
+        deduped_by_period[normalized_period_index] = {**pos_data, 'period_index': normalized_period_index}
+    if deduped_by_period:
+        deduped_positions_data.extend(
+            [deduped_by_period[idx] for idx in sorted(deduped_by_period.keys())]
+        )
+    if duplicate_period_indexes:
+        logger.warning(
+            "Detected duplicate generated positions for transaction %s on period_index values %s. "
+            "Keeping the latest entry per period.",
+            txn.id,
+            sorted(duplicate_period_indexes),
+        )
+    positions_data = deduped_positions_data
+
     # Performance: avoid one SELECT + one INSERT per position.
     # Collisions on UUID4 (12 chars) are effectively impossible; if they happen, we retry on IntegrityError.
     from django.db import IntegrityError
