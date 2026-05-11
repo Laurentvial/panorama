@@ -354,6 +354,8 @@ class ClientPlatformLog(models.Model):
     action_details = models.JSONField(default=dict, blank=True)  # Details of the action (page, element clicked, etc.)
     ip_address = models.CharField(max_length=50, null=True, blank=True)
     user_agent = models.CharField(max_length=500, null=True, blank=True)
+    device = models.CharField(max_length=80, null=True, blank=True)
+    os = models.CharField(max_length=80, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

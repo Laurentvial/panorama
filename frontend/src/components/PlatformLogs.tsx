@@ -23,6 +23,8 @@ interface PlatformLog {
   actionDetails: any;
   ipAddress: string | null;
   userAgent: string | null;
+  device?: string | null;
+  os?: string | null;
   createdAt: string;
   clientId: string;
   clientDisplayName?: string;
@@ -428,6 +430,8 @@ export function PlatformLogs() {
                       <TableHead className="w-[280px]">Action</TableHead>
                       <TableHead>Détails</TableHead>
                       <TableHead className="w-[120px]">Origine</TableHead>
+                      <TableHead className="w-[120px]">Appareil</TableHead>
+                      <TableHead className="w-[120px]">Système</TableHead>
                       <TableHead className="w-[140px]">IP</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -454,6 +458,12 @@ export function PlatformLogs() {
                           </TableCell>
                           <TableCell className="whitespace-nowrap align-middle">
                             <span className={origin.className}>{origin.label}</span>
+                          </TableCell>
+                          <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                            {log.device || '-'}
+                          </TableCell>
+                          <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                            {log.os || '-'}
                           </TableCell>
                           <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                             {log.ipAddress || '-'}

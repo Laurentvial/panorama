@@ -3124,21 +3124,32 @@ def save_generated_positions(
         return instances
 
     created: list[Position] = []
-    for attempt in range(3):
-        instances = _build_instances()
+    instances = _build_instances()
+    max_attempts = 3
+    for attempt in range(max_attempts):
         try:
-            created = Position.objects.bulk_create(instances, batch_size=500)
+            # Isolate each attempt in its own savepoint so an IntegrityError
+            # does not poison the outer atomic transaction.
+            with db_transaction.atomic():
+                created = Position.objects.bulk_create(instances, batch_size=500)
             break
         except IntegrityError:
+            if attempt == max_attempts - 1:
+                logger.error(
+                    "IntegrityError during bulk_create of positions on final attempt (%s/%s).",
+                    attempt + 1,
+                    max_attempts,
+                    exc_info=True,
+                )
+                raise
             logger.warning(
-                "IntegrityError during bulk_create of positions (attempt %s/3); regenerating ids and retrying.",
+                "IntegrityError during bulk_create of positions (attempt %s/%s); regenerating ids and retrying.",
                 attempt + 1,
+                max_attempts,
             )
-            # Retry: regenerate ids for any instances that might collide.
+            # Retry: force fresh ids in case of collision.
             for inst in instances:
                 inst.id = uuid.uuid4().hex[:12]
-            created = Position.objects.bulk_create(instances, batch_size=500)
-            break
 
     logger.debug(f"DEBUG: Created {len(created)} positions for transaction {txn.id}")
     

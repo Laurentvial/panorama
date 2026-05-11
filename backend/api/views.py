@@ -56,6 +56,7 @@ import json
 import os
 import hmac
 import re
+import ipaddress
 import calendar
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
@@ -163,34 +164,47 @@ class SafeTokenRefreshView(TokenRefreshView):
             )
 
 
+def _normalize_ip_candidate(raw_value):
+    """Return a normalized IP string when `raw_value` is a valid IP."""
+    if not raw_value:
+        return None
+    candidate = str(raw_value).strip().strip('"').strip("'")
+    if not candidate:
+        return None
+    if candidate.lower() == 'unknown':
+        return None
+    # IPv6 can be represented as [addr]:port by some proxies.
+    if candidate.startswith('[') and ']' in candidate:
+        candidate = candidate[1:candidate.find(']')]
+    # IPv4 can be represented as ip:port.
+    elif candidate.count(':') == 1 and candidate.count('.') == 3:
+        host, maybe_port = candidate.rsplit(':', 1)
+        if maybe_port.isdigit():
+            candidate = host
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
 def get_client_ip(request):
-    """Extract client IP address from request, checking multiple headers"""
-    # Check various headers that might contain the real client IP
-    # X-Forwarded-For can contain multiple IPs (client, proxy1, proxy2)
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    """Extract the most reliable client IP from trusted proxy headers."""
+    # Prefer CDN/proxy headers that usually carry the original client IP.
+    for header in ('HTTP_CF_CONNECTING_IP', 'HTTP_TRUE_CLIENT_IP', 'HTTP_X_REAL_IP'):
+        ip = _normalize_ip_candidate(request.META.get(header, ''))
+        if ip:
+            return ip
+
+    # X-Forwarded-For may contain a chain: client, proxy1, proxy2...
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
     if x_forwarded_for:
-        # Get the first IP (original client) and strip whitespace
-        ip = x_forwarded_for.split(',')[0].strip()
-        if ip:
-            return ip
-    
-    # Check X-Real-IP header (used by some proxies)
-    x_real_ip = request.META.get('HTTP_X_REAL_IP')
-    if x_real_ip:
-        ip = x_real_ip.strip()
-        if ip:
-            return ip
-    
-    # Check CF-Connecting-IP (Cloudflare)
-    cf_connecting_ip = request.META.get('HTTP_CF_CONNECTING_IP')
-    if cf_connecting_ip:
-        ip = cf_connecting_ip.strip()
-        if ip:
-            return ip
-    
-    # Fallback to REMOTE_ADDR
-    ip = request.META.get('REMOTE_ADDR', '')
-    return ip.strip() if ip else 'Unknown'
+        for part in x_forwarded_for.split(','):
+            ip = _normalize_ip_candidate(part)
+            if ip:
+                return ip
+
+    # Final fallback when no forwarding header is available.
+    return _normalize_ip_candidate(request.META.get('REMOTE_ADDR', '')) or 'Unknown'
 
 
 def _recompute_client_account_verified(client: Client) -> list[str]:
@@ -582,6 +596,42 @@ def get_browser_info(request):
     return browser_info
 
 
+def get_device_and_os_from_user_agent(user_agent):
+    """Infer device type and operating system from a user-agent string."""
+    if not user_agent:
+        return None, None
+
+    ua = user_agent.lower()
+
+    if any(token in ua for token in ('ipad', 'tablet')):
+        device = 'Tablet'
+    elif any(token in ua for token in ('mobile', 'iphone', 'android')):
+        device = 'Mobile'
+    elif any(token in ua for token in ('bot', 'crawler', 'spider')):
+        device = 'Bot'
+    else:
+        device = 'Desktop'
+
+    os_name = None
+    if 'android' in ua:
+        os_name = 'Android'
+    elif any(token in ua for token in ('iphone', 'ipad', 'ios')):
+        os_name = 'iOS'
+    elif 'windows' in ua:
+        if 'windows nt 11.0' in ua:
+            os_name = 'Windows 11'
+        elif 'windows nt 10.0' in ua:
+            os_name = 'Windows 10'
+        else:
+            os_name = 'Windows'
+    elif any(token in ua for token in ('mac os x', 'macintosh')):
+        os_name = 'macOS'
+    elif 'linux' in ua:
+        os_name = 'Linux'
+
+    return device, os_name
+
+
 def get_user_data_for_log(django_user, user_details=None):
     """Helper function to extract user data for logging"""
     user_data = {
@@ -749,6 +799,8 @@ def _serialize_platform_log_rows(rows, include_client_display_name=False):
             'actionDetails': action_details,
             'ipAddress': row.get('ip_address'),
             'userAgent': row.get('user_agent'),
+            'device': row.get('device'),
+            'os': row.get('os'),
             'createdAt': row.get('created_at'),
             'clientId': row.get('client_id'),
         }
@@ -775,9 +827,10 @@ def create_platform_log(client_id, action_type, action_details, request, forced_
             logger.error(f"Failed to create platform log: Client {client_id} does not exist")
             return
         
-        # Extract IP and user agent
+        # Extract IP, user agent and derived device/OS
         ip_address = get_client_ip(request)
         user_agent = request.META.get('HTTP_USER_AGENT', '')
+        device, os_name = get_device_and_os_from_user_agent(user_agent)
 
         normalized_details = dict(action_details) if isinstance(action_details, dict) else {}
         origin = _normalize_platform_log_origin(forced_origin)
@@ -791,7 +844,9 @@ def create_platform_log(client_id, action_type, action_details, request, forced_
             origin=origin,
             action_details=normalized_details,
             ip_address=ip_address if ip_address != 'Unknown' else None,
-            user_agent=user_agent if user_agent else None
+            user_agent=user_agent if user_agent else None,
+            device=device,
+            os=os_name,
         )
         
         # Debug logging
@@ -2005,7 +2060,7 @@ def platform_logs_list(request):
 
     total_count = qs.count()
     offset = (page - 1) * limit
-    log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'created_at', 'client_id']
+    log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'device', 'os', 'created_at', 'client_id']
     if _client_platform_log_has_origin_column():
         log_fields.append('origin')
     paginated_rows = list(qs.values(*log_fields)[offset:offset + limit])
@@ -2081,7 +2136,7 @@ def client_platform_logs(request, client_id):
         
         total_count = logs.count()
         offset = (page - 1) * limit
-        log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'created_at', 'client_id']
+        log_fields = ['id', 'action_type', 'action_details', 'ip_address', 'user_agent', 'device', 'os', 'created_at', 'client_id']
         if _client_platform_log_has_origin_column():
             log_fields.append('origin')
         paginated_rows = list(logs.values(*log_fields)[offset:offset + limit])

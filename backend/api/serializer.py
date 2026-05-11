@@ -803,12 +803,14 @@ class ClientPlatformLogSerializer(serializers.ModelSerializer):
     actionDetails = serializers.JSONField(source='action_details', read_only=True)
     ipAddress = serializers.CharField(source='ip_address', read_only=True, allow_null=True)
     userAgent = serializers.CharField(source='user_agent', read_only=True, allow_null=True)
+    device = serializers.CharField(read_only=True, allow_null=True)
+    os = serializers.CharField(read_only=True, allow_null=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     clientId = serializers.CharField(source='client.id', read_only=True)
     
     class Meta:
         model = ClientPlatformLog
-        fields = ['id', 'actionType', 'origin', 'actionDetails', 'ipAddress', 'userAgent', 'createdAt', 'clientId']
+        fields = ['id', 'actionType', 'origin', 'actionDetails', 'ipAddress', 'userAgent', 'device', 'os', 'createdAt', 'clientId']
         read_only_fields = ['id', 'createdAt']
     
     def to_representation(self, instance):
@@ -818,6 +820,8 @@ class ClientPlatformLogSerializer(serializers.ModelSerializer):
         ret['actionDetails'] = instance.action_details if instance.action_details else {}
         ret['ipAddress'] = instance.ip_address
         ret['userAgent'] = instance.user_agent
+        ret['device'] = instance.device
+        ret['os'] = instance.os
         ret['createdAt'] = instance.created_at
         ret['clientId'] = instance.client.id
         return ret
