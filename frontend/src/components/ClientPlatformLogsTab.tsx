@@ -28,6 +28,8 @@ interface PlatformLog {
   clientId: string;
 }
 
+type PlatformLogFilter = 'client' | 'conseiller' | 'all';
+
 const ACTION_TYPE_LABELS: { [key: string]: string } = {
   login: 'Connexion',
   logout: 'Déconnexion',
@@ -87,6 +89,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [clientDisplayName, setClientDisplayName] = useState<string>('');
+  const [actorFilter, setActorFilter] = useState<PlatformLogFilter>('client');
 
   useEffect(() => {
     loadPlatformLogs();
@@ -304,6 +307,17 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
     return JSON.stringify(log.actionDetails);
   }
 
+  const filteredPlatformLogs = platformLogs.filter((log) => {
+    if (actorFilter === 'all') {
+      return true;
+    }
+    const actorKind = getPlatformLogActorKind(log.origin);
+    if (actorFilter === 'client') {
+      return actorKind === 'client';
+    }
+    return actorKind === 'gestionnaire';
+  });
+
   return (
     <Card>
       <CardHeader>
@@ -322,7 +336,52 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
           </div>
         ) : platformLogs.length > 0 ? (
           <>
-            <div className="overflow-x-auto rounded-md border border-slate-200">
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-sm font-medium text-slate-700">Afficher :</span>
+              <Button
+                type="button"
+                size="sm"
+                variant={actorFilter === 'all' ? 'default' : 'outline'}
+                aria-pressed={actorFilter === 'all'}
+                className={
+                  actorFilter === 'all'
+                    ? 'font-semibold ring-2 ring-slate-300'
+                    : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                }
+                onClick={() => setActorFilter('all')}
+              >
+                Tout
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={actorFilter === 'client' ? 'default' : 'outline'}
+                aria-pressed={actorFilter === 'client'}
+                className={
+                  actorFilter === 'client'
+                    ? 'font-semibold ring-2 ring-slate-300'
+                    : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                }
+                onClick={() => setActorFilter('client')}
+              >
+                Client
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={actorFilter === 'conseiller' ? 'default' : 'outline'}
+                aria-pressed={actorFilter === 'conseiller'}
+                className={
+                  actorFilter === 'conseiller'
+                    ? 'font-semibold ring-2 ring-slate-300'
+                    : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                }
+                onClick={() => setActorFilter('conseiller')}
+              >
+                Conseiller
+              </Button>
+            </div>
+            <div className="overflow-x-auto rounded-md border border-slate-200 mb-8">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -336,7 +395,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {platformLogs.map((log) => {
+                  {filteredPlatformLogs.map((log) => {
                     const detailsSummary = getActionDetailsSummary(log);
                     const originKind = getPlatformLogActorKind(log.origin);
                     const origin = getPlatformLogOriginPresentation(originKind);
@@ -371,30 +430,38 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
                 </TableBody>
               </Table>
             </div>
+
+            {filteredPlatformLogs.length === 0 && (
+              <p className="text-sm text-slate-500 mt-3">
+                Aucun log trouvé pour le filtre sélectionné.
+              </p>
+            )}
             
             {pagination.total_pages > 1 && (
-              <div className="flex items-center justify-between mt-6">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadPlatformLogs(pagination.page - 1)}
-                  disabled={pagination.page === 1}
-                >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
-                  Précédent
-                </Button>
+              <div className="flex items-center justify-between gap-3 mt-8 pt-4 border-t border-slate-100">
                 <span className="text-sm text-slate-600">
                   Page {pagination.page} sur {pagination.total_pages} ({pagination.total} entrées)
                 </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadPlatformLogs(pagination.page + 1)}
-                  disabled={pagination.page >= pagination.total_pages}
-                >
-                  Suivant
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadPlatformLogs(pagination.page - 1)}
+                    disabled={pagination.page === 1}
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Précédent
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadPlatformLogs(pagination.page + 1)}
+                    disabled={pagination.page >= pagination.total_pages}
+                  >
+                    Suivant
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
               </div>
             )}
           </>
