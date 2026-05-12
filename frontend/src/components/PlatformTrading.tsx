@@ -24,6 +24,9 @@ export function PlatformTrading() {
   const location = useLocation();
   const isMobile = useIsMobile();
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [clientProducts, setClientProducts] = useState<any[]>([]);
+  const [productsCatalog, setProductsCatalog] = useState<any[]>([]);
+  const [positions, setPositions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [movementType, setMovementType] = useState<'depot' | 'retrait'>('depot');
   const [paymentMethod, setPaymentMethod] = useState<'virement' | 'carte_bancaire'>('virement');
@@ -173,14 +176,25 @@ export function PlatformTrading() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const transactionsResponse = await apiCall(`/api/clients/${currentUser.id}/transactions/`);
+      const [transactionsResponse, clientProductsResponse, positionsResponse, productsCatalogResponse] = await Promise.all([
+        apiCall(`/api/clients/${currentUser.id}/transactions/`),
+        apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
+        apiCall(`/api/clients/${currentUser.id}/positions/?status=open,done`).catch(() => ({ positions: [] })),
+        apiCall('/api/products/').catch(() => ({ products: [] })),
+      ]);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
         (a: any, b: any) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
       );
       setTransactions(sortedTransactions);
+      setClientProducts((clientProductsResponse as any)?.products || []);
+      setPositions((positionsResponse as any)?.positions || []);
+      setProductsCatalog((productsCatalogResponse as any)?.products || []);
     } catch (error) {
       console.error('Error loading funds data:', error);
       setTransactions([]);
+      setClientProducts([]);
+      setPositions([]);
+      setProductsCatalog([]);
     } finally {
       setLoading(false);
     }
@@ -251,7 +265,110 @@ export function PlatformTrading() {
     return { investedCapital, tradingPortfolio, bonus, availableFunds };
   }, [transactions]);
 
-  const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds);
+  const availableFundsProductKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
+
+    for (const product of productsCatalog || []) {
+      const hasAvailableFunds = Boolean(product?.availableFunds ?? product?.available_funds ?? false);
+      if (!hasAvailableFunds) continue;
+
+      const productId = product?.id != null ? String(product.id) : '';
+      const productReference = product?.reference != null ? String(product.reference) : '';
+      const productName = product?.name != null ? String(product.name) : '';
+
+      if (productId) keys.add(toKey(productId));
+      if (productReference) keys.add(toKey(productReference));
+      if (productName) keys.add(toKey(productName));
+    }
+
+    for (const cp of clientProducts || []) {
+      const product = cp?.product || cp;
+      const hasAvailableFunds = Boolean(product?.availableFunds ?? product?.available_funds ?? false);
+      if (!hasAvailableFunds) continue;
+
+      const productId = product?.id != null ? String(product.id) : '';
+      const productReference = product?.reference != null ? String(product.reference) : '';
+      const productName = product?.name != null ? String(product.name) : '';
+
+      if (productId) keys.add(toKey(productId));
+      if (productReference) keys.add(toKey(productReference));
+      if (productName) keys.add(toKey(productName));
+    }
+
+    return keys;
+  }, [productsCatalog, clientProducts]);
+
+  const availableFundsFromTransactions = useMemo(() => {
+    if (!availableFundsProductKeys.size) return 0;
+
+    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    const completedTransactions = (transactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status))
+      .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+
+    const investedByProduct = new Map<string, number>();
+    const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
+    const normalizeId = (value: any): string | null => {
+      if (value == null) return null;
+      const v = String(value).trim();
+      if (!v || v === 'solde' || v === 'trading') return null;
+      return v;
+    };
+
+    for (const t of completedTransactions) {
+      if (String(t?.type || '') !== 'transfert') continue;
+
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+      if (!amt) continue;
+
+      const to = normalizeId(t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null);
+      const fallbackProductId = normalizeId(t?.productId ?? t?.product_id ?? t?.subscription_details?.productId ?? null);
+
+      const targetProductId = to || fallbackProductId;
+      if (targetProductId && availableFundsProductKeys.has(toKey(targetProductId))) {
+        investedByProduct.set(toKey(targetProductId), (investedByProduct.get(toKey(targetProductId)) || 0) + amt);
+      }
+    }
+
+    let total = 0;
+    for (const investedAmount of investedByProduct.values()) {
+      if (investedAmount > 0) total += investedAmount;
+    }
+
+    return total;
+  }, [transactions, availableFundsProductKeys]);
+
+  const availableFundsFromPositions = useMemo(() => {
+    if (!availableFundsProductKeys.size) return 0;
+
+    const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
+    let total = 0;
+    for (const p of positions || []) {
+      const status = String(p?.status || '').trim().toLowerCase();
+      if (status !== 'open' && status !== 'done') continue;
+
+      const productIdRaw = p?.productId ?? p?.product_id ?? null;
+      const productId = productIdRaw != null ? String(productIdRaw).trim() : '';
+      if (!productId || !availableFundsProductKeys.has(toKey(productId))) continue;
+
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p?.invested_amount);
+      if (Number.isFinite(investedNum) && investedNum > 0) total += investedNum;
+    }
+
+    return total;
+  }, [positions, availableFundsProductKeys]);
+
+  // Prefer positions-based invested amount (source of truth for active invested capital),
+  // and fallback to transaction aggregation when positions are not present.
+  const availableFundsFromProducts = useMemo(
+    () => Math.max(availableFundsFromTransactions, availableFundsFromPositions),
+    [availableFundsFromTransactions, availableFundsFromPositions]
+  );
+
+  const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds + availableFundsFromProducts);
+  const hasInvestedProductWithAvailableFunds = availableFundsFromProducts > 0;
   const isDepositFlow = movementType === 'depot';
   const flowTitle = isDepositFlow ? 'Dépôt de fonds' : 'Demande de retrait';
   const flowDescription = isDepositFlow
@@ -634,7 +751,7 @@ export function PlatformTrading() {
           >
             <Card style={{ ...roundedCardStyle, marginBottom: 0 }}>
               <CardHeader>
-                <CardTitle>Solde disponible</CardTitle>
+                <CardTitle>{hasInvestedProductWithAvailableFunds ? 'Fonds disponibles' : 'Solde disponible'}</CardTitle>
                 <CardDescription>Montant retirable sur votre compte</CardDescription>
               </CardHeader>
               <CardContent>

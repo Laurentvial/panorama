@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -26,6 +26,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [isEditCategoryDialogOpen, setIsEditCategoryDialogOpen] = useState(false);
@@ -221,6 +222,37 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
     return Array.from(new Set(values));
   }
 
+  const filteredProducts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return products.filter((product) => {
+      const categoryMatch =
+        filterCategory === 'all'
+          ? true
+          : filterCategory === 'none'
+            ? !product.categoryId
+            : product.categoryId === filterCategory;
+
+      if (!categoryMatch) return false;
+      if (!query) return true;
+
+      const categoryTitle = categories.find((c) => c.id === product.categoryId)?.title || '';
+      const subcategories = parseSubcategories(product.subcategory);
+      const searchHaystack = [
+        product.name,
+        product.reference,
+        product.type,
+        categoryTitle,
+        ...subcategories,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return searchHaystack.includes(query);
+    });
+  }, [products, categories, filterCategory, searchQuery]);
+
   return (
     <div className="space-y-6">
       <div className="page-header-section">
@@ -238,6 +270,16 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
         <TabsContent value="products" className="space-y-6">
           <div className="flex justify-between items-center gap-4 flex-wrap">
             <div className="flex items-center gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="search-product">Recherche</Label>
+                <Input
+                  id="search-product"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Nom, référence, type, catégorie..."
+                  className="w-[280px]"
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="filter-category">Catégorie</Label>
                 <Select value={filterCategory} onValueChange={setFilterCategory}>
@@ -264,14 +306,14 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
 
           <Card>
             <CardHeader>
-              <CardTitle>Liste des produits ({filterCategory === 'all' ? products.length : filterCategory === 'none' ? products.filter(p => !p.categoryId).length : products.filter(p => p.categoryId === filterCategory).length})</CardTitle>
+              <CardTitle>Liste des produits ({filteredProducts.length})</CardTitle>
             </CardHeader>
             <CardContent>
               {loading ? (
                 <div className="flex items-center justify-center py-10">
                   <LoadingIndicator />
                 </div>
-              ) : products.length > 0 ? (
+              ) : filteredProducts.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -292,7 +334,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                       </tr>
                     </thead>
                     <tbody>
-                      {(filterCategory === 'all' ? products : filterCategory === 'none' ? products.filter(p => !p.categoryId) : products.filter(p => p.categoryId === filterCategory)).map((product) => {
+                      {filteredProducts.map((product) => {
                         const category = categories.find(c => c.id === product.categoryId);
                         
                         return (
@@ -456,7 +498,9 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                   </table>
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">Aucun produit créé</p>
+                <p className="text-sm text-slate-500">
+                  {products.length === 0 ? 'Aucun produit créé' : 'Aucun produit ne correspond à la recherche/filtres'}
+                </p>
               )}
             </CardContent>
           </Card>
