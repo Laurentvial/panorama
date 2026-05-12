@@ -22,6 +22,49 @@ DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 ALLOWED_HOSTS = ['*']
 
+
+def _normalize_origin(origin):
+    value = (origin or '').strip().rstrip('/')
+    if not value:
+        return ''
+    if not value.startswith(('http://', 'https://')):
+        value = f'https://{value}'
+    return value
+
+
+def _get_frontend_allowed_origins():
+    """
+    Build frontend origins from env vars.
+    Supports:
+    - FRONTEND_PUBLIC_URLS (comma-separated list)
+    - FRONTEND_PUBLIC_URL (single value, backward-compatible)
+    """
+    candidates = []
+    raw_origins = os.getenv('FRONTEND_PUBLIC_URLS', '')
+    if raw_origins.strip():
+        candidates.extend(part.strip() for part in raw_origins.split(','))
+
+    single_origin = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
+    if single_origin:
+        candidates.append(single_origin)
+
+    origins = []
+    for candidate in candidates:
+        normalized = _normalize_origin(candidate)
+        if not normalized:
+            continue
+        if normalized not in origins:
+            origins.append(normalized)
+        # Keep historical behavior: auto-allow www for https hostnames.
+        if normalized.startswith('https://') and not normalized.startswith('https://www.'):
+            www_variant = normalized.replace('https://', 'https://www.', 1)
+            if www_variant not in origins:
+                origins.append(www_variant)
+    return origins
+
+
+FRONTEND_ALLOWED_ORIGINS = _get_frontend_allowed_origins()
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -40,12 +83,9 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:5173',
 ]
 
-# Add frontend domain dynamically (for production deployments)
-frontend_public_url = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
-if frontend_public_url:
-    if not frontend_public_url.startswith(('http://', 'https://')):
-        frontend_public_url = f'https://{frontend_public_url}'
-    CSRF_TRUSTED_ORIGINS.append(frontend_public_url.rstrip('/'))
+# Add frontend domain(s) dynamically (for production deployments)
+for frontend_origin in FRONTEND_ALLOWED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(frontend_origin)
 
 # Add Railway domain dynamically
 railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
@@ -329,24 +369,19 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # For production, use explicit allowlist from FRONTEND_PUBLIC_URL; for dev, allow all
 CORS_ALLOW_CREDENTIALS = True
 
-# Build allowed origins: dev defaults + FRONTEND_PUBLIC_URL from env
+# Build allowed origins: dev defaults + frontend domain(s) from env
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ]
-frontend_url = (os.getenv('FRONTEND_PUBLIC_URL') or '').strip()
-if frontend_url:
-    if not frontend_url.startswith(('http://', 'https://')):
-        frontend_url = f'https://{frontend_url}'
-    CORS_ALLOWED_ORIGINS.append(frontend_url)
-    # Add www variant if applicable
-    if frontend_url.startswith('https://') and not frontend_url.startswith('https://www.'):
-        CORS_ALLOWED_ORIGINS.append(frontend_url.replace('https://', 'https://www.'))
+for frontend_origin in FRONTEND_ALLOWED_ORIGINS:
+    if frontend_origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(frontend_origin)
 
-# Use allowlist in production, allow all in dev (when FRONTEND_PUBLIC_URL not set)
-CORS_ALLOW_ALL_ORIGINS = not bool(frontend_url)
+# Use allowlist in production, allow all in dev (when no frontend domain is set)
+CORS_ALLOW_ALL_ORIGINS = not bool(FRONTEND_ALLOWED_ORIGINS)
 
 CORS_ALLOW_METHODS = [
     'DELETE',
