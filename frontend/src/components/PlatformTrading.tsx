@@ -26,7 +26,7 @@ export function PlatformTrading() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [clientProducts, setClientProducts] = useState<any[]>([]);
   const [productsCatalog, setProductsCatalog] = useState<any[]>([]);
-  const [positions, setPositions] = useState<any[]>([]);
+  const [positions, setPositions] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [movementType, setMovementType] = useState<'depot' | 'retrait'>('depot');
   const [paymentMethod, setPaymentMethod] = useState<'virement' | 'carte_bancaire'>('virement');
@@ -179,7 +179,7 @@ export function PlatformTrading() {
       const [transactionsResponse, clientProductsResponse, positionsResponse, productsCatalogResponse] = await Promise.all([
         apiCall(`/api/clients/${currentUser.id}/transactions/`),
         apiCall(`/api/clients/${currentUser.id}/products/`).catch(() => ({ products: [] })),
-        apiCall(`/api/clients/${currentUser.id}/positions/?status=open,done`).catch(() => ({ positions: [] })),
+        apiCall(`/api/clients/${currentUser.id}/positions/?status=open,done`).catch(() => null),
         apiCall('/api/products/').catch(() => ({ products: [] })),
       ]);
       const sortedTransactions = (transactionsResponse.transactions || []).sort(
@@ -187,13 +187,13 @@ export function PlatformTrading() {
       );
       setTransactions(sortedTransactions);
       setClientProducts((clientProductsResponse as any)?.products || []);
-      setPositions((positionsResponse as any)?.positions || []);
+      setPositions(Array.isArray((positionsResponse as any)?.positions) ? (positionsResponse as any).positions : null);
       setProductsCatalog((productsCatalogResponse as any)?.products || []);
     } catch (error) {
       console.error('Error loading funds data:', error);
       setTransactions([]);
       setClientProducts([]);
-      setPositions([]);
+      setPositions(null);
       setProductsCatalog([]);
     } finally {
       setLoading(false);
@@ -361,10 +361,10 @@ export function PlatformTrading() {
   }, [positions, availableFundsProductKeys]);
 
   // Prefer positions-based invested amount (source of truth for active invested capital),
-  // and fallback to transaction aggregation when positions are not present.
+  // and fallback to transaction aggregation only when positions data is unavailable.
   const availableFundsFromProducts = useMemo(
-    () => Math.max(availableFundsFromTransactions, availableFundsFromPositions),
-    [availableFundsFromTransactions, availableFundsFromPositions]
+    () => (positions === null ? availableFundsFromTransactions : availableFundsFromPositions),
+    [positions, availableFundsFromTransactions, availableFundsFromPositions]
   );
 
   const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds + availableFundsFromProducts);

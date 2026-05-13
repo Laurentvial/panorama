@@ -3,6 +3,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 import os
 import dj_database_url
+from urllib.parse import urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -290,12 +291,39 @@ STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files (user uploads) - S3/MinIO storage
-AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '')
-AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
-AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', '')
-AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL') or None  # e.g. https://minio.votredomaine.com or http://minio:9000
-AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
-AWS_S3_USE_SSL = os.getenv('AWS_S3_USE_SSL', 'true').lower() in ('true', '1', 'yes')
+def _first_env_value(*names, default=''):
+    for name in names:
+        value = (os.getenv(name) or '').strip()
+        if value:
+            return value
+    return default
+
+
+AWS_ACCESS_KEY_ID = _first_env_value('AWS_ACCESS_KEY_ID', 'S3_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = _first_env_value('AWS_SECRET_ACCESS_KEY', 'S3_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = _first_env_value('AWS_STORAGE_BUCKET_NAME', 'S3_BUCKET')
+_aws_s3_endpoint_raw = _first_env_value('AWS_S3_ENDPOINT_URL', 'S3_ENDPOINT')
+if _aws_s3_endpoint_raw:
+    _parsed_s3_endpoint = urlparse(_aws_s3_endpoint_raw)
+    if _parsed_s3_endpoint.scheme not in ('http', 'https') or not _parsed_s3_endpoint.netloc:
+        raise ValueError(
+            "Invalid AWS_S3_ENDPOINT_URL. Expected format: http(s)://host[:port]"
+        )
+    if _parsed_s3_endpoint.port == 9001:
+        raise ValueError(
+            "AWS_S3_ENDPOINT_URL points to MinIO console port 9001. "
+            "Use the MinIO S3 API endpoint (usually port 9000)."
+        )
+    # MinIO console links can include /browser/<bucket>; S3 clients need root API endpoint.
+    AWS_S3_ENDPOINT_URL = f"{_parsed_s3_endpoint.scheme}://{_parsed_s3_endpoint.netloc}"
+else:
+    AWS_S3_ENDPOINT_URL = None
+AWS_S3_REGION_NAME = _first_env_value('AWS_S3_REGION_NAME', 'S3_REGION', default='us-east-1')
+_aws_s3_use_ssl_env = os.getenv('AWS_S3_USE_SSL')
+if _aws_s3_use_ssl_env is None and AWS_S3_ENDPOINT_URL:
+    AWS_S3_USE_SSL = AWS_S3_ENDPOINT_URL.startswith('https://')
+else:
+    AWS_S3_USE_SSL = (_aws_s3_use_ssl_env or 'true').lower() in ('true', '1', 'yes')
 AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '')
 # MinIO does not support object ACLs - use bucket policy for public read instead
 AWS_DEFAULT_ACL = None
