@@ -2,6 +2,7 @@ import os
 import hmac
 import hashlib
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 from django.template.loader import render_to_string
@@ -20,12 +21,39 @@ def _require_env(name: str) -> str:
 def get_frontend_public_url() -> str:
     """
     Base URL used in client-facing emails (password reset link).
-    Prefer explicit env var; default to local dev.
+    Prefer explicit env var(s); default to local dev.
     """
+    # New preferred config: comma-separated public URLs.
+    raw_urls = (os.getenv("FRONTEND_PUBLIC_URLS") or "").strip()
+    if raw_urls:
+        for part in raw_urls.split(","):
+            value = (part or "").strip()
+            if value:
+                return value.rstrip("/")
+    # Backward-compatible single value.
     value = (os.getenv("FRONTEND_PUBLIC_URL") or "").strip()
     if value:
         return value.rstrip("/")
     return "http://localhost:5173"
+
+
+def _is_publicly_reachable_base(url: str) -> bool:
+    """
+    Basic guard for email links: avoid local/internal hosts.
+    """
+    value = (url or "").strip()
+    if not value:
+        return False
+    try:
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").strip().lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    if host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+        return False
+    return True
 
 
 def get_email_asset_base_url() -> str:
@@ -37,12 +65,15 @@ def get_email_asset_base_url() -> str:
         from django.conf import settings as django_settings
 
         backend_base = (getattr(django_settings, "BACKEND_PUBLIC_URL", "") or "").strip()
-        if backend_base:
+        if backend_base and _is_publicly_reachable_base(backend_base):
             return backend_base.rstrip("/")
     except Exception:
         pass
 
-    return get_frontend_public_url().rstrip("/")
+    frontend_base = get_frontend_public_url().rstrip("/")
+    if _is_publicly_reachable_base(frontend_base):
+        return frontend_base
+    return ""
 
 
 def get_platform_name() -> str:
