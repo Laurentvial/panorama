@@ -28,6 +28,23 @@ def get_frontend_public_url() -> str:
     return "http://localhost:5173"
 
 
+def get_email_asset_base_url() -> str:
+    """
+    Resolve the public base URL used in email asset links.
+    Prefer backend URL (direct), then frontend URL (when /api is proxied).
+    """
+    try:
+        from django.conf import settings as django_settings
+
+        backend_base = (getattr(django_settings, "BACKEND_PUBLIC_URL", "") or "").strip()
+        if backend_base:
+            return backend_base.rstrip("/")
+    except Exception:
+        pass
+
+    return get_frontend_public_url().rstrip("/")
+
+
 def get_platform_name() -> str:
     # Import lazily to avoid potential app-loading issues at import time.
     try:
@@ -61,12 +78,17 @@ def get_platform_logo_url() -> str:
             # Use proxy URL so private MinIO bucket works (emails, PDFs, etc.)
             path = getattr(logo_field, "name", None) or ""
             if path:
-                base = getattr(django_settings, "BACKEND_PUBLIC_URL", "") or ""
+                base = get_email_asset_base_url()
                 if base:
                     proxy_path = quote(path, safe="/")
                     return f"{base}/api/media/{proxy_path}/"
         logo_url = getattr(logo_field, "url", "") or ""
-        return str(logo_url).strip()
+        logo_url = str(logo_url).strip()
+        if logo_url.startswith("/"):
+            base = get_email_asset_base_url()
+            if base:
+                return f"{base}{logo_url}"
+        return logo_url
     except Exception:
         return ""
 
