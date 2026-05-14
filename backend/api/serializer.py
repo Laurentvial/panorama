@@ -68,22 +68,57 @@ def _get_proxy_url_for_logo(request, logo_url):
     if not base and not request:
         return logo_url
     try:
-        # Logos already in our bucket: use storage path proxy (works with private bucket)
-        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', '') or ''
-        bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '') or ''
-        if endpoint and bucket and endpoint.rstrip('/') in logo_url and bucket in logo_url:
-            from urllib.parse import urlparse
-            parsed = urlparse(logo_url)
-            path = parsed.path
-            # Path is typically /bucket_name/assets/xxx.png - extract path within bucket
-            prefix = f'/{bucket}/'
-            if path.startswith(prefix):
-                storage_path = path[len(prefix):].lstrip('/')
-                if storage_path:
-                    proxy_path = quote(storage_path, safe='/')
-                    if base:
-                        return f'{base}/api/media/{proxy_path}/'
-                    return request.build_absolute_uri(f'/api/media/{proxy_path}/')
+        parsed = urlparse(logo_url)
+        host = (parsed.hostname or '').lower()
+        raw_path = unquote((parsed.path or '').strip())
+        path = raw_path.lstrip('/')
+
+        bucket = (getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '') or '').strip('/')
+        endpoint = (getattr(settings, 'AWS_S3_ENDPOINT_URL', '') or '').strip()
+        custom_domain = (getattr(settings, 'AWS_S3_CUSTOM_DOMAIN', '') or '').strip()
+
+        endpoint_host = ''
+        if endpoint:
+            try:
+                endpoint_host = (urlparse(endpoint).hostname or '').lower()
+            except Exception:
+                endpoint_host = ''
+        custom_domain_host = ''
+        if custom_domain:
+            custom_domain_host = custom_domain.split(':', 1)[0].lower()
+
+        known_storage_host = (
+            (endpoint_host and host == endpoint_host)
+            or (custom_domain_host and host == custom_domain_host)
+            or ('minio' in host)
+            or ('sslip.io' in host)
+        )
+
+        storage_path = ''
+        if known_storage_host and path:
+            if bucket and path.startswith(f'{bucket}/'):
+                storage_path = path[len(bucket) + 1:].lstrip('/')
+            else:
+                # Legacy MinIO URLs can still contain bucket/object style paths even after migration.
+                # Try known media roots first; fallback to removing one leading segment.
+                media_roots = (
+                    'assets/', 'products/', 'news/', 'useful_links/',
+                    'app_settings/', 'client_documents/', 'client_profiles/',
+                    'kyc/', 'successors/', 'user_profiles/',
+                )
+                for root in media_roots:
+                    idx = path.find(root)
+                    if idx != -1:
+                        storage_path = path[idx:]
+                        break
+                if not storage_path and '/' in path:
+                    storage_path = path.split('/', 1)[1]
+
+        if storage_path:
+            proxy_path = quote(storage_path, safe='/')
+            if base:
+                return f'{base}/api/media/{proxy_path}/'
+            return request.build_absolute_uri(f'/api/media/{proxy_path}/')
         # External URLs: use ?url= proxy
         encoded = quote(logo_url, safe='')
         if base:

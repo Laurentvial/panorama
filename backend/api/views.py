@@ -13939,6 +13939,56 @@ def _proxy_fetch_external_url(url: str):
     return resp.content, content_type
 
 
+def _extract_storage_path_from_url(url: str) -> str:
+    """Best-effort extraction of object key from storage-style URLs (S3/MinIO, legacy hosts)."""
+    from urllib.parse import urlparse, unquote
+    from django.conf import settings
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or '').lower()
+    path = unquote((parsed.path or '').strip()).lstrip('/')
+    if not path:
+        return ''
+
+    bucket = (getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '') or '').strip('/')
+    endpoint = (getattr(settings, 'AWS_S3_ENDPOINT_URL', '') or '').strip()
+    custom_domain = (getattr(settings, 'AWS_S3_CUSTOM_DOMAIN', '') or '').strip()
+
+    endpoint_host = ''
+    if endpoint:
+        try:
+            endpoint_host = (urlparse(endpoint).hostname or '').lower()
+        except Exception:
+            endpoint_host = ''
+    custom_domain_host = custom_domain.split(':', 1)[0].lower() if custom_domain else ''
+
+    is_storage_like_host = (
+        (endpoint_host and host == endpoint_host)
+        or (custom_domain_host and host == custom_domain_host)
+        or ('minio' in host)
+        or ('sslip.io' in host)
+    )
+    if not is_storage_like_host:
+        return ''
+
+    if bucket and path.startswith(f'{bucket}/'):
+        return path[len(bucket) + 1:].lstrip('/')
+
+    media_roots = (
+        'assets/', 'products/', 'news/', 'useful_links/',
+        'app_settings/', 'client_documents/', 'client_profiles/',
+        'kyc/', 'successors/', 'user_profiles/',
+    )
+    for root in media_roots:
+        idx = path.find(root)
+        if idx != -1:
+            return path[idx:]
+
+    if '/' in path:
+        return path.split('/', 1)[1]
+    return ''
+
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -13961,6 +14011,13 @@ def media_proxy(request):
         return response
     except Exception as e:
         logging.getLogger(__name__).warning(f"media_proxy ?url= error: {e}")
+        # Fallback for legacy MinIO URLs: convert URL to object key and serve via storage backend.
+        try:
+            storage_path = _extract_storage_path_from_url(decoded)
+            if storage_path:
+                return media_proxy_path(request, storage_path)
+        except Exception:
+            pass
         return HttpResponse(status=404)
 
 
