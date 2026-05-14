@@ -53,9 +53,25 @@ class S3MediaStorage(Storage):
         # Namespace all newly uploaded media per deployment/app.
         # Example: MEDIA_KEY_PREFIX=staging-app-a -> staging-app-a/user_profiles/...
         self._media_key_prefix = (os.getenv('MEDIA_KEY_PREFIX') or '').strip().strip('/')
+        # Prefix only tenant/private buckets that must not be shared globally.
+        self._prefixed_top_level_dirs = {
+            'app_settings',
+            'client_documents',
+            'client_profiles',
+            'kyc',
+            'successors',
+            'user_profiles',
+        }
 
     def _normalize_name(self, name):
         return name.replace('\\', '/') if name else name
+
+    def _should_apply_media_key_prefix(self, name):
+        normalized_name = self._normalize_name(name)
+        if not normalized_name:
+            return False
+        top_level_dir = normalized_name.lstrip('/').split('/', 1)[0]
+        return top_level_dir in self._prefixed_top_level_dirs
 
     def _prefix_upload_name(self, name):
         """
@@ -70,6 +86,8 @@ class S3MediaStorage(Storage):
             return name
         # Prevent double-prefixing when callers already include MEDIA_KEY_PREFIX.
         if name == self._media_key_prefix or name.startswith(f'{self._media_key_prefix}/'):
+            return name
+        if not self._should_apply_media_key_prefix(name):
             return name
         return f'{self._media_key_prefix}/{name.lstrip("/")}'
 
