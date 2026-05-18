@@ -68,6 +68,15 @@ def _get_proxy_url_for_logo(request, logo_url):
     if not base and not request:
         return logo_url
     try:
+        def _parse_config_host(value: str) -> str:
+            candidate = (value or '').strip()
+            if not candidate:
+                return ''
+            if '://' not in candidate:
+                candidate = f'https://{candidate}'
+            parsed_candidate = urlparse(candidate)
+            return (parsed_candidate.hostname or '').lower()
+
         parsed = urlparse(logo_url)
         host = (parsed.hostname or '').lower()
         raw_path = unquote((parsed.path or '').strip())
@@ -80,12 +89,12 @@ def _get_proxy_url_for_logo(request, logo_url):
         endpoint_host = ''
         if endpoint:
             try:
-                endpoint_host = (urlparse(endpoint).hostname or '').lower()
+                endpoint_host = _parse_config_host(endpoint)
             except Exception:
                 endpoint_host = ''
         custom_domain_host = ''
         if custom_domain:
-            custom_domain_host = custom_domain.split(':', 1)[0].lower()
+            custom_domain_host = _parse_config_host(custom_domain)
 
         known_storage_host = (
             (endpoint_host and host == endpoint_host)

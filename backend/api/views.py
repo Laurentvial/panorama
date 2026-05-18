@@ -1412,6 +1412,7 @@ def client_create(request):
 
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def client_detail(request, client_id):
     client = get_object_or_404(Client, id=client_id)
     err = _check_gestionnaire_client_access(request, client)
@@ -1577,6 +1578,68 @@ def client_detail(request, client_id):
             client.rib_bic = request.data.get('ribBic', '') or ''
         if 'ribDomiciliation' in request.data:
             client.rib_domiciliation = request.data.get('ribDomiciliation', '') or ''
+
+        # Handle KYC document replacements (admin-side assistance workflow)
+        kyc_documents_review = client.kyc_documents_review if isinstance(client.kyc_documents_review, dict) else {}
+        kyc_uploaded_labels = []
+        if 'identityDocument' in request.FILES:
+            identity_file = request.FILES['identityDocument']
+            try:
+                original_filename = identity_file.name
+                _, ext = os.path.splitext(original_filename)
+                custom_filename = f'{client_id}_identity_recto{ext}'
+                if client.identity_document:
+                    client.identity_document.delete(save=False)
+                client.identity_document.save(custom_filename, identity_file, save=False)
+                kyc_documents_review['identityDocument'] = 'pending'
+                kyc_uploaded_labels.append("pièce d'identité (recto)")
+            except Exception as upload_error:
+                return Response({'error': f'Erreur upload pièce d\'identité (recto): {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if 'identityDocumentVerso' in request.FILES:
+            identity_verso_file = request.FILES['identityDocumentVerso']
+            try:
+                original_filename = identity_verso_file.name
+                _, ext = os.path.splitext(original_filename)
+                custom_filename = f'{client_id}_identity_verso{ext}'
+                if client.identity_document_verso:
+                    client.identity_document_verso.delete(save=False)
+                client.identity_document_verso.save(custom_filename, identity_verso_file, save=False)
+                kyc_documents_review['identityDocumentVerso'] = 'pending'
+                kyc_uploaded_labels.append("pièce d'identité (verso)")
+            except Exception as upload_error:
+                return Response({'error': f'Erreur upload pièce d\'identité (verso): {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if 'proofOfAddress' in request.FILES:
+            proof_file = request.FILES['proofOfAddress']
+            try:
+                original_filename = proof_file.name
+                _, ext = os.path.splitext(original_filename)
+                custom_filename = f'{client_id}_address{ext}'
+                if client.proof_of_address:
+                    client.proof_of_address.delete(save=False)
+                client.proof_of_address.save(custom_filename, proof_file, save=False)
+                kyc_documents_review['proofOfAddress'] = 'pending'
+                kyc_uploaded_labels.append("justificatif de domicile")
+            except Exception as upload_error:
+                return Response({'error': f'Erreur upload justificatif de domicile: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if 'selfiePhoto' in request.FILES:
+            selfie_file = request.FILES['selfiePhoto']
+            try:
+                original_filename = selfie_file.name
+                _, ext = os.path.splitext(original_filename)
+                custom_filename = f'{client_id}_selfie{ext}'
+                if client.selfie_photo:
+                    client.selfie_photo.delete(save=False)
+                client.selfie_photo.save(custom_filename, selfie_file, save=False)
+                kyc_documents_review['selfiePhoto'] = 'pending'
+                kyc_uploaded_labels.append("selfie")
+            except Exception as upload_error:
+                return Response({'error': f'Erreur upload selfie: {str(upload_error)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if kyc_uploaded_labels:
+            client.kyc_documents_review = kyc_documents_review
         
         # Handle profile photo upload or removal
         if 'profilePhoto' in request.FILES:
@@ -1807,6 +1870,7 @@ def client_detail(request, client_id):
             for field in request.data.keys():
                 if field not in ['removeProfilePhoto']:  # Skip special fields
                     changed_fields.append(field)
+            changed_fields.extend(request.FILES.keys())
             
             if changed_fields:
                 create_log_entry(
@@ -13944,6 +14008,15 @@ def _extract_storage_path_from_url(url: str) -> str:
     from urllib.parse import urlparse, unquote
     from django.conf import settings
 
+    def _parse_config_host(value: str) -> str:
+        candidate = (value or '').strip()
+        if not candidate:
+            return ''
+        if '://' not in candidate:
+            candidate = f'https://{candidate}'
+        parsed_candidate = urlparse(candidate)
+        return (parsed_candidate.hostname or '').lower()
+
     parsed = urlparse(url)
     host = (parsed.hostname or '').lower()
     path = unquote((parsed.path or '').strip()).lstrip('/')
@@ -13957,10 +14030,10 @@ def _extract_storage_path_from_url(url: str) -> str:
     endpoint_host = ''
     if endpoint:
         try:
-            endpoint_host = (urlparse(endpoint).hostname or '').lower()
+            endpoint_host = _parse_config_host(endpoint)
         except Exception:
             endpoint_host = ''
-    custom_domain_host = custom_domain.split(':', 1)[0].lower() if custom_domain else ''
+    custom_domain_host = _parse_config_host(custom_domain) if custom_domain else ''
 
     is_storage_like_host = (
         (endpoint_host and host == endpoint_host)
