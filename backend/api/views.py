@@ -1529,6 +1529,7 @@ def client_detail(request, client_id):
         if 'kycStatus' in request.data:
             client.kyc_status = request.data.get('kycStatus', 'pending') or 'pending'
         if 'kycDocumentsReview' in request.data:
+            previous_review_map = client.kyc_documents_review if isinstance(client.kyc_documents_review, dict) else {}
             review_map = request.data.get('kycDocumentsReview')
             if isinstance(review_map, str):
                 try:
@@ -1540,12 +1541,45 @@ def client_detail(request, client_id):
             allowed_keys = {'identityDocument', 'identityDocumentVerso', 'proofOfAddress', 'selfiePhoto'}
             allowed_values = {'pending', 'approved', 'rejected'}
             sanitized_review_map = {}
+            doc_field_map = {
+                'identityDocument': ('identity_document', "pièce d'identité (recto)"),
+                'identityDocumentVerso': ('identity_document_verso', "pièce d'identité (verso)"),
+                'proofOfAddress': ('proof_of_address', 'justificatif de domicile'),
+                'selfiePhoto': ('selfie_photo', 'selfie avec pièce d\'identité'),
+            }
+            newly_rejected_docs = []
             for key, value in review_map.items():
                 if key not in allowed_keys:
                     continue
                 normalized_value = (str(value or '')).strip().lower()
                 sanitized_review_map[key] = normalized_value if normalized_value in allowed_values else 'pending'
+
+                previous_status = str(previous_review_map.get(key, 'pending') or 'pending').strip().lower()
+                if sanitized_review_map[key] == 'rejected' and previous_status != 'rejected':
+                    field_name, document_label = doc_field_map.get(key, (None, None))
+                    if field_name:
+                        file_field = getattr(client, field_name, None)
+                        if file_field:
+                            try:
+                                file_field.delete(save=False)
+                            except Exception as delete_error:
+                                logger.warning("Failed to delete rejected KYC document %s for client %s: %s", key, client.id, str(delete_error))
+                        setattr(client, field_name, None)
+                        newly_rejected_docs.append((key, document_label))
             client.kyc_documents_review = sanitized_review_map
+            for rejected_key, rejected_label in newly_rejected_docs:
+                create_app_notification(
+                    recipient_type=AppNotification.RECIPIENT_CLIENT,
+                    recipient_client=client,
+                    notification_type=AppNotification.TYPE_CLIENT_KYC_DOCUMENT_REJECTED,
+                    title='Document KYC rejeté',
+                    message=f"Votre document {rejected_label} a été rejeté, merci de renvoyer un document valide.",
+                    payload={
+                        'client_id': client.id,
+                        'document_key': rejected_key,
+                        'route': '/platform/account-verification',
+                    },
+                )
         if 'kycReviewedAt' in request.data:
             raw_reviewed_at = request.data.get('kycReviewedAt')
             if raw_reviewed_at in (None, '', 'null'):

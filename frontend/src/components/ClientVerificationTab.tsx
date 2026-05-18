@@ -117,6 +117,8 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
   const [kycDocumentsReview, setKycDocumentsReview] = useState<Record<string, KycDocumentReviewStatus>>(
     (client?.kycDocumentsReview || client?.kyc_documents_review || {}) as Record<string, KycDocumentReviewStatus>,
   );
+  const [kycDocumentOverrides, setKycDocumentOverrides] = useState<Record<string, string | null>>({});
+  const [uploadingByDocument, setUploadingByDocument] = useState<Record<string, boolean>>({});
 
   const actualClientId = clientId || client?.id;
 
@@ -126,6 +128,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
     setKycDocumentsReview(
       (client?.kycDocumentsReview || client?.kyc_documents_review || {}) as Record<string, KycDocumentReviewStatus>,
     );
+    setKycDocumentOverrides({});
   }, [client]);
 
   useEffect(() => {
@@ -428,6 +431,10 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
   };
 
   const getKycDocumentUrl = (documentKey: string): string => {
+    if (Object.prototype.hasOwnProperty.call(kycDocumentOverrides, documentKey)) {
+      const overrideUrl = kycDocumentOverrides[documentKey];
+      return typeof overrideUrl === 'string' ? overrideUrl : '';
+    }
     const possibleKeys = KYC_DOCUMENT_FILE_KEYS[documentKey] || [];
     for (const key of possibleKeys) {
       const value = client?.[key];
@@ -466,7 +473,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
 
     setReviewSavingByDocument((prev) => ({ ...prev, [documentKey]: true }));
     try {
-      await apiCall(`/api/clients/${actualClientId}/`, {
+      const response = await apiCall(`/api/clients/${actualClientId}/`, {
         method: 'PATCH',
         body: JSON.stringify({
           kycDocumentsReview: nextDocumentsReview,
@@ -474,6 +481,9 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
           kycReviewedAt: nextReviewedAt,
         }),
       });
+      const updatedClient = (response as any)?.client || {};
+      const nextUrl = extractKycDocumentUrlFromPayload(updatedClient, documentKey);
+      setKycDocumentOverrides((prev) => ({ ...prev, [documentKey]: nextUrl || null }));
       setKycDocumentsReview(nextDocumentsReview);
       setKycStatus(nextGlobalKycStatus);
       setKycReviewedAt(nextReviewedAt);
@@ -483,6 +493,53 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
       toast.error(error?.message || 'Erreur lors de la mise à jour du statut du document.');
     } finally {
       setReviewSavingByDocument((prev) => ({ ...prev, [documentKey]: false }));
+    }
+  };
+
+  const getKycDocumentFileAccept = (documentKey: string): string => {
+    if (documentKey === 'selfiePhoto') return 'image/*';
+    return 'image/*,.pdf';
+  };
+
+  const extractKycDocumentUrlFromPayload = (payload: any, documentKey: string): string => {
+    const possibleKeys = KYC_DOCUMENT_FILE_KEYS[documentKey] || [];
+    for (const key of possibleKeys) {
+      const value = payload?.[key];
+      if (typeof value === 'string' && value.trim() !== '') {
+        return value;
+      }
+    }
+    return '';
+  };
+
+  const handleKycDocumentUpload = async (documentKey: string, file: File | null) => {
+    if (!actualClientId || !file) return;
+
+    setUploadingByDocument((prev) => ({ ...prev, [documentKey]: true }));
+    try {
+      const formData = new FormData();
+      formData.append(documentKey, file);
+      formData.append('kycStatus', 'submitted');
+
+      const response = await apiCall(`/api/clients/${actualClientId}/`, {
+        method: 'PATCH',
+        body: formData,
+      });
+
+      const updatedClient = (response as any)?.client || {};
+      const nextUrl = extractKycDocumentUrlFromPayload(updatedClient, documentKey);
+      setKycDocumentOverrides((prev) => ({ ...prev, [documentKey]: nextUrl || null }));
+
+      setKycDocumentsReview((prev) => ({ ...prev, [documentKey]: 'pending' }));
+      setKycStatus((updatedClient?.kycStatus || updatedClient?.kyc_status || 'submitted') as string);
+      setKycReviewedAt((updatedClient?.kycReviewedAt || updatedClient?.kyc_reviewed_at || null) as string | null);
+
+      toast.success('Document importé avec succès.');
+    } catch (error: any) {
+      console.error('Error uploading KYC document from admin:', error);
+      toast.error(error?.message || "Erreur lors de l'import du document.");
+    } finally {
+      setUploadingByDocument((prev) => ({ ...prev, [documentKey]: false }));
     }
   };
 
@@ -837,6 +894,8 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                     const documentUrl = getKycDocumentUrl(documentKey);
                     const reviewStatus = getKycDocumentReviewStatus(documentKey);
                     const isSavingDocumentReview = !!reviewSavingByDocument[documentKey];
+                    const isUploadingDocument = !!uploadingByDocument[documentKey];
+                    const uploadInputId = `kyc-upload-${actualClientId || 'client'}-${documentKey}`;
 
                     return (
                       <div key={documentKey} className="rounded-md border border-slate-200 p-3 space-y-3">
@@ -862,11 +921,34 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                         )}
 
                         <div className="flex flex-wrap items-center gap-3 text-sm">
+                          <label
+                            htmlFor={uploadInputId}
+                            className={`inline-flex items-center rounded-md px-2.5 py-1 text-sm transition-colors ${
+                              isUploadingDocument || isSavingDocumentReview
+                                ? 'cursor-not-allowed text-slate-400'
+                                : 'cursor-pointer text-blue-700 hover:bg-blue-50'
+                            }`}
+                          >
+                            <input
+                              id={uploadInputId}
+                              type="file"
+                              accept={getKycDocumentFileAccept(documentKey)}
+                              className="hidden"
+                              disabled={isUploadingDocument || isSavingDocumentReview}
+                              onChange={(event) => {
+                                const selectedFile = event.target.files?.[0] || null;
+                                void handleKycDocumentUpload(documentKey, selectedFile);
+                                event.currentTarget.value = '';
+                              }}
+                            />
+                            {isUploadingDocument ? "Import..." : documentUrl ? 'Remplacer' : 'Ajouter'}
+                          </label>
+
                           {reviewStatus !== 'approved' && (
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'approved')}
-                              disabled={!documentUrl || isSavingDocumentReview}
+                              disabled={!documentUrl || isSavingDocumentReview || isUploadingDocument}
                               className="rounded-sm px-1 underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:bg-green-50 hover:text-green-700 hover:decoration-2 hover:decoration-green-700 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
                             >
                               Valider
@@ -876,7 +958,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'rejected')}
-                              disabled={!documentUrl || isSavingDocumentReview}
+                              disabled={!documentUrl || isSavingDocumentReview || isUploadingDocument}
                               className="underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:text-red-700 hover:decoration-2 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
                             >
                               Rejeter
@@ -886,7 +968,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'pending')}
-                              disabled={!documentUrl || isSavingDocumentReview}
+                              disabled={!documentUrl || isSavingDocumentReview || isUploadingDocument}
                               className="underline underline-offset-2 decoration-1 transition-all text-blue-700 hover:text-amber-700 hover:decoration-2 hover:underline-offset-4 disabled:text-slate-400 disabled:no-underline"
                             >
                               En attente

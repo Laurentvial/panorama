@@ -276,6 +276,7 @@ class AppNotification(models.Model):
     TYPE_CLIENT_DEPOT = 'client_depot'
     TYPE_CLIENT_RETRAIT = 'client_retrait'
     TYPE_CLIENT_KYC_DOCUMENT_UPLOADED = 'client_kyc_document_uploaded'
+    TYPE_CLIENT_KYC_DOCUMENT_REJECTED = 'client_kyc_document_rejected'
     TYPE_REFERRAL_INSCRIPTION = 'referral_inscription'
 
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
