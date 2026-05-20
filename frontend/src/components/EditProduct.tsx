@@ -2289,7 +2289,7 @@ export function EditProduct() {
               </div>
             )}
 
-            <div className="flex justify-end gap-4 pt-4 border-t">
+            <div className="sticky bottom-0 z-20 -mx-6 mt-6 flex justify-end gap-4 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
               <Button
                 type="button"
                 variant="outline"
