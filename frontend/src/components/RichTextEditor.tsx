@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
-import { Sparkles, List, ListOrdered, CornerDownLeft, Eraser } from 'lucide-react';
+import { Input } from './ui/input';
+import { Sparkles, List, ListOrdered, CornerDownLeft, Eraser, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface RichTextEditorProps {
@@ -35,6 +36,9 @@ export function RichTextEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showAiContextPanel, setShowAiContextPanel] = useState(false);
+  const [showSearchReplacePanel, setShowSearchReplacePanel] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [replaceTerm, setReplaceTerm] = useState('');
 
   useEffect(() => {
     if (!showAiContextPanel) return;
@@ -64,6 +68,16 @@ export function RichTextEditor({
     }, 0);
   }
 
+  function escapeRegExp(text: string) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function countOccurrences(text: string, term: string) {
+    if (!term) return 0;
+    const regex = new RegExp(escapeRegExp(term), 'g');
+    return (text.match(regex) || []).length;
+  }
+
   function insertLineBreak() {
     insertAtCursor('\n');
   }
@@ -87,6 +101,82 @@ export function RichTextEditor({
     if (lines.length !== cleaned.length) {
       toast.success(`${lines.length - cleaned.length} ligne(s) vide(s) supprimée(s)`);
     }
+  }
+
+  function replaceCurrentOccurrence() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const term = searchTerm;
+    if (!term) {
+      toast.error('Saisissez un texte a rechercher');
+      return;
+    }
+
+    const currentStart = textarea.selectionStart;
+    const currentEnd = textarea.selectionEnd;
+    const selectedText = value.slice(currentStart, currentEnd);
+
+    if (selectedText === term) {
+      const updatedValue =
+        value.slice(0, currentStart) + replaceTerm + value.slice(currentEnd);
+      onChange(updatedValue);
+      const nextCursor = currentStart + replaceTerm.length;
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(nextCursor, nextCursor);
+      }, 0);
+      toast.success('Occurrence remplacee');
+      return;
+    }
+
+    let replaceIndex = -1;
+    const containingIndex = value.lastIndexOf(term, currentStart);
+    if (containingIndex !== -1) {
+      const containingEnd = containingIndex + term.length;
+      if (currentStart >= containingIndex && currentStart <= containingEnd) {
+        replaceIndex = containingIndex;
+      }
+    }
+
+    if (replaceIndex === -1) {
+      replaceIndex = value.indexOf(term, currentEnd);
+    }
+
+    if (replaceIndex === -1) {
+      toast.error('Aucune occurrence trouvee');
+      return;
+    }
+
+    const updatedValue =
+      value.slice(0, replaceIndex) + replaceTerm + value.slice(replaceIndex + term.length);
+    onChange(updatedValue);
+    const nextCursor = replaceIndex + replaceTerm.length;
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+    toast.success('Occurrence remplacee');
+  }
+
+  function replaceAllOccurrences() {
+    const term = searchTerm;
+    if (!term) {
+      toast.error('Saisissez un texte a rechercher');
+      return;
+    }
+
+    const occurrences = countOccurrences(value, term);
+    if (occurrences === 0) {
+      toast.error('Aucune occurrence trouvee');
+      return;
+    }
+
+    onChange(value.split(term).join(replaceTerm));
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+    toast.success(`${occurrences} occurrence(s) remplacee(s)`);
   }
 
   function insertNumberedList() {
@@ -148,6 +238,13 @@ export function RichTextEditor({
     }
   }
 
+  function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      setShowSearchReplacePanel((current) => !current);
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -193,6 +290,16 @@ export function RichTextEditor({
           >
             <Eraser className="w-4 h-4" />
           </Button>
+          <Button
+            type="button"
+            variant={showSearchReplacePanel ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setShowSearchReplacePanel((current) => !current)}
+            title="Afficher le panneau rechercher/remplacer (Ctrl+H)"
+            className="h-8 w-8 p-0"
+          >
+            <Search className="w-4 h-4" />
+          </Button>
           {onGenerateAI && (
             <Button
               type="button"
@@ -212,11 +319,45 @@ export function RichTextEditor({
         </div>
       </div>
       {aiContextSlot && showAiContextPanel ? aiContextSlot : null}
+      {showSearchReplacePanel ? (
+        <div className="rounded-md border bg-slate-50 p-3">
+          <div className="grid gap-2 md:grid-cols-2">
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Rechercher"
+              aria-label="Rechercher"
+            />
+            <Input
+              value={replaceTerm}
+              onChange={(e) => setReplaceTerm(e.target.value)}
+              placeholder="Remplacer par"
+              aria-label="Remplacer par"
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              {searchTerm
+                ? `${countOccurrences(value, searchTerm)} occurrence(s)`
+                : 'Saisissez un terme a rechercher'}
+            </span>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={replaceCurrentOccurrence}>
+                Remplacer
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={replaceAllOccurrences}>
+                Tout remplacer
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <Textarea
         ref={textareaRef}
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleTextareaKeyDown}
         placeholder={placeholder}
         rows={rows}
         onFocus={() => setIsFocused(true)}
