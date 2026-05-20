@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
+from django.db import IntegrityError, transaction, connection
 from rest_framework import serializers
 from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 from .client_product_overrides import merge_serialized_product_with_overrides, normalize_overrides_incoming
@@ -7,6 +8,29 @@ import uuid
 from urllib.parse import urlparse, unquote, quote
 
 COMPLETED_TRANSACTION_STATUSES = ('valide',)
+
+
+def _sync_auth_user_id_sequence_if_needed():
+    """
+    Keep PostgreSQL auth_user auto-increment sequence aligned with current max(id).
+    This prevents duplicate PK errors after manual imports/restores.
+    """
+    if connection.vendor != 'postgresql':
+        return
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT setval(
+                    pg_get_serial_sequence('auth_user', 'id'),
+                    COALESCE((SELECT MAX(id) FROM auth_user), 1),
+                    true
+                )
+                """
+            )
+    except Exception:
+        # Don't fail user creation if sequence sync fails; normal create flow will still run.
+        pass
 
 
 def _get_media_base_url(request):
@@ -200,63 +224,76 @@ class UserSerializer(serializers.ModelSerializer):
         
         # Get and normalize username (already validated and stripped in validate_username)
         username = validated_data.get('username', '').strip()
-        
-        # Create Django User
-        user = DjangoUser.objects.create_user(
-            username=username,
-            email=validated_data.get('email', '').strip() if validated_data.get('email') else '',
-            password=validated_data.get('password'),
-            first_name=first_name.strip() if first_name else '',
-            last_name=last_name.strip() if last_name else ''
-        )
 
-        # Generate a numeric UserDetails ID (str) incrementing from max existing one
-        # Ensure it's always 12 characters or less
-        max_id = 0
-        for id_val in UserDetails.objects.values_list('id', flat=True):
-            try:
-                int_id = int(id_val)
-                if int_id > max_id:
-                    max_id = int_id
-            except (ValueError, TypeError):
-                continue
-        
-        # Generate new ID and ensure it doesn't exceed 12 characters
-        new_id = max_id + 1
-        user_details_id = str(new_id)
-        
-        # If the ID exceeds 12 characters, use a truncated UUID instead
-        if len(user_details_id) > 12:
-            # Generate a unique 12-character ID
-            while True:
-                user_details_id = uuid.uuid4().hex[:12]
-                if not UserDetails.objects.filter(id=user_details_id).exists():
-                    break
-
-        # Create UserDetails entry for this user
-        user_details = UserDetails.objects.create(
-            id=user_details_id,
-            django_user=user,
-            role=role,
-            phone=phone.strip() if phone else ''
-        )
-        
-        # Create TeamMember if teamId provided
-        if team_id:
-            try:
-                team = Team.objects.get(id=team_id)
-                # Generate TeamMember ID
-                team_member_id = uuid.uuid4().hex[:12]
-                while TeamMember.objects.filter(id=team_member_id).exists():
-                    team_member_id = uuid.uuid4().hex[:12]
-                TeamMember.objects.create(
-                    id=team_member_id,
-                    user=user_details,
-                    team=team
+        try:
+            with transaction.atomic():
+                _sync_auth_user_id_sequence_if_needed()
+                # Create Django User
+                user = DjangoUser.objects.create_user(
+                    username=username,
+                    email=validated_data.get('email', '').strip() if validated_data.get('email') else '',
+                    password=validated_data.get('password'),
+                    first_name=first_name.strip() if first_name else '',
+                    last_name=last_name.strip() if last_name else ''
                 )
-            except Team.DoesNotExist:
-                pass
-        
+
+                # Generate a numeric UserDetails ID (str) incrementing from max existing one
+                # Ensure it's always 12 characters or less
+                max_id = 0
+                for id_val in UserDetails.objects.values_list('id', flat=True):
+                    try:
+                        int_id = int(id_val)
+                        if int_id > max_id:
+                            max_id = int_id
+                    except (ValueError, TypeError):
+                        continue
+
+                # Generate new ID and ensure it doesn't exceed 12 characters
+                new_id = max_id + 1
+                user_details_id = str(new_id)
+
+                # If the ID exceeds 12 characters, use a truncated UUID instead
+                if len(user_details_id) > 12:
+                    # Generate a unique 12-character ID
+                    while True:
+                        user_details_id = uuid.uuid4().hex[:12]
+                        if not UserDetails.objects.filter(id=user_details_id).exists():
+                            break
+
+                # If UserDetails has already been created by another process/signal, reuse it.
+                user_details, created = UserDetails.objects.get_or_create(
+                    django_user=user,
+                    defaults={
+                        'id': user_details_id,
+                        'role': role,
+                        'phone': phone.strip() if phone else '',
+                    }
+                )
+                if not created:
+                    user_details.role = role
+                    user_details.phone = phone.strip() if phone else ''
+                    user_details.save(update_fields=['role', 'phone', 'updated_at'])
+
+                # Create TeamMember if teamId provided
+                if team_id:
+                    try:
+                        team = Team.objects.get(id=team_id)
+                        # Generate TeamMember ID
+                        team_member_id = uuid.uuid4().hex[:12]
+                        while TeamMember.objects.filter(id=team_member_id).exists():
+                            team_member_id = uuid.uuid4().hex[:12]
+                        TeamMember.objects.get_or_create(
+                            user=user_details,
+                            team=team,
+                            defaults={'id': team_member_id}
+                        )
+                    except Team.DoesNotExist:
+                        pass
+        except IntegrityError:
+            raise serializers.ValidationError({
+                "email": "A user with this email/username already exists."
+            })
+
         return user
 
 class NoteSerializer(serializers.ModelSerializer):
