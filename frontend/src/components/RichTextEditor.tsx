@@ -74,7 +74,7 @@ export function RichTextEditor({
 
   function countOccurrences(text: string, term: string) {
     if (!term) return 0;
-    const regex = new RegExp(escapeRegExp(term), 'g');
+    const regex = new RegExp(escapeRegExp(term), 'gi');
     return (text.match(regex) || []).length;
   }
 
@@ -116,8 +116,10 @@ export function RichTextEditor({
     const currentStart = textarea.selectionStart;
     const currentEnd = textarea.selectionEnd;
     const selectedText = value.slice(currentStart, currentEnd);
+    const normalizedTerm = term.toLocaleLowerCase();
+    const normalizedValue = value.toLocaleLowerCase();
 
-    if (selectedText === term) {
+    if (selectedText.toLocaleLowerCase() === normalizedTerm) {
       const updatedValue =
         value.slice(0, currentStart) + replaceTerm + value.slice(currentEnd);
       onChange(updatedValue);
@@ -131,7 +133,7 @@ export function RichTextEditor({
     }
 
     let replaceIndex = -1;
-    const containingIndex = value.lastIndexOf(term, currentStart);
+    const containingIndex = normalizedValue.lastIndexOf(normalizedTerm, currentStart);
     if (containingIndex !== -1) {
       const containingEnd = containingIndex + term.length;
       if (currentStart >= containingIndex && currentStart <= containingEnd) {
@@ -140,7 +142,7 @@ export function RichTextEditor({
     }
 
     if (replaceIndex === -1) {
-      replaceIndex = value.indexOf(term, currentEnd);
+      replaceIndex = normalizedValue.indexOf(normalizedTerm, currentEnd);
     }
 
     if (replaceIndex === -1) {
@@ -172,7 +174,8 @@ export function RichTextEditor({
       return;
     }
 
-    onChange(value.split(term).join(replaceTerm));
+    const regex = new RegExp(escapeRegExp(term), 'gi');
+    onChange(value.replace(regex, () => replaceTerm));
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);

@@ -65,9 +65,28 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         return;
       }
       try {
-        // open + closed (done) only
-        const data = await apiCall(`/api/clients/${clientId}/positions/?status=open,done`);
-        setPositions((data as any)?.positions || []);
+        // open + closed (done) only; paginate to include full history
+        const allPositions: any[] = [];
+        let page = 1;
+        const limit = 500;
+        let hasMore = true;
+
+        while (hasMore) {
+          const data = await apiCall(`/api/clients/${clientId}/positions/?status=open,done&page=${page}&limit=${limit}`);
+          const pagePositions = (data as any)?.positions || [];
+          allPositions.push(...pagePositions);
+
+          const pagination = (data as any)?.pagination;
+          if (pagination && page >= pagination.total_pages) {
+            hasMore = false;
+          } else if (pagePositions.length < limit) {
+            hasMore = false;
+          } else {
+            page += 1;
+          }
+        }
+
+        setPositions(allPositions);
       } catch (error) {
         console.error('Error loading client positions for portfolio:', error);
         setPositions([]);
