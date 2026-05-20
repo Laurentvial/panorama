@@ -1039,7 +1039,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                   <Button
                     variant="outline"
                     role="combobox"
-                    className="w-full justify-between h-9 rounded-md border-input bg-input-background px-3 py-2 text-sm text-slate-700"
+                    className="w-full justify-between h-9 rounded-md border-input bg-input-background px-4 py-2 text-sm text-black"
                   >
                     <span className="truncate">{getTypeFilterDisplayText()}</span>
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

@@ -300,7 +300,7 @@ export function Transactions() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 w-full justify-between rounded-md border bg-input-background font-normal hover:bg-input-background/80"
+                    className="h-9 w-full justify-between rounded-md border bg-input-background px-3 py-2 font-normal text-black hover:bg-input-background/80"
                   >
                     {typeFilterLabel}
                     <ChevronDown className="h-4 w-4 opacity-50" />

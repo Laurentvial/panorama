@@ -513,7 +513,10 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['kycDocumentsReview'] = ret.get('kyc_documents_review', {}) or {}
         ret['kycSubmittedAt'] = ret.get('kyc_submitted_at', None)
         ret['kycReviewedAt'] = ret.get('kyc_reviewed_at', None)
-        ret['birthDate'] = instance.birth_date.isoformat() if instance.birth_date else None
+        if instance.birth_date:
+            ret['birthDate'] = instance.birth_date.isoformat() if hasattr(instance.birth_date, 'isoformat') else str(instance.birth_date)
+        else:
+            ret['birthDate'] = None
         ret['birthPlace'] = ret.get('birth_place', '') or ''
         ret['address'] = ret.get('address', '') or ''
         ret['postalCode'] = ret.get('postal_code', '') or ''

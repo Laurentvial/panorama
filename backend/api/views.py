@@ -1158,7 +1158,19 @@ def client_create(request):
     def get_date(value):
         if not value or value == '':
             return None
-        return value
+        try:
+            from datetime import datetime
+            raw = str(value).strip()
+            # Accept both YYYY-MM-DD and DD/MM/YYYY formats
+            if '/' in raw:
+                parts = raw.split('/')
+                if len(parts) != 3:
+                    return None
+                day, month, year = [part.strip() for part in parts]
+                return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d").date()
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except Exception:
+            return None
     
     # Helper function to safely get list
     def get_list(value, default=None):
@@ -1430,13 +1442,15 @@ def client_detail(request, client_id):
                 return None
             try:
                 from datetime import datetime
+                raw = str(value).strip()
                 # Handle both YYYY-MM-DD and DD/MM/YYYY formats
-                if '/' in str(value):
-                    parts = str(value).split('/')
-                    if len(parts) == 3:
-                        day, month, year = parts
-                        return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d").date()
-                return datetime.strptime(str(value), "%Y-%m-%d").date()
+                if '/' in raw:
+                    parts = raw.split('/')
+                    if len(parts) != 3:
+                        return None
+                    day, month, year = [part.strip() for part in parts]
+                    return datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d").date()
+                return datetime.strptime(raw, "%Y-%m-%d").date()
             except:
                 return None
         

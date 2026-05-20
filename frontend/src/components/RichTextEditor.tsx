@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
@@ -34,7 +34,6 @@ export function RichTextEditor({
   aiContextFocusFieldId = 'ai-description-context',
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showAiContextPanel, setShowAiContextPanel] = useState(false);
   const [showSearchReplacePanel, setShowSearchReplacePanel] = useState(false);
@@ -71,15 +70,6 @@ export function RichTextEditor({
 
   function escapeRegExp(text: string) {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  function escapeHtml(text: string) {
-    return text
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
   }
 
   function countOccurrences(text: string, term: string) {
@@ -258,39 +248,6 @@ export function RichTextEditor({
     }
   }
 
-  function handleTextareaScroll(e: React.UIEvent<HTMLTextAreaElement>) {
-    if (!highlightRef.current) return;
-    highlightRef.current.scrollTop = e.currentTarget.scrollTop;
-    highlightRef.current.scrollLeft = e.currentTarget.scrollLeft;
-  }
-
-  const shouldHighlightMatches = showSearchReplacePanel && searchTerm.trim() !== '';
-  const highlightedContent = useMemo(() => {
-    if (!shouldHighlightMatches) return '';
-
-    const regex = new RegExp(escapeRegExp(searchTerm), 'gi');
-    let lastIndex = 0;
-    let highlightedHtml = '';
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(value)) !== null) {
-      const start = match.index;
-      const matchedText = match[0];
-      const end = start + matchedText.length;
-
-      highlightedHtml += escapeHtml(value.slice(lastIndex, start));
-      highlightedHtml += `<mark class="rounded-sm bg-yellow-300/70 text-transparent">${escapeHtml(matchedText)}</mark>`;
-      lastIndex = end;
-
-      if (matchedText.length === 0) {
-        regex.lastIndex += 1;
-      }
-    }
-
-    highlightedHtml += escapeHtml(value.slice(lastIndex));
-    return highlightedHtml || '&nbsp;';
-  }, [searchTerm, shouldHighlightMatches, value]);
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -398,33 +355,20 @@ export function RichTextEditor({
           </div>
         </div>
       ) : null}
-      <div className="relative">
-        {shouldHighlightMatches ? (
-          <div
-            ref={highlightRef}
-            aria-hidden="true"
-            className={`pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-md px-3 py-2 font-mono text-sm text-transparent whitespace-pre-wrap break-words ${
-              fixedHeight ? 'h-40' : ''
-            }`}
-            dangerouslySetInnerHTML={{ __html: highlightedContent }}
-          />
-        ) : null}
-        <Textarea
-          ref={textareaRef}
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleTextareaKeyDown}
-          onScroll={handleTextareaScroll}
-          placeholder={placeholder}
-          rows={rows}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          className={`relative z-10 font-mono text-sm whitespace-pre-wrap transition-all duration-200 overflow-y-auto ${
-            fixedHeight ? 'h-40 resize-none field-sizing-fixed' : 'resize-y'
-          } ${isFocused ? '' : ''}`}
-        />
-      </div>
+      <Textarea
+        ref={textareaRef}
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleTextareaKeyDown}
+        placeholder={placeholder}
+        rows={rows}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        className={`font-mono text-sm whitespace-pre-wrap transition-all duration-200 overflow-y-auto ${
+          fixedHeight ? 'h-40 resize-none field-sizing-fixed' : 'resize-y'
+        } ${isFocused ? '' : ''}`}
+      />
     </div>
   );
 }

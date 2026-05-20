@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -903,6 +904,51 @@ export function EditProduct() {
     }
   }
 
+  function preventSubmitOnEnter(e: React.KeyboardEvent<HTMLFormElement>) {
+    if (e.key !== 'Enter') return;
+    const target = e.target as Element | null;
+    if (!(target instanceof HTMLInputElement)) return;
+    const inputType = (target.type || 'text').toLowerCase();
+    if (!['text', 'number', 'email', 'search'].includes(inputType)) return;
+    e.preventDefault();
+  }
+
+  function renderSubmitActions() {
+    const actionBar = (
+      <div
+        className="z-50 border-t border-slate-200 bg-white shadow-[0_-10px_24px_rgba(0,0,0,0.12)]"
+        style={{ position: 'fixed', left: 0, right: 0, bottom: 0 }}
+      >
+        <div
+          className="mx-auto flex max-w-[1600px] justify-center gap-4 px-6 pt-4"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate('/admin/produits-investissements')}
+            disabled={loading}
+          >
+            Annuler
+          </Button>
+          <Button
+            type="submit"
+            form="edit-product-form"
+            disabled={loading}
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {loading ? 'Mise à jour...' : 'Enregistrer les modifications'}
+          </Button>
+        </div>
+      </div>
+    );
+
+    if (typeof document !== 'undefined' && document.body) {
+      return createPortal(actionBar, document.body);
+    }
+    return actionBar;
+  }
+
   if (loadingProduct) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -936,7 +982,7 @@ export function EditProduct() {
           <CardTitle>Informations du produit</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form id="edit-product-form" onSubmit={handleSubmit} onKeyDown={preventSubmitOnEnter} className="space-y-6 pb-24">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-name">Nom du produit *</Label>
@@ -2289,23 +2335,10 @@ export function EditProduct() {
               </div>
             )}
 
-            <div className="sticky bottom-0 z-20 -mx-6 mt-6 flex justify-end gap-4 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => navigate('/admin/produits-investissements')}
-                disabled={loading}
-              >
-                Annuler
-              </Button>
-              <Button type="submit" disabled={loading}>
-                <Save className="w-4 h-4 mr-2" />
-                {loading ? 'Mise à jour...' : 'Enregistrer les modifications'}
-              </Button>
-            </div>
           </form>
         </CardContent>
       </Card>
+      {renderSubmitActions()}
     </div>
   );
 }
