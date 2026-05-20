@@ -37,6 +37,60 @@ def get_frontend_public_url() -> str:
     return "http://localhost:5173"
 
 
+def _normalize_origin(origin: str) -> str:
+    value = (origin or "").strip().rstrip("/")
+    if not value:
+        return ""
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    return value
+
+
+def get_frontend_public_url_for_request(request=None) -> str:
+    """
+    Resolve frontend base URL from the request origin when possible.
+    Falls back to configured default URL when the request origin is absent or not trusted.
+    """
+    default_url = get_frontend_public_url()
+    if request is None:
+        return default_url
+
+    trusted_origins: list[str] = []
+    try:
+        from django.conf import settings as django_settings
+
+        for candidate in getattr(django_settings, "FRONTEND_ALLOWED_ORIGINS", []) or []:
+            normalized = _normalize_origin(str(candidate))
+            if normalized and normalized not in trusted_origins:
+                trusted_origins.append(normalized)
+    except Exception:
+        pass
+
+    candidates: list[str] = []
+    origin_header = _normalize_origin(request.headers.get("Origin", ""))
+    if origin_header:
+        candidates.append(origin_header)
+
+    referer_header = (request.headers.get("Referer") or "").strip()
+    if referer_header:
+        try:
+            parsed = urlparse(referer_header)
+            referer_origin = _normalize_origin(f"{parsed.scheme}://{parsed.netloc}")
+            if referer_origin:
+                candidates.append(referer_origin)
+        except Exception:
+            pass
+
+    for candidate in candidates:
+        if not _is_publicly_reachable_base(candidate):
+            continue
+        if trusted_origins and candidate not in trusted_origins:
+            continue
+        return candidate.rstrip("/")
+
+    return default_url
+
+
 def _is_publicly_reachable_base(url: str) -> bool:
     """
     Basic guard for email links: avoid local/internal hosts.
@@ -56,11 +110,17 @@ def _is_publicly_reachable_base(url: str) -> bool:
     return True
 
 
-def get_email_asset_base_url() -> str:
+def get_email_asset_base_url(request=None) -> str:
     """
     Resolve the public base URL used in email asset links.
-    Prefer backend URL (direct), then frontend URL (when /api is proxied).
+    Prefer request-aware frontend URL so emails match the platform domain used by the user.
+    Fallback to backend/public defaults.
     """
+    if request is not None:
+        request_frontend_base = get_frontend_public_url_for_request(request).rstrip("/")
+        if _is_publicly_reachable_base(request_frontend_base):
+            return request_frontend_base
+
     try:
         from django.conf import settings as django_settings
 
@@ -88,7 +148,7 @@ def get_platform_name() -> str:
         return "Panorama"
 
 
-def get_platform_logo_url() -> str:
+def get_platform_logo_url(request=None) -> str:
     """
     Returns an absolute logo URL if configured in AppSettings.
     When S3/MinIO is configured, returns proxy URL (required for private bucket).
@@ -109,14 +169,14 @@ def get_platform_logo_url() -> str:
             # Use proxy URL so private MinIO bucket works (emails, PDFs, etc.)
             path = getattr(logo_field, "name", None) or ""
             if path:
-                base = get_email_asset_base_url()
+                base = get_email_asset_base_url(request)
                 if base:
                     proxy_path = quote(path, safe="/")
                     return f"{base}/api/media/{proxy_path}/"
         logo_url = getattr(logo_field, "url", "") or ""
         logo_url = str(logo_url).strip()
         if logo_url.startswith("/"):
-            base = get_email_asset_base_url()
+            base = get_email_asset_base_url(request)
             if base:
                 return f"{base}{logo_url}"
         return logo_url

@@ -38,6 +38,14 @@
                 <p style="margin:0;line-height:1.5;color:#6b7280;font-size:13px;">
                   Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.
                 </p>
+
+                {% if login_url %}
+                <div style="margin:18px 0 0 0;">
+                  <a href="{{ login_url }}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:10px;font-weight:bold;font-size:13px;">
+                    Ouvrir la page de connexion
+                  </a>
+                </div>
+                {% endif %}
               </td>
             </tr>
             <tr>

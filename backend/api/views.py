@@ -88,7 +88,7 @@ ALLOWED_PLATFORM_LOG_ORIGINS = {
 from .emailing import (
     send_resend_email,
     render_email,
-    get_frontend_public_url,
+    get_frontend_public_url_for_request,
     get_platform_name,
     get_platform_logo_url,
     otp_hmac,
@@ -2489,10 +2489,11 @@ def client_password_reset_request(request):
             {'purpose': 'client_password_reset', 'client_id': client.id},
             salt='client-password-reset',
         )
-        reset_url = f"{get_frontend_public_url()}/reset-password?token={quote(token)}"
+        frontend_base_url = get_frontend_public_url_for_request(request)
+        reset_url = f"{frontend_base_url}/reset-password?token={quote(token)}"
 
         platform_name = get_platform_name()
-        logo_url = get_platform_logo_url()
+        logo_url = get_platform_logo_url(request)
         subject = f"{platform_name} - Réinitialisation du mot de passe"
         html = render_email(
             'emails/client_password_reset.html',
@@ -2707,7 +2708,8 @@ def client_login_otp_request(request):
         if channel == 'email':
             challenge_token = signing.dumps(challenge_payload, salt='client-login-otp')
             platform_name = get_platform_name()
-            logo_url = get_platform_logo_url()
+            logo_url = get_platform_logo_url(request)
+            frontend_base_url = get_frontend_public_url_for_request(request)
             subject = f"{platform_name} - Code de connexion"
             html = render_email(
                 'emails/client_login_otp.html',
@@ -2716,6 +2718,7 @@ def client_login_otp_request(request):
                     'logo_url': logo_url,
                     'otp_code': otp_code,
                     'expires_minutes': expires_minutes,
+                    'login_url': f"{frontend_base_url}/login/otp",
                 },
             )
             send_resend_email(to_email=client.email, subject=subject, html=html)
