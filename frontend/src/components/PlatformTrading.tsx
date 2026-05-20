@@ -307,7 +307,7 @@ export function PlatformTrading() {
       .filter((t: any) => isCompletedStatus(t?.status))
       .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
 
-    const investedByProduct = new Map<string, number>();
+    const netByProduct = new Map<string, number>();
     const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
     const normalizeId = (value: any): string | null => {
       if (value == null) return null;
@@ -323,18 +323,31 @@ export function PlatformTrading() {
       const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
       if (!amt) continue;
 
-      const to = normalizeId(t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null);
+      const rawTo = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const rawFrom = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+      const to = normalizeId(rawTo);
+      const from = normalizeId(rawFrom);
       const fallbackProductId = normalizeId(t?.productId ?? t?.product_id ?? t?.subscription_details?.productId ?? null);
 
-      const targetProductId = to || fallbackProductId;
-      if (targetProductId && availableFundsProductKeys.has(toKey(targetProductId))) {
-        investedByProduct.set(toKey(targetProductId), (investedByProduct.get(toKey(targetProductId)) || 0) + amt);
+      // Inflow: solde -> product (or legacy transfer with productId and no explicit source/target).
+      const inflowProductId = to || (!from && !to ? fallbackProductId : null);
+      if (inflowProductId && availableFundsProductKeys.has(toKey(inflowProductId))) {
+        const key = toKey(inflowProductId);
+        netByProduct.set(key, (netByProduct.get(key) || 0) + amt);
+      }
+
+      // Outflow: product -> solde.
+      const isTransferToSolde = String(rawTo ?? '').trim().toLowerCase() === 'solde';
+      const outflowProductId = isTransferToSolde ? (from || fallbackProductId) : null;
+      if (outflowProductId && availableFundsProductKeys.has(toKey(outflowProductId))) {
+        const key = toKey(outflowProductId);
+        netByProduct.set(key, (netByProduct.get(key) || 0) - amt);
       }
     }
 
     let total = 0;
-    for (const investedAmount of investedByProduct.values()) {
-      if (investedAmount > 0) total += investedAmount;
+    for (const netAmount of netByProduct.values()) {
+      if (netAmount > 0) total += netAmount;
     }
 
     return total;
@@ -360,11 +373,10 @@ export function PlatformTrading() {
     return total;
   }, [positions, availableFundsProductKeys]);
 
-  // Prefer positions-based invested amount (source of truth for active invested capital),
-  // and fallback to transaction aggregation only when positions data is unavailable.
+  // Use transaction net flow only (per client) to avoid overcounting historical positions.
   const availableFundsFromProducts = useMemo(
-    () => (positions === null ? availableFundsFromTransactions : availableFundsFromPositions),
-    [positions, availableFundsFromTransactions, availableFundsFromPositions]
+    () => availableFundsFromTransactions,
+    [availableFundsFromTransactions]
   );
 
   const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds + availableFundsFromProducts);
