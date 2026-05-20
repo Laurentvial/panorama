@@ -15,8 +15,8 @@ interface ClientPortfolioTabProps {
 export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfolioTabProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
-  const [assets, setAssets] = useState<any[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
 
   useEffect(() => {
     async function loadTransactions() {
@@ -76,19 +76,6 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     loadPositions();
   }, [clientId]);
 
-  useEffect(() => {
-    async function loadAssets() {
-      try {
-        const assetsResponse = await apiCall('/api/assets/').catch(() => ({ assets: [] }));
-        setAssets((assetsResponse as any)?.assets || []);
-      } catch (error) {
-        console.error('Error loading assets:', error);
-        setAssets([]);
-      }
-    }
-    loadAssets();
-  }, []);
-
   // Calculate values from transactions
   const calculateValuesFromTransactions = () => {
     let calculatedInvestedCapital = 0;
@@ -98,7 +85,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     let calculatedTotalInvesti = 0; // achat + transfert (solde → product) - transfert (product → solde) when status is 'valide'
 
     const completedTransactions = transactions
-      .filter((t: any) => t.status === 'valide')
+      .filter((t: any) => isCompletedStatus(t?.status))
       .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
 
     let effectiveCurrency: string | null = null;
@@ -196,7 +183,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   
   // Check if there are completed transactions
   const hasCompletedTransactions = useMemo(() => 
-    transactions.some((t: any) => t.status === 'valide'),
+    transactions.some((t: any) => isCompletedStatus(t?.status)),
     [transactions]
   );
   
@@ -222,105 +209,38 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     [hasCompletedTransactions, calculatedValues.bonus, client?.bonus]
   );
   
-  const assetsById = useMemo(() => {
-    const map = new Map<string, any>();
-    for (const a of assets || []) {
-      const id = a?.id != null ? String(a.id) : '';
-      if (id) map.set(id, a);
-    }
-    return map;
-  }, [assets]);
-
   const profitLoss = useMemo(() => {
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte)
-    // 2. Les positions de trading ouvertes (open) et fermées (done), excluant les positions pending
+    // 2. Les positions de trading fermées (done) uniquement
     
     // Commencer avec le profit/loss des transactions
     let total = hasCompletedTransactions ? calculatedValues.profitLoss : 0;
     
     // Ajouter le profit/loss des positions de trading
     for (const p of positions || []) {
-      // Inclure uniquement les positions ouvertes (open) et fermées (done)
-      // Exclure toutes les positions pending
-      if (p?.status === 'pending') continue;
-      // Inclure seulement open, done, et cancelled (si elles ont un profit_loss)
-      if (p?.status !== 'open' && p?.status !== 'done' && p?.status !== 'cancelled') continue;
+      if (p?.status !== 'done') continue;
 
       const profitLossNum =
         p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
       const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
       const expectedTotalNum =
         p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
-      
-      // Récupérer la devise de l'actif et le taux de change
-      const assetId = p?.assetId || p?.asset_id || p?.asset?.id || null;
-      const asset = assetId ? assetsById.get(String(assetId)) : null;
-      const assetCurrency = (p?.assetCurrency || p?.asset_currency || p?.asset?.currency || asset?.currency || 'EUR').trim().toUpperCase();
-      const fxNum =
-        p?.fx_rate_eur_to_asset == null
-          ? null
-          : typeof p.fx_rate_eur_to_asset === 'string'
-            ? parseFloat(p.fx_rate_eur_to_asset)
-            : Number(p.fx_rate_eur_to_asset);
-      const fxRate = fxNum != null && Number.isFinite(fxNum) && fxNum > 0 ? fxNum : null;
 
       let positionPnl = 0;
       if (profitLossNum != null && Number.isFinite(profitLossNum)) {
         // profit_loss est toujours en EUR (objectif de période)
         positionPnl = profitLossNum;
-      } else if (p?.status === 'done' && expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+      } else if (expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
         // Calculer le P&L à partir de expected_total et invested_amount
         // Ces valeurs sont déjà en EUR (invested_amount est toujours en EUR)
         positionPnl = expectedTotalNum - investedNum;
-      } else if (p?.status === 'open' && assetId && asset) {
-        // Pour les positions ouvertes sans profit_loss stocké, calculer en temps réel
-        const entryPriceNum = p?.entry_price == null ? null : typeof p.entry_price === 'string' ? parseFloat(p.entry_price) : Number(p.entry_price);
-        const qtyNum = p?.quantity == null ? null : typeof p.quantity === 'string' ? parseFloat(p.quantity) : Number(p.quantity);
-        const investedAssetNum =
-          p?.invested_amount_asset_currency == null
-            ? null
-            : typeof p.invested_amount_asset_currency === 'string'
-              ? parseFloat(p.invested_amount_asset_currency)
-              : Number(p.invested_amount_asset_currency);
-        
-        const entryPrice = entryPriceNum != null && Number.isFinite(entryPriceNum) && entryPriceNum > 0 ? entryPriceNum : null;
-        const qty = qtyNum != null && Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
-        const investedAsset = investedAssetNum != null && Number.isFinite(investedAssetNum) && investedAssetNum > 0 ? investedAssetNum : null;
-        
-        // Prix actuel de l'actif
-        const currentPriceRaw = asset?.lastPrice ?? asset?.price ?? null;
-        const currentPriceNum =
-          currentPriceRaw == null ? null : typeof currentPriceRaw === 'string' ? parseFloat(currentPriceRaw) : Number(currentPriceRaw);
-        const currentPrice = currentPriceNum != null && Number.isFinite(currentPriceNum) ? currentPriceNum : null;
-        
-        if (currentPrice != null && qty > 0) {
-          // Calculer le P&L en devise de l'actif
-          let pnlAsset = 0;
-          if (investedAsset != null && investedAsset > 0) {
-            // Utiliser invested_amount_asset_currency si disponible
-            const marketValue = qty * currentPrice;
-            pnlAsset = marketValue - investedAsset;
-          } else if (entryPrice != null && entryPrice > 0) {
-            // Sinon utiliser entry_price
-            const marketValue = qty * currentPrice;
-            const costBasis = qty * entryPrice;
-            pnlAsset = marketValue - costBasis;
-          }
-          
-          // Convertir en EUR si nécessaire
-          if (assetCurrency !== 'EUR' && fxRate != null && fxRate > 0) {
-            positionPnl = pnlAsset / fxRate;
-          } else {
-            positionPnl = pnlAsset;
-          }
-        }
       }
 
       total += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
     return total;
-  }, [positions, calculatedValues, hasCompletedTransactions, assetsById]);
+  }, [positions, calculatedValues, hasCompletedTransactions]);
   
   // Total Investi: only achat and transfert (solde → product)
   const totalInvesti = useMemo(() => 
