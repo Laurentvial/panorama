@@ -7,9 +7,10 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies for psycopg2
+# Install system dependencies for psycopg2 + pg_dump (database backups)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
+    postgresql-client \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
