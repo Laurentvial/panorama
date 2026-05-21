@@ -10,6 +10,7 @@ backend container instead: ``python manage.py process_positions`` and
 HTTP examples (when curl is available):
   curl --fail -X POST "https://api.yourdomain.com/api/cron/refresh-prices/?token=YOUR_CRON_SECRET_TOKEN"
   curl --fail -X POST "https://api.yourdomain.com/api/cron/process-positions/?token=YOUR_CRON_SECRET_TOKEN"
+  curl --fail -X POST "https://api.yourdomain.com/api/cron/database-backup/?token=YOUR_CRON_SECRET_TOKEN"
 """
 from __future__ import annotations
 
@@ -72,6 +73,21 @@ def cron_process_positions(request):
     out = StringIO()
     try:
         call_command("process_positions", stdout=out)
+        return JsonResponse({"status": "ok", "output": out.getvalue()})
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_POST
+def cron_database_backup(request):
+    """Trigger backup_database_to_s3 management command."""
+    if not _validate_cron_token(request):
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
+    out = StringIO()
+    try:
+        call_command("backup_database_to_s3", stdout=out)
         return JsonResponse({"status": "ok", "output": out.getvalue()})
     except Exception as e:
         return JsonResponse({"status": "error", "message": str(e)}, status=500)

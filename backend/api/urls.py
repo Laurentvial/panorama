@@ -6,6 +6,7 @@ urlpatterns = [
     # Cron endpoints (Coolify Scheduled Tasks - protected by CRON_SECRET_TOKEN)
     path('cron/refresh-prices/', cron_views.cron_refresh_prices, name='cron-refresh-prices'),
     path('cron/process-positions/', cron_views.cron_process_positions, name='cron-process-positions'),
+    path('cron/database-backup/', cron_views.cron_database_backup, name='cron-database-backup'),
     # Notes endpoints
     path('notes/', api_views.NoteListCreateView.as_view(), name='note-list-create'),
     path('notes/delete/<str:pk>/', api_views.NoteDeleteView.as_view(), name='note-delete'),
