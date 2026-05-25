@@ -5586,44 +5586,57 @@ def create_interest_transaction_for_period_if_complete(
         if _txn_compounds_interests(txn, product):
             return None
 
-        # Get all positions for this transaction and period
-        positions_in_period = Position.objects.filter(
-            transaction_id=txn.id,
-            period_index=period_index
+        # Resolve the payment group containing this calculation period.
+        # A payment can include multiple calculation periods; all related positions
+        # must be considered together for both completion checks and total amount.
+        generated_periods = generate_rates_for_investment(txn)
+        payment_groups = _group_calculation_periods_by_payment_period(
+            txn, product, generated_periods
         )
+        target_group = next(
+            (
+                g for g in payment_groups
+                if int(period_index) in [int(p) for p in (g.get("calculationPeriods", []) or [])]
+            ),
+            None,
+        )
+        if not target_group:
+            return None
 
-        period_summary: dict | None = None
+        calculation_periods = [int(p) for p in (target_group.get("calculationPeriods", []) or [])]
+        if not calculation_periods:
+            return None
+
+        payment_period_index = int(target_group.get("paymentPeriodIndex", 0))
         period_end_date: date | None = None
-        used_positions = positions_in_period.exists()
-        
-        if used_positions:
-            # Check if all positions in this period are 'done'
-            total_positions = positions_in_period.count()
-            done_positions = positions_in_period.filter(status='done').count()
 
-            if done_positions < total_positions:
-                # Period not yet complete
-                return None
-            
-            # Get the period end date from the latest position in this period
-            latest_position = positions_in_period.order_by('-period_date').first()
+        positions_in_group = Position.objects.filter(
+            transaction_id=txn.id,
+            period_index__in=calculation_periods,
+        )
+        used_positions = positions_in_group.exists()
+
+        if used_positions:
+            # Every existing calculation period in this payment bucket must be fully done.
+            for calc_period_idx in calculation_periods:
+                positions_in_calc_period = Position.objects.filter(
+                    transaction_id=txn.id,
+                    period_index=calc_period_idx,
+                )
+                if not positions_in_calc_period.exists():
+                    continue
+                total_positions = positions_in_calc_period.count()
+                done_positions = positions_in_calc_period.filter(status='done').count()
+                if done_positions < total_positions:
+                    return None
+
+            latest_position = positions_in_group.order_by('-period_date').first()
             if latest_position and latest_position.period_date:
                 period_end_date = latest_position.period_date
         else:
             # Fallback path: no positions linked to this validated transfer.
-            # We still create "interets" at period end using generated target profit.
-            generated_periods = generate_rates_for_investment(txn)
-            period_summary = next(
-                (
-                    p for p in generated_periods
-                    if int(p.get("periodIndex", -1)) == int(period_index)
-                ),
-                None,
-            )
-            if not period_summary:
-                return None
-
-            period_end_raw = period_summary.get("endDate")
+            # Use generated payment group boundaries and profit.
+            period_end_raw = target_group.get("endDate")
             if not period_end_raw:
                 return None
             try:
@@ -5654,12 +5667,12 @@ def create_interest_transaction_for_period_if_complete(
 
         # Get period date range for description and idempotence check
         if used_positions:
-            period_positions = positions_in_period.order_by('period_date')
+            period_positions = positions_in_group.order_by('period_date')
             first_date = period_positions.first().period_date if period_positions.exists() else None
             last_date = period_positions.last().period_date if period_positions.exists() else None
         else:
-            first_raw = (period_summary or {}).get("startDate")
-            last_raw = (period_summary or {}).get("endDate")
+            first_raw = target_group.get("startDate")
+            last_raw = target_group.get("endDate")
             try:
                 first_date = date.fromisoformat(str(first_raw)) if first_raw else None
             except Exception:
@@ -5670,7 +5683,7 @@ def create_interest_transaction_for_period_if_complete(
                 last_date = None
 
         # Build period_info for description and idempotence
-        period_info = f"Période {period_index + 1}"
+        period_info = f"Période {payment_period_index + 1}"
         if first_date and last_date:
             if first_date == last_date:
                 period_info += f" ({first_date.strftime('%d/%m/%Y')})"
@@ -5701,12 +5714,12 @@ def create_interest_transaction_for_period_if_complete(
         # - from realized positions when available
         # - from generated targetProfit when no positions are linked to this transaction
         if used_positions:
-            total_profit = positions_in_period.aggregate(
+            total_profit = positions_in_group.aggregate(
                 total=Sum('profit_loss')
             )['total'] or Decimal('0')
         else:
             try:
-                total_profit = Decimal(str((period_summary or {}).get('targetProfit', '0')))
+                total_profit = Decimal(str(target_group.get('totalProfit', '0')))
             except Exception:
                 total_profit = Decimal('0')
         
