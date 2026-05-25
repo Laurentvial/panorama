@@ -193,7 +193,8 @@
   display: none;
 }
 
-@media (max-width: 767px) {
+/* Keep portfolio table/cards switch aligned with useIsMobile (<= 1000px). */
+@media (max-width: 1000px) {
   .platform-portfolioTableDesktop {
     display: none;
   }

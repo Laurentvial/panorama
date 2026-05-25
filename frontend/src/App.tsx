@@ -1,6 +1,6 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { lazy } from './utils/lazyImport';
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { UserProvider } from './contexts/UserContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { PlatformSearchProvider } from './contexts/PlatformSearchContext';
@@ -91,6 +91,19 @@ const PlatformPageLoading = () => (
   </div>
 );
 
+function ScrollToTopOnRouteChange() {
+    const { pathname } = useLocation();
+
+    useEffect(() => {
+        // Ensure each page navigation starts at the top.
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+    }, [pathname]);
+
+    return null;
+}
+
 function Logout() {
     const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
     const sessionUserType = sessionStorage.getItem('userType');
@@ -142,6 +155,7 @@ function PlacementsWrapper() {
 function App() {
     return (
         <Router>
+            <ScrollToTopOnRouteChange />
             <UserProvider>
                 <ThemeProvider>
                     <Toaster />

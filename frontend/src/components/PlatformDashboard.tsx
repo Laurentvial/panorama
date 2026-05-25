@@ -1560,15 +1560,15 @@ export function PlatformDashboard() {
           {/* Actualités | [Mes documents above Plus fortes hausses] on desktop; on phone: Actualités last */}
           <div
             style={{
-              display: isPhone ? 'flex' : 'grid',
-              flexDirection: isPhone ? 'column' : undefined,
-              gridTemplateColumns: isPhone ? undefined : '1fr 1fr',
+              display: isMobile ? 'flex' : 'grid',
+              flexDirection: isMobile ? 'column' : undefined,
+              gridTemplateColumns: isMobile ? undefined : 'minmax(0, 1fr) minmax(0, 1fr)',
               gap: isPhone ? '16px' : isMobile ? '20px' : '30px',
               marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
             }}
           >
           {/* Actualités - left on desktop, last on phone */}
-            <Card style={{ ...roundedCardStyle, order: isPhone ? 1 : 0 }}>
+            <Card style={{ ...roundedCardStyle, order: isMobile ? 1 : 0 }}>
               <CardHeader>
                 <div
                   style={{
@@ -1800,7 +1800,8 @@ export function PlatformDashboard() {
                           key={doc.id}
                           style={{
                             display: 'flex',
-                            alignItems: 'center',
+                            alignItems: isNarrowForCards ? 'flex-start' : 'center',
+                            flexDirection: isNarrowForCards ? 'column' : 'row',
                             justifyContent: 'space-between',
                             gap: 12,
                             padding: isPhone ? '10px 12px' : '12px 14px',
@@ -1809,14 +1810,14 @@ export function PlatformDashboard() {
                             border: '1px solid #e5e7eb',
                           }}
                         >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, fontSize: isMobile ? 14 : 15, color: '#111827' }}>
+                          <div style={{ flex: 1, minWidth: 0, width: isNarrowForCards ? '100%' : undefined }}>
+                            <div style={{ fontWeight: 600, fontSize: isMobile ? 14 : 15, color: '#111827', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                               {doc.name}
                             </div>
-                            <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2 }}>
-                              {typeLabel}
+                            <div style={{ fontSize: isMobile ? 12 : 13, color: '#6b7280', marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: '4px 8px' }}>
+                              <span>{typeLabel}</span>
                               {creationLabel && (
-                                <span style={{ marginLeft: 8 }}>
+                                <span>
                                   • {creationLabel}
                                 </span>
                               )}
@@ -1830,6 +1831,7 @@ export function PlatformDashboard() {
                               aria-label="Voir le document"
                               style={{
                                 flexShrink: 0,
+                                alignSelf: isNarrowForCards ? 'flex-start' : undefined,
                                 fontSize: isMobile ? 13 : 14,
                                 fontWeight: 600,
                                 color: 'var(--platform-button-bg, #030213)',

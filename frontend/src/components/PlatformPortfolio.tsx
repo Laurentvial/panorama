@@ -794,20 +794,6 @@ export function PlatformPortfolio() {
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
-  // Calculate gains/losses from interest transactions (these are credited to cash solde)
-  const interestGainsInCash = useMemo(() => {
-    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
-    let total = 0;
-    completedTransactions.forEach((transaction: any) => {
-      if (transaction.type === 'interets') {
-        const amount = typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
-        const amt = Number.isFinite(amount) ? amount : 0;
-        total += amt;
-      }
-    });
-    return total;
-  }, [transactions]);
-
   const portfolioValue = useMemo(
     () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
     [availableFunds, tradingPortfolio, profitLoss]
@@ -932,24 +918,6 @@ export function PlatformPortfolio() {
         <>
           {/* Summary Cards */}
           <div className="platform-portfolioSummaryGrid">
-            <Card className="platform-portfolioCard">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="platform-portfolioStatTitle">Solde</CardTitle>
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="platform-portfolioStatValue">
-                  {formatAmount(Math.max(0, availableFunds), accountCurrency)}
-                </div>
-                <p className="platform-portfolioStatSub">Fonds disponibles pour investir</p>
-                {interestGainsInCash !== 0 && (
-                  <p className={`text-xs mt-1 ${interestGainsInCash >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    dont {formatAmount(interestGainsInCash, accountCurrency)} de {interestGainsInCash >= 0 ? 'gains' : 'pertes'} d'intérêts déjà basculés dans le solde
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
             <Card className="platform-portfolioCard">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="platform-portfolioStatTitle">Total Investi</CardTitle>

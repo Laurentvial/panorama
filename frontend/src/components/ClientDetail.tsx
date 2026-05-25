@@ -189,6 +189,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
     }
   }
 
+  async function refreshAssetsTabData() {
+    // Force-refresh this tab payload so new assignments appear immediately
+    await loadTabData('assets', true, true);
+  }
+
   function handleOpenEditModal() {
     setIsEditPersonalInfoOpen(true);
   }
@@ -380,7 +385,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
               availableAssets={availableAssets}
               clientProducts={clientProducts}
               availableProducts={availableProducts}
-              onRefresh={loadClientData}
+              onRefresh={refreshAssetsTabData}
             />
           )}
         </TabsContent>

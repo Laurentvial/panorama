@@ -299,8 +299,8 @@ export function PlatformTrading() {
     return keys;
   }, [productsCatalog, clientProducts]);
 
-  const availableFundsFromTransactions = useMemo(() => {
-    if (!availableFundsProductKeys.size) return 0;
+  const availableFundsPrincipalByProduct = useMemo(() => {
+    if (!availableFundsProductKeys.size) return new Map<string, number>();
 
     const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
     const completedTransactions = (transactions || [])
@@ -345,41 +345,64 @@ export function PlatformTrading() {
       }
     }
 
+    return netByProduct;
+  }, [transactions, availableFundsProductKeys]);
+
+  const availableFundsFromTransactions = useMemo(() => {
     let total = 0;
-    for (const netAmount of netByProduct.values()) {
+    for (const netAmount of availableFundsPrincipalByProduct.values()) {
       if (netAmount > 0) total += netAmount;
     }
 
     return total;
-  }, [transactions, availableFundsProductKeys]);
+  }, [availableFundsPrincipalByProduct]);
 
-  const availableFundsFromPositions = useMemo(() => {
-    if (!availableFundsProductKeys.size) return 0;
+  const availableFundsUnpaidGainsFromProducts = useMemo(() => {
+    if (!availableFundsPrincipalByProduct.size) return 0;
 
     const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
-    let total = 0;
+    const activeProductKeys = new Set<string>();
+    for (const [productKey, netPrincipal] of availableFundsPrincipalByProduct.entries()) {
+      if (netPrincipal > 0) activeProductKeys.add(productKey);
+    }
+    if (!activeProductKeys.size) return 0;
+
+    let accruedGains = 0;
     for (const p of positions || []) {
       const status = String(p?.status || '').trim().toLowerCase();
       if (status !== 'open' && status !== 'done') continue;
 
-      const productIdRaw = p?.productId ?? p?.product_id ?? null;
-      const productId = productIdRaw != null ? String(productIdRaw).trim() : '';
-      if (!productId || !availableFundsProductKeys.has(toKey(productId))) continue;
+      const productIdRaw = p?.productId ?? p?.product_id ?? p?.product?.id ?? null;
+      const productKey = productIdRaw != null ? toKey(productIdRaw) : '';
+      if (!productKey || !activeProductKeys.has(productKey)) continue;
 
-      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p?.invested_amount);
-      if (Number.isFinite(investedNum) && investedNum > 0) total += investedNum;
+      const gainNum = typeof p?.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p?.profit_loss);
+      if (Number.isFinite(gainNum)) accruedGains += gainNum;
     }
 
-    return total;
-  }, [positions, availableFundsProductKeys]);
+    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    let paidInterests = 0;
+    for (const t of transactions || []) {
+      if (!isCompletedStatus(t?.status) || String(t?.type || '') !== 'interets') continue;
 
-  // Use transaction net flow only (per client) to avoid overcounting historical positions.
+      const productIdRaw = t?.productId ?? t?.product_id ?? t?.product?.id ?? t?.subscription_details?.productId ?? null;
+      const productKey = productIdRaw != null ? toKey(productIdRaw) : '';
+      if (!productKey || !activeProductKeys.has(productKey)) continue;
+
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+      if (amt > 0) paidInterests += amt;
+    }
+
+    return accruedGains - paidInterests;
+  }, [positions, transactions, availableFundsPrincipalByProduct]);
+
   const availableFundsFromProducts = useMemo(
-    () => availableFundsFromTransactions,
-    [availableFundsFromTransactions]
+    () => Math.max(0, availableFundsFromTransactions + availableFundsUnpaidGainsFromProducts),
+    [availableFundsFromTransactions, availableFundsUnpaidGainsFromProducts]
   );
 
-  const withdrawableFunds = Math.max(0, calculatedFunds.availableFunds + availableFundsFromProducts);
+  const withdrawableFunds = Math.max(0, Math.max(0, calculatedFunds.availableFunds) + availableFundsFromProducts);
   const hasInvestedProductWithAvailableFunds = availableFundsFromProducts > 0;
   const isDepositFlow = movementType === 'depot';
   const flowTitle = isDepositFlow ? 'Dépôt de fonds' : 'Demande de retrait';

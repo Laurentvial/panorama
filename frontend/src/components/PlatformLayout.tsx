@@ -301,6 +301,13 @@ export function PlatformLayout() {
     () => menuItems.filter((item) => item.id !== 'transactions' && item.id !== 'positions'),
     [menuItems]
   );
+  const canDepositFunds = useMemo(() => {
+    const methods = Array.isArray(currentUser?.paymentMethods) ? currentUser.paymentMethods : [];
+    const normalizedMethods = methods
+      .map((m: any) => String(m || '').trim().toLowerCase().replace(/\s+/g, '_'))
+      .filter(Boolean);
+    return normalizedMethods.includes('virement') || normalizedMethods.includes('carte_bancaire');
+  }, [currentUser?.paymentMethods]);
 
   const handleMenuClick = (path: string) => {
     navigate(path);
@@ -984,35 +991,37 @@ export function PlatformLayout() {
                     marginRight: 16,
                   }}
                 >
-                  <Link
-                    to="/platform/funds?movement=depot"
-                    onClick={() => showBottomNav && setSidebarOpen(false)}
-                    className="platform-hoverable platform-action-btn"
-                    style={{
-                      width: '100%',
-                      minHeight: 32,
-                      height: 32,
-                      padding: '0 10px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                      backgroundColor: platformButtonBg,
-                      border: 'none',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '13px',
-                      lineHeight: 1.2,
-                      color: 'white',
-                      fontWeight: 500,
-                      borderRadius: 8,
-                      whiteSpace: 'nowrap',
-                      textDecoration: 'none',
-                    }}
-                  >
-                    <ArrowDown size={16} />
-                    Déposer des fonds
-                  </Link>
+                  {canDepositFunds && (
+                    <Link
+                      to="/platform/funds?movement=depot"
+                      onClick={() => showBottomNav && setSidebarOpen(false)}
+                      className="platform-hoverable platform-action-btn"
+                      style={{
+                        width: '100%',
+                        minHeight: 32,
+                        height: 32,
+                        padding: '0 10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        backgroundColor: platformButtonBg,
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontSize: '13px',
+                        lineHeight: 1.2,
+                        color: 'white',
+                        fontWeight: 500,
+                        borderRadius: 8,
+                        whiteSpace: 'nowrap',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <ArrowDown size={16} />
+                      Déposer des fonds
+                    </Link>
+                  )}
                   <Link
                     to="/platform/funds?movement=retrait"
                     onClick={() => showBottomNav && setSidebarOpen(false)}
