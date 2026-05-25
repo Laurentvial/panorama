@@ -274,11 +274,29 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   // Bonus is cash and should be included in liquidités (available funds), so we don't subtract it
   // investedCapital already includes deposits + bonuses, so we only subtract what's invested (tradingPortfolio)
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
+
+  // Intérêts déjà encaissés (hors surperformance): ils sont déjà intégrés au solde via investedCapital.
+  // On les retire de la composante P&L utilisée dans la valeur du portefeuille pour éviter le double comptage.
+  const recoveredInterestsInBalance = useMemo(() => {
+    return transactions
+      .filter((t: any) => isCompletedStatus(t?.status) && t?.type === 'interets')
+      .reduce((sum: number, t: any) => {
+        const subDetails = t?.subscription_details || t?.subscriptionDetails;
+        if (subDetails?.is_surperformance) return sum;
+        const amount = parseFloat(t?.amount) || 0;
+        return Number.isFinite(amount) ? sum + amount : sum;
+      }, 0);
+  }, [transactions]);
+
+  const unrealizedOrNotYetRecoveredProfitLoss = useMemo(
+    () => profitLoss - recoveredInterestsInBalance,
+    [profitLoss, recoveredInterestsInBalance]
+  );
   
-  // Valeur du Portefeuille = Liquidité disponible + Valeur investie (tradingPortfolio) + Bénéfice/Perte
+  // Valeur du Portefeuille = Liquidité disponible + Valeur investie + P&L non déjà encaissé en intérêts
   const portfolioValue = useMemo(
-    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
-    [availableFunds, tradingPortfolio, profitLoss]
+    () => Math.max(0, availableFunds) + tradingPortfolio + unrealizedOrNotYetRecoveredProfitLoss,
+    [availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss]
   );
 
   const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
@@ -355,14 +373,14 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       valeurPortefeuille: {
         solde: Math.max(0, availableFunds),
         investi: tradingPortfolio,
-        profitLoss,
+        profitLoss: unrealizedOrNotYetRecoveredProfitLoss,
       },
       solde: {
         capital: investedCapital,
         investi: tradingPortfolio,
       },
     };
-  }, [transactions, positions, availableFunds, tradingPortfolio, profitLoss, investedCapital]);
+  }, [transactions, positions, availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss, investedCapital]);
 
   return (
     <div className="space-y-6">
@@ -474,7 +492,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
                 <span>{formatSignedCurrency(recap.valeurPortefeuille.investi)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Bénéfices / perte</span>
+                <span>Bénéfices / perte (hors intérêts encaissés)</span>
                 <span>{formatSignedCurrency(recap.valeurPortefeuille.profitLoss)}</span>
               </div>
             </div>

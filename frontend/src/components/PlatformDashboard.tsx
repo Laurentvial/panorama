@@ -531,6 +531,24 @@ export function PlatformDashboard() {
 
   const availableFunds = React.useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
+  // Intérêts déjà encaissés (hors surperformance): inclus dans le solde via investedCapital.
+  // On les retire du P&L utilisé dans la valeur du portefeuille pour éviter le double comptage.
+  const recoveredInterestsInBalance = React.useMemo(() => {
+    return (allTransactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status) && t?.type === 'interets')
+      .reduce((sum: number, t: any) => {
+        const subDetails = t?.subscription_details || t?.subscriptionDetails;
+        if (subDetails?.is_surperformance) return sum;
+        const amount = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+        return Number.isFinite(amount) ? sum + amount : sum;
+      }, 0);
+  }, [allTransactions]);
+
+  const unrealizedOrNotYetRecoveredProfitLoss = React.useMemo(
+    () => profitLoss - recoveredInterestsInBalance,
+    [profitLoss, recoveredInterestsInBalance]
+  );
+
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = React.useMemo(() => {
     const completedTransactions = (allTransactions || []).filter((t: any) => isCompletedStatus(t?.status));
@@ -640,10 +658,11 @@ export function PlatformDashboard() {
   }, [allTransactions, products, assets, availableFunds]);
 
   const portfolioValue = React.useMemo(
-    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
-    [availableFunds, tradingPortfolio, profitLoss]
+    () => Math.max(0, availableFunds) + tradingPortfolio + unrealizedOrNotYetRecoveredProfitLoss,
+    [availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss]
   );
   const isProfit = profitLoss >= 0;
+  const isPortfolioValueProfit = unrealizedOrNotYetRecoveredProfitLoss >= 0;
 
   // Calculate gainers and losers
   const getGainersAndLosers = () => {
@@ -1166,19 +1185,19 @@ export function PlatformDashboard() {
                     marginTop: 8,
                     fontSize: isMobile ? '16px' : '18px',
                     fontWeight: 600,
-                    color: isProfit ? '#10b981' : '#ef4444',
+                    color: isPortfolioValueProfit ? '#10b981' : '#ef4444',
                     minWidth: 0,
                     overflowWrap: 'anywhere',
                     wordBreak: 'break-word',
                   }}
                 >
-                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
+                  {isPortfolioValueProfit ? '+' : ''}{formatAmount(unrealizedOrNotYetRecoveredProfitLoss, accountCurrency)}
                   {(() => {
-                    const costBasis = portfolioValue - profitLoss;
-                    const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+                    const costBasis = portfolioValue - unrealizedOrNotYetRecoveredProfitLoss;
+                    const pct = costBasis > 0 ? (unrealizedOrNotYetRecoveredProfitLoss / costBasis) * 100 : 0;
                     return (
                       <span style={{ marginLeft: 6 }}>
-                        ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
+                        ({isPortfolioValueProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
                       </span>
                     );
                   })()}

@@ -795,11 +795,30 @@ export function PlatformPortfolio() {
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
+  // Intérêts déjà encaissés (hors surperformance): inclus dans le solde via investedCapital.
+  // On les retire du P&L utilisé dans la valeur du portefeuille pour éviter le double comptage.
+  const recoveredInterestsInBalance = useMemo(() => {
+    return (transactions || [])
+      .filter((t: any) => isCompletedStatus(t?.status) && t?.type === 'interets')
+      .reduce((sum: number, t: any) => {
+        const subDetails = t?.subscription_details || t?.subscriptionDetails;
+        if (subDetails?.is_surperformance) return sum;
+        const amount = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+        return Number.isFinite(amount) ? sum + amount : sum;
+      }, 0);
+  }, [transactions]);
+
+  const unrealizedOrNotYetRecoveredProfitLoss = useMemo(
+    () => profitLoss - recoveredInterestsInBalance,
+    [profitLoss, recoveredInterestsInBalance]
+  );
+
   const portfolioValue = useMemo(
-    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
-    [availableFunds, tradingPortfolio, profitLoss]
+    () => Math.max(0, availableFunds) + tradingPortfolio + unrealizedOrNotYetRecoveredProfitLoss,
+    [availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss]
   );
   const isProfit = profitLoss >= 0;
+  const isPortfolioValueProfit = unrealizedOrNotYetRecoveredProfitLoss >= 0;
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = useMemo(() => {
@@ -963,14 +982,14 @@ export function PlatformPortfolio() {
                 <div className="platform-portfolioStatValue">
                   {formatAmount(portfolioValue, accountCurrency)}
                 </div>
-                <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
-                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
+                <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: isPortfolioValueProfit ? '#10b981' : '#ef4444' }}>
+                  {isPortfolioValueProfit ? '+' : ''}{formatAmount(unrealizedOrNotYetRecoveredProfitLoss, accountCurrency)}
                   {(() => {
-                    const costBasis = portfolioValue - profitLoss;
-                    const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+                    const costBasis = portfolioValue - unrealizedOrNotYetRecoveredProfitLoss;
+                    const pct = costBasis > 0 ? (unrealizedOrNotYetRecoveredProfitLoss / costBasis) * 100 : 0;
                     return (
                       <span style={{ marginLeft: 6 }}>
-                        ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
+                        ({isPortfolioValueProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
                       </span>
                     );
                   })()}
