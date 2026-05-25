@@ -21,7 +21,7 @@ interface AssetAvailabilityModalProps {
   };
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedClientAsset?: any) => void;
 }
 
 export function AssetAvailabilityModal({
@@ -47,7 +47,7 @@ export function AssetAvailabilityModal({
     setIsSubmitting(true);
 
     try {
-      await apiCall(`/api/clients/${clientId}/assets/${clientAsset.assetId}/availability/`, {
+      const response = await apiCall(`/api/clients/${clientId}/assets/${clientAsset.assetId}/availability/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -57,7 +57,7 @@ export function AssetAvailabilityModal({
       });
 
       toast.success('Dates de disponibilité mises à jour avec succès');
-      onSuccess();
+      onSuccess(response);
       onClose();
     } catch (error: any) {
       console.error('Error updating availability:', error);
@@ -71,7 +71,7 @@ export function AssetAvailabilityModal({
     setIsSubmitting(true);
 
     try {
-      await apiCall(`/api/clients/${clientId}/assets/${clientAsset.assetId}/availability/`, {
+      const response = await apiCall(`/api/clients/${clientId}/assets/${clientAsset.assetId}/availability/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -83,7 +83,7 @@ export function AssetAvailabilityModal({
       toast.success('Dates de disponibilité effacées');
       setAvailabilityStart('');
       setAvailabilityEnd('');
-      onSuccess();
+      onSuccess(response);
       onClose();
     } catch (error: any) {
       console.error('Error clearing availability:', error);

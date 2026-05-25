@@ -460,6 +460,51 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     }
   }
 
+  function handleAssetAvailabilitySuccess(updatedClientAsset?: any) {
+    if (!updatedClientAsset || typeof updatedClientAsset !== 'object') {
+      onRefresh();
+      return;
+    }
+
+    const updatedId = String(updatedClientAsset.id || '').trim();
+    const updatedAssetId = String(updatedClientAsset.assetId || updatedClientAsset.asset?.id || '').trim();
+
+    setLocalClientAssets((prev) =>
+      prev.map((ca: any) => {
+        const caId = String(ca?.id || '').trim();
+        const caAssetId = String(ca?.assetId || ca?.asset?.id || '').trim();
+        const sameClientAsset = updatedId && caId === updatedId;
+        const sameAsset = updatedAssetId && caAssetId === updatedAssetId;
+        return sameClientAsset || sameAsset ? { ...ca, ...updatedClientAsset } : ca;
+      })
+    );
+
+    void onRefresh();
+  }
+
+  function handleProductAvailabilitySuccess(updatedClientProduct?: any) {
+    if (!updatedClientProduct || typeof updatedClientProduct !== 'object') {
+      onRefresh();
+      return;
+    }
+
+    const updatedId = String(updatedClientProduct.id || '').trim();
+    const updatedProductId = String(updatedClientProduct.productId || updatedClientProduct.product?.id || '').trim();
+
+    setLocalClientProducts((prev) =>
+      prev.map((cp: any) => {
+        const cpId = String(cp?.id || '').trim();
+        const cpProductId = String(cp?.productId || cp?.product?.id || '').trim();
+        const sameClientProduct = updatedId && cpId === updatedId;
+        const sameProduct = updatedProductId && cpProductId === updatedProductId;
+        return sameClientProduct || sameProduct ? { ...cp, ...updatedClientProduct } : cp;
+      })
+    );
+
+    // Background sync to keep local cache aligned with server.
+    void onRefresh();
+  }
+
   return (
     <div className="space-y-6">
       <Tabs defaultValue="products" className="space-y-6">
@@ -1447,7 +1492,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
             setIsAvailabilityModalOpen(false);
             setSelectedClientAsset(null);
           }}
-          onSuccess={onRefresh}
+          onSuccess={handleAssetAvailabilitySuccess}
         />
       )}
 
@@ -1461,7 +1506,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
             setIsProductAvailabilityModalOpen(false);
             setSelectedClientProduct(null);
           }}
-          onSuccess={onRefresh}
+          onSuccess={handleProductAvailabilitySuccess}
         />
       )}
     </div>

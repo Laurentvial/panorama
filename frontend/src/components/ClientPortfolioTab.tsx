@@ -15,6 +15,8 @@ interface ClientPortfolioTabProps {
 export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfolioTabProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
+  const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
+  const [productsIndex, setProductsIndex] = useState<any[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const isCompletedStatus = (status: any) =>
     ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
@@ -57,6 +59,29 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
     loadTransactions();
+  }, [clientId]);
+
+  useEffect(() => {
+    async function loadAssetsAndProducts() {
+      if (!clientId) {
+        setAssetsIndex([]);
+        setProductsIndex([]);
+        return;
+      }
+      try {
+        const [assetsResponse, productsResponse] = await Promise.all([
+          apiCall('/api/assets/').catch(() => ({ assets: [] })),
+          apiCall('/api/products/').catch(() => ({ products: [] })),
+        ]);
+        setAssetsIndex((assetsResponse as any)?.assets || []);
+        setProductsIndex((productsResponse as any)?.products || []);
+      } catch (error) {
+        console.error('Error loading assets/products for holdings:', error);
+        setAssetsIndex([]);
+        setProductsIndex([]);
+      }
+    }
+    loadAssetsAndProducts();
   }, [clientId]);
 
   useEffect(() => {
@@ -303,6 +328,158 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   const formatCurrency = (amount: number) => formatAmount(amount, accountCurrency);
   const formatSignedCurrency = (amount: number) => `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
 
+  const productsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const p of productsIndex || []) {
+      const id = p?.id != null ? String(p.id) : '';
+      if (id) map.set(id, p);
+    }
+    return map;
+  }, [productsIndex]);
+
+  const assetHoldings = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        assetId: string;
+        name: string;
+        type: string;
+        reference: string;
+        invested: number;
+        pnl: number;
+      }
+    >();
+
+    for (const p of positions || []) {
+      if (!p || String(p?.status || '') !== 'open') continue;
+      const assetId = p.assetId || p.asset_id || p.asset?.id || null;
+      if (!assetId) continue;
+
+      const investedNum = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const pnlNum = p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const invested = Number.isFinite(investedNum) ? investedNum : 0;
+      const pnl = pnlNum != null && Number.isFinite(pnlNum) ? pnlNum : 0;
+
+      const key = String(assetId);
+      const prev = map.get(key) || {
+        assetId: key,
+        name: p.assetName || p.asset_name || p.asset?.name || key,
+        type: p.assetType || p.asset_type || p.asset?.type || '',
+        reference: p.assetReference || p.asset_reference || p.asset?.reference || '',
+        invested: 0,
+        pnl: 0,
+      };
+
+      map.set(key, {
+        ...prev,
+        invested: prev.invested + invested,
+        pnl: prev.pnl + pnl,
+      });
+    }
+
+    return Array.from(map.values());
+  }, [positions]);
+
+  const investedProducts = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        productId: string;
+        name: string;
+        type: string;
+        reference: string;
+        invested: number;
+        pnl: number;
+      }
+    >();
+
+    const normalizeId = (value: any): string | null => {
+      if (value == null) return null;
+      const v = String(value).trim();
+      if (!v || v === 'solde' || v === 'trading') return null;
+      return v;
+    };
+
+    const completedTransactions = (transactions || []).filter((t: any) => isCompletedStatus(t?.status));
+    for (const t of completedTransactions) {
+      if (!t || String(t?.type || '') !== 'transfert') continue;
+      const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+      const amount = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+      if (!amount) continue;
+
+      const toRaw = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
+      const fromRaw = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
+      const to = normalizeId(toRaw);
+      const from = normalizeId(fromRaw);
+      const toValue = String(toRaw ?? '').trim();
+      const fromValue = String(fromRaw ?? '').trim();
+
+      const applyDelta = (productId: string, delta: number) => {
+        const product = productsById.get(String(productId));
+        const prev = map.get(String(productId)) || {
+          productId: String(productId),
+          name: t?.productName || t?.product_name || product?.name || String(productId),
+          type: t?.productType || t?.product_type || product?.type || product?.subcategory || product?.category || '',
+          reference: t?.productReference || t?.product_reference || product?.reference || '',
+          invested: 0,
+          pnl: 0,
+        };
+        map.set(String(productId), {
+          ...prev,
+          invested: prev.invested + delta,
+        });
+      };
+
+      if (fromValue === 'solde' && to) {
+        applyDelta(to, amount);
+        continue;
+      }
+      if (toValue === 'solde' && from) {
+        applyDelta(from, -amount);
+        continue;
+      }
+      if (to) applyDelta(to, amount);
+    }
+
+    // P&L produits depuis positions clôturées
+    for (const p of positions || []) {
+      if (p?.status !== 'done') continue;
+      const productId = p?.productId || p?.product_id || null;
+      if (!productId) continue;
+      const key = String(productId);
+      if (!map.has(key)) continue;
+      const pnlNum = p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      if (pnlNum != null && Number.isFinite(pnlNum)) {
+        const prev = map.get(key)!;
+        map.set(key, { ...prev, pnl: prev.pnl + pnlNum });
+      }
+    }
+
+    return Array.from(map.values()).filter((p) => p.invested > 0.009);
+  }, [transactions, positions, productsById]);
+
+  const holdingsRows = useMemo(() => {
+    const assetRows = assetHoldings.map((a) => ({
+      kind: 'asset',
+      key: `asset-${a.assetId}`,
+      name: a.name,
+      type: a.type || 'Trading',
+      reference: a.reference || '-',
+      invested: a.invested,
+      pnl: a.pnl,
+    }));
+    const productRows = investedProducts.map((p) => ({
+      kind: 'product',
+      key: `product-${p.productId}`,
+      name: p.name,
+      type: p.type || 'Produit',
+      reference: p.reference || '-',
+      invested: p.invested,
+      pnl: p.pnl,
+    }));
+    return [...assetRows, ...productRows].sort((a, b) => b.invested - a.invested);
+  }, [assetHoldings, investedProducts]);
+
   const recap = useMemo(() => {
     let achats = 0;
     let transfertsEntrants = 0;
@@ -515,6 +692,53 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
           </CardContent>
         </Card>
       </div>
+
+      {/* Actifs détenus */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Actifs détenus</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {holdingsRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucun actif détenu.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="py-2 text-left font-medium text-muted-foreground">Actif / Produit</th>
+                    <th className="py-2 text-left font-medium text-muted-foreground">Type</th>
+                    <th className="py-2 text-left font-medium text-muted-foreground">Réf</th>
+                    <th className="py-2 text-right font-medium text-muted-foreground">Valeur investie</th>
+                    <th className="py-2 text-right font-medium text-muted-foreground">P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdingsRows.map((row) => (
+                    <tr key={row.key} className="border-b last:border-b-0">
+                      <td className="py-2">
+                        <div className="font-medium">{row.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {row.kind === 'asset' ? 'Actif' : 'Produit'}
+                        </div>
+                      </td>
+                      <td className="py-2">{row.type}</td>
+                      <td className="py-2">{row.reference}</td>
+                      <td className="py-2 text-right font-medium">{formatCurrency(row.invested)}</td>
+                      <td
+                        className="py-2 text-right font-medium"
+                        style={{ color: row.pnl >= 0 ? '#16a34a' : '#dc2626' }}
+                      >
+                        {formatSignedCurrency(row.pnl)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Wallet Details */}
       <ClientWallet client={client} transactions={transactions} positions={positions} />

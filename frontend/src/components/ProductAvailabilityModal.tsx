@@ -53,7 +53,7 @@ interface ProductAvailabilityModalProps {
   };
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedClientProduct?: any) => void;
 }
 
 export function ProductAvailabilityModal({
@@ -77,7 +77,22 @@ export function ProductAvailabilityModal({
   const resolvedProductId = clientProduct.productId || (clientProduct.product as { id?: string })?.id || '';
 
   const base = clientProduct.baseProduct || clientProduct.product;
+  const currentProduct = clientProduct.product || {};
+  const currentOverrides = (clientProduct.overrides || {}) as Record<string, unknown>;
   const isCatalogVariableProfitability = String(base?.isVariableProfitability || '').toLowerCase() === 'oui';
+  const isCurrentProductVariableProfitability =
+    String(currentProduct?.isVariableProfitability || '').toLowerCase() === 'oui';
+  const hasVariableOverride =
+    currentOverrides.variableProfitability != null &&
+    String(currentOverrides.variableProfitability).trim() !== '';
+  const hasCurrentProductVariableRate =
+    currentProduct?.variableProfitability != null &&
+    String(currentProduct.variableProfitability).trim() !== '';
+  const usesVariableProfitability =
+    isCatalogVariableProfitability ||
+    isCurrentProductVariableProfitability ||
+    hasCurrentProductVariableRate ||
+    hasVariableOverride;
 
   // Format date from YYYY-MM-DD to DD/MM/YYYY
   const formatDate = (dateStr: string | undefined): string => {
@@ -169,7 +184,7 @@ export function ProductAvailabilityModal({
       delete next.profitability;
     }
 
-    if (isCatalogVariableProfitability && trim(variableProfitabilityOverride) !== '') {
+    if (usesVariableProfitability && trim(variableProfitabilityOverride) !== '') {
       const n = parseFloat(variableProfitabilityOverride.replace(',', '.'));
       if (!Number.isNaN(n)) {
         next.variableProfitability = n;
@@ -213,7 +228,7 @@ export function ProductAvailabilityModal({
 
     try {
       const overrides = buildOverridesPayload();
-      await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
+      const response = await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -224,7 +239,7 @@ export function ProductAvailabilityModal({
       });
 
       toast.success('Produit client mis à jour');
-      onSuccess();
+      onSuccess(response);
       onClose();
     } catch (error: any) {
       console.error('Error updating product client record:', error);
@@ -239,7 +254,7 @@ export function ProductAvailabilityModal({
     setIsSubmitting(true);
     const overrides = buildOverridesPayload();
     try {
-      await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
+      const response = await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -251,7 +266,7 @@ export function ProductAvailabilityModal({
       toast.success('Dates de disponibilité effacées');
       setAvailabilityStart('');
       setAvailabilityEnd('');
-      onSuccess();
+      onSuccess(response);
       onClose();
     } catch (error: any) {
       console.error('Error clearing availability:', error);
@@ -273,7 +288,7 @@ export function ProductAvailabilityModal({
       setNameOverride('');
       setDescriptionOverride('');
       setCgvOverride('');
-      await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
+      const response = await apiCall(`/api/clients/${clientId}/products/${resolvedProductId}/availability/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +298,7 @@ export function ProductAvailabilityModal({
         }),
       });
       toast.success('Personnalisation réinitialisée (valeurs catalogue)');
-      onSuccess();
+      onSuccess(response);
       onClose();
     } catch (error: any) {
       console.error('Error resetting overrides:', error);
@@ -298,7 +313,7 @@ export function ProductAvailabilityModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-container max-w-4xl" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-content modal-content--wide">
+        <div className="modal-content modal-content--wide modal-content--scrollable">
           <div className="modal-header">
             <h2 className="modal-title">Produit client — disponibilité et personnalisation</h2>
             <button onClick={onClose} className="modal-close-button">
@@ -416,7 +431,7 @@ export function ProductAvailabilityModal({
                     </div>
                   </div>
 
-                  {isCatalogVariableProfitability ? (
+                  {usesVariableProfitability ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div className="product-availability-modal-field">
                         <Label htmlFor="ov-profit">Taux min. (surcharge)</Label>

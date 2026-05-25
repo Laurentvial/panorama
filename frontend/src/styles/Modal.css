@@ -4,11 +4,20 @@
   inset: 0;
   z-index: 1000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background-color: rgba(0, 0, 0, 0.5);
-  height: 100vh;
-  overflow: hidden;
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1rem;
+}
+
+.modal-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: auto 0;
 }
 
 /*
@@ -52,7 +61,7 @@ body:has(.modal-overlay)[data-scroll-locked] {
   padding: 1.5rem;
   max-width: 28rem;
   width: 100%;
-  margin: 0 1rem;
+  margin: 0;
 }
 
 .modal-content--wide {
@@ -123,7 +132,7 @@ body:has(.modal-overlay)[data-scroll-locked] {
 
 /* Scrollable variant (for large modals like transaction details) */
 .modal-content--scrollable {
-  max-height: 100%;
+  max-height: calc(100dvh - 2rem);
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;

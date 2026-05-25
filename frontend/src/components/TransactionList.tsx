@@ -213,6 +213,31 @@ const resolveEffectiveInterestPeriod = (value: any): string => {
   return parts[0] || raw;
 };
 
+const getAllocationsFromProduct = (product: any): any[] => {
+  if (!product) return [];
+  const raw =
+    (product as any).assetAllocations ??
+    (product as any).asset_allocations ??
+    (product as any).assetAllocations?.results ??
+    (product as any).asset_allocations?.results ??
+    [];
+
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  if (raw && typeof raw === 'object') {
+    const values = Object.values(raw);
+    return Array.isArray(values) ? values : [];
+  }
+  return [];
+};
+
 interface TransactionListProps {
   transactions: any[];
   assets?: any[];
@@ -443,8 +468,9 @@ export function TransactionList({
             const hasContract = contractDocs.length > 0;
             const isTransfer = transaction.type === 'transfert';
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
+            const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
             const tracksInterest = isTransfer && transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
-            const isValidTransactionStatus = ['valide', 'cloture'].includes(String(transaction.status || '').trim().toLowerCase());
+            const isValidTransactionStatus = ['valide', 'cloture'].includes(normalizedStatus);
             const lastInterestTransaction = tracksInterest ? getLastInterestTransaction(transaction) : null;
             const lastInterestReferenceDate = lastInterestTransaction ? getInterestReferenceDate(lastInterestTransaction) : null;
             const nextInterestDate =
@@ -458,12 +484,21 @@ export function TransactionList({
               nextInterestTimestamp < new Date(new Date().toDateString()).getTime() &&
               isValidTransactionStatus;
             const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
+            const transferFrom = String(transaction.from ?? transaction.transfer_from ?? transaction.from_field ?? '');
+            const relevantProductIdForRecover =
+              (transferTo && transferTo !== 'solde' && transferTo !== 'trading' ? transferTo : '') ||
+              (transferFrom && transferFrom !== 'solde' && transferFrom !== 'trading' ? transferFrom : '');
+            const relevantRecoverProduct = relevantProductIdForRecover
+              ? products.find((p: any) => String(p?.id) === String(relevantProductIdForRecover))
+              : null;
+            const hasAllocationsForRecover = getAllocationsFromProduct(relevantRecoverProduct).length > 0;
             const showRecoverPositions =
               !!onRecoverPositions &&
-              isValidTransactionStatus &&
+              normalizedStatus === 'valide' &&
               transaction.type === 'transfert' &&
               transferTo !== '' &&
-              transferTo !== 'solde';
+              transferTo !== 'solde' &&
+              hasAllocationsForRecover;
             const recoverPositionsLabel =
               positionsCountForRecover > 0 ? 'Régénérer les positions' : 'Créer les positions';
             const recoverPositionsTitle =

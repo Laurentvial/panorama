@@ -252,7 +252,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   return (
     <div className="space-y-6">
       <div>
-        <Button variant="ghost" onClick={onBack} className="mb-4">
+        <Button
+          variant="outline"
+          onClick={onBack}
+          className="mb-4 client-back-button"
+        >
           <ArrowLeft className="w-4 h-4 mr-2"/>
           Retour
         </Button>

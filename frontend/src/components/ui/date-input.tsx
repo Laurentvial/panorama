@@ -24,27 +24,45 @@ function DateInput({ value, onChange, className, label, ...props }: DateInputPro
     return `${day}/${month}/${year}`;
   };
 
-  // Convert DD/MM/YYYY to YYYY-MM-DD
-  const parseFromDisplay = (displayValue: string): string => {
-    if (!displayValue) return '';
-    // Remove any non-digit characters except /
-    const cleaned = displayValue.replace(/[^\d/]/g, '');
-    const parts = cleaned.split('/');
-    
-    if (parts.length === 3) {
-      const day = parts[0].padStart(2, '0');
-      const month = parts[1].padStart(2, '0');
-      const year = parts[2];
-      
-      // Validate and convert to YYYY-MM-DD
-      if (day && month && year && year.length === 4) {
-        const date = new Date(`${year}-${month}-${day}T00:00:00`);
-        if (!isNaN(date.getTime())) {
-          return `${year}-${month}-${day}`;
-        }
+  const toIsoDate = (year: string, month: string, day: string): string | null => {
+    if (!year || !month || !day || year.length !== 4) return null;
+    const normalizedYear = year;
+    const normalizedMonth = month.padStart(2, '0');
+    const normalizedDay = day.padStart(2, '0');
+    const date = new Date(`${normalizedYear}-${normalizedMonth}-${normalizedDay}T00:00:00`);
+    if (isNaN(date.getTime())) return null;
+    if (date.getFullYear() !== Number(normalizedYear)) return null;
+    if (date.getMonth() + 1 !== Number(normalizedMonth)) return null;
+    if (date.getDate() !== Number(normalizedDay)) return null;
+    return `${normalizedYear}-${normalizedMonth}-${normalizedDay}`;
+  };
+
+  // Convert common date formats to YYYY-MM-DD
+  const parseFromDisplay = (displayValue: string): string | null => {
+    const trimmed = displayValue.trim();
+    if (!trimmed) return null;
+
+    // Supports yyyy-mm-dd, yyyy/mm/dd, dd-mm-yyyy and dd/mm/yyyy
+    const separated = trimmed.match(/^(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})$/);
+    if (separated) {
+      const [, first, second, third] = separated;
+      if (first.length === 4) {
+        return toIsoDate(first, second, third);
+      }
+      if (third.length === 4) {
+        return toIsoDate(third, second, first);
       }
     }
-    return value; // Return current value if parsing fails
+
+    // Supports raw digits ddmmyyyy or yyyymmdd
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length === 8) {
+      const yearFirst = toIsoDate(digits.slice(0, 4), digits.slice(4, 6), digits.slice(6, 8));
+      if (yearFirst) return yearFirst;
+      return toIsoDate(digits.slice(4, 8), digits.slice(2, 4), digits.slice(0, 2));
+    }
+
+    return null;
   };
 
   const [displayValue, setDisplayValue] = React.useState(formatForDisplay(value));
@@ -52,35 +70,40 @@ function DateInput({ value, onChange, className, label, ...props }: DateInputPro
 
   React.useEffect(() => {
     if (!isFocused) {
-      setDisplayValue(formatForDisplay(value));
+      setDisplayValue((previousDisplayValue) => {
+        // Do not clear visible input when external value is still empty.
+        if (!value) return previousDisplayValue;
+        return formatForDisplay(value);
+      });
     }
   }, [value, isFocused]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let inputValue = e.target.value;
-    
-    // Remove any non-digit characters except /
-    inputValue = inputValue.replace(/[^\d/]/g, '');
-    
-    // Auto-format as user types: dd/mm/yyyy
-    if (inputValue.length > 0) {
-      const digits = inputValue.replace(/\//g, '');
+
+    // Keep only numeric and common date separators
+    inputValue = inputValue.replace(/[^\d/-]/g, '');
+
+    const hasSeparator = inputValue.includes('/') || inputValue.includes('-');
+    // Auto-format only pure digit input as dd/mm/yyyy
+    if (!hasSeparator && inputValue.length > 0) {
+      const digits = inputValue.replace(/\D/g, '');
       let formatted = '';
-      
+
       for (let i = 0; i < digits.length && i < 8; i++) {
         if (i === 2 || i === 4) {
           formatted += '/';
         }
         formatted += digits[i];
       }
-      
+
       inputValue = formatted;
     }
     
     setDisplayValue(inputValue);
     
-    // Try to parse if we have a complete date (dd/mm/yyyy = 10 chars)
-    if (inputValue.length === 10) {
+    // Try to parse when enough characters are present
+    if (inputValue.length >= 8) {
       const parsed = parseFromDisplay(inputValue);
       if (parsed && parsed !== value) {
         onChange(parsed);
@@ -97,7 +120,8 @@ function DateInput({ value, onChange, className, label, ...props }: DateInputPro
     } else if (value) {
       setDisplayValue(formatForDisplay(value));
     } else {
-      setDisplayValue('');
+      // Keep user input visible if parsing failed to avoid "disappearing" dates.
+      setDisplayValue(displayValue.trim());
     }
   };
 
