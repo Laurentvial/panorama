@@ -233,11 +233,22 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     // Profit/Loss basé sur:
     // 1. Les transactions (interets, frais, perte)
     // 2. Les positions de trading fermées (done) uniquement
-    
-    // Commencer avec le profit/loss des transactions
-    let total = hasCompletedTransactions ? calculatedValues.profitLoss : 0;
-    
-    // Ajouter le profit/loss des positions de trading
+
+    const completedTransactions = transactions.filter((t: any) => isCompletedStatus(t?.status));
+    const surperformanceInterests = completedTransactions
+      .filter((t: any) => t?.type === 'interets')
+      .reduce((sum: number, t: any) => {
+        const subDetails = t?.subscription_details || t?.subscriptionDetails;
+        if (!subDetails?.is_surperformance) return sum;
+        const amount = parseFloat(t?.amount) || 0;
+        return Number.isFinite(amount) ? sum + amount : sum;
+      }, 0);
+
+    // Base transactions P&L (déjà net des intérêts non-surperformance, frais, pertes)
+    const transactionsProfitLoss = hasCompletedTransactions ? calculatedValues.profitLoss : 0;
+
+    // P&L brut des positions clôturées
+    let closedPositionsProfitLoss = 0;
     for (const p of positions || []) {
       if (p?.status !== 'done') continue;
 
@@ -257,10 +268,17 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         positionPnl = expectedTotalNum - investedNum;
       }
 
-      total += Number.isFinite(positionPnl) ? positionPnl : 0;
+      closedPositionsProfitLoss += Number.isFinite(positionPnl) ? positionPnl : 0;
     }
-    return total;
-  }, [positions, calculatedValues, hasCompletedTransactions]);
+
+    // Les intérêts de surperformance sont hors performance des positions:
+    // on les neutralise à 100% via amortissement.
+    const surchargeAmortization = surperformanceInterests;
+    const adjustedClosedPositionsProfitLoss =
+      closedPositionsProfitLoss - surperformanceInterests + surchargeAmortization;
+
+    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss;
+  }, [positions, calculatedValues, hasCompletedTransactions, transactions]);
   
   // Total Investi: only achat and transfert (solde → product)
   const totalInvesti = useMemo(() => 
@@ -275,28 +293,10 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   // investedCapital already includes deposits + bonuses, so we only subtract what's invested (tradingPortfolio)
   const availableFunds = useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
 
-  // Intérêts déjà encaissés (hors surperformance): ils sont déjà intégrés au solde via investedCapital.
-  // On les retire de la composante P&L utilisée dans la valeur du portefeuille pour éviter le double comptage.
-  const recoveredInterestsInBalance = useMemo(() => {
-    return transactions
-      .filter((t: any) => isCompletedStatus(t?.status) && t?.type === 'interets')
-      .reduce((sum: number, t: any) => {
-        const subDetails = t?.subscription_details || t?.subscriptionDetails;
-        if (subDetails?.is_surperformance) return sum;
-        const amount = parseFloat(t?.amount) || 0;
-        return Number.isFinite(amount) ? sum + amount : sum;
-      }, 0);
-  }, [transactions]);
-
-  const unrealizedOrNotYetRecoveredProfitLoss = useMemo(
-    () => profitLoss - recoveredInterestsInBalance,
-    [profitLoss, recoveredInterestsInBalance]
-  );
-  
-  // Valeur du Portefeuille = Liquidité disponible + Valeur investie + P&L non déjà encaissé en intérêts
+  // Valeur du Portefeuille = Liquidité disponible + Valeur investie + Bénéfice/Perte
   const portfolioValue = useMemo(
-    () => Math.max(0, availableFunds) + tradingPortfolio + unrealizedOrNotYetRecoveredProfitLoss,
-    [availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss]
+    () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
+    [availableFunds, tradingPortfolio, profitLoss]
   );
 
   const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
@@ -309,6 +309,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     let transfertsSortants = 0;
     let fraisEtPertes = 0;
     let interetsReintegres = 0;
+    let interetsSurperformance = 0;
     let pnlPositionsCloturees = 0;
 
     const completedTransactions = transactions.filter((t: any) => isCompletedStatus(t?.status));
@@ -339,7 +340,9 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
 
       if (transaction.type === 'interets') {
         const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
-        if (!subDetails?.is_surperformance) {
+        if (subDetails?.is_surperformance) {
+          interetsSurperformance += amount;
+        } else {
           interetsReintegres += amount;
         }
       }
@@ -359,6 +362,9 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
 
+    // Amortissement total de la surperformance (hors positions).
+    const amortissementSurperformance = interetsSurperformance;
+
     return {
       totalInvesti: {
         achats,
@@ -367,20 +373,22 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       },
       profitLoss: {
         pnlPositionsCloturees,
+        interetsSurperformance,
+        amortissementSurperformance,
         fraisEtPertes,
         interetsReintegres,
       },
       valeurPortefeuille: {
         solde: Math.max(0, availableFunds),
         investi: tradingPortfolio,
-        profitLoss: unrealizedOrNotYetRecoveredProfitLoss,
+        profitLoss,
       },
       solde: {
         capital: investedCapital,
         investi: tradingPortfolio,
       },
     };
-  }, [transactions, positions, availableFunds, tradingPortfolio, unrealizedOrNotYetRecoveredProfitLoss, investedCapital]);
+  }, [transactions, positions, availableFunds, tradingPortfolio, profitLoss, investedCapital]);
 
   return (
     <div className="space-y-6">
@@ -461,6 +469,14 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
                 <span>{formatSignedCurrency(recap.profitLoss.pnlPositionsCloturees)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span>Intérêts surperformance</span>
+                <span>{formatSignedCurrency(-recap.profitLoss.interetsSurperformance)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Amortissement surcharge surperformance</span>
+                <span>{formatSignedCurrency(recap.profitLoss.amortissementSurperformance)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span>Frais / pertes</span>
                 <span>{formatSignedCurrency(-recap.profitLoss.fraisEtPertes)}</span>
               </div>
@@ -492,7 +508,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
                 <span>{formatSignedCurrency(recap.valeurPortefeuille.investi)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Bénéfices / perte (hors intérêts encaissés)</span>
+                <span>Bénéfices / perte</span>
                 <span>{formatSignedCurrency(recap.valeurPortefeuille.profitLoss)}</span>
               </div>
             </div>
