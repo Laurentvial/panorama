@@ -51,7 +51,9 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
   // Calculate wallet evolution from transactions
   const evolutionData = useMemo(() => {
     // Only consider completed transactions
-    const completedTransactions = (transactions || []).filter((t: any) => t?.status === 'valide');
+    const completedTransactions = (transactions || []).filter((t: any) =>
+      ['valide', 'cloture'].includes(String(t?.status || '').trim().toLowerCase())
+    );
     
     if (completedTransactions.length === 0) {
       return [];

@@ -35,6 +35,16 @@ body:has([data-slot="drawer-overlay"][data-state="open"]) {
   overflow: visible !important;
 }
 
+/*
+ * Certains dropdowns Radix (Select/Popover) appliquent un lock temporaire sur body.
+ * Dans nos modales custom (.modal-overlay), ce lock provoque la disparition de la scrollbar
+ * et des artefacts d'affichage sur le header. On neutralise ce lock dans ce contexte.
+ */
+body:has(.modal-overlay)[data-scroll-locked] {
+  overflow: visible !important;
+  padding-right: 0 !important;
+}
+
 /* Modal Content */
 .modal-content {
   background-color: white;

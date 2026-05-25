@@ -16,7 +16,7 @@ from .position_service import (
 )
 
 logger = logging.getLogger(__name__)
-COMPLETED_TRANSACTION_STATUSES = ("valide",)
+COMPLETED_TRANSACTION_STATUSES = ("valide", "cloture")
 
 
 @receiver(pre_save, sender=Transaction)

@@ -59,7 +59,7 @@ const TRANSACTION_TYPES = {
   },
   transfert: {
     label: 'Transfert',
-    statuses: ['en_cours', 'valide', 'annule']
+    statuses: ['en_cours', 'valide', 'cloture', 'annule']
   },
   perte: {
     label: 'Perte',
@@ -76,6 +76,7 @@ const STATUS_LABELS: { [key: string]: string } = {
   en_cours: 'En cours',
   en_verification: 'En vérification',
   valide: 'Validé',
+  cloture: 'Clôturé',
   conteste: 'Contesté',
   annule: 'Annulé'
 };
@@ -259,8 +260,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   };
 
   const handleValidateAndGenerate = async (tx: any) => {
-    if (tx.status === 'valide') {
-      toast.info('La transaction est déjà validée');
+    if (['valide', 'cloture'].includes(String(tx.status || '').trim().toLowerCase())) {
+      toast.info('La transaction est déjà validée ou clôturée');
       return;
     }
     if (tx.type !== 'transfert') {

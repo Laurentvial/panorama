@@ -444,7 +444,7 @@ export function TransactionList({
             const isTransfer = transaction.type === 'transfert';
             const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
             const tracksInterest = isTransfer && transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
-            const isValidTransactionStatus = transaction.status === 'valide';
+            const isValidTransactionStatus = ['valide', 'cloture'].includes(String(transaction.status || '').trim().toLowerCase());
             const lastInterestTransaction = tracksInterest ? getLastInterestTransaction(transaction) : null;
             const lastInterestReferenceDate = lastInterestTransaction ? getInterestReferenceDate(lastInterestTransaction) : null;
             const nextInterestDate =
@@ -460,7 +460,7 @@ export function TransactionList({
             const positionsCountForRecover = Number(transaction.positionsCount ?? 0);
             const showRecoverPositions =
               !!onRecoverPositions &&
-              transaction.status === 'valide' &&
+              isValidTransactionStatus &&
               transaction.type === 'transfert' &&
               transferTo !== '' &&
               transferTo !== 'solde';
@@ -751,7 +751,7 @@ export function TransactionList({
                 )}
                 <td className="py-3 px-4 text-right">
                   <div className="flex gap-2 justify-end relative" style={{ zIndex: 10 }}>
-                    {onValidateAndGenerate && transaction.type === 'transfert' && transaction.status !== 'valide' && (
+                    {onValidateAndGenerate && transaction.type === 'transfert' && !isValidTransactionStatus && (
                       <Button
                         variant="ghost"
                         size="sm"

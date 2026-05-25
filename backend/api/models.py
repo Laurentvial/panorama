@@ -531,6 +531,7 @@ class Transaction(models.Model):
         ('en_cours', 'En cours'),
         ('en_verification', 'En vérification'),
         ('valide', 'Validé'),
+        ('cloture', 'Clôturé'),
         ('conteste', 'Contesté'),
         ('annule', 'Annulé'),
     ]

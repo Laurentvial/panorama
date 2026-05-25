@@ -154,6 +154,11 @@ urlpatterns = [
     path('clients/<str:client_id>/positions/<str:position_id>/cancel/', api_views.client_position_cancel, name='client-position-cancel'),
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
+    path(
+        'clients/<str:client_id>/transactions/<str:transaction_id>/closure-amount/',
+        api_views.transaction_closure_amount,
+        name='transaction-closure-amount'
+    ),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-positions/', api_views.transaction_generate_positions, name='transaction-generate-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/save-positions/', api_views.transaction_save_positions, name='transaction-save-positions'),

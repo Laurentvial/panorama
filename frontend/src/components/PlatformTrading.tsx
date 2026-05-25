@@ -207,7 +207,8 @@ export function PlatformTrading() {
     let bonus = 0;
     let effectiveCurrency: string | null = null;
 
-    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    const isCompletedStatus = (status: any) =>
+      ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
     const completedTransactions = (transactions || [])
       .filter((t: any) => isCompletedStatus(t?.status))
       .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
@@ -302,7 +303,8 @@ export function PlatformTrading() {
   const availableFundsPrincipalByProduct = useMemo(() => {
     if (!availableFundsProductKeys.size) return new Map<string, number>();
 
-    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    const isCompletedStatus = (status: any) =>
+      ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
     const completedTransactions = (transactions || [])
       .filter((t: any) => isCompletedStatus(t?.status))
       .sort((a: any, b: any) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
@@ -380,7 +382,8 @@ export function PlatformTrading() {
       if (Number.isFinite(gainNum)) accruedGains += gainNum;
     }
 
-    const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+    const isCompletedStatus = (status: any) =>
+      ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
     let paidInterests = 0;
     for (const t of transactions || []) {
       if (!isCompletedStatus(t?.status) || String(t?.type || '') !== 'interets') continue;

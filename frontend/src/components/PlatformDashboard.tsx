@@ -391,7 +391,8 @@ export function PlatformDashboard() {
   };
 
   // Même critère que PlatformPortfolio pour les transactions "complétées"
-  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+  const isCompletedStatus = (status: any) =>
+    ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
 
   // Stats: même logique que page Portefeuille (PlatformPortfolio) pour Valeur du Portefeuille
   const calculatedValues = React.useMemo(() => {

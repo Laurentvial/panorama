@@ -31,7 +31,7 @@ class InvestmentContext:
 
 
 _DURATION_RE = re.compile(r"(\d+)")
-COMPLETED_TRANSACTION_STATUSES = ("valide",)
+COMPLETED_TRANSACTION_STATUSES = ("valide", "cloture")
 
 
 def _add_months(d: date, months: int) -> date:

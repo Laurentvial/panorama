@@ -98,6 +98,7 @@ from .alpha_vantage_service import get_alpha_vantage_service
 from .position_service import (
     GENERATION_HORIZON_MAX_DAYS,
     GENERATION_HORIZON_MIN_DAYS,
+    _calculate_real_invested_capital,
     create_positions_for_investment,
     generate_rates_for_investment,
     generate_positions_with_rates,
@@ -108,7 +109,7 @@ from .position_service import (
     sync_position_statuses_from_schedule,
 )
 
-COMPLETED_TRANSACTION_STATUSES = ('valide',)
+COMPLETED_TRANSACTION_STATUSES = ('valide', 'cloture')
 
 # Étapes 3–5 (profil, préférences, objectifs) activées par défaut ; 6–7 (conformité, sources) désactivées.
 DEFAULT_CLIENT_VERIFICATION_STEPS_CONFIG = {
@@ -8595,6 +8596,7 @@ def _client_transaction_create_impl(request, client_id):
         subscription_details_data = (subscription_details_data or {}) | conv_subscription
         # Create conversion transaction and update client
         with db_transaction.atomic():
+            conversion_status = str(request.data.get('status', 'valide') or 'valide').strip().lower()
             conv_txn = Transaction(
                 id=transaction_id,
                 client=client,
@@ -8602,10 +8604,10 @@ def _client_transaction_create_impl(request, client_id):
                 amount=round(to_amount, 2),
                 amount_currency=to_currency,
                 description=request.data.get('description') or f'Conversion {current_currency} → {to_currency}',
-                status=request.data.get('status', 'valide'),
+                status=conversion_status,
                 datetime=transaction_datetime,
                 subscription_details=subscription_details_data,
-                validated_at=transaction_datetime if request.data.get('status') == 'valide' else None,
+                validated_at=transaction_datetime if conversion_status in COMPLETED_TRANSACTION_STATUSES else None,
             )
             conv_txn.save()
             client.account_currency = to_currency
@@ -8744,6 +8746,7 @@ def _client_transaction_create_impl(request, client_id):
     # Check if this is an investment transaction that will be created with status 'valide'
     # If so, we need to generate positions BEFORE creating the transaction, then create both together atomically
     transaction_status = request.data.get('status', 'en_cours')
+    normalized_transaction_status = str(transaction_status or '').strip().lower()
     skip_position_generation = request.data.get('skip_position_generation', False)
     is_investment_transfert = (
         transaction_type == 'transfert'
@@ -8761,14 +8764,15 @@ def _client_transaction_create_impl(request, client_id):
                 {'error': "La période d'intérêt est obligatoire pour une transaction d'investissement."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-    # IMPORTANT: For investment transactions with status 'valide', we MUST generate positions
+    # IMPORTANT: For investment transactions with a completed status ('valide' or 'cloture'),
+    # we MUST generate positions
     # even if skip_position_generation is True (which is set by frontend to show modal).
     # The frontend will handle showing the modal, but if the user closes it without completing,
     # the transaction should still have positions generated automatically.
     # Only skip if it's explicitly a withdrawal or non-investment transaction.
     should_generate_positions_before_create = (
         is_investment_transfert 
-        and transaction_status == 'valide'
+        and normalized_transaction_status in COMPLETED_TRANSACTION_STATUSES
     )
     
     # Create transaction and generate positions together in an atomic transaction
@@ -10041,6 +10045,75 @@ def client_transaction_update(request, client_id, transaction_id):
     transaction.refresh_from_db()
     serializer = TransactionSerializer(transaction)
     return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def transaction_closure_amount(request, client_id, transaction_id):
+    """Return the currently closable amount for a validated investment transfer."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    # Authorization check: same access model as transaction update.
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not is_client_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+
+    if transaction.type != 'transfert':
+        return Response({'error': 'La transaction source doit être un transfert.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if transaction.status != 'valide':
+        return Response({'error': 'Le transfert source doit être au statut Validé.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if transaction.transfer_from != 'solde':
+        return Response(
+            {'error': "Le transfert source doit être un investissement (de solde vers produit)."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    product_id = (transaction.transfer_to or '').strip()
+    if not product_id or product_id in ('solde', 'trading'):
+        return Response(
+            {'error': "Le transfert source doit cibler un produit d'investissement."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        raw_amount = _calculate_real_invested_capital(client_id=client_id, product_id=product_id)
+        closable_amount = max(raw_amount, Decimal('0')).quantize(Decimal('0.01'))
+    except Exception:
+        logger.exception(
+            "transaction_closure_amount failed (client_id=%s, transaction_id=%s, product_id=%s)",
+            client_id,
+            transaction_id,
+            product_id,
+        )
+        return Response(
+            {'error': 'Erreur lors du calcul du montant clôturable.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    return Response(
+        {
+            'amount': float(closable_amount),
+            'amount_decimal': str(closable_amount),
+            'product_id': product_id,
+            'transaction_id': transaction.id,
+            'currency': client.account_currency or 'EUR',
+        }
+    )
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

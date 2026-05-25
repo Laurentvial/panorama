@@ -7,7 +7,7 @@ from .client_product_overrides import merge_serialized_product_with_overrides, n
 import uuid
 from urllib.parse import urlparse, unquote, quote
 
-COMPLETED_TRANSACTION_STATUSES = ('valide',)
+COMPLETED_TRANSACTION_STATUSES = ('valide', 'cloture')
 
 
 def _sync_auth_user_id_sequence_if_needed():

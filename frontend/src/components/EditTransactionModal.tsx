@@ -71,6 +71,7 @@ export function EditTransactionModal({
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
   const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
+  const [isClosingTransfer, setIsClosingTransfer] = useState(false);
   const [transferProduct, setTransferProduct] = useState<any>(null);
   const [loadingTransferProduct, setLoadingTransferProduct] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
@@ -353,6 +354,7 @@ export function EditTransactionModal({
   const handleClose = () => {
     setDateDisplay('');
     setTimeDisplay('');
+    setIsClosingTransfer(false);
     setTransactionForm({
       type: 'depot',
       amount: '',
@@ -438,6 +440,94 @@ export function EditTransactionModal({
     };
   };
 
+  const getClosureInvestmentProductId = (): string | null => {
+    if (!transaction) return null;
+    if (transactionForm.type !== 'transfert') return null;
+    if (transaction.status !== 'valide') return null;
+
+    const fromField = String(transactionForm.from_field || '').trim();
+    const toField = String(transactionForm.to_field || '').trim();
+
+    if (fromField !== 'solde') return null;
+    if (!toField || toField === 'solde' || toField === 'trading') return null;
+
+    return toField;
+  };
+
+  const buildNowDatetimeLocalISO = (): string => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  };
+
+  const handleCloseTransfer = async () => {
+    if (!transaction || isClosingTransfer) return;
+
+    const productId = getClosureInvestmentProductId();
+    if (!productId) {
+      toast.error("Cette transaction n'est pas éligible à une clôture automatique.");
+      return;
+    }
+
+    const confirmed = confirm(
+      'Clôturer ce transfert va créer un retrait validé vers le solde pour la totalité des fonds encore investis sur ce produit. Continuer ?'
+    );
+    if (!confirmed) return;
+
+    setIsClosingTransfer(true);
+    try {
+      const closureData: any = await apiCall(
+        `/api/clients/${clientId}/transactions/${transaction.id}/closure-amount/`,
+        { method: 'GET' }
+      );
+
+      const closureAmount = Number(closureData?.amount ?? closureData?.amount_decimal ?? 0);
+      if (!Number.isFinite(closureAmount) || closureAmount <= 0) {
+        toast.error("Aucun montant clôturable disponible pour ce transfert.");
+        return;
+      }
+
+      const productLabel = transferProduct?.name ? ` (${transferProduct.name})` : '';
+      const createdTransaction: any = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'transfert',
+          amount: closureAmount,
+          description: `Clôture automatique du transfert${productLabel} vers le solde.`,
+          status: 'valide',
+          datetime: buildNowDatetimeLocalISO(),
+          from_field: productId,
+          to_field: 'solde',
+          subscription_details: {
+            productId,
+          },
+        }),
+      });
+
+      await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'cloture',
+        }),
+      });
+
+      bustTransactionsCache(clientId);
+      toast.success('Clôture du transfert effectuée avec succès.');
+      handleClose();
+      onSuccess(createdTransaction?.transaction || createdTransaction);
+    } catch (error: any) {
+      console.error('Error closing transfer:', error);
+      toast.error(error.message || 'Erreur lors de la clôture du transfert');
+    } finally {
+      setIsClosingTransfer(false);
+    }
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
@@ -473,7 +563,7 @@ export function EditTransactionModal({
     // Only show modal if status is changing FROM something else TO "valide"
     // If status was already "valide", no need to regenerate positions
     const isTransfert = transactionForm.type === 'transfert';
-    const wasAlreadyTermine = transaction.status === 'valide';
+    const wasAlreadyTermine = ['valide', 'cloture'].includes(String(transaction.status || '').trim().toLowerCase());
     const isChangingToTermine = effectiveStatus === 'valide' && 
                                  !wasAlreadyTermine;
     
@@ -556,7 +646,7 @@ export function EditTransactionModal({
       // Only recalculate if status is changing TO "valide" (not if it was already "valide")
       const transferTo = transactionForm.to_field || null;
       const transferFrom = transactionForm.from_field || null;
-      const wasAlreadyTermine = transaction.status === 'valide';
+      const wasAlreadyTermine = ['valide', 'cloture'].includes(String(transaction.status || '').trim().toLowerCase());
       const isWithdrawal = transactionForm.type === 'transfert' && 
                           effectiveStatus === 'valide' &&
                           !wasAlreadyTermine && // Only if status is changing TO "valide"
@@ -639,6 +729,7 @@ export function EditTransactionModal({
   };
 
   const interestPeriodOptions = getInterestPeriodOptions(transferProduct);
+  const canCloseTransfer = !!getClosureInvestmentProductId();
 
   if (!isOpen || !transaction) return null;
 
@@ -842,19 +933,35 @@ export function EditTransactionModal({
             </div>
             </div>
             <div className="modal-form-actions mt-4">
-              <Button 
-                type="button" 
-                variant="destructive" 
-                onClick={handleDelete}
-                style={{ marginRight: 'auto' }}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Supprimer
-              </Button>
-              <Button type="button" variant="outline" onClick={handleClose}>
-                Annuler
-              </Button>
-              <Button type="submit">Enregistrer</Button>
+              <div className="w-full">
+                {canCloseTransfer && (
+                  <div className="mb-3">
+                    <button
+                      type="button"
+                      onClick={handleCloseTransfer}
+                      disabled={isClosingTransfer}
+                      className="text-sm text-blue-600 underline underline-offset-2 hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      {isClosingTransfer ? 'Clôture en cours...' : 'Clôturer le transfert'}
+                    </button>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDelete}
+                    style={{ marginRight: 'auto' }}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Supprimer
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleClose}>
+                    Annuler
+                  </Button>
+                  <Button type="submit">Enregistrer</Button>
+                </div>
+              </div>
             </div>
           </form>
         </div>

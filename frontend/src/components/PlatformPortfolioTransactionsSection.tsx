@@ -30,6 +30,8 @@ function formatTransactionStatus(status: string | undefined | null, transactionT
     case 'valide':
     case 'validé':
       return 'Validé';
+    case 'cloture':
+      return 'Clôturé';
     case 'en_cours':
       return 'En cours';
     case 'en_attente_paiement':
@@ -49,6 +51,7 @@ function getStatusColor(status: string | undefined | null) {
   switch (statusLower) {
     case 'valide':
     case 'validé':
+    case 'cloture':
       return '#15803d';
     case 'en_cours':
     case 'en_attente_paiement':

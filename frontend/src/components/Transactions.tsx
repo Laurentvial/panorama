@@ -346,6 +346,7 @@ export function Transactions() {
                   <SelectItem value="en_attente_paiement">En attente de paiement</SelectItem>
                   <SelectItem value="en_cours">En cours</SelectItem>
                   <SelectItem value="valide">Validé</SelectItem>
+                  <SelectItem value="cloture">Clôturé</SelectItem>
                   <SelectItem value="conteste">Contesté</SelectItem>
                 </SelectContent>
               </Select>

@@ -131,7 +131,8 @@ export function PlatformPortfolio() {
     return formatAmount(n, currency || 'EUR', opts);
   };
 
-  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+  const isCompletedStatus = (status: any) =>
+    ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
 
   const formatPositionRange = (p: any) => {
     if (p.opened_at) {

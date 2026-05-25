@@ -16,7 +16,8 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   const [transactions, setTransactions] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
-  const isCompletedStatus = (status: any) => String(status ?? '').trim().toLowerCase() === 'valide';
+  const isCompletedStatus = (status: any) =>
+    ['valide', 'cloture'].includes(String(status ?? '').trim().toLowerCase());
 
   useEffect(() => {
     async function loadTransactions() {
