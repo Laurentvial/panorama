@@ -76,6 +76,13 @@ export function SimpleCalendar({ selected, onSelect, className }: SimpleCalendar
                 key={d.toISOString()}
                 type="button"
                 onClick={() => onSelect(d)}
+                style={
+                  isSelected
+                    ? { backgroundColor: "#0f172a", color: "#ffffff" }
+                    : isTodayDate
+                      ? { backgroundColor: "#e2e8f0", color: "#0f172a", fontWeight: 600 }
+                      : undefined
+                }
                 className={cn(
                   "h-8 w-8 text-sm rounded-md transition-colors font-medium",
                   isOutside && "text-slate-300 cursor-default",

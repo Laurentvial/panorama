@@ -4111,16 +4111,24 @@ def _clamp_generation_horizon_days(days: int) -> int:
 
 
 def _position_generation_window_start_dt(txn: Transaction) -> datetime:
-    """Same start as generate_rates_for_investment / modal preview (contract date or txn datetime)."""
-    contract_start = _get_contract_start_date(txn)
+    """
+    Determine the generation start datetime for positions.
+
+    Important rule: when transaction datetime exists, keep its time component so the first
+    generated position cannot open before the transaction time on that same day.
+    """
     tz = timezone.get_current_timezone()
-    if contract_start:
-        start_dt = timezone.make_aware(
-            datetime.combine(contract_start, datetime.min.time()),
-            tz,
-        )
+    if txn.datetime:
+        start_dt = txn.datetime
     else:
-        start_dt = txn.datetime or timezone.now()
+        contract_start = _get_contract_start_date(txn)
+        if contract_start:
+            start_dt = timezone.make_aware(
+                datetime.combine(contract_start, datetime.min.time()),
+                tz,
+            )
+        else:
+            start_dt = timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
     return start_dt

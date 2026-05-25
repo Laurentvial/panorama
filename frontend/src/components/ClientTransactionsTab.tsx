@@ -7,7 +7,7 @@ import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
-import { Plus, X, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, ChevronDown, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -19,6 +19,7 @@ import { PositionGenerationModal } from './PositionGenerationModal';
 import { getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
+import { SimpleCalendar } from './ui/simple-calendar';
 import '../styles/Modal.css';
 
 interface ClientTransactionsTabProps {
@@ -423,6 +424,91 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     // kept for backward compatibility with existing UI resets
     visibleByClient: true
   });
+  const [dateDisplay, setDateDisplay] = useState('');
+  const [timeDisplay, setTimeDisplay] = useState('');
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+
+  const getDefaultTransactionForm = () => ({
+    type: 'depot',
+    amount: '',
+    description: '',
+    status: 'en_attente_paiement',
+    datetime: '',
+    from_field: 'solde',
+    to_field: 'solde',
+    productId: '',
+    interestPeriod: '',
+    to_currency: '',
+    fx_rate_eur_to_account: '',
+    bonus_amount: '',
+    is_surperformance: false,
+    visibleByClient: true
+  });
+
+  const resetTransactionForm = () => {
+    setTransactionForm(getDefaultTransactionForm());
+    setDateDisplay('');
+    setTimeDisplay('');
+    setIsDatePickerOpen(false);
+  };
+
+  const formatDisplayDate = (iso: string): string => {
+    if (!iso || !iso.includes('T')) return '';
+    const [datePart] = iso.split('T');
+    const [y, m, d] = datePart.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const formatDisplayTime = (iso: string): string => {
+    if (!iso || !iso.includes('T')) return '';
+    const timePart = iso.split('T')[1] || '00:00';
+    return timePart.slice(0, 5);
+  };
+
+  const parseDate = (s: string): { y: number; m: number; d: number } | null => {
+    const t = s.trim();
+    const match = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return null;
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    return { y: year, m: month, d: day };
+  };
+
+  const parseTime = (s: string): { h: number; min: number } | null => {
+    const t = s.trim();
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+    return { h, min };
+  };
+
+  const buildDatetimeFromDisplay = (dateStr: string, timeStr: string): string | null => {
+    const date = parseDate(dateStr);
+    const time = parseTime(timeStr);
+    if (!date || !time) return null;
+    const monthStr = String(date.m).padStart(2, '0');
+    const dayStr = String(date.d).padStart(2, '0');
+    const hoursStr = String(time.h).padStart(2, '0');
+    const minutesStr = String(time.min).padStart(2, '0');
+    return `${date.y}-${monthStr}-${dayStr}T${hoursStr}:${minutesStr}`;
+  };
+
+  const buildDisplayDateFromDate = (date: Date): string => {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const selectedDateForCalendar = (() => {
+    const parsed = parseDate(dateDisplay);
+    return parsed ? new Date(parsed.y, parsed.m - 1, parsed.d) : undefined;
+  })();
 
   const normalizeInterestPeriod = (value: string): string => {
     const v = String(value || '').trim();
@@ -460,15 +546,17 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   useEffect(() => {
     if (isTransactionDialogOpen && !transactionForm.datetime) {
       const now = new Date();
-      // Format as YYYY-MM-DDTHH:mm for datetime-local input
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const day = String(now.getDate()).padStart(2, '0');
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
-      setTransactionForm(prev => ({ ...prev, datetime: `${year}-${month}-${day}T${hours}:${minutes}` }));
+      const nextDatetime = `${year}-${month}-${day}T${hours}:${minutes}`;
+      setTransactionForm(prev => ({ ...prev, datetime: nextDatetime }));
+      setDateDisplay(formatDisplayDate(nextDatetime));
+      setTimeDisplay(formatDisplayTime(nextDatetime));
     }
-  }, [isTransactionDialogOpen]);
+  }, [isTransactionDialogOpen, transactionForm.datetime]);
 
   // Fetch suggested FX rate for depot/bonus when account is non-EUR
   const needsEurInputAndConversion = (
@@ -602,8 +690,21 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     if (isCreatingTransaction) return;
     setIsCreatingTransaction(true);
 
-    if (!transactionForm.datetime) {
-      toast.error('La date et l\'heure sont requises');
+    if (!dateDisplay.trim()) {
+      toast.error('La date est requise');
+      setIsCreatingTransaction(false);
+      return;
+    }
+
+    if (!timeDisplay.trim()) {
+      toast.error('L\'heure est requise');
+      setIsCreatingTransaction(false);
+      return;
+    }
+
+    const submittedDatetime = buildDatetimeFromDisplay(dateDisplay, timeDisplay);
+    if (!submittedDatetime) {
+      toast.error('Format de date invalide. Utilisez JJ/MM/AAAA pour la date et HH:mm pour l\'heure.');
       setIsCreatingTransaction(false);
       return;
     }
@@ -641,8 +742,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
 
     try {
       // Keep datetime in local format, don't convert to UTC
-      // transactionForm.datetime is already in YYYY-MM-DDTHH:mm format (local time)
-      let datetimeISO = transactionForm.datetime;
+      // submittedDatetime is in YYYY-MM-DDTHH:mm format (local time)
+      let datetimeISO = submittedDatetime;
       if (datetimeISO && !datetimeISO.includes(':')) {
         // Add seconds if not present
         datetimeISO = `${datetimeISO}:00`;
@@ -784,22 +885,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
           // Keep the dialog closed (it was already closed or will be closed)
           setIsTransactionDialogOpen(false);
           // Reset form
-          setTransactionForm({
-            type: 'depot',
-            amount: '',
-            description: '',
-            status: 'en_attente_paiement',
-            datetime: '',
-            from_field: 'solde',
-            to_field: 'solde',
-            productId: '',
-            interestPeriod: '',
-            to_currency: '',
-            fx_rate_eur_to_account: '',
-            bonus_amount: '',
-            is_surperformance: false,
-            visibleByClient: true
-          });
+          resetTransactionForm();
           // Don't call onRefresh yet - wait for modal to complete
           return;
         } else {
@@ -835,22 +921,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         return next;
       });
       setIsTransactionDialogOpen(false);
-      setTransactionForm({
-        type: 'depot',
-        amount: '',
-        description: '',
-        status: 'en_attente_paiement',
-        datetime: '',
-        from_field: 'solde',
-        to_field: 'solde',
-        productId: '',
-        interestPeriod: '',
-        to_currency: '',
-        fx_rate_eur_to_account: '',
-        bonus_amount: '',
-        is_surperformance: false,
-        visibleByClient: true
-      });
+      resetTransactionForm();
       // Reload first page to guarantee visibility of the newly created transaction.
       loadTransactions(1, pagination.limit);
       loadContractDocuments();
@@ -1002,23 +1073,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         <h2 className="text-xl font-semibold">Transactions</h2>
         <Button onClick={() => {
           setIsTransactionDialogOpen(true);
-          // Reset form when opening
-          setTransactionForm({
-            type: 'depot',
-            amount: '',
-            description: '',
-            status: 'en_attente_paiement',
-            datetime: '',
-            from_field: 'solde',
-            to_field: 'solde',
-            productId: '',
-            interestPeriod: '',
-            to_currency: '',
-            fx_rate_eur_to_account: '',
-            bonus_amount: '',
-            is_surperformance: false,
-            visibleByClient: true
-          });
+          resetTransactionForm();
         }}>
           <Plus className="w-4 h-4 mr-2" />
           Ajouter une transaction
@@ -1146,23 +1201,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       {isTransactionDialogOpen && (
         <div className="modal-overlay" onClick={() => {
           setIsTransactionDialogOpen(false);
-          // Reset form when closing
-          setTransactionForm({
-            type: 'depot',
-            amount: '',
-            description: '',
-            status: 'en_attente_paiement',
-            datetime: '',
-            from_field: 'solde',
-            to_field: 'solde',
-            productId: '',
-            interestPeriod: '',
-            to_currency: '',
-            fx_rate_eur_to_account: '',
-            bonus_amount: '',
-            is_surperformance: false,
-            visibleByClient: true
-          });
+          resetTransactionForm();
         }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '36rem' }}>
             <div className="modal-header">
@@ -1175,22 +1214,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 onClick={() => {
                   setIsTransactionDialogOpen(false);
                   setIsCreatingTransaction(false);
-                  setTransactionForm({
-                    type: 'depot',
-                    amount: '',
-                    description: '',
-                    status: 'en_attente_paiement',
-                    datetime: '',
-                    from_field: 'solde',
-                    to_field: 'solde',
-                    productId: '',
-                    interestPeriod: '',
-                    to_currency: '',
-                    fx_rate_eur_to_account: '',
-                    bonus_amount: '',
-                    is_surperformance: false,
-                    visibleByClient: true
-                  });
+                  resetTransactionForm();
                 }}
               >
                 <X className="planning-icon-md" />
@@ -1337,11 +1361,64 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               )}
 
               <div className="modal-form-field">
-                <Label>Date et heure</Label>
+                <Label>Date</Label>
+                <div className="flex">
+                  <Input
+                    type="text"
+                    value={dateDisplay}
+                    placeholder="JJ/MM/AAAA"
+                    className="rounded-r-none border-r-0"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDateDisplay(v);
+                      const parsed = buildDatetimeFromDisplay(v, timeDisplay);
+                      if (parsed) setTransactionForm((prev) => ({ ...prev, datetime: parsed }));
+                    }}
+                    required
+                  />
+                  <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="shrink-0 rounded-none border-l-0 px-3"
+                        aria-label="Ouvrir le calendrier"
+                      >
+                        <CalendarIcon className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 border shadow-lg z-[1050]" align="end" style={{ zIndex: 1050 }}>
+                      <SimpleCalendar
+                        selected={selectedDateForCalendar}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          const nextDate = buildDisplayDateFromDate(date);
+                          setDateDisplay(nextDate);
+                          const parsed = buildDatetimeFromDisplay(nextDate, timeDisplay);
+                          if (parsed) {
+                            setTransactionForm((prev) => ({ ...prev, datetime: parsed }));
+                          }
+                          setIsDatePickerOpen(false);
+                        }}
+                        className="min-w-[260px]"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+              <div className="modal-form-field">
+                <Label>Heure</Label>
                 <Input
-                  type="datetime-local"
-                  value={transactionForm.datetime}
-                  onChange={(e) => setTransactionForm({ ...transactionForm, datetime: e.target.value })}
+                  type="text"
+                  value={timeDisplay}
+                  placeholder="HH:mm"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTimeDisplay(v);
+                    const parsed = buildDatetimeFromDisplay(dateDisplay, v);
+                    if (parsed) setTransactionForm((prev) => ({ ...prev, datetime: parsed }));
+                  }}
                   required
                 />
               </div>
@@ -1455,22 +1532,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 <Button type="button" variant="outline" disabled={isCreatingTransaction}                 onClick={() => {
                   setIsTransactionDialogOpen(false);
                   setIsCreatingTransaction(false);
-          setTransactionForm({
-            type: 'depot',
-            amount: '',
-            description: '',
-            status: 'en_attente_paiement',
-            datetime: '',
-            from_field: 'solde',
-            to_field: 'solde',
-            productId: '',
-            interestPeriod: '',
-            to_currency: '',
-            fx_rate_eur_to_account: '',
-            bonus_amount: '',
-            is_surperformance: false,
-            visibleByClient: true
-          });
+          resetTransactionForm();
         }}>
           Annuler
                 </Button>
