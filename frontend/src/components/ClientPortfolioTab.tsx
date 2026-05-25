@@ -283,6 +283,86 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
 
   const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
   const formatCurrency = (amount: number) => formatAmount(amount, accountCurrency);
+  const formatSignedCurrency = (amount: number) => `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+
+  const recap = useMemo(() => {
+    let achats = 0;
+    let transfertsEntrants = 0;
+    let transfertsSortants = 0;
+    let fraisEtPertes = 0;
+    let interetsReintegres = 0;
+    let pnlPositionsCloturees = 0;
+
+    const completedTransactions = transactions.filter((t: any) => isCompletedStatus(t?.status));
+
+    for (const transaction of completedTransactions) {
+      const amount = parseFloat(transaction.amount) || 0;
+      if (!Number.isFinite(amount) || amount === 0) continue;
+
+      if (transaction.type === 'achat') {
+        achats += amount;
+      }
+
+      if (transaction.type === 'transfert') {
+        const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
+        const hasProductId = transaction.productId || null;
+        if (transferTo && transferTo !== 'solde') {
+          transfertsEntrants += amount;
+        } else if (transferTo === 'solde') {
+          transfertsSortants += amount;
+        } else if (hasProductId) {
+          transfertsEntrants += amount;
+        }
+      }
+
+      if (transaction.type === 'frais' || transaction.type === 'perte') {
+        fraisEtPertes += amount;
+      }
+
+      if (transaction.type === 'interets') {
+        const subDetails = transaction.subscription_details || transaction.subscriptionDetails;
+        if (!subDetails?.is_surperformance) {
+          interetsReintegres += amount;
+        }
+      }
+    }
+
+    for (const p of positions || []) {
+      if (p?.status !== 'done') continue;
+      const profitLossNum =
+        p?.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+      const investedNum = typeof p?.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+      const expectedTotalNum =
+        p?.expected_total == null ? null : typeof p.expected_total === 'string' ? parseFloat(p.expected_total) : Number(p.expected_total);
+      if (profitLossNum != null && Number.isFinite(profitLossNum)) {
+        pnlPositionsCloturees += profitLossNum;
+      } else if (expectedTotalNum != null && Number.isFinite(expectedTotalNum) && Number.isFinite(investedNum)) {
+        pnlPositionsCloturees += expectedTotalNum - investedNum;
+      }
+    }
+
+    return {
+      totalInvesti: {
+        achats,
+        transfertsEntrants,
+        transfertsSortants,
+      },
+      profitLoss: {
+        pnlPositionsCloturees,
+        fraisEtPertes,
+        interetsReintegres,
+      },
+      valeurPortefeuille: {
+        solde: Math.max(0, availableFunds),
+        investi: tradingPortfolio,
+        profitLoss,
+      },
+      solde: {
+        capital: investedCapital,
+        investi: tradingPortfolio,
+      },
+    };
+  }, [transactions, positions, availableFunds, tradingPortfolio, profitLoss, investedCapital]);
 
   return (
     <div className="space-y-6">
@@ -303,6 +383,16 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
               {formatCurrency(Math.max(0, availableFunds))}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Fonds disponibles pour investir</p>
+            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Capital cumulé</span>
+                <span>{formatSignedCurrency(recap.solde.capital)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Montant investi en cours</span>
+                <span>{formatSignedCurrency(-recap.solde.investi)}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -316,6 +406,20 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
               {formatCurrency(totalInvesti)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Capital total investi</p>
+            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Achats</span>
+                <span>{formatSignedCurrency(recap.totalInvesti.achats)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Transferts vers produits</span>
+                <span>{formatSignedCurrency(recap.totalInvesti.transfertsEntrants)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Transferts vers solde</span>
+                <span>{formatSignedCurrency(-recap.totalInvesti.transfertsSortants)}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -333,6 +437,20 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
               {profitLoss >= 0 ? '+' : ''}{formatCurrency(profitLoss)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Performance du portefeuille</p>
+            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Positions clôturées</span>
+                <span>{formatSignedCurrency(recap.profitLoss.pnlPositionsCloturees)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Frais / pertes</span>
+                <span>{formatSignedCurrency(-recap.profitLoss.fraisEtPertes)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Intérêts réintégrés au capital</span>
+                <span>{formatSignedCurrency(-recap.profitLoss.interetsReintegres)}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -346,6 +464,20 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
               {formatCurrency(portfolioValue)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Valeur totale actuelle</p>
+            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>Solde disponible</span>
+                <span>{formatSignedCurrency(recap.valeurPortefeuille.solde)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Capital investi en cours</span>
+                <span>{formatSignedCurrency(recap.valeurPortefeuille.investi)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Bénéfices / perte</span>
+                <span>{formatSignedCurrency(recap.valeurPortefeuille.profitLoss)}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

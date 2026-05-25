@@ -550,6 +550,89 @@ def _proportional_pnl_parts(target_total: Decimal, amounts: list[Decimal]) -> li
     return parts
 
 
+def _reduce_identical_adjacent_parts(
+    parts: list[Decimal],
+    caps: list[Decimal],
+    *,
+    floor: Decimal = Decimal('0.00'),
+    max_passes: int = 6,
+    max_adjacent_run: int = 3,
+) -> list[Decimal]:
+    """
+    Reduce long runs of identical adjacent values by moving 0.01 between positions
+    while preserving total sum and respecting [floor, cap] bounds.
+    """
+    n = len(parts)
+    if n <= 1:
+        return parts
+
+    step = Decimal('0.01')
+    values = [p.quantize(step) for p in parts]
+
+    for _ in range(max_passes):
+        changed = False
+        run_len = 1
+
+        for i in range(1, n):
+            if values[i] != values[i - 1]:
+                run_len = 1
+                continue
+
+            run_len += 1
+            if run_len <= max_adjacent_run:
+                continue
+
+            near = {i - 1, i, i + 1}
+
+            # Try increasing current slot by 0.01 and taking 0.01 from a donor.
+            if values[i] + step <= caps[i]:
+                donor_candidates = [
+                    idx for idx in range(n)
+                    if idx != i and values[idx] - step >= floor
+                ]
+                donor_candidates.sort(
+                    key=lambda idx: (
+                        idx not in near,          # prefer changing distant slots
+                        values[idx] - floor,      # with more removable slack
+                        abs(idx - i),
+                    ),
+                    reverse=True,
+                )
+                for donor in donor_candidates:
+                    values[donor] = (values[donor] - step).quantize(step)
+                    values[i] = (values[i] + step).quantize(step)
+                    changed = True
+                    run_len = 1
+                    break
+                if changed:
+                    continue
+
+            # Fallback: decrease current slot and add 0.01 to a receiver.
+            if values[i] - step >= floor:
+                receiver_candidates = [
+                    idx for idx in range(n)
+                    if idx != i and values[idx] + step <= caps[idx]
+                ]
+                receiver_candidates.sort(
+                    key=lambda idx: (
+                        idx not in near,          # prefer changing distant slots
+                        caps[idx] - values[idx],  # with room to increase
+                        -values[idx],             # and lower value first
+                    ),
+                    reverse=True,
+                )
+                for recv in receiver_candidates:
+                    values[i] = (values[i] - step).quantize(step)
+                    values[recv] = (values[recv] + step).quantize(step)
+                    changed = True
+                    run_len = 1
+                    break
+        if not changed:
+            break
+
+    return values
+
+
 def _distribute_pnl_total_capped(
     target_total: Decimal,
     amounts: list[Decimal],
@@ -681,10 +764,19 @@ def _distribute_pnl_total_capped(
         if total_amt <= 0:
             parts = [Decimal('0.00')] * n
         else:
+            # Keep proportional logic, but introduce a tiny per-trade jitter to avoid
+            # overly regular series when invested amounts are equal.
+            jittered_weights = [
+                (a * Decimal(str(random.uniform(0.985, 1.015)))).quantize(Decimal('0.0001'))
+                for a in amounts
+            ]
+            total_weight = sum(jittered_weights)
+            effective_weights = jittered_weights if total_weight > 0 else amounts
+            effective_total = sum(effective_weights)
             acc = Decimal('0')
             parts = []
             for i in range(n - 1):
-                p = (target_total * amounts[i] / total_amt).quantize(Decimal('0.01'))
+                p = (target_total * effective_weights[i] / effective_total).quantize(Decimal('0.01'))
                 parts.append(p)
                 acc += p
             parts.append((target_total - acc).quantize(Decimal('0.01')))
@@ -738,6 +830,10 @@ def _distribute_pnl_total_capped(
                 for i in range(n):
                     parts[i] = max(Decimal('0'), parts[i]).quantize(Decimal('0.01'))
         drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
+
+    if avoid_losses:
+        floor = step if positive_only else Decimal('0.00')
+        parts = _reduce_identical_adjacent_parts(parts, caps, floor=floor)
 
     return parts
 

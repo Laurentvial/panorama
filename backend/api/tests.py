@@ -66,3 +66,62 @@ class DistributePnlNegativeTargetTest(SimpleTestCase):
         for p in parts:
             self.assertGreaterEqual(p, -cap_amt)
             self.assertLessEqual(p, Decimal('0'))
+
+
+class DistributePnlAvoidLossesTest(SimpleTestCase):
+    @staticmethod
+    def _longest_adjacent_run(values: list[Decimal]) -> int:
+        if not values:
+            return 0
+        longest = 1
+        current = 1
+        for i in range(1, len(values)):
+            if values[i] == values[i - 1]:
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 1
+        return longest
+
+    @patch('api.position_service.random.uniform', return_value=1.0)
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_avoid_losses_reduces_identical_adjacent_gains_for_equal_amounts(
+        self,
+        _mock_random,
+        _mock_uniform,
+    ):
+        amounts = [Decimal('5000.00')] * 6
+        target = Decimal('600.00')
+
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=True)
+
+        self.assertEqual(len(parts), 6)
+        self.assertEqual(sum(parts, Decimal('0')).quantize(Decimal('0.01')), target)
+        cap = (Decimal('5000.00') * Decimal('0.30')).quantize(Decimal('0.01'))
+        for p in parts:
+            self.assertGreaterEqual(p, Decimal('0.00'))
+            self.assertLessEqual(p, cap)
+
+        # Before anti-run handling this setup was usually [100.00] * 6.
+        self.assertGreater(len(set(parts)), 1)
+        self.assertLess(self._longest_adjacent_run(parts), len(parts))
+
+    @patch('api.position_service.random.uniform', return_value=1.0)
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_avoid_losses_keeps_bounds_when_target_exceeds_total_caps(
+        self,
+        _mock_random,
+        _mock_uniform,
+    ):
+        amounts = [Decimal('1000.00'), Decimal('1000.00')]
+        target = Decimal('50000.00')
+
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=True)
+
+        cap = (Decimal('1000.00') * Decimal('0.30')).quantize(Decimal('0.01'))
+        total = sum(parts, Decimal('0')).quantize(Decimal('0.01'))
+        self.assertLessEqual(total, target)
+        self.assertEqual(total, (cap * 2).quantize(Decimal('0.01')))
+        for p in parts:
+            self.assertGreaterEqual(p, Decimal('0.00'))
+            self.assertLessEqual(p, cap)
