@@ -1,3 +1,4 @@
+import random
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -6,6 +7,7 @@ from django.test import SimpleTestCase
 from .position_service import (
     GENERATION_HORIZON_MAX_DAYS,
     GENERATION_HORIZON_MIN_DAYS,
+    _apply_profit_variability,
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
     _product_has_explicit_contract_duration,
@@ -125,3 +127,33 @@ class DistributePnlAvoidLossesTest(SimpleTestCase):
         for p in parts:
             self.assertGreaterEqual(p, Decimal('0.00'))
             self.assertLessEqual(p, cap)
+
+    @patch('api.position_service.random.uniform', return_value=1.0)
+    @patch('api.position_service.random.random', return_value=0.5)
+    def test_avoid_losses_natural_distribution_for_small_total(
+        self,
+        _mock_random,
+        _mock_uniform,
+    ):
+        amounts = [Decimal('500.00')] * 6
+        target = Decimal('1.55')
+
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=True)
+        self.assertEqual(sum(parts, Decimal('0')).quantize(Decimal('0.01')), target)
+        self.assertGreaterEqual(len(set(parts)), 4)
+        self.assertLessEqual(self._longest_adjacent_run(parts), 2)
+        self.assertGreaterEqual(max(parts) - min(parts), Decimal('0.10'))
+
+
+class ProfitVariabilityTest(SimpleTestCase):
+    def test_small_profit_variability_breaks_cent_lock(self):
+        values = []
+        for i in range(20):
+            rng = random.Random(f"txnA:{i}:variability")
+            values.append(_apply_profit_variability(Decimal('0.26'), rng))
+        self.assertGreater(len(set(values)), 1)
+
+    def test_variability_keeps_positive_floor_for_positive_profits(self):
+        rng = random.Random("tiny-profit")
+        value = _apply_profit_variability(Decimal('0.01'), rng)
+        self.assertGreaterEqual(value, Decimal('0.01'))

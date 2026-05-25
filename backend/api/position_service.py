@@ -633,6 +633,98 @@ def _reduce_identical_adjacent_parts(
     return values
 
 
+def _apply_profit_variability(profit: Decimal, rng: random.Random) -> Decimal:
+    """
+    Apply a controlled variability to a period profit.
+
+    For very small profits, percentage-only jitter is often erased by cent rounding.
+    Add a small cent-level jitter to avoid long identical sequences like 0.26, 0.26, ...
+    """
+    step = Decimal('0.01')
+    base = (profit or Decimal('0')).quantize(step)
+    if base <= Decimal('0'):
+        return Decimal('0.00')
+
+    # Mild relative jitter for all positive profits.
+    relative_factor = Decimal(str(rng.uniform(0.985, 1.015)))  # ±1.5%
+    adjusted = (base * relative_factor)
+
+    # Extra cent jitter for small profits where 2-decimal quantization dominates.
+    if base < Decimal('1.00'):
+        cent_window = 2   # up to ±0.02
+    elif base < Decimal('5.00'):
+        cent_window = 1   # up to ±0.01
+    else:
+        cent_window = 0
+
+    if cent_window > 0:
+        cent_jitter = Decimal(rng.randint(-cent_window, cent_window)) * step
+        adjusted += cent_jitter
+
+    varied = adjusted.quantize(step)
+    if varied < step:
+        varied = step
+    return varied
+
+
+def _naturalize_positive_pnl_parts(
+    parts: list[Decimal],
+    caps: list[Decimal],
+    *,
+    floor: Decimal = Decimal('0.00'),
+) -> list[Decimal]:
+    """
+    Make positive P&L parts look less artificial by redistributing cents between
+    positions while preserving exact total and respecting [floor, cap] constraints.
+    """
+    n = len(parts)
+    if n <= 2:
+        return parts
+
+    step = Decimal('0.01')
+    values = [p.quantize(step) for p in parts]
+
+    # Keep dispersion moderate around the initial solution.
+    avg = (sum(values) / Decimal(str(n))).quantize(step)
+    max_delta = max(step * 2, (avg * Decimal('0.65')).quantize(step))
+    local_floor = [max(floor, (v - max_delta).quantize(step)) for v in values]
+    local_cap = [min(caps[i], (values[i] + max_delta).quantize(step)) for i in range(n)]
+    rng = random.Random(f"naturalize:{n}:{sum(values)}:{sum(caps)}:{floor}")
+
+    # Transfer cents from low to high values to create visible irregularity.
+    # Move count is limited to avoid extreme shapes.
+    moves_budget = min(800, n * 120, max(0, int((sum(values) - floor * n) / step)))
+    for _ in range(moves_budget):
+        up_pool = [
+            (i, (local_cap[i] - values[i]).quantize(step))
+            for i in range(n)
+            if (local_cap[i] - values[i]) >= step
+        ]
+        down_pool = [
+            (i, (values[i] - local_floor[i]).quantize(step))
+            for i in range(n)
+            if (values[i] - local_floor[i]) >= step
+        ]
+        if not up_pool or not down_pool:
+            break
+
+        # Favor higher values as receivers and lower values as donors.
+        up_pool.sort(key=lambda x: values[x[0]], reverse=True)
+        down_pool.sort(key=lambda x: values[x[0]])
+
+        winner = _weighted_choice_with_rng(up_pool, rng)
+        loser = _weighted_choice_with_rng(down_pool, rng)
+        if winner == loser:
+            winner = next((idx for idx, _ in up_pool if idx != loser), None)
+        if winner is None or winner == loser:
+            break
+
+        values[winner] = (values[winner] + step).quantize(step)
+        values[loser] = (values[loser] - step).quantize(step)
+
+    return values
+
+
 def _distribute_pnl_total_capped(
     target_total: Decimal,
     amounts: list[Decimal],
@@ -833,6 +925,7 @@ def _distribute_pnl_total_capped(
 
     if avoid_losses:
         floor = step if positive_only else Decimal('0.00')
+        parts = _naturalize_positive_pnl_parts(parts, caps, floor=floor)
         parts = _reduce_identical_adjacent_parts(parts, caps, floor=floor)
 
     return parts
@@ -1975,11 +2068,10 @@ def _create_period_positions_simple(
             # If period is daily: creates 5-20 positions for the day (distributed if needed)
             num_positions_for_period = rng.randint(positions_per_month_min, positions_per_month_max)
         
-        # Apply ±0.2% variability to profit target for realism
-        # This ensures totals are close but not exact
+        # Apply controlled variability to reduce repeated cent values across periods.
+        # For small profits, this includes a tiny cent-level jitter.
         variability_rng = random.Random(f"{txn.id}:{period_idx}:variability")
-        variability_factor = Decimal(str(variability_rng.uniform(0.998, 1.002)))  # ±0.2%
-        profit_with_variability = (profit_remaining * variability_factor).quantize(Decimal('0.01'))
+        profit_with_variability = _apply_profit_variability(profit_remaining, variability_rng)
         
         # Create position(s) for this period if profit_remaining > 0
         if profit_with_variability > Decimal('0') and num_positions_for_period > 0:
@@ -2746,9 +2838,16 @@ def generate_positions_with_rates(
         capital_base = capital if does_compound else invested_total
         target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
         profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
+        variability_rng = random.Random(f"{txn.id}:{period_idx}:custom_rates:variability")
+        profit_with_variability = _apply_profit_variability(profit_remaining, variability_rng)
         
         # Debug logging
-        logger.info(f"Period {period_idx}: capital_base={capital_base}, effective_rate={effective_rate_pct}%, target_profit={target_profit}, existing_profit={existing_profit}, profit_remaining={profit_remaining}")
+        logger.info(
+            f"Period {period_idx}: capital_base={capital_base}, "
+            f"effective_rate={effective_rate_pct}%, target_profit={target_profit}, "
+            f"existing_profit={existing_profit}, profit_remaining={profit_remaining}, "
+            f"profit_with_variability={profit_with_variability}"
+        )
 
         # Count CLOSED and OPEN positions for existing counts
         # IMPORTANT: When using custom rates, exclude ALL pending positions because they will be regenerated
@@ -2863,7 +2962,7 @@ def generate_positions_with_rates(
 
             if invested_amounts:
                 pnl_parts = _distribute_pnl_total_capped(
-                    profit_remaining,
+                    profit_with_variability,
                     invested_amounts,
                     avoid_losses=avoid_losses,
                     positive_only=positive_only,
