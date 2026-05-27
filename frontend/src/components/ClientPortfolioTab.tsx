@@ -628,7 +628,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Bénéfices / Perte</CardTitle>
+            <CardTitle className="text-sm font-medium">Bénéfices</CardTitle>
             {profitLoss >= 0 ? (
               <TrendingUp className="h-4 w-4 text-green-600" />
             ) : (

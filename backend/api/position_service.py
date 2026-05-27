@@ -3285,30 +3285,33 @@ def save_generated_positions(
                 sorted(existing_locked_period_indexes),
             )
 
-    # Defensive deduplication: keep only one generated row per non-null period_index.
-    # This protects against malformed/duplicated payloads from the UI.
+    # Defensive deduplication:
+    # keep all legitimate positions inside a period and remove only exact duplicates.
+    # A period can contain multiple positions by design.
     deduped_positions_data: list[dict] = []
-    deduped_by_period: dict[int, dict] = {}
-    duplicate_period_indexes: set[int] = set()
+    seen_position_signatures: set[tuple] = set()
+    duplicate_rows_count = 0
     for pos_data in positions_data:
-        period_index = pos_data.get('period_index')
-        if period_index is None:
-            deduped_positions_data.append(pos_data)
-            continue
-        normalized_period_index = int(period_index)
-        if normalized_period_index in deduped_by_period:
-            duplicate_period_indexes.add(normalized_period_index)
-        deduped_by_period[normalized_period_index] = {**pos_data, 'period_index': normalized_period_index}
-    if deduped_by_period:
-        deduped_positions_data.extend(
-            [deduped_by_period[idx] for idx in sorted(deduped_by_period.keys())]
+        signature = (
+            str(pos_data.get('asset_id') or ''),
+            str(pos_data.get('opened_at') or ''),
+            str(pos_data.get('closed_at') or ''),
+            str(pos_data.get('invested_amount') or ''),
+            str(pos_data.get('profit_loss') or ''),
+            str(pos_data.get('period_index') or ''),
+            str(pos_data.get('period_date') or ''),
         )
-    if duplicate_period_indexes:
+        if signature in seen_position_signatures:
+            duplicate_rows_count += 1
+            continue
+        seen_position_signatures.add(signature)
+        deduped_positions_data.append(pos_data)
+
+    if duplicate_rows_count > 0:
         logger.warning(
-            "Detected duplicate generated positions for transaction %s on period_index values %s. "
-            "Keeping the latest entry per period.",
+            "Detected %s exact duplicate generated positions for transaction %s; dropped duplicates only.",
+            duplicate_rows_count,
             txn.id,
-            sorted(duplicate_period_indexes),
         )
     positions_data = deduped_positions_data
 
