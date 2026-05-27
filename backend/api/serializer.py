@@ -81,6 +81,55 @@ def _get_media_url_for_field(request, file_field):
         return None
 
 
+def _get_media_url_for_storage_path(request, storage, storage_path: str):
+    """Build a URL from a raw storage path, using proxy when S3 is enabled."""
+    if not storage_path:
+        return None
+    try:
+        if getattr(settings, 'S3_CONFIGURED', False):
+            return build_media_proxy_url(storage_path, request=request)
+        url = storage.url(storage_path)
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url
+        if request and url:
+            return request.build_absolute_uri(url)
+        return url
+    except Exception:
+        return None
+
+
+def _find_shared_product_image_storage_path(product: Product):
+    """
+    Fallback lookup for shared buckets: detect image by product ID when DB field is empty.
+    Supports common image extensions and upper/lower-case variants.
+    """
+    product_id = (str(getattr(product, 'id', '') or '')).strip()
+    if not product_id:
+        return None
+    try:
+        storage = product._meta.get_field('image').storage
+    except Exception:
+        return None
+
+    extensions = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg')
+    candidates = []
+    for ext in extensions:
+        candidates.append(f'products/{product_id}{ext}')
+        candidates.append(f'products/{product_id}{ext.upper()}')
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            if storage.exists(candidate):
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _get_proxy_url_for_logo(request, logo_url):
     """Return proxy URL for asset logo. Our MinIO paths use storage proxy; external URLs use ?url= proxy."""
     if not logo_url or not isinstance(logo_url, str):
@@ -1297,7 +1346,20 @@ class ProductSerializer(serializers.ModelSerializer):
     
     def get_imageUrl(self, obj):
         request = self.context.get('request')
-        return _get_media_url_for_field(request, obj.image)
+        image_url = _get_media_url_for_field(request, obj.image)
+        if image_url:
+            return image_url
+
+        # Shared-bucket fallback: another deployment may have uploaded the image
+        # with the same product ID while this DB row still has image=NULL.
+        storage_path = _find_shared_product_image_storage_path(obj)
+        if not storage_path:
+            return None
+        try:
+            storage = obj._meta.get_field('image').storage
+        except Exception:
+            return None
+        return _get_media_url_for_storage_path(request, storage, storage_path)
 
     def get_technicalSheetUrl(self, obj):
         request = self.context.get('request')

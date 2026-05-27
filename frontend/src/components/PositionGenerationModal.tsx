@@ -678,6 +678,15 @@ export function PositionGenerationModal({
         (isWithdrawal || isAdditionRecalc) &&
         positionsPerMonthMin.trim() !== '' &&
         positionsPerMonthMax.trim() !== '';
+      const fixedRecalculationCutoff =
+        isAdditionRecalc && additionRecalculation?.cutoff_datetime
+          ? String(additionRecalculation.cutoff_datetime)
+          : null;
+      const expectedRecalculationTotal =
+        (isWithdrawal || isAdditionRecalc) &&
+        recalculationPreview?.regenerated_total_expected != null
+          ? Number(recalculationPreview.regenerated_total_expected)
+          : null;
 
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/save-positions/`,
@@ -693,6 +702,16 @@ export function PositionGenerationModal({
               ? {
                   positions_per_month_min: parseInt(positionsPerMonthMin.trim(), 10),
                   positions_per_month_max: parseInt(positionsPerMonthMax.trim(), 10),
+                }
+              : {}),
+            ...(fixedRecalculationCutoff
+              ? {
+                  recalculation_cutoff_datetime: fixedRecalculationCutoff,
+                }
+              : {}),
+            ...(expectedRecalculationTotal != null && Number.isFinite(expectedRecalculationTotal)
+              ? {
+                  expected_recalculation_total: expectedRecalculationTotal,
                 }
               : {}),
           })

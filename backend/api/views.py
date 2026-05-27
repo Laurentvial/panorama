@@ -377,9 +377,9 @@ def _profitability_text_for_product(product: Product) -> str:
 
 def _profitability_text_for_contract(*, product: Product, duration_days: int) -> str:
     """
-    Contract recap must be internally consistent:
-    - profits are estimated using an annual rate prorated by (duration_days / 365)
-    - the displayed profitability should match that same period yield
+    Format profitability text for the contract using the product's declared period.
+    Rates configured on products are expressed in their own unit
+    (mensuel/trimestriel/annuel/fin de contrat, etc.) and must be displayed as-is.
     """
     period = (product.profitability_period or '').strip()
     try:
@@ -387,32 +387,22 @@ def _profitability_text_for_contract(*, product: Product, duration_days: int) ->
     except Exception:
         is_var = False
 
-    # If duration is missing/invalid, fall back to the raw product text.
-    if not isinstance(duration_days, int) or duration_days <= 0:
-        return _profitability_text_for_product(product)
-
-    def _to_decimal_percent(v) -> Decimal:
-        try:
-            return Decimal(str(v or 0))
-        except Exception:
-            return Decimal('0')
-
-    # If the product profitability is expressed "Fin de contrat", interpret it as
-    # the yield over the contract duration (NOT annualized), so keep raw %.
-    if "fin" in period.lower() and "contrat" in period.lower():
-        return _profitability_text_for_product(product)
-
-    # Otherwise: convert annual % -> period % (simple pro-rata on 365d).
-    prorata = (Decimal(duration_days) / Decimal('365'))
-    min_rate = _to_decimal_percent(product.profitability)
-    min_period = (min_rate * prorata).quantize(Decimal('0.01'))
-
     if is_var and product.variable_profitability:
-        max_rate = _to_decimal_percent(product.variable_profitability)
-        max_period = (max_rate * prorata).quantize(Decimal('0.01'))
-        base = f"{min_period}% à {max_period}%"
+        try:
+            min_rate = Decimal(str(product.profitability or 0)).quantize(Decimal('0.01'))
+        except Exception:
+            min_rate = Decimal('0.00')
+        try:
+            max_rate = Decimal(str(product.variable_profitability)).quantize(Decimal('0.01'))
+        except Exception:
+            max_rate = Decimal('0.00')
+        base = f"{min_rate}% à {max_rate}%"
     else:
-        base = f"{min_period}%"
+        try:
+            base_rate = Decimal(str(product.profitability or 0)).quantize(Decimal('0.01'))
+        except Exception:
+            base_rate = Decimal('0.00')
+        base = f"{base_rate}%"
 
     return f"{base} {period}".strip()
 
@@ -3228,6 +3218,7 @@ def client_update_identity(request):
         try:
             original_filename = identity_file.name
             _, ext = os.path.splitext(original_filename)
+            ext = (ext or '').lower()
             custom_filename = f'{client_id}_identity_recto{ext}'
             if client.identity_document:
                 client.identity_document.delete(save=False)
@@ -3245,6 +3236,7 @@ def client_update_identity(request):
         try:
             original_filename = identity_verso_file.name
             _, ext = os.path.splitext(original_filename)
+            ext = (ext or '').lower()
             custom_filename = f'{client_id}_identity_verso{ext}'
             if client.identity_document_verso:
                 client.identity_document_verso.delete(save=False)
@@ -9184,37 +9176,11 @@ def _client_transaction_create_impl(request, client_id):
             if contract_currency not in ('EUR', 'USD', 'CHF'):
                 contract_currency = 'EUR'
             
-            # Profitability
-            is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
+            # Profitability (display rate in its declared unit: mensuel/trimestriel/etc.)
             profitability_period = product.profitability_period or 'mensuel'
             period_label = (profitability_period or '').strip().lower()
             prorata = (Decimal(duration_days) / Decimal('365')) if duration_days else Decimal('0')
-
-            # If profitability is expressed "Fin de contrat", rate is over the contract duration.
-            if 'fin' in period_label and 'contrat' in period_label:
-                if is_variable and product.variable_profitability:
-                    min_profit = float(product.profitability or 0)
-                    max_profit = float(product.variable_profitability)
-                    profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
-                elif product.profitability is not None:
-                    profit = float(product.profitability)
-                    profitability_text = f"{profit:.2f}% NET {profitability_period}"
-                else:
-                    profitability_text = ''
-            else:
-                # Otherwise treat the product rate as annualized and prorate for display consistency.
-                if is_variable and product.variable_profitability:
-                    min_profit = float(product.profitability or 0)
-                    max_profit = float(product.variable_profitability)
-                    min_period = float((Decimal(str(min_profit)) * prorata).quantize(Decimal('0.01')))
-                    max_period = float((Decimal(str(max_profit)) * prorata).quantize(Decimal('0.01')))
-                    profitability_text = f"{min_period:.2f}% NET variable jusqu'à {max_period:.2f}% NET {profitability_period}"
-                elif product.profitability is not None:
-                    profit = float(product.profitability)
-                    period_profit = float((Decimal(str(profit)) * prorata).quantize(Decimal('0.01')))
-                    profitability_text = f"{period_profit:.2f}% NET {profitability_period}"
-                else:
-                    profitability_text = ''
+            profitability_text = _profitability_text_for_contract(product=product, duration_days=duration_days)
             
             # Calculate contract dates
             contract_start_date = transaction_datetime.date()
@@ -9577,30 +9543,6 @@ def _client_transaction_create_impl(request, client_id):
             story.append(Paragraph("\" Bon pour accord \"<br/>\" J'accepte les Termes et Conditions \"", normal_style))
             story.append(Spacer(1, 3*mm))
             story.append(Paragraph(f"Fait le <b>{today_formatted}</b><br/>À : <b>{investor_city}</b>", normal_style))
-            story.append(Spacer(1, 5*mm))
-            
-            # Interest table
-            interest_data = [
-                ['Date', 'Intérêts payés', 'Performance'],
-                [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
-            ]
-            interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
-            interest_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 11),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
-                ('FONTSIZE', (0, 1), (-1, -1), 10),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('InterestTitle', parent=heading_style, alignment=TA_CENTER)))
-            story.append(Spacer(1, 3*mm))
-            story.append(interest_table)
             story.append(Spacer(1, 5*mm))
             
             # Terms & Conditions
@@ -10503,6 +10445,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
         addition_metadata = None
         if requires_addition_recalculation and include_recalculation_preview:
             # Use the same recalculation engine for additions, in dry-run mode.
+            preview_cutoff_dt = timezone.now()
             from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
             recalculation_preview = recalculate_positions_for_product_addition(
                 transaction,
@@ -10512,6 +10455,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 positions_per_month_min=min_val if positions_per_month_min is not None else None,
                 positions_per_month_max=max_val if positions_per_month_max is not None else None,
                 include_focus_transaction=include_focus_transaction,
+                recalculation_cutoff_datetime=preview_cutoff_dt,
             )
 
             deleted_total_expected = int(recalculation_preview.get('deleted_total') or 0)
@@ -10539,7 +10483,11 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 product = transaction.product
 
             addition_metadata = (
-                calculate_addition_recalculation_metadata(addition_txn=transaction, product=product)
+                calculate_addition_recalculation_metadata(
+                    addition_txn=transaction,
+                    product=product,
+                    cutoff_datetime=preview_cutoff_dt,
+                )
                 if product is not None else None
             )
 
@@ -10990,6 +10938,32 @@ def transaction_save_positions(request, client_id, transaction_id):
     skip_positions = request.data.get('skip_positions', False)
     if not isinstance(skip_positions, bool):
         skip_positions = str(skip_positions).lower() in ('true', '1', 'yes', 'on')
+
+    requested_recalculation_cutoff = request.data.get('recalculation_cutoff_datetime')
+    parsed_recalculation_cutoff_dt = None
+    if requested_recalculation_cutoff:
+        try:
+            parsed_recalculation_cutoff_dt = datetime.fromisoformat(
+                str(requested_recalculation_cutoff).replace('Z', '+00:00')
+            )
+            if timezone.is_naive(parsed_recalculation_cutoff_dt):
+                parsed_recalculation_cutoff_dt = timezone.make_aware(
+                    parsed_recalculation_cutoff_dt,
+                    timezone.get_current_timezone(),
+                )
+        except Exception:
+            # Non-blocking fallback: if cutoff parsing fails, continue with server "now".
+            parsed_recalculation_cutoff_dt = None
+
+    expected_recalculation_total = request.data.get('expected_recalculation_total')
+    parsed_expected_recalculation_total = None
+    if expected_recalculation_total is not None:
+        try:
+            parsed_expected_recalculation_total = int(expected_recalculation_total)
+            if parsed_expected_recalculation_total < 0:
+                parsed_expected_recalculation_total = None
+        except (ValueError, TypeError):
+            parsed_expected_recalculation_total = None
     
     try:
         if skip_positions:
@@ -11048,6 +11022,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                     addition_metadata = calculate_addition_recalculation_metadata(
                         addition_txn=transaction,
                         product=product,
+                        cutoff_datetime=parsed_recalculation_cutoff_dt or timezone.now(),
                     )
                     from .models import Position
                     from django.db.models import Count
@@ -11116,7 +11091,16 @@ def transaction_save_positions(request, client_id, transaction_id):
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
                     include_focus_transaction=include_focus_transaction,
+                    recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
                 )
+
+                if parsed_expected_recalculation_total is not None:
+                    actual_regenerated_total = int(recalculation_execution.get('regenerated_total') or 0)
+                    if actual_regenerated_total != parsed_expected_recalculation_total:
+                        raise ValueError(
+                            f"Incohérence preview/exécution: {parsed_expected_recalculation_total} positions prévues "
+                            f"mais {actual_regenerated_total} régénérées. Opération annulée, veuillez régénérer."
+                        )
 
             response_data = {
                 'positions': [], 
@@ -11228,6 +11212,14 @@ def transaction_save_positions(request, client_id, transaction_id):
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
                 )
+
+                if parsed_expected_recalculation_total is not None:
+                    actual_regenerated_total = int(recalculation_execution.get('regenerated_total') or 0)
+                    if actual_regenerated_total != parsed_expected_recalculation_total:
+                        raise ValueError(
+                            f"Incohérence preview/exécution: {parsed_expected_recalculation_total} positions prévues "
+                            f"mais {actual_regenerated_total} régénérées. Opération annulée, veuillez régénérer."
+                        )
 
             response_data = {
                 'positions': [], 
@@ -11962,37 +11954,11 @@ def product_contract_pdf(request, product_id):
     except (ValueError, TypeError):
         amount = float(product.min_entry_value or 10000)
     
-    # Profitability
-    is_variable = str(product.is_variable_profitability or '').lower() == 'oui'
+    # Profitability (display rate in its declared unit: mensuel/trimestriel/etc.)
     profitability_period = product.profitability_period or 'mensuel'
     period_label = (profitability_period or '').strip().lower()
     prorata = (Decimal(duration_days) / Decimal('365')) if duration_days else Decimal('0')
-
-    if 'fin' in period_label and 'contrat' in period_label:
-        # Rate is already for the contract duration.
-        if is_variable and product.variable_profitability:
-            min_profit = float(product.profitability or 0)
-            max_profit = float(product.variable_profitability)
-            profitability_text = f"{min_profit:.2f}% NET variable jusqu'à {max_profit:.2f}% NET {profitability_period}"
-        elif product.profitability is not None:
-            profit = float(product.profitability)
-            profitability_text = f"{profit:.2f}% NET {profitability_period}"
-        else:
-            profitability_text = ''
-    else:
-        # Annualized -> prorated display.
-        if is_variable and product.variable_profitability:
-            min_profit = float(product.profitability or 0)
-            max_profit = float(product.variable_profitability)
-            min_period = float((Decimal(str(min_profit)) * prorata).quantize(Decimal('0.01')))
-            max_period = float((Decimal(str(max_profit)) * prorata).quantize(Decimal('0.01')))
-            profitability_text = f"{min_period:.2f}% NET variable jusqu'à {max_period:.2f}% NET {profitability_period}"
-        elif product.profitability is not None:
-            profit = float(product.profitability)
-            period_profit = float((Decimal(str(profit)) * prorata).quantize(Decimal('0.01')))
-            profitability_text = f"{period_profit:.2f}% NET {profitability_period}"
-        else:
-            profitability_text = ''
+    profitability_text = _profitability_text_for_contract(product=product, duration_days=duration_days)
     
     # Calculate contract dates
     contract_start_date = date.today()
@@ -12358,30 +12324,6 @@ def product_contract_pdf(request, product_id):
     story.append(Paragraph("\" Bon pour accord \"<br/>\" J'accepte les Termes et Conditions \"", normal_style))
     story.append(Spacer(1, 3*mm))
     story.append(Paragraph(f"Fait le <b>{today_formatted}</b><br/>À : <b>{investor_city}</b>", normal_style))
-    story.append(Spacer(1, 5*mm))
-    
-    # Interest table
-    interest_data = [
-        ['Date', 'Intérêts payés', 'Performance'],
-        [contract_end_date_str, _format_amount_for_contract(interest_amount, contract_currency), f"{profitability_rate:.2f} %"],
-    ]
-    interest_table = Table(interest_data, colWidths=[60*mm, 60*mm, 50*mm])
-    interest_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 11),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica-Bold'),  # Make dynamic data bold
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    story.append(Paragraph("RÉCAPITULATIF DE VOTRE SOUSCRIPTION", ParagraphStyle('InterestTitle', parent=heading_style, alignment=TA_CENTER)))
-    story.append(Spacer(1, 3*mm))
-    story.append(interest_table)
     story.append(Spacer(1, 5*mm))
     
     # Terms & Conditions

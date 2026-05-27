@@ -1914,6 +1914,8 @@ def _create_period_positions_simple(
     ctx: InvestmentContext,
     allocations: list[ProductAssetAllocation] | None,
     trigger: str | None = None,
+    future_only: bool = False,
+    future_cutoff_datetime: datetime | None = None,
 ) -> list[Position]:
     """
     Create position(s) per profitability period with exact calculated values.
@@ -2012,6 +2014,15 @@ def _create_period_positions_simple(
     cursor_dt = start_dt
     period_idx = 0
     
+    generation_cutoff_now = None
+    if future_only:
+        generation_cutoff_now = future_cutoff_datetime or timezone.now()
+        if timezone.is_naive(generation_cutoff_now):
+            generation_cutoff_now = timezone.make_aware(
+                generation_cutoff_now,
+                timezone.get_current_timezone(),
+            )
+
     while remaining_months > 0:
         step_months = min(float(profit_period_months), float(remaining_months))
         period_end_dt = _add_months_dt(cursor_dt, step_months)
@@ -2393,6 +2404,10 @@ def _create_period_positions_simple(
                     asset_obj = p.get("asset")
                     opened_at = p["opened_at"]
                     closed_at = p["closed_at"]
+
+                    if generation_cutoff_now is not None and opened_at <= generation_cutoff_now:
+                        # Regeneration must only recreate upcoming positions.
+                        continue
                     
                     fx_rate = None
                     invested_amount_asset_currency = None
@@ -2980,10 +2995,14 @@ def generate_positions_with_rates(
                 opened_at = t["opened_at"]
                 closed_at = t["closed_at"]
 
+                # Manual regeneration only replaces upcoming positions.
+                # Never preview/save newly generated positions in the past.
+                if opened_at <= now:
+                    continue
+
                 asset_currency = None
                 fx_rate = None
                 invested_amount_asset_currency = None
-                now = timezone.now()
                 is_future_position = opened_at > now
                 if asset_obj is not None and not is_future_position:
                     asset_currency = (getattr(asset_obj, 'currency', None) or '').strip().upper() or None
@@ -3285,6 +3304,35 @@ def save_generated_positions(
                 sorted(existing_locked_period_indexes),
             )
 
+    # Regeneration replaces only upcoming positions.
+    # Never create newly generated rows in the past; keep open/done history unchanged.
+    future_filtered_positions_data: list[dict] = []
+    dropped_past_rows = 0
+    now_cutoff = timezone.now()
+    for pos_data in positions_data:
+        opened_raw = pos_data.get('opened_at')
+        if not opened_raw:
+            continue
+        try:
+            opened_at = datetime.fromisoformat(str(opened_raw).replace('Z', '+00:00'))
+        except Exception:
+            # Keep robust behavior: if datetime is malformed, drop the row.
+            dropped_past_rows += 1
+            continue
+        if timezone.is_naive(opened_at):
+            opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
+        if opened_at <= now_cutoff:
+            dropped_past_rows += 1
+            continue
+        future_filtered_positions_data.append(pos_data)
+    if dropped_past_rows > 0:
+        logger.info(
+            "Dropped %s generated past positions for transaction %s (regen is future-only).",
+            dropped_past_rows,
+            txn.id,
+        )
+    positions_data = future_filtered_positions_data
+
     # Defensive deduplication:
     # keep all legitimate positions inside a period and remove only exact duplicates.
     # A period can contain multiple positions by design.
@@ -3484,7 +3532,12 @@ def save_generated_positions(
                     # Regenerate positions for this investment transaction
                     # This will use the updated capital (which includes the change from the current transaction)
                     # delete_pending=False because we already deleted all pending positions above (for all transactions)
-                    created_positions = create_positions_for_investment(other_txn, trigger="capital_update_recalculation", delete_pending=False)
+                    created_positions = create_positions_for_investment(
+                        other_txn,
+                        trigger="capital_update_recalculation",
+                        delete_pending=False,
+                        future_only=True,
+                    )
                     logger.debug(f"DEBUG: Transaction {other_txn.id}: Created {len(created_positions)} new positions (attempt {attempt + 1}/{max_retries + 1})")
                     
                     # Verify that positions were actually created
@@ -4572,7 +4625,14 @@ def build_investment_context(
 
 
 @db_transaction.atomic
-def create_positions_for_investment(txn: Transaction, *, trigger: str | None = None, delete_pending: bool = True) -> list[Position]:
+def create_positions_for_investment(
+    txn: Transaction,
+    *,
+    trigger: str | None = None,
+    delete_pending: bool = True,
+    future_only: bool = False,
+    future_cutoff_datetime: datetime | None = None,
+) -> list[Position]:
     """
     Create monthly positions for an investment transaction.
 
@@ -4585,6 +4645,8 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
         trigger: Optional trigger string for logging
         delete_pending: If True (default), delete all pending positions before creating new ones.
                        If False, only create missing positions (idempotent mode).
+        future_only: If True, only create positions with opened_at strictly in the future.
+        future_cutoff_datetime: Optional fixed cutoff used when future_only=True.
     """
     ctx = build_investment_context(txn)
     if ctx is None:
@@ -4665,6 +4727,8 @@ def create_positions_for_investment(txn: Transaction, *, trigger: str | None = N
             ctx=ctx,
             allocations=allocations_list,
             trigger=trigger,
+            future_only=future_only,
+            future_cutoff_datetime=future_cutoff_datetime,
         )
 
     # Fallback: products without allocations (no positions generated)
@@ -4865,7 +4929,7 @@ def recalculate_positions_for_product_withdrawal(
             type='transfert',
             transfer_to=product.id,
             status__in=COMPLETED_TRANSACTION_STATUSES
-        ).exclude(id=withdrawal_txn.id)  # Exclude the withdrawal transaction itself
+        ).exclude(id=withdrawal_txn.id).order_by('datetime', 'id')  # Exclude the withdrawal transaction itself
         
         txn_count = investment_transactions.count()
         execution_summary['transaction_count'] = int(txn_count)
@@ -4913,7 +4977,12 @@ def recalculate_positions_for_product_withdrawal(
                 # Regenerate positions for this investment transaction
                 # This will use the updated capital (reduced by the withdrawal)
                 # delete_pending=False because we already deleted ALL pending positions above (for all transactions)
-                created_positions = create_positions_for_investment(inv_txn, trigger="withdrawal_recalculation", delete_pending=False)
+                created_positions = create_positions_for_investment(
+                    inv_txn,
+                    trigger="withdrawal_recalculation",
+                    delete_pending=False,
+                    future_only=True,
+                )
                 created_count = len(created_positions or [])
                 regenerated_total += created_count
                 if dry_run and created_positions:
@@ -5014,6 +5083,7 @@ def calculate_addition_recalculation_metadata(
     *,
     addition_txn: Transaction,
     product: Product | None = None,
+    cutoff_datetime: datetime | None = None,
 ) -> dict:
     """
     Compute addition metadata used for proportional recalculation:
@@ -5042,7 +5112,10 @@ def calculate_addition_recalculation_metadata(
             'cutoff_datetime': (addition_txn.datetime or timezone.now()).isoformat(),
         }
 
-    cutoff_dt = addition_txn.datetime or timezone.now()
+    # Important: addition recalculation must reflect the current portfolio state.
+    # Transaction datetime can be backdated for UX/accounting, which would undercount
+    # already-closed positions in the audit panel.
+    cutoff_dt = cutoff_datetime or timezone.now()
     addition_amount = (_to_decimal(addition_txn.amount) or Decimal('0')).quantize(Decimal('0.01'))
 
     principal_before = _calculate_real_invested_capital(
@@ -5102,6 +5175,7 @@ def recalculate_positions_for_product_addition(
     positions_per_month_min: int | None = None,
     positions_per_month_max: int | None = None,
     include_focus_transaction: bool = False,
+    recalculation_cutoff_datetime: datetime | None = None,
 ) -> dict:
     """
     Recalculate pending positions after a fund addition.
@@ -5184,19 +5258,33 @@ def recalculate_positions_for_product_addition(
             execution_summary['status'] = 'failed'
             return execution_summary
         
-        # Verify this is indeed an addition (investment)
+        # Verify this is indeed an addition (investment).
+        # Be tolerant with historical rows where transfer_from may be missing:
+        # if transfer_to targets the product (and is not 'solde'), this is an investment flow.
+        transfer_to_value = str(addition_txn.transfer_to or '').strip()
+        transfer_from_value = str(addition_txn.transfer_from or '').strip()
+        product_id_value = str(product.id or '').strip()
         is_addition = (
-            addition_txn.transfer_to == product.id and
-            addition_txn.transfer_from == 'solde'
+            transfer_to_value != '' and
+            transfer_to_value != 'solde' and
+            transfer_to_value == product_id_value and
+            transfer_from_value != 'trading'
         )
         if not is_addition:
             execution_summary['status'] = 'skipped_not_addition'
             return execution_summary
 
         execution_summary['product_id'] = product.id
+        recalculation_cutoff_dt = recalculation_cutoff_datetime or timezone.now()
+        if timezone.is_naive(recalculation_cutoff_dt):
+            recalculation_cutoff_dt = timezone.make_aware(
+                recalculation_cutoff_dt,
+                timezone.get_current_timezone(),
+            )
         addition_meta = calculate_addition_recalculation_metadata(
             addition_txn=addition_txn,
             product=product,
+            cutoff_datetime=recalculation_cutoff_dt,
         )
         logger.info(
             "Addition recalculation context "
@@ -5282,7 +5370,7 @@ def recalculate_positions_for_product_addition(
             type='transfert',
             transfer_to=product.id,
             status__in=COMPLETED_TRANSACTION_STATUSES,
-        ).order_by('datetime')
+        ).order_by('datetime', 'id')
         if not include_focus_transaction:
             investment_transactions = investment_transactions.exclude(id=addition_txn.id)
 
@@ -5314,7 +5402,7 @@ def recalculate_positions_for_product_addition(
                     inv_txn.subscription_details = merged_sub
 
                 # Pass recalculation context to context builder without persisting anything.
-                inv_txn._capital_cutoff_datetime = addition_txn.datetime or timezone.now()
+                inv_txn._capital_cutoff_datetime = recalculation_cutoff_dt
                 inv_txn._withdrawal_recalc_metadata = addition_meta  # Reuse the same attribute name for consistency
                 
                 # Check all existing positions before recalculation
@@ -5330,7 +5418,13 @@ def recalculate_positions_for_product_addition(
                 # Regenerate positions for this investment transaction
                 # This will use the updated capital (increased by the addition)
                 # delete_pending=False because we already deleted ALL pending positions above
-                created_positions = create_positions_for_investment(inv_txn, trigger="addition_recalculation", delete_pending=False)
+                created_positions = create_positions_for_investment(
+                    inv_txn,
+                    trigger="addition_recalculation",
+                    delete_pending=False,
+                    future_only=True,
+                    future_cutoff_datetime=recalculation_cutoff_dt,
+                )
                 created_count = len(created_positions or [])
                 regenerated_total += created_count
                 if dry_run and created_positions:
