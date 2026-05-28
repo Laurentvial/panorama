@@ -11524,8 +11524,6 @@ def transaction_save_positions(request, client_id, transaction_id):
             
             return Response(response_data)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Failed to save positions/history for transaction {transaction.id}: {str(e)}", exc_info=True)
         return Response({'error': f'Erreur lors de l\'enregistrement des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
