@@ -1,6 +1,7 @@
 import random
 from decimal import Decimal
 from unittest.mock import patch
+from datetime import datetime, timezone as dt_timezone
 
 from django.test import SimpleTestCase
 
@@ -11,6 +12,11 @@ from .position_service import (
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
     _product_has_explicit_contract_duration,
+)
+from .views import (
+    _build_preview_contract,
+    _validate_preview_contract,
+    _validate_recalculation_execution_against_expected,
 )
 
 
@@ -157,3 +163,58 @@ class ProfitVariabilityTest(SimpleTestCase):
         rng = random.Random("tiny-profit")
         value = _apply_profit_variability(Decimal('0.01'), rng)
         self.assertGreaterEqual(value, Decimal('0.01'))
+
+
+class PreviewContractValidationTest(SimpleTestCase):
+    def test_preview_contract_round_trip(self):
+        cutoff = datetime(2026, 6, 1, 12, 30, tzinfo=dt_timezone.utc)
+        per_tx = [
+            {'transaction_id': 'txnA', 'created': 10, 'before_pending': 7, 'after_pending': 10, 'status': 'ok'},
+            {'transaction_id': 'txnB', 'created': 5, 'before_pending': 3, 'after_pending': 5, 'status': 'ok'},
+        ]
+        contract = _build_preview_contract(
+            cutoff_dt=cutoff,
+            regenerated_total=15,
+            per_transaction_expected=per_tx,
+            source='unit_test',
+        )
+        parsed, err = _validate_preview_contract(contract)
+        self.assertIsNone(err)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed['expected_total'], 15)
+        self.assertEqual(len(parsed['expected_per_transaction']), 2)
+        self.assertEqual(parsed['cutoff_datetime'], cutoff.isoformat())
+
+    def test_preview_contract_signature_mismatch_detected(self):
+        cutoff = datetime(2026, 6, 1, 12, 30, tzinfo=dt_timezone.utc)
+        contract = _build_preview_contract(
+            cutoff_dt=cutoff,
+            regenerated_total=3,
+            per_transaction_expected=[{'transaction_id': 'txnA', 'created': 3}],
+            source='unit_test',
+        )
+        contract['expected_total'] = 999
+        parsed, err = _validate_preview_contract(contract)
+        self.assertIsNone(parsed)
+        self.assertIsNotNone(err)
+        self.assertIn('signature mismatch', err)
+
+    def test_validate_recalculation_execution_against_expected_per_transaction(self):
+        expected_per_tx = [
+            {'transaction_id': 'txnA', 'created': 10},
+            {'transaction_id': 'txnB', 'created': 5},
+        ]
+        execution_summary = {
+            'regenerated_total': 15,
+            'per_transaction': [
+                {'transaction_id': 'txnA', 'created': 10},
+                {'transaction_id': 'txnB', 'created': 2},
+            ],
+        }
+        mismatch = _validate_recalculation_execution_against_expected(
+            expected_total=15,
+            expected_per_transaction=expected_per_tx,
+            execution_summary=execution_summary,
+        )
+        self.assertIsNotNone(mismatch)
+        self.assertIn('par transaction', mismatch)

@@ -3280,29 +3280,10 @@ def save_generated_positions(
     ).count() if ctx.product_id else 0
     logger.debug(f"DEBUG: Total pending positions for product {ctx.product_id} BEFORE creating new positions: {total_pending_before_create}")
 
-    # Never try to recreate periods that already exist as non-pending for this transaction
-    # (open/done). They are historical records and must remain immutable.
-    existing_locked_period_indexes = set(
-        Position.objects.filter(transaction_id=txn.id)
-        .exclude(status='pending')
-        .exclude(period_index__isnull=True)
-        .values_list('period_index', flat=True)
-    )
-    if existing_locked_period_indexes:
-        original_count = len(positions_data)
-        positions_data = [
-            pos_data
-            for pos_data in positions_data
-            if pos_data.get('period_index') not in existing_locked_period_indexes
-        ]
-        skipped = original_count - len(positions_data)
-        if skipped > 0:
-            logger.info(
-                "Skipping %s generated positions for transaction %s: period_index already exists in non-pending positions (%s).",
-                skipped,
-                txn.id,
-                sorted(existing_locked_period_indexes),
-            )
+    # Keep open/done history immutable by not deleting them, but DO NOT drop generated
+    # future rows only because they share a period_index with historical rows.
+    # In regeneration flows, a period can legitimately contain both historical open/done
+    # rows and newly generated future pending rows.
 
     # Regeneration replaces only upcoming positions.
     # Never create newly generated rows in the past; keep open/done history unchanged.
@@ -4748,6 +4729,7 @@ def recalculate_positions_for_product_withdrawal(
     dry_run: bool = False,
     positions_per_month_min: int | None = None,
     positions_per_month_max: int | None = None,
+    recalculation_cutoff_datetime: datetime | None = None,
 ) -> dict:
     """
     Recalculate pending positions after a withdrawal.
@@ -4789,6 +4771,13 @@ def recalculate_positions_for_product_withdrawal(
             logger.error(message)
 
     try:
+        recalculation_cutoff_dt = recalculation_cutoff_datetime or timezone.now()
+        if timezone.is_naive(recalculation_cutoff_dt):
+            recalculation_cutoff_dt = timezone.make_aware(
+                recalculation_cutoff_dt,
+                timezone.get_current_timezone(),
+            )
+
         if withdrawal_txn.type != 'transfert':
             execution_summary['status'] = 'skipped_not_transfer'
             return execution_summary
@@ -4960,7 +4949,7 @@ def recalculate_positions_for_product_withdrawal(
                     inv_txn.subscription_details = merged_sub
 
                 # Pass recalculation context to context builder without persisting anything.
-                inv_txn._capital_cutoff_datetime = withdrawal_txn.datetime or timezone.now()
+                inv_txn._capital_cutoff_datetime = recalculation_cutoff_dt
                 inv_txn._withdrawal_recalc_metadata = withdrawal_meta
 
                 # Check all existing positions before recalculation
@@ -4982,6 +4971,7 @@ def recalculate_positions_for_product_withdrawal(
                     trigger="withdrawal_recalculation",
                     delete_pending=False,
                     future_only=True,
+                    future_cutoff_datetime=recalculation_cutoff_dt,
                 )
                 created_count = len(created_positions or [])
                 regenerated_total += created_count

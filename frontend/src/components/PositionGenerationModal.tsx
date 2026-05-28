@@ -563,7 +563,10 @@ export function PositionGenerationModal({
       const positionsData = (response as any).positions || [];
       setPositions(positionsData);
       if ((response as any).recalculation_execution_preview) {
-        setRecalculationPreview((response as any).recalculation_execution_preview);
+        setRecalculationPreview({
+          ...((response as any).recalculation_execution_preview || {}),
+          preview_contract: (response as any).preview_contract || null,
+        } as any);
       }
       if ((response as any).withdrawal_recalculation) {
         setWithdrawalRecalculation((response as any).withdrawal_recalculation);
@@ -687,6 +690,16 @@ export function PositionGenerationModal({
         recalculationPreview?.regenerated_total_expected != null
           ? Number(recalculationPreview.regenerated_total_expected)
           : null;
+      const expectedRecalculationPerTransaction =
+        (isWithdrawal || isAdditionRecalc) &&
+        Array.isArray(recalculationPreview?.per_transaction_expected)
+          ? recalculationPreview.per_transaction_expected
+          : null;
+      const previewContract =
+        (isWithdrawal || isAdditionRecalc) &&
+        (recalculationPreview as any)?.preview_contract
+          ? (recalculationPreview as any).preview_contract
+          : null;
 
       const response = await apiCall(
         `/api/clients/${clientId}/transactions/${transaction.id}/save-positions/`,
@@ -712,6 +725,16 @@ export function PositionGenerationModal({
             ...(expectedRecalculationTotal != null && Number.isFinite(expectedRecalculationTotal)
               ? {
                   expected_recalculation_total: expectedRecalculationTotal,
+                }
+              : {}),
+            ...(expectedRecalculationPerTransaction
+              ? {
+                  expected_recalculation_per_transaction: expectedRecalculationPerTransaction,
+                }
+              : {}),
+            ...(previewContract
+              ? {
+                  preview_contract: previewContract,
                 }
               : {}),
           })

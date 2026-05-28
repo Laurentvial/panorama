@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
-import { Check } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
@@ -44,6 +44,7 @@ export function PlatformTrading() {
   const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const [cardDepositDialogOpen, setCardDepositDialogOpen] = useState(false);
   const [cardDepositSuccess, setCardDepositSuccess] = useState<{ amount: number; transaction: any } | null>(null);
+  const [depositRibDialogOpen, setDepositRibDialogOpen] = useState(false);
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
@@ -558,6 +559,40 @@ export function PlatformTrading() {
   const depositWireMotifMissing =
     clientRibs.length > 0 && !(selectedDepositClientRib?.rib?.motif || '').trim();
 
+  const canViewDepositRib =
+    movementType === 'depot' &&
+    availablePaymentMethods.includes('virement');
+
+  const copyShortcutButtonStyle: React.CSSProperties = {
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    backgroundColor: '#ffffff',
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: 600,
+    padding: '4px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
+  const copyToClipboard = async (label: string, value: string) => {
+    const text = String(value || '').trim();
+    if (!text) {
+      toast.error(`Aucune valeur à copier pour ${label}`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copié`);
+    } catch (error) {
+      console.error(`Failed to copy ${label}:`, error);
+      toast.error(`Impossible de copier ${label}`);
+    }
+  };
+
   const confirmTransfer = async () => {
     try {
       setSubmitting(true);
@@ -919,11 +954,222 @@ export function PlatformTrading() {
                   >
                     {submitting ? 'Traitement...' : flowSubmitLabel}
                   </Button>
+                  {canViewDepositRib && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDepositRibDialogOpen(true)}
+                    >
+                      Voir le RIB
+                    </Button>
+                  )}
                 </div>
                 </form>
               </CardContent>
             </Card>
           </div>
+
+          <Dialog open={depositRibDialogOpen} onOpenChange={setDepositRibDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>RIB pour le virement</DialogTitle>
+                <DialogDescription>
+                  Utilisez ces informations pour effectuer votre virement.
+                </DialogDescription>
+              </DialogHeader>
+
+              {selectedDepositClientRib?.rib ? (
+                <div
+                  style={{
+                    padding: 12,
+                    border: '1px solid #dbeafe',
+                    borderRadius: 8,
+                    backgroundColor: '#f8fafc',
+                  }}
+                >
+                  <div style={{ display: 'grid', gap: 8, fontSize: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontWeight: 500, color: '#6b7280' }}>Titulaire :</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 600 }}>{selectedDepositClientRib.rib.accountHolder || '-'}</span>
+                        <button
+                          type="button"
+                          style={copyShortcutButtonStyle}
+                          onClick={() => copyToClipboard('Titulaire', selectedDepositClientRib.rib.accountHolder || '')}
+                          aria-label="Copier le titulaire"
+                          title="Copier le titulaire"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <div style={{ fontWeight: 500, color: '#6b7280', fontSize: 13 }}>
+                          IBAN :
+                        </div>
+                        <button
+                          type="button"
+                          style={copyShortcutButtonStyle}
+                          onClick={() => copyToClipboard('IBAN', selectedDepositClientRib.rib.iban || '')}
+                          aria-label="Copier l'IBAN"
+                          title="Copier l'IBAN"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 600, color: '#111827', wordBreak: 'break-word' }}>
+                        {selectedDepositClientRib.rib.iban || '-'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span style={{ fontWeight: 500, color: '#6b7280' }}>BIC :</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedDepositClientRib.rib.bic || '-'}</span>
+                        <button
+                          type="button"
+                          style={copyShortcutButtonStyle}
+                          onClick={() => copyToClipboard('BIC', selectedDepositClientRib.rib.bic || '')}
+                          aria-label="Copier le BIC"
+                          title="Copier le BIC"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {selectedDepositClientRib.rib.bankCode && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontWeight: 500, color: '#6b7280' }}>Code banque :</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedDepositClientRib.rib.bankCode}</span>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Code banque', selectedDepositClientRib.rib.bankCode || '')}
+                            aria-label="Copier le code banque"
+                            title="Copier le code banque"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedDepositClientRib.rib.branchCode && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontWeight: 500, color: '#6b7280' }}>Code guichet :</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedDepositClientRib.rib.branchCode}</span>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Code guichet', selectedDepositClientRib.rib.branchCode || '')}
+                            aria-label="Copier le code guichet"
+                            title="Copier le code guichet"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedDepositClientRib.rib.accountNumber && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontWeight: 500, color: '#6b7280' }}>N° compte :</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedDepositClientRib.rib.accountNumber}</span>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Numéro de compte', selectedDepositClientRib.rib.accountNumber || '')}
+                            aria-label="Copier le numéro de compte"
+                            title="Copier le numéro de compte"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedDepositClientRib.rib.ribKey && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontWeight: 500, color: '#6b7280' }}>Clé RIB :</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedDepositClientRib.rib.ribKey}</span>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Clé RIB', selectedDepositClientRib.rib.ribKey || '')}
+                            aria-label="Copier la clé RIB"
+                            title="Copier la clé RIB"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedDepositClientRib.rib.domiciliation && (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <div style={{ fontWeight: 500, color: '#6b7280', fontSize: 13 }}>
+                            Domiciliation :
+                          </div>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Domiciliation', selectedDepositClientRib.rib.domiciliation || '')}
+                            aria-label="Copier la domiciliation"
+                            title="Copier la domiciliation"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                        <div style={{ fontSize: 13, color: '#374151' }}>
+                          {selectedDepositClientRib.rib.domiciliation}
+                        </div>
+                      </div>
+                    )}
+                    {(selectedDepositClientRib.rib.motif || '').trim() ? (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <div style={{ fontWeight: 500, color: '#6b7280', fontSize: 13 }}>
+                            Motif du virement :
+                          </div>
+                          <button
+                            type="button"
+                            style={copyShortcutButtonStyle}
+                            onClick={() => copyToClipboard('Motif du virement', (selectedDepositClientRib.rib.motif || '').trim())}
+                            aria-label="Copier le motif du virement"
+                            title="Copier le motif du virement"
+                          >
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 14,
+                            color: '#111827',
+                            whiteSpace: 'pre-wrap',
+                            fontWeight: 600,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {(selectedDepositClientRib.rib.motif || '').trim()}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 14, color: '#6b7280' }}>
+                  Aucun RIB disponible actuellement.
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button type="button" variant="platform" onClick={() => setDepositRibDialogOpen(false)}>
+                  Fermer
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog
             open={withdrawDialogOpen}

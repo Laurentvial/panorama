@@ -53,6 +53,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 import uuid
 import json
+import hashlib
 import os
 import hmac
 import re
@@ -147,6 +148,116 @@ def _parse_generation_horizon_days_from_request(request_data) -> tuple[int | Non
             status=status.HTTP_400_BAD_REQUEST,
         )
     return v, None
+
+
+def _normalize_recalculation_per_transaction(items) -> list[dict]:
+    normalized: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        txn_id = str(item.get('transaction_id') or '').strip()
+        if not txn_id:
+            continue
+        try:
+            created = int(item.get('created') or 0)
+        except (TypeError, ValueError):
+            created = 0
+        try:
+            before_pending = int(item.get('before_pending') or 0)
+        except (TypeError, ValueError):
+            before_pending = 0
+        try:
+            after_pending = int(item.get('after_pending') or 0)
+        except (TypeError, ValueError):
+            after_pending = 0
+        normalized.append(
+            {
+                'transaction_id': txn_id,
+                'before_pending': before_pending,
+                'created': created,
+                'after_pending': after_pending,
+                'status': str(item.get('status') or ''),
+            }
+        )
+    normalized.sort(key=lambda x: x['transaction_id'])
+    return normalized
+
+
+def _build_preview_contract(
+    *,
+    cutoff_dt,
+    regenerated_total: int,
+    per_transaction_expected: list[dict],
+    source: str,
+) -> dict:
+    normalized_per_tx = _normalize_recalculation_per_transaction(per_transaction_expected)
+    payload = {
+        'version': 1,
+        'source': str(source or ''),
+        'cutoff_datetime': cutoff_dt.isoformat() if cutoff_dt else None,
+        'expected_total': int(regenerated_total or 0),
+        'expected_per_transaction': normalized_per_tx,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    digest = hashlib.sha256(payload_json.encode('utf-8')).hexdigest()
+    return {
+        **payload,
+        'payload_sha256': digest,
+    }
+
+
+def _validate_preview_contract(contract) -> tuple[dict | None, str | None]:
+    if not contract:
+        return None, None
+    if not isinstance(contract, dict):
+        return None, 'preview_contract invalide (objet attendu)'
+
+    payload = {
+        'version': int(contract.get('version') or 1),
+        'source': str(contract.get('source') or ''),
+        'cutoff_datetime': contract.get('cutoff_datetime'),
+        'expected_total': int(contract.get('expected_total') or 0),
+        'expected_per_transaction': _normalize_recalculation_per_transaction(
+            contract.get('expected_per_transaction') or []
+        ),
+    }
+    provided_digest = str(contract.get('payload_sha256') or '').strip().lower()
+    if not provided_digest:
+        return None, 'preview_contract invalide (payload_sha256 manquant)'
+
+    payload_json = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    computed_digest = hashlib.sha256(payload_json.encode('utf-8')).hexdigest()
+    if computed_digest != provided_digest:
+        return None, 'preview_contract invalide (signature mismatch)'
+    return payload, None
+
+
+def _validate_recalculation_execution_against_expected(
+    *,
+    expected_total: int | None,
+    expected_per_transaction: list[dict] | None,
+    execution_summary: dict,
+) -> str | None:
+    actual_total = int(execution_summary.get('regenerated_total') or 0)
+    if expected_total is not None and actual_total != int(expected_total):
+        return (
+            f"Incohérence preview/exécution: {int(expected_total)} positions prévues "
+            f"mais {actual_total} régénérées."
+        )
+
+    if expected_per_transaction:
+        actual_per_tx = _normalize_recalculation_per_transaction(execution_summary.get('per_transaction') or [])
+        actual_created_by_tx = {item['transaction_id']: int(item.get('created') or 0) for item in actual_per_tx}
+        expected_created_by_tx = {
+            item['transaction_id']: int(item.get('created') or 0)
+            for item in _normalize_recalculation_per_transaction(expected_per_transaction)
+        }
+        if actual_created_by_tx != expected_created_by_tx:
+            return (
+                "Incohérence preview/exécution par transaction: "
+                f"attendu={expected_created_by_tx}, obtenu={actual_created_by_tx}."
+            )
+    return None
 
 
 class SafeTokenRefreshView(TokenRefreshView):
@@ -7743,9 +7854,11 @@ def client_positions(request, client_id):
             return err
 
     # Align pending/open/done with real time so the portal stays correct if cron is late or missing.
+    sync_stats = None
+    sync_error = None
     try:
         with db_transaction.atomic():
-            sync_position_statuses_from_schedule(
+            sync_stats = sync_position_statuses_from_schedule(
                 Position.objects.filter(client=client),
                 run_interest_for_closed=True,
                 interest_trigger='client_positions_view',
@@ -7756,6 +7869,7 @@ def client_positions(request, client_id):
             'sync_position_statuses_from_schedule failed for client %s',
             client_id,
         )
+        sync_error = 'sync_failed'
 
     qs = Position.objects.select_related('client', 'product', 'transaction', 'asset').filter(client=client)
     # Platform client must never see cancelled positions (even if requested via status filter).
@@ -7809,6 +7923,22 @@ def client_positions(request, client_id):
     paginated_qs = qs[offset:offset + limit]
     
     serializer = PositionSerializer(paginated_qs, many=True)
+    sync_response = None
+    if isinstance(sync_stats, dict):
+        sync_response = {
+            'applied': True,
+            'moved_to_pending': int(sync_stats.get('to_pending') or 0),
+            'moved_to_open': int(sync_stats.get('to_open') or 0),
+            'moved_to_done': int(sync_stats.get('to_done') or 0),
+            'interest_transactions_created': int(sync_stats.get('interest_transactions_created') or 0),
+            'now': sync_stats.get('now').isoformat() if sync_stats.get('now') else None,
+        }
+    elif sync_error:
+        sync_response = {
+            'applied': False,
+            'error': sync_error,
+        }
+
     return Response({
         'positions': serializer.data,
         'pagination': {
@@ -7816,7 +7946,8 @@ def client_positions(request, client_id):
             'limit': limit,
             'total': total_count,
             'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
-        }
+        },
+        'sync': sync_response,
     })
 
 
@@ -10502,6 +10633,12 @@ def transaction_generate_positions(request, client_id, transaction_id):
                     'generated_positions_preview_note': recalculation_preview.get('generated_positions_preview_note'),
                     'source': 'recalculate_positions_for_product_addition_dry_run',
                 },
+                'preview_contract': _build_preview_contract(
+                    cutoff_dt=preview_cutoff_dt,
+                    regenerated_total=regenerated_total_expected,
+                    per_transaction_expected=per_txn_expected,
+                    source='recalculate_positions_for_product_addition_dry_run',
+                ),
             }
             if deleted_positions_preview:
                 response_data['deleted_positions'] = deleted_positions_preview
@@ -10511,6 +10648,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
 
         if is_withdrawal and include_recalculation_preview:
             # Use the same recalculation engine as save-positions, but in dry-run mode.
+            preview_cutoff_dt = timezone.now()
             recalculation_preview = recalculate_positions_for_product_withdrawal(
                 transaction,
                 force_recalculate=True,
@@ -10518,6 +10656,7 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 dry_run=True,
                 positions_per_month_min=min_val if positions_per_month_min is not None else None,
                 positions_per_month_max=max_val if positions_per_month_max is not None else None,
+                recalculation_cutoff_datetime=preview_cutoff_dt,
             )
 
             deleted_total_expected = int(recalculation_preview.get('deleted_total') or 0)
@@ -10560,6 +10699,12 @@ def transaction_generate_positions(request, client_id, transaction_id):
                     'generated_positions_preview_note': recalculation_preview.get('generated_positions_preview_note'),
                     'source': 'recalculate_positions_for_product_withdrawal_dry_run',
                 },
+                'preview_contract': _build_preview_contract(
+                    cutoff_dt=preview_cutoff_dt,
+                    regenerated_total=regenerated_total_expected,
+                    per_transaction_expected=per_txn_expected,
+                    source='recalculate_positions_for_product_withdrawal_dry_run',
+                ),
             }
             if deleted_positions_preview:
                 response_data['deleted_positions'] = deleted_positions_preview
@@ -10964,8 +11109,83 @@ def transaction_save_positions(request, client_id, transaction_id):
                 parsed_expected_recalculation_total = None
         except (ValueError, TypeError):
             parsed_expected_recalculation_total = None
+
+    expected_recalculation_per_transaction = request.data.get('expected_recalculation_per_transaction')
+    parsed_expected_recalculation_per_transaction = _normalize_recalculation_per_transaction(
+        expected_recalculation_per_transaction if isinstance(expected_recalculation_per_transaction, list) else []
+    )
+
+    raw_preview_contract = request.data.get('preview_contract')
+    parsed_preview_contract, preview_contract_error = _validate_preview_contract(raw_preview_contract)
+    if preview_contract_error:
+        return Response({'error': preview_contract_error}, status=status.HTTP_400_BAD_REQUEST)
+
+    if parsed_preview_contract is not None:
+        contract_cutoff_raw = parsed_preview_contract.get('cutoff_datetime')
+        if contract_cutoff_raw:
+            try:
+                parsed_recalculation_cutoff_dt = datetime.fromisoformat(
+                    str(contract_cutoff_raw).replace('Z', '+00:00')
+                )
+                if timezone.is_naive(parsed_recalculation_cutoff_dt):
+                    parsed_recalculation_cutoff_dt = timezone.make_aware(
+                        parsed_recalculation_cutoff_dt,
+                        timezone.get_current_timezone(),
+                    )
+            except Exception:
+                return Response(
+                    {'error': 'preview_contract invalide (cutoff_datetime)'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        contract_expected_total = parsed_preview_contract.get('expected_total')
+        if parsed_expected_recalculation_total is None and contract_expected_total is not None:
+            parsed_expected_recalculation_total = int(contract_expected_total)
+        elif (
+            parsed_expected_recalculation_total is not None
+            and contract_expected_total is not None
+            and int(parsed_expected_recalculation_total) != int(contract_expected_total)
+        ):
+            return Response(
+                {'error': 'Incohérence: expected_recalculation_total diffère de preview_contract.expected_total'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        contract_expected_per_tx = parsed_preview_contract.get('expected_per_transaction') or []
+        if not parsed_expected_recalculation_per_transaction:
+            parsed_expected_recalculation_per_transaction = _normalize_recalculation_per_transaction(
+                contract_expected_per_tx
+            )
+        elif (
+            _normalize_recalculation_per_transaction(parsed_expected_recalculation_per_transaction)
+            != _normalize_recalculation_per_transaction(contract_expected_per_tx)
+        ):
+            return Response(
+                {'error': 'Incohérence: expected_recalculation_per_transaction diffère de preview_contract'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     
     try:
+        logger.info(
+            "transaction_save_positions.request %s",
+            json.dumps(
+                {
+                    'transaction_id': transaction.id,
+                    'client_id': client_id,
+                    'requires_addition_recalculation': bool(requires_addition_recalculation),
+                    'is_withdrawal': bool(is_withdrawal),
+                    'manual_regeneration': bool(manual_regeneration),
+                    'include_focus_transaction': bool(include_focus_transaction),
+                    'expected_recalculation_total': parsed_expected_recalculation_total,
+                    'expected_recalculation_per_transaction_count': len(parsed_expected_recalculation_per_transaction or []),
+                    'recalculation_cutoff_datetime': parsed_recalculation_cutoff_dt.isoformat() if parsed_recalculation_cutoff_dt else None,
+                    'has_preview_contract': parsed_preview_contract is not None,
+                },
+                sort_keys=True,
+                default=str,
+            ),
+        )
+
         if skip_positions:
             # "History-only" path: persist a durable marker so signals don't regenerate positions later.
             with db_transaction.atomic():
@@ -11094,13 +11314,13 @@ def transaction_save_positions(request, client_id, transaction_id):
                     recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
                 )
 
-                if parsed_expected_recalculation_total is not None:
-                    actual_regenerated_total = int(recalculation_execution.get('regenerated_total') or 0)
-                    if actual_regenerated_total != parsed_expected_recalculation_total:
-                        raise ValueError(
-                            f"Incohérence preview/exécution: {parsed_expected_recalculation_total} positions prévues "
-                            f"mais {actual_regenerated_total} régénérées. Opération annulée, veuillez régénérer."
-                        )
+                mismatch_error = _validate_recalculation_execution_against_expected(
+                    expected_total=parsed_expected_recalculation_total,
+                    expected_per_transaction=parsed_expected_recalculation_per_transaction,
+                    execution_summary=recalculation_execution,
+                )
+                if mismatch_error:
+                    raise ValueError(f"{mismatch_error} Opération annulée, veuillez régénérer.")
 
             response_data = {
                 'positions': [], 
@@ -11113,6 +11333,30 @@ def transaction_save_positions(request, client_id, transaction_id):
             if addition_metadata:
                 response_data['addition_recalculation'] = addition_metadata
             response_data['recalculation_execution'] = recalculation_execution
+            response_data['recalculation_debug'] = {
+                'expected_recalculation_total': parsed_expected_recalculation_total,
+                'actual_regenerated_total': int((recalculation_execution or {}).get('regenerated_total') or 0),
+                'expected_per_transaction_count': len(parsed_expected_recalculation_per_transaction or []),
+                'actual_per_transaction_count': len((recalculation_execution or {}).get('per_transaction') or []),
+                'requires_addition_recalculation': bool(requires_addition_recalculation),
+                'is_withdrawal': bool(is_withdrawal),
+                'include_focus_transaction': bool(include_focus_transaction),
+                'recalculation_cutoff_datetime': parsed_recalculation_cutoff_dt.isoformat() if parsed_recalculation_cutoff_dt else None,
+            }
+            logger.info(
+                "transaction_save_positions.addition_recalculation.result %s",
+                json.dumps(
+                    {
+                        'transaction_id': transaction.id,
+                        'status': (recalculation_execution or {}).get('status'),
+                        'expected_total': parsed_expected_recalculation_total,
+                        'actual_total': int((recalculation_execution or {}).get('regenerated_total') or 0),
+                        'final_pending_total': int((recalculation_execution or {}).get('final_pending_total') or 0),
+                    },
+                    sort_keys=True,
+                    default=str,
+                ),
+            )
             
             return Response(response_data)
         
@@ -11211,15 +11455,16 @@ def transaction_save_positions(request, client_id, transaction_id):
                     strict=True,
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
+                    recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
                 )
 
-                if parsed_expected_recalculation_total is not None:
-                    actual_regenerated_total = int(recalculation_execution.get('regenerated_total') or 0)
-                    if actual_regenerated_total != parsed_expected_recalculation_total:
-                        raise ValueError(
-                            f"Incohérence preview/exécution: {parsed_expected_recalculation_total} positions prévues "
-                            f"mais {actual_regenerated_total} régénérées. Opération annulée, veuillez régénérer."
-                        )
+                mismatch_error = _validate_recalculation_execution_against_expected(
+                    expected_total=parsed_expected_recalculation_total,
+                    expected_per_transaction=parsed_expected_recalculation_per_transaction,
+                    execution_summary=recalculation_execution,
+                )
+                if mismatch_error:
+                    raise ValueError(f"{mismatch_error} Opération annulée, veuillez régénérer.")
 
             response_data = {
                 'positions': [], 
@@ -11232,6 +11477,30 @@ def transaction_save_positions(request, client_id, transaction_id):
             if withdrawal_metadata:
                 response_data['withdrawal_recalculation'] = withdrawal_metadata
             response_data['recalculation_execution'] = recalculation_execution
+            response_data['recalculation_debug'] = {
+                'expected_recalculation_total': parsed_expected_recalculation_total,
+                'actual_regenerated_total': int((recalculation_execution or {}).get('regenerated_total') or 0),
+                'expected_per_transaction_count': len(parsed_expected_recalculation_per_transaction or []),
+                'actual_per_transaction_count': len((recalculation_execution or {}).get('per_transaction') or []),
+                'requires_addition_recalculation': bool(requires_addition_recalculation),
+                'is_withdrawal': bool(is_withdrawal),
+                'include_focus_transaction': bool(include_focus_transaction),
+                'recalculation_cutoff_datetime': parsed_recalculation_cutoff_dt.isoformat() if parsed_recalculation_cutoff_dt else None,
+            }
+            logger.info(
+                "transaction_save_positions.withdrawal_recalculation.result %s",
+                json.dumps(
+                    {
+                        'transaction_id': transaction.id,
+                        'status': (recalculation_execution or {}).get('status'),
+                        'expected_total': parsed_expected_recalculation_total,
+                        'actual_total': int((recalculation_execution or {}).get('regenerated_total') or 0),
+                        'final_pending_total': int((recalculation_execution or {}).get('final_pending_total') or 0),
+                    },
+                    sort_keys=True,
+                    default=str,
+                ),
+            )
             
             return Response(response_data)
         else:
