@@ -7781,6 +7781,106 @@ def client_position_cancel(request, client_id, position_id):
     return Response({'position': serializer.data})
 
 
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def client_position_update(request, client_id, position_id):
+    """
+    Met à jour une position client (dates ouverture/fermeture, asset, montant investi).
+    Accessible uniquement aux utilisateurs authentifiés (admin/gestionnaire) ayant accès au client.
+    """
+    from decimal import Decimal, InvalidOperation
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    pos = get_object_or_404(
+        Position.objects.select_related('client', 'product', 'transaction', 'asset'),
+        id=position_id,
+        client=client,
+    )
+
+    payload = request.data or {}
+    updates = {}
+    update_fields = []
+
+    def _parse_dt(value, field_name):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            value = raw
+        dt = parse_datetime(str(value))
+        if not dt:
+            raise ValueError(f'{field_name} invalide (attendu ISO datetime)')
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    if 'opened_at' in payload:
+        try:
+            updates['opened_at'] = _parse_dt(payload.get('opened_at'), 'opened_at')
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        update_fields.append('opened_at')
+
+    if 'closed_at' in payload:
+        try:
+            updates['closed_at'] = _parse_dt(payload.get('closed_at'), 'closed_at')
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        update_fields.append('closed_at')
+
+    if 'asset_id' in payload:
+        raw_asset_id = payload.get('asset_id')
+        asset_id = str(raw_asset_id).strip() if raw_asset_id is not None else ''
+        if not asset_id:
+            updates['asset'] = None
+        else:
+            try:
+                updates['asset'] = Asset.objects.get(id=asset_id)
+            except Asset.DoesNotExist:
+                return Response({'error': 'Asset introuvable'}, status=status.HTTP_404_NOT_FOUND)
+        update_fields.append('asset')
+
+    if 'invested_amount' in payload:
+        raw_amount = payload.get('invested_amount')
+        try:
+            amount = Decimal(str(raw_amount))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'error': 'Montant investi invalide'}, status=status.HTTP_400_BAD_REQUEST)
+        if amount < 0:
+            return Response({'error': 'Le montant investi ne peut pas être négatif'}, status=status.HTTP_400_BAD_REQUEST)
+        updates['invested_amount'] = amount
+        update_fields.append('invested_amount')
+
+    if not update_fields:
+        return Response(
+            {'error': 'Aucun champ à mettre à jour (opened_at, closed_at, asset_id, invested_amount)'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    effective_opened_at = updates.get('opened_at', pos.opened_at)
+    effective_closed_at = updates.get('closed_at', pos.closed_at)
+    if effective_opened_at and effective_closed_at and effective_closed_at < effective_opened_at:
+        return Response(
+            {'error': "La date de fermeture doit être postérieure à la date d'ouverture"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    for field_name, value in updates.items():
+        setattr(pos, field_name, value)
+    pos.save(update_fields=list(set(update_fields + ['updated_at'])))
+
+    serializer = PositionSerializer(pos)
+    return Response({'position': serializer.data})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def client_process_positions(request, client_id):

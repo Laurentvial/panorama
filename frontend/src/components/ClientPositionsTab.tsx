@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,7 +20,7 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 
 type ClientPositionRow = {
@@ -62,14 +65,31 @@ const formatPositionRange = (p: ClientPositionRow) => {
   return '-';
 };
 
+const formatForDatetimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const raw = String(value).trim();
+  // Preserve wall-clock datetime from API payload and avoid browser timezone conversion.
+  const isoPrefixMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})/);
+  if (isoPrefixMatch) {
+    return `${isoPrefixMatch[1]}T${isoPrefixMatch[2]}:${isoPrefixMatch[3]}`;
+  }
+  return '';
+};
+
 export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clientId: string; accountCurrency?: string }) {
   const [loading, setLoading] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
   const [allPositions, setAllPositions] = useState<ClientPositionRow[]>([]); // All positions for counts
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>(undefined);
   const [assets, setAssets] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed' | 'cancelled'>('upcoming');
+  const [editingPosition, setEditingPosition] = useState<ClientPositionRow | null>(null);
+  const [editOpenedAt, setEditOpenedAt] = useState('');
+  const [editClosedAt, setEditClosedAt] = useState('');
+  const [editAssetId, setEditAssetId] = useState<string>('none');
+  const [editAmount, setEditAmount] = useState('');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
   const openStatuses = useMemo(() => new Set(['open']), []);
@@ -257,6 +277,56 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
     return { upcoming, open, closed, cancelled };
   }, [filteredByProduct, upcomingStatuses, openStatuses, closedStatuses, cancelledStatuses]);
 
+  function openEditModal(row: ClientPositionRow) {
+    setEditingPosition(row);
+    setEditOpenedAt(formatForDatetimeInput(row.opened_at));
+    setEditClosedAt(formatForDatetimeInput(row.closed_at));
+    setEditAssetId(row.assetId ? String(row.assetId) : 'none');
+    const initialAmount = typeof row.invested_amount === 'number' ? row.invested_amount : parseFloat(String(row.invested_amount));
+    setEditAmount(Number.isFinite(initialAmount) ? String(initialAmount) : '');
+  }
+
+  async function handleSavePositionEdit() {
+    if (!editingPosition) return;
+    if (editOpenedAt && editClosedAt && new Date(editClosedAt).getTime() < new Date(editOpenedAt).getTime()) {
+      toast.error("La date de fermeture doit être postérieure à la date d'ouverture");
+      return;
+    }
+
+    const payload: Record<string, string | number | null> = {
+      opened_at: editOpenedAt || null,
+      closed_at: editClosedAt || null,
+      asset_id: editAssetId === 'none' ? null : editAssetId,
+    };
+    const normalizedAmount = String(editAmount ?? '').trim();
+    if (normalizedAmount !== '') {
+      const parsedAmount = parseFloat(normalizedAmount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        toast.error('Le montant doit être un nombre positif ou nul');
+        return;
+      }
+      payload.invested_amount = parsedAmount;
+    }
+
+    setSavingEdit(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/positions/${editingPosition.id}/update/`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      clearApiCache(`clients/${clientId}/positions`);
+      await loadAllPositionsForCounts();
+      await loadPositionsForTab(activeTab, pagination.page, pagination.limit, false);
+      toast.success('Position modifiée avec succès');
+      setEditingPosition(null);
+    } catch (error: any) {
+      console.error('Error updating position:', error);
+      toast.error(error?.message || 'Erreur lors de la modification de la position');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
@@ -320,6 +390,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                     rows={filtered}
                     assets={assets}
                     accountCurrency={accountCurrency}
+                    onEdit={openEditModal}
                     onCancel={async (row) => {
                       try {
                         await cancelPosition(row.id);
@@ -348,6 +419,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                     rows={filtered}
                     assets={assets}
                     accountCurrency={accountCurrency}
+                    onEdit={openEditModal}
                     onCancel={async (row) => {
                       try {
                         await cancelPosition(row.id);
@@ -376,6 +448,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                     rows={filtered}
                     assets={assets}
                     accountCurrency={accountCurrency}
+                    onEdit={openEditModal}
                     onCancel={async (row) => {
                       try {
                         await cancelPosition(row.id);
@@ -403,6 +476,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                     rows={filtered}
                     assets={assets}
                     accountCurrency={accountCurrency}
+                    onEdit={openEditModal}
                     onCancel={async (row) => {
                       try {
                         await cancelPosition(row.id);
@@ -515,6 +589,71 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
             )}
           </>
         )}
+        <Dialog open={!!editingPosition} onOpenChange={(open) => { if (!open && !savingEdit) setEditingPosition(null); }}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Modifier la position</DialogTitle>
+            </DialogHeader>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-position-opened-at">Date d&apos;ouverture</Label>
+                <Input
+                  id="edit-position-opened-at"
+                  type="datetime-local"
+                  value={editOpenedAt}
+                  onChange={(e) => setEditOpenedAt(e.target.value)}
+                  disabled={savingEdit}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-position-closed-at">Date de fermeture</Label>
+                <Input
+                  id="edit-position-closed-at"
+                  type="datetime-local"
+                  value={editClosedAt}
+                  onChange={(e) => setEditClosedAt(e.target.value)}
+                  disabled={savingEdit}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-position-asset">Asset</Label>
+                <Select value={editAssetId} onValueChange={setEditAssetId} disabled={savingEdit}>
+                  <SelectTrigger id="edit-position-asset">
+                    <SelectValue placeholder="Sélectionner un asset" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Aucun asset</SelectItem>
+                    {assets.map((asset) => (
+                      <SelectItem key={String(asset.id)} value={String(asset.id)}>
+                        {asset.name || asset.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-position-amount">Montant investi (EUR)</Label>
+                <Input
+                  id="edit-position-amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  disabled={savingEdit}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingPosition(null)} disabled={savingEdit}>
+                Annuler
+              </Button>
+              <Button type="button" onClick={() => { void handleSavePositionEdit(); }} disabled={savingEdit}>
+                {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -524,11 +663,13 @@ function PositionsTable({
   rows,
   assets,
   accountCurrency = 'EUR',
+  onEdit,
   onCancel,
 }: {
   rows: ClientPositionRow[];
   assets: any[];
   accountCurrency?: string;
+  onEdit: (row: ClientPositionRow) => void;
   onCancel: (row: ClientPositionRow) => Promise<void>;
 }) {
   // Créer un Map pour accéder rapidement aux assets par ID
@@ -765,17 +906,28 @@ function PositionsTable({
                   {p.status === 'cancelled' ? (
                     <span className="text-slate-400">—</span>
                   ) : (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
-                      onClick={() => {
-                        setCancelRow(p);
-                        setCancelOpen(true);
-                      }}
-                    >
-                      Annuler
-                    </Button>
+                    <div className="inline-flex items-center gap-3">
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
+                        onClick={() => onEdit(p)}
+                      >
+                        <Pencil className="w-3 h-3 mr-1" />
+                        Modifier
+                      </Button>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
+                        onClick={() => {
+                          setCancelRow(p);
+                          setCancelOpen(true);
+                        }}
+                      >
+                        Annuler
+                      </Button>
+                    </div>
                   )}
                 </td>
               </tr>
