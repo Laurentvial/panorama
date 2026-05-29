@@ -2744,7 +2744,9 @@ def generate_positions_with_rates(
     
     day_targets = _build_day_targets(trading_days, desired_total, max_per_day=max_per_day, rng=rng)
 
-    existing_count_before = Position.objects.filter(transaction_id=ctx.transaction_id).count() if save_to_db else 0
+    existing_positions_qs = Position.objects.filter(transaction_id=ctx.transaction_id)
+    existing_count_before = existing_positions_qs.count() if save_to_db else 0
+    has_existing_positions_for_txn = existing_positions_qs.exists()
     existing_counts, max_idx = _existing_trade_counts(ctx.transaction_id) if save_to_db else ({}, 0)
     next_idx = max_idx + 1
 
@@ -2995,9 +2997,10 @@ def generate_positions_with_rates(
                 opened_at = t["opened_at"]
                 closed_at = t["closed_at"]
 
-                # Manual regeneration only replaces upcoming positions.
-                # Never preview/save newly generated positions in the past.
-                if opened_at <= now:
+                # For existing transactions, regeneration should only replace upcoming positions.
+                # For a first generation (no positions yet), keep retroactive positions from
+                # the transaction date even if they are in the past.
+                if has_existing_positions_for_txn and opened_at <= now:
                     continue
 
                 asset_currency = None
@@ -3285,34 +3288,36 @@ def save_generated_positions(
     # In regeneration flows, a period can legitimately contain both historical open/done
     # rows and newly generated future pending rows.
 
-    # Regeneration replaces only upcoming positions.
-    # Never create newly generated rows in the past; keep open/done history unchanged.
-    future_filtered_positions_data: list[dict] = []
-    dropped_past_rows = 0
-    now_cutoff = timezone.now()
-    for pos_data in positions_data:
-        opened_raw = pos_data.get('opened_at')
-        if not opened_raw:
-            continue
-        try:
-            opened_at = datetime.fromisoformat(str(opened_raw).replace('Z', '+00:00'))
-        except Exception:
-            # Keep robust behavior: if datetime is malformed, drop the row.
-            dropped_past_rows += 1
-            continue
-        if timezone.is_naive(opened_at):
-            opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
-        if opened_at <= now_cutoff:
-            dropped_past_rows += 1
-            continue
-        future_filtered_positions_data.append(pos_data)
-    if dropped_past_rows > 0:
-        logger.info(
-            "Dropped %s generated past positions for transaction %s (regen is future-only).",
-            dropped_past_rows,
-            txn.id,
-        )
-    positions_data = future_filtered_positions_data
+    # Keep retroactive rows for first generation.
+    # For regeneration flows (transaction already has positions), keep future-only replacement.
+    has_existing_positions_for_txn = Position.objects.filter(transaction_id=txn.id).exists()
+    if has_existing_positions_for_txn:
+        future_filtered_positions_data: list[dict] = []
+        dropped_past_rows = 0
+        now_cutoff = timezone.now()
+        for pos_data in positions_data:
+            opened_raw = pos_data.get('opened_at')
+            if not opened_raw:
+                continue
+            try:
+                opened_at = datetime.fromisoformat(str(opened_raw).replace('Z', '+00:00'))
+            except Exception:
+                # Keep robust behavior: if datetime is malformed, drop the row.
+                dropped_past_rows += 1
+                continue
+            if timezone.is_naive(opened_at):
+                opened_at = timezone.make_aware(opened_at, timezone.get_current_timezone())
+            if opened_at <= now_cutoff:
+                dropped_past_rows += 1
+                continue
+            future_filtered_positions_data.append(pos_data)
+        if dropped_past_rows > 0:
+            logger.info(
+                "Dropped %s generated past positions for transaction %s (existing txn regen is future-only).",
+                dropped_past_rows,
+                txn.id,
+            )
+        positions_data = future_filtered_positions_data
 
     # Defensive deduplication:
     # keep all legitimate positions inside a period and remove only exact duplicates.
@@ -3381,6 +3386,18 @@ def save_generated_positions(
                 else None
             )
 
+            # Assign status from timeline so retroactive rows are inserted consistently:
+            # - closed in the past  => done
+            # - currently running   => open
+            # - not started yet     => pending
+            now_ref = timezone.now()
+            if closed_at <= now_ref:
+                computed_status = 'done'
+            elif opened_at <= now_ref < closed_at:
+                computed_status = 'open'
+            else:
+                computed_status = 'pending'
+
             instances.append(
                 Position(
                     id=position_id,
@@ -3396,7 +3413,7 @@ def save_generated_positions(
                     profit_loss=Decimal(str(pos_data['profit_loss'])),
                     period_index=pos_data['period_index'],
                     period_date=date.fromisoformat(pos_data['period_date']),
-                    status='pending',
+                    status=computed_status,
                 )
             )
         return instances
@@ -4105,22 +4122,29 @@ def create_trade_positions_for_smart_portfolio_investment(txn: Transaction, *, t
 def _parse_days(duration: str | None) -> int:
     """
     Parse duration string to number of days.
-    For backward compatibility: if the extracted integer is in the typical month range (1-24),
-    treat as months and return v * 30 (days). Otherwise treat as days (e.g. 30, 90, 365).
-    Using 24 as the upper bound avoids interpreting "30" (new default for 30 days) as 30 months.
+
+    Rules:
+    - Bare numbers are interpreted as days (e.g. "10" => 10 days).
+    - Explicit month units ("mois"/"month") are converted to days (x30).
+    - Explicit week/year units are also converted.
     """
     if not duration:
         return 30  # default ~1 month in days
-    m = _DURATION_RE.search(str(duration))
+    duration_str = str(duration).strip()
+    m = _DURATION_RE.search(duration_str)
     if not m:
         return 30
     try:
         v = int(m.group(1))
         if v <= 0:
             return 30
-        if v <= 24:
-            # Legacy: value was in months (e.g. "12" = 12 months; typical contracts 1-24 months)
+        lowered = duration_str.lower()
+        if ('mois' in lowered) or ('month' in lowered):
             return v * 30
+        if ('semaine' in lowered) or ('week' in lowered):
+            return v * 7
+        if re.search(r'\b(année|annee|an|ans|year|years)\b', lowered):
+            return v * 365
         return v  # already in days (30, 90, 365, etc.)
     except Exception:
         return 30

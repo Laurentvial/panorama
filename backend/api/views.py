@@ -377,22 +377,29 @@ _DURATION_RE = re.compile(r"(\d+)")
 def _parse_days_from_duration(duration_str: str | None) -> int:
     """
     Parse duration string to number of days.
-    For backward compatibility: if the extracted integer is in the typical month range (1-24),
-    treat as months and return v * 30 (days). Otherwise treat as days (e.g. 30, 90, 365).
-    Using 24 as the upper bound avoids interpreting "30" (new default for 30 days) as 30 months.
+
+    Rules:
+    - Bare numbers are interpreted as days (e.g. "10" => 10 days).
+    - Explicit month units ("mois"/"month") are converted to days (x30).
+    - Explicit week/year units are also converted.
     """
     if not duration_str:
         return 30  # default ~1 month in days
-    m = _DURATION_RE.search(str(duration_str))
+    raw = str(duration_str).strip()
+    m = _DURATION_RE.search(raw)
     if not m:
         return 30
     try:
         v = int(m.group(1))
         if v <= 0:
             return 30
-        if v <= 24:
-            # Legacy: value was in months (e.g. "12" = 12 months; typical contracts 1-24 months)
+        lowered = raw.lower()
+        if ('mois' in lowered) or ('month' in lowered):
             return v * 30
+        if ('semaine' in lowered) or ('week' in lowered):
+            return v * 7
+        if re.search(r'\b(année|annee|an|ans|year|years)\b', lowered):
+            return v * 365
         return v  # already in days (30, 90, 365, etc.)
     except Exception:
         return 30
