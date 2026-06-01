@@ -91,7 +91,6 @@ export function EditProduct() {
     availabilityStart: '',
     availabilityEnd: '',
     linkToAssets: false,
-    default: false, // Afficher par défaut pour tous les clients
     availableFunds: false, // Fonds disponibles
     // Gestion des prix
     minEntryValue: '',
@@ -374,7 +373,6 @@ export function EditProduct() {
         availabilityStart: formatDate(product.availabilityStart),
         availabilityEnd: formatDate(product.availabilityEnd),
         linkToAssets: product.linkToAssets === 'Oui' || product.linkToAssets === true,
-        default: product.default || false,
         availableFunds: (product as any).availableFunds ?? (product as any).available_funds ?? false,
         minEntryValue: product.minEntryValue?.toString() || '',
         maxEntryValue: product.maxEntryValue?.toString() || ''
@@ -599,7 +597,6 @@ export function EditProduct() {
         availabilityEnd: isValidValue(formData.availabilityEnd) ? formData.availabilityEnd : '',
         // Options du produit
         linkToAssets: formData.linkToAssets,
-        default: formData.default,
         availableFunds: formData.availableFunds,
         // Texte existant pour amélioration (si non vide)
         existingCgv: (formData.cgv || '').trim()
@@ -773,7 +770,6 @@ export function EditProduct() {
         formDataToSend.append('availabilityEnd', formData.availabilityEnd || '');
         const linkToAssetsValue = formData.linkToAssets ? 'Oui' : 'Non';
         formDataToSend.append('linkToAssets', linkToAssetsValue);
-        formDataToSend.append('default', formData.default.toString());
         formDataToSend.append('availableFunds', formData.availableFunds.toString());
         if (formData.linkToAssets) {
           const allocationsPayload = assetAllocations
@@ -845,7 +841,6 @@ export function EditProduct() {
           availabilityStart: formData.availabilityStart || undefined,
           availabilityEnd: formData.availabilityEnd || undefined,
           linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
-          default: formData.default,
           availableFunds: formData.availableFunds,
           assetAllocations: formData.linkToAssets && assetAllocations.length > 0
             ? assetAllocations
@@ -1605,16 +1600,6 @@ export function EditProduct() {
               <h3 className="text-lg font-semibold text-accent-foreground">Gestion du produit</h3>
               
               <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="product-default"
-                    checked={formData.default}
-                    onCheckedChange={(checked) => setFormData({ ...formData, default: checked === true })}
-                  />
-                  <Label htmlFor="product-default" className="cursor-pointer">
-                    Afficher par défaut (ce produit sera ajouté aux produits actifs de tous les clients)
-                  </Label>
-                </div>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="product-available-funds"

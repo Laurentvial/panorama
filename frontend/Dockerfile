@@ -26,10 +26,14 @@ FROM nginx:alpine
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# SPA fallback: serve index.html for all routes
-RUN cat > /etc/nginx/conf.d/default.conf <<'EOF'
+# Railway provides a dynamic PORT; default to 80 for local Docker runs.
+ENV PORT=80
+
+# SPA fallback: serve index.html for all routes.
+# Nginx official entrypoint will envsubst this template at container start.
+RUN cat > /etc/nginx/templates/default.conf.template <<'EOF'
 server {
-    listen 80;
+    listen ${PORT};
     root /usr/share/nginx/html;
     index index.html;
 

@@ -4990,57 +4990,16 @@ def client_product_update_availability(request, client_id, product_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def client_products_reset(request, client_id):
-    """Réinitialiser les produits d'un client : retirer ceux qui ne sont pas default=True, ajouter ceux qui sont default=True"""
+    """Fonctionnalité supprimée: les produits par défaut globaux ne sont plus gérés."""
     client = get_object_or_404(Client, id=client_id)
     err = _check_gestionnaire_client_access(request, client)
     if err:
         return err
-    
-    # Get all current client products (convert to list to avoid query issues after deletion)
-    # Filter out ClientProducts where the product has been deleted (product is None)
-    current_client_products = [
-        cp for cp in ClientProduct.objects.filter(client=client).select_related('product')
-        if cp.product is not None
-    ]
-    current_product_ids = {cp.product.id for cp in current_client_products}
-    
-    # Get all default products
-    default_products = Product.objects.filter(default=True)
-    
-    # Remove products that are not default=True
-    removed_count = 0
-    for client_product in current_client_products:
-        if not client_product.product.default:
-            client_product.delete()
-            removed_count += 1
-    
-    # Add products that are default=True and not already assigned
-    added_count = 0
-    for product in default_products:
-        if product.id not in current_product_ids:
-            # Generate ClientProduct ID
-            client_product_id = uuid.uuid4().hex[:12]
-            while ClientProduct.objects.filter(id=client_product_id).exists():
-                client_product_id = uuid.uuid4().hex[:12]
-            
-            # Create ClientProduct relationship
-            # Handle potential race condition: if two concurrent requests try to add the same product,
-            # the second one will hit the unique_together constraint and raise IntegrityError
-            try:
-                ClientProduct.objects.create(
-                    id=client_product_id,
-                    client=client,
-                    product=product
-                )
-                added_count += 1
-            except IntegrityError:
-                # Another request created this relationship concurrently, skip it
-                pass
-    
+
     return Response({
-        'message': 'Produits réinitialisés avec succès',
-        'removed': removed_count,
-        'added': added_count
+        'message': 'Fonctionnalité "produits par défaut" supprimée : aucune modification appliquée.',
+        'removed': 0,
+        'added': 0
     }, status=status.HTTP_200_OK)
 
 # Alpha Vantage endpoints
@@ -11901,14 +11860,6 @@ def product_create(request):
     raw_sub = request.data.get('subcategory', '')
     subcategory_value = _sanitize_product_subcategory(raw_sub)
     
-    # Handle default field - support both string and boolean
-    default_value_raw = request.data.get('default', False)
-    default_value_final = (
-        (str(default_value_raw).strip().lower() in ['oui', 'true', '1', 'yes'])
-        if isinstance(default_value_raw, str)
-        else bool(default_value_raw)
-    )
-    
     product = Product.objects.create(
         id=product_id,
         name=request.data.get('name', ''),
@@ -11931,8 +11882,7 @@ def product_create(request):
         availability_start=availability_start,
         availability_end=availability_end,
         link_to_assets=request.data.get('linkToAssets', 'Non'),
-        # Handle default field - support both string and boolean
-        default=default_value_final,
+        default=False,
         # Handle available_funds field - support both string and boolean
         available_funds=(
             (str(request.data.get('availableFunds', False)).strip().lower() in ['oui', 'true', '1', 'yes'])
@@ -12107,26 +12057,6 @@ def product_create(request):
             print(f"Error uploading technical sheet: {error_msg}")
             print(traceback.format_exc())
             return Response({'error': f'Erreur lors de l\'upload de la fiche technique: {error_msg}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    # If product is marked as default, add it to all existing clients
-    if product.default:
-        from django.db import IntegrityError
-        all_clients = Client.objects.all()
-        for client in all_clients:
-            # Check if client already has this product (safety check)
-            if not ClientProduct.objects.filter(client=client, product=product).exists():
-                client_product_id = uuid.uuid4().hex[:12]
-                while ClientProduct.objects.filter(id=client_product_id).exists():
-                    client_product_id = uuid.uuid4().hex[:12]
-                try:
-                    ClientProduct.objects.create(
-                        id=client_product_id,
-                        client=client,
-                        product=product
-                    )
-                except IntegrityError:
-                    # Another request created this relationship concurrently, skip it
-                    pass
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -12728,9 +12658,6 @@ def product_update(request, product_id):
     
     product = get_object_or_404(Product, id=product_id)
     
-    # Store original default value to detect changes
-    original_default_value = product.default
-    
     if 'name' in request.data:
         product.name = request.data['name']
     if 'reference' in request.data:
@@ -12949,13 +12876,8 @@ def product_update(request, product_id):
     if 'maxEntryValue' in request.data:
         max_entry = request.data['maxEntryValue']
         product.max_entry_value = float(max_entry) if max_entry is not None and max_entry != '' else None
-    if 'default' in request.data:
-        # Handle default field - support both string and boolean
-        default_value = request.data['default']
-        if isinstance(default_value, str):
-            product.default = default_value.strip().lower() in ['oui', 'true', '1', 'yes']
-        else:
-            product.default = bool(default_value)
+    # Feature removed: internal products can no longer be auto-shown to all clients.
+    product.default = False
     if 'availableFunds' in request.data:
         # Handle available_funds field - support both string and boolean
         v = request.data['availableFunds']
@@ -13052,56 +12974,6 @@ def product_update(request, product_id):
     # Refresh from database to get auto-updated fields (like updated_at timestamp)
     # and ensure we have the latest state including any database-level defaults or triggers
     product.refresh_from_db()
-    
-    # Handle default field changes: add/remove product from all clients accordingly
-    # Check if default field was updated in this request
-    default_was_updated = 'default' in request.data
-    if default_was_updated:
-        from django.db import IntegrityError
-        
-        # If product changed from default=True to default=False, remove from all clients
-        if original_default_value and not product.default:
-            # Remove ClientProducts for this product from all clients
-            ClientProduct.objects.filter(product=product).delete()
-        
-        # If product is now default=True, ensure it's added to all existing clients
-        elif product.default:
-            all_clients = Client.objects.all()
-            for client in all_clients:
-                # Check if client already has this product (safety check)
-                if not ClientProduct.objects.filter(client=client, product=product).exists():
-                    client_product_id = uuid.uuid4().hex[:12]
-                    while ClientProduct.objects.filter(id=client_product_id).exists():
-                        client_product_id = uuid.uuid4().hex[:12]
-                    try:
-                        ClientProduct.objects.create(
-                            id=client_product_id,
-                            client=client,
-                            product=product
-                        )
-                    except IntegrityError:
-                        # Another request created this relationship concurrently, skip it
-                        pass
-    elif product.default:
-        # If default field wasn't updated but product is still default=True,
-        # ensure it's added to all existing clients (for new clients or if it was missed before)
-        from django.db import IntegrityError
-        all_clients = Client.objects.all()
-        for client in all_clients:
-            # Check if client already has this product (safety check)
-            if not ClientProduct.objects.filter(client=client, product=product).exists():
-                client_product_id = uuid.uuid4().hex[:12]
-                while ClientProduct.objects.filter(id=client_product_id).exists():
-                    client_product_id = uuid.uuid4().hex[:12]
-                try:
-                    ClientProduct.objects.create(
-                        id=client_product_id,
-                        client=client,
-                        product=product
-                    )
-                except IntegrityError:
-                    # Another request created this relationship concurrently, skip it
-                    pass
     
     serializer = ProductSerializer(product, context={'request': request})
     return Response(serializer.data)

@@ -84,7 +84,6 @@ export function AddProduct() {
     availabilityStart: '',
     availabilityEnd: '',
     linkToAssets: false,
-    default: false, // Afficher par défaut pour tous les clients
     availableFunds: false, // Fonds disponibles
     // Gestion des prix
     minEntryValue: '',
@@ -363,7 +362,6 @@ export function AddProduct() {
         availabilityEnd: isValidValue(formData.availabilityEnd) ? formData.availabilityEnd : '',
         // Options du produit
         linkToAssets: formData.linkToAssets,
-        default: formData.default,
         availableFunds: formData.availableFunds,
         // Texte existant pour amélioration (si non vide)
         existingCgv: (formData.cgv || '').trim()
@@ -512,7 +510,6 @@ export function AddProduct() {
         if (formData.availabilityStart) formDataToSend.append('availabilityStart', formData.availabilityStart);
         if (formData.availabilityEnd) formDataToSend.append('availabilityEnd', formData.availabilityEnd);
         formDataToSend.append('linkToAssets', formData.linkToAssets ? 'Oui' : 'Non');
-        formDataToSend.append('default', formData.default.toString());
         if (formData.linkToAssets) {
           const allocationsPayload = assetAllocations
             .map((row) => ({
@@ -558,7 +555,6 @@ export function AddProduct() {
             availabilityStart: formData.availabilityStart || undefined,
             availabilityEnd: formData.availabilityEnd || undefined,
             linkToAssets: formData.linkToAssets ? 'Oui' : 'Non',
-            default: formData.default,
             availableFunds: formData.availableFunds,
             assetAllocations: formData.linkToAssets
               ? assetAllocations
@@ -1133,16 +1129,6 @@ export function AddProduct() {
               <h3 className="text-lg font-semibold text-slate-800">Gestion du produit</h3>
               
               <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="product-default"
-                    checked={formData.default === true}
-                    onCheckedChange={(checked) => setFormData({ ...formData, default: checked === true })}
-                  />
-                  <Label htmlFor="product-default" className="cursor-pointer">
-                    Afficher par défaut (ce produit sera ajouté aux produits actifs de tous les clients)
-                  </Label>
-                </div>
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="product-available-funds"
