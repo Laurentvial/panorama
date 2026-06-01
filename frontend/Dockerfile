@@ -16,6 +16,9 @@ ENV VITE_API_URL=${VITE_API_URL:-$VITE_URL}
 COPY package.json package-lock.json* ./
 RUN npm install --legacy-peer-deps
 
+# Vite build can exceed Node's default heap in constrained containers.
+ENV NODE_OPTIONS=--max-old-space-size=1536
+
 # Copy source and build
 COPY . .
 RUN npm run build
