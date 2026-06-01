@@ -31,6 +31,7 @@ ENV PORT=80
 
 # SPA fallback: serve index.html for all routes.
 # Nginx official entrypoint will envsubst this template at container start.
+RUN mkdir -p /etc/nginx/templates
 RUN cat > /etc/nginx/templates/default.conf.template <<'EOF'
 server {
     listen ${PORT};
