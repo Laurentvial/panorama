@@ -15,6 +15,7 @@ from .position_service import (
 )
 from .views import (
     _build_preview_contract,
+    _has_existing_pending_positions_for_product,
     _validate_preview_contract,
     _validate_recalculation_execution_against_expected,
 )
@@ -218,3 +219,56 @@ class PreviewContractValidationTest(SimpleTestCase):
         )
         self.assertIsNotNone(mismatch)
         self.assertIn('par transaction', mismatch)
+
+
+class AdditionPendingDetectionTest(SimpleTestCase):
+    @patch('api.views.Position.objects.filter')
+    def test_has_existing_pending_positions_for_product_without_exclude(self, mock_filter):
+        qs = mock_filter.return_value
+        qs.exists.return_value = True
+
+        result = _has_existing_pending_positions_for_product(
+            client_id='clientA',
+            product_id='productA',
+        )
+
+        self.assertTrue(result)
+        mock_filter.assert_called_once_with(
+            product_id='productA',
+            client_id='clientA',
+            status='pending',
+        )
+        qs.exclude.assert_not_called()
+        qs.exists.assert_called_once()
+
+    @patch('api.views.Position.objects.filter')
+    def test_has_existing_pending_positions_for_product_with_exclude_transaction(self, mock_filter):
+        base_qs = mock_filter.return_value
+        excluded_qs = base_qs.exclude.return_value
+        excluded_qs.exists.return_value = True
+
+        result = _has_existing_pending_positions_for_product(
+            client_id='clientA',
+            product_id='productA',
+            exclude_transaction_id='txnA',
+        )
+
+        self.assertTrue(result)
+        base_qs.exclude.assert_called_once_with(transaction_id='txnA')
+        excluded_qs.exists.assert_called_once()
+
+    @patch('api.views.Position.objects.filter')
+    def test_has_existing_pending_positions_for_product_ignores_solde_or_empty(self, mock_filter):
+        self.assertFalse(
+            _has_existing_pending_positions_for_product(
+                client_id='clientA',
+                product_id='solde',
+            )
+        )
+        self.assertFalse(
+            _has_existing_pending_positions_for_product(
+                client_id='clientA',
+                product_id='',
+            )
+        )
+        mock_filter.assert_not_called()

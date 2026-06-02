@@ -105,6 +105,7 @@ from .position_service import (
     generate_positions_with_rates,
     save_generated_positions,
     save_position_generation_history,
+    recalculate_positions_for_product_addition,
     recalculate_positions_for_product_withdrawal,
     calculate_withdrawal_recalculation_metadata,
     sync_position_statuses_from_schedule,
@@ -181,6 +182,26 @@ def _normalize_recalculation_per_transaction(items) -> list[dict]:
         )
     normalized.sort(key=lambda x: x['transaction_id'])
     return normalized
+
+
+def _has_existing_pending_positions_for_product(
+    *,
+    client_id: str,
+    product_id: str,
+    exclude_transaction_id: str | None = None,
+) -> bool:
+    product_id_norm = str(product_id or '').strip()
+    if not product_id_norm or product_id_norm == 'solde':
+        return False
+
+    qs = Position.objects.filter(
+        product_id=product_id_norm,
+        client_id=client_id,
+        status='pending',
+    )
+    if exclude_transaction_id:
+        qs = qs.exclude(transaction_id=exclude_transaction_id)
+    return qs.exists()
 
 
 def _build_preview_contract(
@@ -9062,7 +9083,21 @@ def _client_transaction_create_impl(request, client_id):
             # Generate positions BEFORE transaction commit
             # This ensures positions are created in the same atomic transaction
             try:
-                create_positions_for_investment(transaction, trigger="api_transaction_create")
+                addition_pending_exists = _has_existing_pending_positions_for_product(
+                    client_id=transaction.client_id,
+                    product_id=transaction.transfer_to,
+                )
+
+                if addition_pending_exists:
+                    recalculate_positions_for_product_addition(
+                        transaction,
+                        force_recalculate=True,
+                        strict=True,
+                        include_focus_transaction=True,
+                        recalculation_cutoff_datetime=timezone.now(),
+                    )
+                else:
+                    create_positions_for_investment(transaction, trigger="api_transaction_create")
             except Exception as pos_err:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -10116,7 +10151,22 @@ def client_transaction_update(request, client_id, transaction_id):
     if is_investment and transaction.status in COMPLETED_TRANSACTION_STATUSES and not skip_position_generation:
         if previous_status not in COMPLETED_TRANSACTION_STATUSES or not Position.objects.filter(transaction=transaction).exists():
             try:
-                create_positions_for_investment(transaction, trigger="api_transaction_update")
+                has_other_pending_on_product = _has_existing_pending_positions_for_product(
+                    client_id=transaction.client_id,
+                    product_id=transaction.transfer_to,
+                    exclude_transaction_id=transaction.id,
+                )
+
+                if has_other_pending_on_product:
+                    recalculate_positions_for_product_addition(
+                        transaction,
+                        force_recalculate=True,
+                        strict=True,
+                        include_focus_transaction=True,
+                        recalculation_cutoff_datetime=timezone.now(),
+                    )
+                else:
+                    create_positions_for_investment(transaction, trigger="api_transaction_update")
             except Exception as pos_err:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -10144,7 +10194,22 @@ def client_transaction_update(request, client_id, transaction_id):
     if is_investment and not was_investment:
         # Transaction now represents an investment start: create positions
         try:
-            create_positions_for_investment(transaction, trigger="api_transaction_update")
+            has_other_pending_on_product = _has_existing_pending_positions_for_product(
+                client_id=transaction.client_id,
+                product_id=transaction.transfer_to,
+                exclude_transaction_id=transaction.id,
+            )
+
+            if has_other_pending_on_product:
+                recalculate_positions_for_product_addition(
+                    transaction,
+                    force_recalculate=True,
+                    strict=True,
+                    include_focus_transaction=True,
+                    recalculation_cutoff_datetime=timezone.now(),
+                )
+            else:
+                create_positions_for_investment(transaction, trigger="api_transaction_update")
         except Exception as pos_err:
             import logging
             logger = logging.getLogger(__name__)
@@ -10289,15 +10354,10 @@ def transaction_generate_rates(request, client_id, transaction_id):
     # Check if this investment requires recalculation (existing pending positions on same product)
     requires_addition_recalculation = False
     if is_investment:
-        product_id = transaction.transfer_to
-        if product_id and product_id != 'solde':
-            from .models import Position
-            pending_count = Position.objects.filter(
-                product_id=product_id,
-                client_id=transaction.client_id,
-                status='pending'
-            ).count()
-            requires_addition_recalculation = pending_count > 0
+        requires_addition_recalculation = _has_existing_pending_positions_for_product(
+            client_id=transaction.client_id,
+            product_id=transaction.transfer_to,
+        )
     
     if not is_investment and not is_withdrawal:
         return Response({'error': 'Cette transaction n\'est pas un investissement ou un retrait'}, status=status.HTTP_400_BAD_REQUEST)

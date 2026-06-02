@@ -3,7 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { DateInput } from './ui/date-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from './ui/command';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import {
@@ -20,7 +23,7 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Pencil, ChevronDown } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 
 type ClientPositionRow = {
@@ -65,15 +68,24 @@ const formatPositionRange = (p: ClientPositionRow) => {
   return '-';
 };
 
-const formatForDatetimeInput = (value?: string | null) => {
-  if (!value) return '';
+const splitForDateTimeInputs = (value?: string | null) => {
+  if (!value) return { date: '', time: '' };
   const raw = String(value).trim();
   // Preserve wall-clock datetime from API payload and avoid browser timezone conversion.
   const isoPrefixMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})/);
   if (isoPrefixMatch) {
-    return `${isoPrefixMatch[1]}T${isoPrefixMatch[2]}:${isoPrefixMatch[3]}`;
+    return { date: isoPrefixMatch[1], time: `${isoPrefixMatch[2]}:${isoPrefixMatch[3]}` };
   }
-  return '';
+  return { date: '', time: '' };
+};
+
+const combineDateAndTimeForApi = (date: string, time: string): string | null => {
+  const normalizedDate = String(date || '').trim();
+  const normalizedTime = String(time || '').trim();
+  if (!normalizedDate && !normalizedTime) return null;
+  if (!normalizedDate || !normalizedTime) return '';
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(normalizedTime)) return '';
+  return `${normalizedDate}T${normalizedTime}`;
 };
 
 export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clientId: string; accountCurrency?: string }) {
@@ -86,9 +98,13 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   const [assets, setAssets] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed' | 'cancelled'>('upcoming');
   const [editingPosition, setEditingPosition] = useState<ClientPositionRow | null>(null);
-  const [editOpenedAt, setEditOpenedAt] = useState('');
-  const [editClosedAt, setEditClosedAt] = useState('');
+  const [editOpenedDate, setEditOpenedDate] = useState('');
+  const [editOpenedTime, setEditOpenedTime] = useState('');
+  const [editClosedDate, setEditClosedDate] = useState('');
+  const [editClosedTime, setEditClosedTime] = useState('');
   const [editAssetId, setEditAssetId] = useState<string>('none');
+  const [isAssetSearchOpen, setIsAssetSearchOpen] = useState(false);
+  const [editAssetQuery, setEditAssetQuery] = useState('');
   const [editAmount, setEditAmount] = useState('');
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
@@ -279,23 +295,39 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
 
   function openEditModal(row: ClientPositionRow) {
     setEditingPosition(row);
-    setEditOpenedAt(formatForDatetimeInput(row.opened_at));
-    setEditClosedAt(formatForDatetimeInput(row.closed_at));
+    const opened = splitForDateTimeInputs(row.opened_at);
+    const closed = splitForDateTimeInputs(row.closed_at);
+    setEditOpenedDate(opened.date);
+    setEditOpenedTime(opened.time);
+    setEditClosedDate(closed.date);
+    setEditClosedTime(closed.time);
     setEditAssetId(row.assetId ? String(row.assetId) : 'none');
+    setIsAssetSearchOpen(false);
+    setEditAssetQuery('');
     const initialAmount = typeof row.invested_amount === 'number' ? row.invested_amount : parseFloat(String(row.invested_amount));
     setEditAmount(Number.isFinite(initialAmount) ? String(initialAmount) : '');
   }
 
   async function handleSavePositionEdit() {
     if (!editingPosition) return;
-    if (editOpenedAt && editClosedAt && new Date(editClosedAt).getTime() < new Date(editOpenedAt).getTime()) {
+    const openedAt = combineDateAndTimeForApi(editOpenedDate, editOpenedTime);
+    if (openedAt === '') {
+      toast.error("Veuillez renseigner l'heure d'ouverture");
+      return;
+    }
+    const closedAt = combineDateAndTimeForApi(editClosedDate, editClosedTime);
+    if (closedAt === '') {
+      toast.error("Veuillez renseigner l'heure de fermeture");
+      return;
+    }
+    if (openedAt && closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) {
       toast.error("La date de fermeture doit être postérieure à la date d'ouverture");
       return;
     }
 
     const payload: Record<string, string | number | null> = {
-      opened_at: editOpenedAt || null,
-      closed_at: editClosedAt || null,
+      opened_at: openedAt,
+      closed_at: closedAt,
       asset_id: editAssetId === 'none' ? null : editAssetId,
     };
     const normalizedAmount = String(editAmount ?? '').trim();
@@ -326,6 +358,30 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
       setSavingEdit(false);
     }
   }
+
+  const selectedEditAsset = useMemo(() => {
+    if (editAssetId === 'none') return null;
+    return assets.find((asset) => String(asset.id) === String(editAssetId)) || null;
+  }, [assets, editAssetId]);
+
+  const selectedEditAssetLabel =
+    editAssetId === 'none'
+      ? 'Aucun asset'
+      : selectedEditAsset
+        ? `${selectedEditAsset.name || selectedEditAsset.id}${selectedEditAsset.reference ? ` (${selectedEditAsset.reference})` : ''}`
+        : 'Asset sélectionné';
+
+  const filteredAssetOptions = useMemo(() => {
+    const query = editAssetQuery.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return assets
+      .filter((asset) => {
+        const name = String(asset?.name || '').toLowerCase();
+        const reference = String(asset?.reference || '').toLowerCase();
+        return name.includes(query) || reference.includes(query);
+      })
+      .slice(0, 150);
+  }, [assets, editAssetQuery]);
 
   return (
     <Card>
@@ -590,46 +646,120 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
           </>
         )}
         <Dialog open={!!editingPosition} onOpenChange={(open) => { if (!open && !savingEdit) setEditingPosition(null); }}>
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="w-[min(92vw,36rem)] sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>Modifier la position</DialogTitle>
             </DialogHeader>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="edit-position-opened-at">Date d&apos;ouverture</Label>
-                <Input
-                  id="edit-position-opened-at"
-                  type="datetime-local"
-                  value={editOpenedAt}
-                  onChange={(e) => setEditOpenedAt(e.target.value)}
-                  disabled={savingEdit}
-                />
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Date (JJ/MM/AAAA) et heure d&apos;ouverture</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <DateInput
+                    id="edit-position-opened-date"
+                    value={editOpenedDate}
+                    onChange={setEditOpenedDate}
+                    disabled={savingEdit}
+                  />
+                  <Input
+                    id="edit-position-opened-time"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="HH:mm"
+                    pattern="^([01]\d|2[0-3]):([0-5]\d)$"
+                    value={editOpenedTime}
+                    onChange={(e) => setEditOpenedTime(e.target.value)}
+                    disabled={savingEdit}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-position-closed-at">Date de fermeture</Label>
-                <Input
-                  id="edit-position-closed-at"
-                  type="datetime-local"
-                  value={editClosedAt}
-                  onChange={(e) => setEditClosedAt(e.target.value)}
-                  disabled={savingEdit}
-                />
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Date (JJ/MM/AAAA) et heure de fermeture</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <DateInput
+                    id="edit-position-closed-date"
+                    value={editClosedDate}
+                    onChange={setEditClosedDate}
+                    disabled={savingEdit}
+                  />
+                  <Input
+                    id="edit-position-closed-time"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="HH:mm"
+                    pattern="^([01]\d|2[0-3]):([0-5]\d)$"
+                    value={editClosedTime}
+                    onChange={(e) => setEditClosedTime(e.target.value)}
+                    disabled={savingEdit}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-position-asset">Asset</Label>
-                <Select value={editAssetId} onValueChange={setEditAssetId} disabled={savingEdit}>
-                  <SelectTrigger id="edit-position-asset">
-                    <SelectValue placeholder="Sélectionner un asset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Aucun asset</SelectItem>
-                    {assets.map((asset) => (
-                      <SelectItem key={String(asset.id)} value={String(asset.id)}>
-                        {asset.name || asset.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover
+                  open={isAssetSearchOpen}
+                  onOpenChange={(open) => {
+                    setIsAssetSearchOpen(open);
+                    if (!open) setEditAssetQuery('');
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="edit-position-asset"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isAssetSearchOpen}
+                      disabled={savingEdit}
+                      className="w-full justify-between h-9 rounded-md border-input bg-input-background px-3 py-2 text-sm font-normal text-slate-700"
+                    >
+                      <span className="truncate">{selectedEditAssetLabel}</span>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 z-[10050]" align="start" style={{ zIndex: 10050 }}>
+                    <Command>
+                      <CommandInput
+                        placeholder="Rechercher un asset (nom ou référence)..."
+                        value={editAssetQuery}
+                        onValueChange={setEditAssetQuery}
+                      />
+                      <CommandList className="max-h-[220px]">
+                        <CommandEmpty>
+                          {editAssetQuery.trim().length < 2
+                            ? 'Tapez au moins 2 caractères.'
+                            : 'Aucun asset trouvé.'}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="aucun asset none"
+                            onSelect={() => {
+                              setEditAssetId('none');
+                              setIsAssetSearchOpen(false);
+                            }}
+                          >
+                            Aucun asset
+                          </CommandItem>
+                          {filteredAssetOptions.map((asset) => {
+                            const assetLabel = asset.name || asset.id;
+                            const searchValue = `${assetLabel} ${asset.reference || ''}`.toLowerCase();
+                            return (
+                              <CommandItem
+                                key={String(asset.id)}
+                                value={searchValue}
+                                onSelect={() => {
+                                  setEditAssetId(String(asset.id));
+                                  setIsAssetSearchOpen(false);
+                                }}
+                              >
+                                {assetLabel}
+                                {asset.reference ? ` (${asset.reference})` : ''}
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-position-amount">Montant investi (EUR)</Label>

@@ -1806,24 +1806,23 @@ def _create_trade_positions_compounding(
                 # CRITICAL: Always use txn.id for transaction_id to ensure correct linkage
                 transaction_id_to_use = txn.id
                 
-                created.append(
-                    Position.objects.create(
-                        id=position_id,
-                        client_id=ctx.client_id,
-                        product_id=ctx.product_id,
-                        transaction_id=transaction_id_to_use,  # Always use txn.id to ensure correct linkage
-                        asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                        opened_at=opened_at,
-                        closed_at=closed_at,
-                        invested_amount=amt,
-                        fx_rate_eur_to_asset=fx_rate,
-                        invested_amount_asset_currency=invested_amount_asset_currency,
-                        profit_loss=pnl,
-                        period_index=next_idx,
-                        period_date=opened_at.date(),
-                        status='pending',
-                    )
-                )
+                create_kwargs = {
+                    'id': position_id,
+                    'client_id': ctx.client_id,
+                    'product_id': ctx.product_id,
+                    'transaction_id': transaction_id_to_use,  # Always use txn.id to ensure correct linkage
+                    'asset_id': getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                    'opened_at': opened_at,
+                    'closed_at': closed_at,
+                    'invested_amount': amt,
+                    'fx_rate_eur_to_asset': fx_rate,
+                    'invested_amount_asset_currency': invested_amount_asset_currency,
+                    'profit_loss': pnl,
+                    'period_index': next_idx,
+                    'period_date': opened_at.date(),
+                    'status': 'pending',
+                }
+                created.append(_create_position_idempotent_by_period(create_kwargs))
                 next_idx += 1
 
         if does_compound:
@@ -2428,24 +2427,23 @@ def _create_period_positions_simple(
                     while Position.objects.filter(id=position_id).exists():
                         position_id = uuid.uuid4().hex[:12]
                     
-                    created.append(
-                        Position.objects.create(
-                            id=position_id,
-                            client_id=ctx.client_id,
-                            product_id=ctx.product_id,
-                            transaction_id=txn.id,
-                            asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                            opened_at=opened_at,
-                            closed_at=closed_at,
-                            invested_amount=pos_invested,
-                            fx_rate_eur_to_asset=fx_rate,
-                            invested_amount_asset_currency=invested_amount_asset_currency,
-                            profit_loss=pos_profit,
-                            period_index=next_idx,
-                            period_date=opened_at.date(),
-                            status='pending',
-                        )
-                    )
+                    create_kwargs = {
+                        'id': position_id,
+                        'client_id': ctx.client_id,
+                        'product_id': ctx.product_id,
+                        'transaction_id': txn.id,
+                        'asset_id': getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                        'opened_at': opened_at,
+                        'closed_at': closed_at,
+                        'invested_amount': pos_invested,
+                        'fx_rate_eur_to_asset': fx_rate,
+                        'invested_amount_asset_currency': invested_amount_asset_currency,
+                        'profit_loss': pos_profit,
+                        'period_index': next_idx,
+                        'period_date': opened_at.date(),
+                        'status': 'pending',
+                    }
+                    created.append(_create_position_idempotent_by_period(create_kwargs))
                     next_idx += 1
         
         # Compound profits
@@ -3023,24 +3021,23 @@ def generate_positions_with_rates(
 
                     transaction_id_to_use = txn.id
 
-                    created.append(
-                        Position.objects.create(
-                            id=position_id,
-                            client_id=ctx.client_id,
-                            product_id=ctx.product_id,
-                            transaction_id=transaction_id_to_use,
-                            asset_id=getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
-                            opened_at=opened_at,
-                            closed_at=closed_at,
-                            invested_amount=amt,
-                            fx_rate_eur_to_asset=fx_rate,
-                            invested_amount_asset_currency=invested_amount_asset_currency,
-                            profit_loss=pnl,
-                            period_index=next_idx,
-                            period_date=opened_at.date(),
-                            status='pending',
-                        )
-                    )
+                    create_kwargs = {
+                        'id': position_id,
+                        'client_id': ctx.client_id,
+                        'product_id': ctx.product_id,
+                        'transaction_id': transaction_id_to_use,
+                        'asset_id': getattr(asset_obj, 'id', asset_obj) if asset_obj is not None else None,
+                        'opened_at': opened_at,
+                        'closed_at': closed_at,
+                        'invested_amount': amt,
+                        'fx_rate_eur_to_asset': fx_rate,
+                        'invested_amount_asset_currency': invested_amount_asset_currency,
+                        'profit_loss': pnl,
+                        'period_index': next_idx,
+                        'period_date': opened_at.date(),
+                        'status': 'pending',
+                    }
+                    created.append(_create_position_idempotent_by_period(create_kwargs))
                 else:
                     asset_info = {}
                     if asset_obj is not None:
@@ -3428,7 +3425,50 @@ def save_generated_positions(
             with db_transaction.atomic():
                 created = Position.objects.bulk_create(instances, batch_size=500)
             break
-        except IntegrityError:
+        except IntegrityError as exc:
+            err_msg = str(exc)
+            is_txn_period_conflict = (
+                'api_position_transaction_id_period_index' in err_msg
+                or '(transaction_id, period_index)' in err_msg
+            )
+            if is_txn_period_conflict:
+                logger.warning(
+                    "Detected duplicate (transaction_id, period_index) while saving generated positions "
+                    "for transaction %s; applying idempotent upsert fallback.",
+                    txn.id,
+                )
+                upserted: list[Position] = []
+                with db_transaction.atomic():
+                    for inst in instances:
+                        # Generated investment rows should always have period_index.
+                        # If missing, keep strict behavior to avoid ambiguous updates.
+                        if inst.period_index is None:
+                            raise ValueError(
+                                f"Position upsert fallback requires period_index for transaction {txn.id}"
+                            )
+                        defaults = {
+                            'id': inst.id,
+                            'client_id': inst.client_id,
+                            'product_id': inst.product_id,
+                            'asset_id': inst.asset_id,
+                            'opened_at': inst.opened_at,
+                            'closed_at': inst.closed_at,
+                            'invested_amount': inst.invested_amount,
+                            'fx_rate_eur_to_asset': inst.fx_rate_eur_to_asset,
+                            'invested_amount_asset_currency': inst.invested_amount_asset_currency,
+                            'profit_loss': inst.profit_loss,
+                            'period_date': inst.period_date,
+                            'status': inst.status,
+                        }
+                        pos_obj, _ = Position.objects.update_or_create(
+                            transaction_id=inst.transaction_id,
+                            period_index=inst.period_index,
+                            defaults=defaults,
+                        )
+                        upserted.append(pos_obj)
+                created = upserted
+                break
+
             if attempt == max_attempts - 1:
                 logger.error(
                     "IntegrityError during bulk_create of positions on final attempt (%s/%s).",
@@ -4193,6 +4233,54 @@ def _position_generation_window_start_dt(txn: Transaction) -> datetime:
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
     return start_dt
+
+
+def _create_position_idempotent_by_period(create_kwargs: dict) -> Position:
+    """
+    Create a Position row, and if (transaction_id, period_index) already exists,
+    update that row instead of failing. Keeps existing line history and makes
+    regeneration retries idempotent.
+    """
+    from django.db import IntegrityError
+
+    try:
+        # Use an inner savepoint so a duplicate-key IntegrityError does not
+        # poison the caller's outer atomic transaction.
+        with db_transaction.atomic():
+            return Position.objects.create(**create_kwargs)
+    except IntegrityError as exc:
+        err_msg = str(exc)
+        txn_id = create_kwargs.get('transaction_id')
+        period_index = create_kwargs.get('period_index')
+        is_period_unique_conflict = (
+            period_index is not None
+            and (
+                'api_position_transaction_id_period_index' in err_msg
+                or '(transaction_id, period_index)' in err_msg
+            )
+        )
+        if not is_period_unique_conflict:
+            raise
+
+        defaults = {
+            'client_id': create_kwargs.get('client_id'),
+            'product_id': create_kwargs.get('product_id'),
+            'asset_id': create_kwargs.get('asset_id'),
+            'opened_at': create_kwargs.get('opened_at'),
+            'closed_at': create_kwargs.get('closed_at'),
+            'invested_amount': create_kwargs.get('invested_amount'),
+            'fx_rate_eur_to_asset': create_kwargs.get('fx_rate_eur_to_asset'),
+            'invested_amount_asset_currency': create_kwargs.get('invested_amount_asset_currency'),
+            'profit_loss': create_kwargs.get('profit_loss'),
+            'period_date': create_kwargs.get('period_date'),
+            'status': create_kwargs.get('status'),
+        }
+        pos_obj, _ = Position.objects.update_or_create(
+            transaction_id=txn_id,
+            period_index=period_index,
+            defaults=defaults,
+        )
+        return pos_obj
 
 
 def _to_decimal(value) -> Decimal | None:
@@ -5376,136 +5464,114 @@ def recalculate_positions_for_product_addition(
                 f"Deleted positions mismatch for product {product.id}: deleted={deleted_count}, expected={total_pending_count}."
             )
         
-        # Find all investment transactions (transfer_to = product_id) for the same client and product.
-        # By default exclude addition_txn (legacy). Manual UI regeneration passes include_focus_transaction=True
-        # so the transaction opened in the modal is regenerated too (e.g. sole investment on the product).
-        investment_transactions = Transaction.objects.filter(
-            client_id=addition_txn.client_id,
-            type='transfert',
-            transfer_to=product.id,
-            status__in=COMPLETED_TRANSACTION_STATUSES,
-        ).order_by('datetime', 'id')
-        if not include_focus_transaction:
-            investment_transactions = investment_transactions.exclude(id=addition_txn.id)
-
-        txn_count = investment_transactions.count()
-        execution_summary['transaction_count'] = int(txn_count)
-        logger.info(f"Recalculating positions for {txn_count} investment transactions "
-                    f"on product {product.id} after addition transaction {addition_txn.id}")
-
-        if total_pending_count > 0 and txn_count == 0:
-            _record_failure(
-                f"Pending positions were deleted ({total_pending_count}) but no investment transactions were eligible for regeneration "
-                f"(product={product.id}, client={addition_txn.client_id})."
-            )
-        
-        # For each investment transaction, recalculate positions
-        # This will use the updated capital (which now includes the addition)
+        # Addition flow attribution rule:
+        # all newly regenerated positions must be linked to the new addition transaction.
+        # We still compute on global product capital via context metadata, but we persist
+        # the upcoming schedule under addition_txn.id.
+        execution_summary['transaction_count'] = 1
         regenerated_total = 0
         preview_sample_cap = 500
         preview_sample_count = 0
-        for inv_txn in investment_transactions:
-            before_pending = int(deleted_by_transaction.get(inv_txn.id, 0))
-            try:
-                if positions_per_month_min is not None or positions_per_month_max is not None:
-                    merged_sub = dict(inv_txn.subscription_details or {})
-                    if positions_per_month_min is not None:
-                        merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
-                    if positions_per_month_max is not None:
-                        merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
-                    inv_txn.subscription_details = merged_sub
+        before_pending_total = int(total_pending_count)
 
-                # Pass recalculation context to context builder without persisting anything.
-                inv_txn._capital_cutoff_datetime = recalculation_cutoff_dt
-                inv_txn._withdrawal_recalc_metadata = addition_meta  # Reuse the same attribute name for consistency
-                
-                # Check all existing positions before recalculation
-                all_existing = Position.objects.filter(transaction_id=inv_txn.id)
-                total_before = all_existing.count()
-                pending_before = all_existing.filter(status='pending').count()
-                open_before = all_existing.filter(status='open').count()
-                done_before = all_existing.filter(status='done').count()
-                
-                logger.info(f"Before recalculation for investment transaction {inv_txn.id} after addition {addition_txn.id}: "
-                        f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}")
-                
-                # Regenerate positions for this investment transaction
-                # This will use the updated capital (increased by the addition)
-                # delete_pending=False because we already deleted ALL pending positions above
-                created_positions = create_positions_for_investment(
-                    inv_txn,
-                    trigger="addition_recalculation",
-                    delete_pending=False,
-                    future_only=True,
-                    future_cutoff_datetime=recalculation_cutoff_dt,
-                )
-                created_count = len(created_positions or [])
-                regenerated_total += created_count
-                if dry_run and created_positions:
-                    for p in created_positions:
-                        if preview_sample_count >= preview_sample_cap:
-                            break
-                        preview_sample_count += 1
-                        asset_name = ''
-                        asset_reference = ''
-                        asset_type = ''
-                        if getattr(p, 'asset_id', None):
-                            asset_obj = Asset.objects.filter(id=p.asset_id).first()
-                            if asset_obj:
-                                asset_name = asset_obj.name or ''
-                                asset_reference = asset_obj.reference or ''
-                                asset_type = asset_obj.type or ''
-                        execution_summary['generated_positions_preview'].append({
-                            'id': str(getattr(p, 'id', '') or ''),
-                            'client_id': str(getattr(p, 'client_id', '') or ''),
-                            'product_id': str(getattr(p, 'product_id', '') or ''),
-                            'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
-                            'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
-                            'asset_name': asset_name,
-                            'asset_reference': asset_reference,
-                            'asset_type': asset_type,
-                            'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
-                            'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
-                            'invested_amount': str(getattr(p, 'invested_amount', '0')),
-                            'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
-                            'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
-                            'profit_loss': str(getattr(p, 'profit_loss', '0')),
-                            'period_index': int(getattr(p, 'period_index', 0) or 0),
-                            'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
-                            'status': str(getattr(p, 'status', 'pending') or 'pending'),
-                        })
-                after_pending = Position.objects.filter(transaction_id=inv_txn.id, status='pending').count()
-                execution_summary['per_transaction'].append({
-                    'transaction_id': inv_txn.id,
-                    'before_pending': before_pending,
-                    'created': int(created_count),
-                    'after_pending': int(after_pending),
-                    'status': 'ok',
-                })
+        target_txn = addition_txn
+        try:
+            if positions_per_month_min is not None or positions_per_month_max is not None:
+                merged_sub = dict(target_txn.subscription_details or {})
+                if positions_per_month_min is not None:
+                    merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
+                if positions_per_month_max is not None:
+                    merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
+                target_txn.subscription_details = merged_sub
 
-                if before_pending > 0 and created_count == 0:
-                    _record_failure(
-                        f"Regeneration produced 0 positions for transaction {inv_txn.id} although {before_pending} pending positions were deleted."
-                    )
-                if created_count > 0 and after_pending < created_count:
-                    _record_failure(
-                        f"Post-regeneration mismatch for transaction {inv_txn.id}: created={created_count}, after_pending={after_pending}."
-                    )
-                logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after addition")
-            except Exception as e:
-                execution_summary['per_transaction'].append({
-                    'transaction_id': inv_txn.id,
-                    'before_pending': before_pending,
-                    'created': 0,
-                    'after_pending': 0,
-                    'status': 'failed',
-                    'error': str(e),
-                })
+            target_txn._capital_cutoff_datetime = recalculation_cutoff_dt
+            target_txn._withdrawal_recalc_metadata = addition_meta  # reuse metadata hook
+
+            created_positions = create_positions_for_investment(
+                target_txn,
+                trigger="addition_recalculation",
+                delete_pending=False,
+                future_only=True,
+                future_cutoff_datetime=recalculation_cutoff_dt,
+            )
+            created_count = len(created_positions or [])
+            regenerated_total = int(created_count)
+
+            if dry_run and created_positions:
+                for p in created_positions:
+                    if preview_sample_count >= preview_sample_cap:
+                        break
+                    preview_sample_count += 1
+                    asset_name = ''
+                    asset_reference = ''
+                    asset_type = ''
+                    if getattr(p, 'asset_id', None):
+                        asset_obj = Asset.objects.filter(id=p.asset_id).first()
+                        if asset_obj:
+                            asset_name = asset_obj.name or ''
+                            asset_reference = asset_obj.reference or ''
+                            asset_type = asset_obj.type or ''
+                    execution_summary['generated_positions_preview'].append({
+                        'id': str(getattr(p, 'id', '') or ''),
+                        'client_id': str(getattr(p, 'client_id', '') or ''),
+                        'product_id': str(getattr(p, 'product_id', '') or ''),
+                        'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
+                        'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
+                        'asset_name': asset_name,
+                        'asset_reference': asset_reference,
+                        'asset_type': asset_type,
+                        'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
+                        'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
+                        'invested_amount': str(getattr(p, 'invested_amount', '0')),
+                        'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
+                        'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
+                        'profit_loss': str(getattr(p, 'profit_loss', '0')),
+                        'period_index': int(getattr(p, 'period_index', 0) or 0),
+                        'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
+                        'status': str(getattr(p, 'status', 'pending') or 'pending'),
+                    })
+
+            after_pending_for_target = Position.objects.filter(
+                transaction_id=target_txn.id,
+                status='pending',
+            ).count()
+            execution_summary['per_transaction'].append({
+                'transaction_id': target_txn.id,
+                'before_pending': before_pending_total,
+                'created': int(created_count),
+                'after_pending': int(after_pending_for_target),
+                'status': 'ok',
+            })
+
+            if before_pending_total > 0 and created_count == 0:
                 _record_failure(
-                    f"Failed to recalculate positions for investment transaction {inv_txn.id} "
-                    f"after addition {addition_txn.id}: {str(e)}",
-                    exc=e
+                    f"Regeneration produced 0 positions for addition transaction {target_txn.id} although "
+                    f"{before_pending_total} pending positions were deleted."
                 )
+            if created_count > 0 and after_pending_for_target < created_count:
+                _record_failure(
+                    f"Post-regeneration mismatch for addition transaction {target_txn.id}: "
+                    f"created={created_count}, after_pending={after_pending_for_target}."
+                )
+            logger.info(
+                "Regenerated %s positions after addition %s (all linked to transaction %s)",
+                created_count,
+                addition_txn.id,
+                target_txn.id,
+            )
+        except Exception as e:
+            execution_summary['per_transaction'].append({
+                'transaction_id': target_txn.id,
+                'before_pending': before_pending_total,
+                'created': 0,
+                'after_pending': 0,
+                'status': 'failed',
+                'error': str(e),
+            })
+            _record_failure(
+                f"Failed to recalculate positions for addition transaction {target_txn.id}: {str(e)}",
+                exc=e
+            )
 
         execution_summary['regenerated_total'] = int(regenerated_total)
         final_pending_total = Position.objects.filter(
