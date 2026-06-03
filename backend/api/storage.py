@@ -59,6 +59,7 @@ class S3MediaStorage(Storage):
             'client_documents',
             'client_profiles',
             'kyc',
+            'products',
             'successors',
             'user_profiles',
         }
