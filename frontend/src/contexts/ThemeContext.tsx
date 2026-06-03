@@ -119,9 +119,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const applyTheme = (appSettings: AppSettings) => {
     const root = document.documentElement;
 
-    // Apply platform name (document title) — never show "Panorama" as default
-    const platformName = (appSettings.platform_name || '').trim();
-    document.title = (platformName && platformName.toLowerCase() !== 'panorama') ? platformName : '';
+    // Keep browser titles generic to avoid exposing the platform name publicly.
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+    let genericTitle = 'Plateforme';
+    if (pathname.startsWith('/admin/login')) {
+      genericTitle = 'Administration';
+    } else if (
+      pathname.startsWith('/login') ||
+      pathname.startsWith('/forgot-password') ||
+      pathname.startsWith('/reset-password')
+    ) {
+      genericTitle = 'Connexion';
+    } else if (pathname.startsWith('/invite/')) {
+      genericTitle = 'Invitation';
+    } else if (pathname.startsWith('/legal/')) {
+      genericTitle = 'Mentions légales';
+    }
+    document.title = genericTitle;
     
     // Apply favicon (normalize proxy URL for deployed / reverse-proxy setups)
     const faviconUrl = appSettings.favicon_url

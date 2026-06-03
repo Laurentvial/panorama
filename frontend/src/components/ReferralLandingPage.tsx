@@ -24,8 +24,6 @@ export function ReferralLandingPage() {
 
   const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -103,8 +101,6 @@ export function ReferralLandingPage() {
             <div className="login-banner-placeholder" aria-hidden="true" />
           ) : hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : platformName ? (
-            <div className="login-banner-title">{platformName}</div>
           ) : (
             <div className="login-banner-fallback" role="img" aria-label="Espace client">
               <Building2 className="login-banner-fallback-icon" aria-hidden />
@@ -135,8 +131,6 @@ export function ReferralLandingPage() {
             <div className="login-banner-placeholder" aria-hidden="true" />
           ) : hasLogo ? (
             <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : platformName ? (
-            <div className="login-banner-title">{platformName}</div>
           ) : (
             <div className="login-banner-fallback" role="img" aria-label="Espace client">
               <Building2 className="login-banner-fallback-icon" aria-hidden />
@@ -169,8 +163,6 @@ export function ReferralLandingPage() {
           <div className="login-banner-placeholder" aria-hidden="true" />
         ) : hasLogo ? (
           <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : platformName ? (
-          <div className="login-banner-title">{platformName}</div>
         ) : (
           <div className="login-banner-fallback" role="img" aria-label="Espace client">
             <Building2 className="login-banner-fallback-icon" aria-hidden />
@@ -182,7 +174,7 @@ export function ReferralLandingPage() {
         <Card className="login-card">
           <CardHeader className="login-card-header">
             <CardDescription style={{ fontSize: '1.1rem', fontWeight: 600, color: '#166534', marginBottom: 8 }}>
-              Rejoignez {platformName || 'la plateforme'} et <strong>recevez jusqu&apos;à 500€</strong> de bonus grâce à cette invitation
+              Rejoignez notre espace client et <strong>recevez jusqu&apos;à 500€</strong> de bonus grâce à cette invitation
             </CardDescription>
             <CardDescription style={{ fontSize: '0.95rem', color: '#6b7280' }}>
               Laissez-nous vos coordonnées pour recevoir votre bonus et créer votre compte.

@@ -16,9 +16,6 @@ export function LegalDocumentShell({ title, children }: LegalDocumentShellProps)
   const { settings } = useTheme();
   const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName =
-    rawName && rawName.toLowerCase() !== 'panorama' ? rawName : 'Plateforme';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -86,7 +83,7 @@ export function LegalDocumentShell({ title, children }: LegalDocumentShellProps)
             {hasLogo ? (
               <img
                 src={bannerLogoSrc}
-                alt={platformName}
+                alt="Logo"
                 style={{
                   display: 'block',
                   maxHeight: 36,
@@ -96,7 +93,7 @@ export function LegalDocumentShell({ title, children }: LegalDocumentShellProps)
                 }}
               />
             ) : (
-              <span style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.3 }}>{platformName}</span>
+              <span style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.3 }}>Plateforme</span>
             )}
           </Link>
           <div style={{ justifySelf: 'end', width: '100%', minWidth: 0 }} aria-hidden />

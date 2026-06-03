@@ -9,23 +9,18 @@ import { useUser } from '../contexts/UserContext';
 import { ACCESS_TOKEN, REFRESH_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
-import { Building2 } from 'lucide-react';
 import '../styles/LoginPage.css';
 
 export function AdminLoginPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
-  const { settings, loading: settingsLoading } = useTheme();
+  const { settings } = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ username?: boolean; password?: boolean }>({});
-  const hasLogo = Boolean(settings?.logo_url);
-  const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -137,24 +132,10 @@ export function AdminLoginPage() {
 
   return (
     <div className="login-page-container" style={containerStyle}>
-      <header className="login-banner">
-        {settingsLoading ? (
-          <div className="login-banner-placeholder" aria-hidden="true" />
-        ) : hasLogo ? (
-          <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : platformName ? (
-          <div className="login-banner-title">{platformName}</div>
-        ) : (
-          <div className="login-banner-fallback" role="img" aria-label="Administration">
-            <Building2 className="login-banner-fallback-icon" aria-hidden />
-          </div>
-        )}
-      </header>
-
       <div className="login-content">
         <Card className="login-card">
           <CardHeader className="login-card-header">
-            <CardTitle>{platformName ? `${platformName} - Administration` : ''}</CardTitle>
+            <CardTitle>Administration</CardTitle>
             <CardDescription>
               Connectez-vous à votre compte administrateur
             </CardDescription>

@@ -189,9 +189,11 @@ function App() {
                         </Suspense>
                     } />
                     <Route path="/legal/:docId" element={
-                        <Suspense fallback={<LoadingFallback />}>
-                            <LegalDocumentPage />
-                        </Suspense>
+                        <ClientProtectedRoute>
+                            <Suspense fallback={<LoadingFallback />}>
+                                <LegalDocumentPage />
+                            </Suspense>
+                        </ClientProtectedRoute>
                     } />
                     
                     {/* Admin/CRM Routes - All under /admin */}

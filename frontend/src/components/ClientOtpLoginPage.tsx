@@ -9,7 +9,6 @@ import { Input } from './ui/input';
 import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 
 import { clientRequestOtp, clientVerifyOtp } from '../utils/auth';
-import { Building2 } from 'lucide-react';
 
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
@@ -42,10 +41,6 @@ export function ClientOtpLoginPage() {
     else if (emailOtpEnabled && !smsOtpEnabled) setChannel('email');
   }, [settingsLoading, emailOtpEnabled, smsOtpEnabled]);
 
-  const hasLogo = Boolean(settings?.logo_url);
-  const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -139,17 +134,6 @@ export function ClientOtpLoginPage() {
   if (bothOtpDisabled) {
     return (
       <div className="login-page-container login-page-container--client" style={containerStyle}>
-        <header className="login-banner">
-          {hasLogo ? (
-            <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-          ) : platformName ? (
-            <div className="login-banner-title">{platformName}</div>
-          ) : (
-            <div className="login-banner-fallback" role="img" aria-label="Espace client">
-              <Building2 className="login-banner-fallback-icon" aria-hidden />
-            </div>
-          )}
-        </header>
         <div className="login-content">
           <Card className="login-card">
             <CardHeader className="login-card-header">
@@ -174,20 +158,6 @@ export function ClientOtpLoginPage() {
 
   return (
     <div className="login-page-container login-page-container--client" style={containerStyle}>
-      <header className="login-banner">
-        {settingsLoading ? (
-          <div className="login-banner-placeholder" aria-hidden="true" />
-        ) : hasLogo ? (
-          <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : platformName ? (
-          <div className="login-banner-title">{platformName}</div>
-        ) : (
-          <div className="login-banner-fallback" role="img" aria-label="Espace client">
-            <Building2 className="login-banner-fallback-icon" aria-hidden />
-          </div>
-        )}
-      </header>
-
       <div className="login-content">
         <Card className="login-card">
           <CardHeader className="login-card-header">

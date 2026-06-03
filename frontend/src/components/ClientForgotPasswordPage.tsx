@@ -7,22 +7,17 @@ import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 
 import { useTheme } from '../contexts/ThemeContext';
 import { clientRequestPasswordReset } from '../utils/auth';
-import { Building2 } from 'lucide-react';
 
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
 
 export function ClientForgotPasswordPage() {
-  const { settings, loading: settingsLoading } = useTheme();
+  const { settings } = useTheme();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
-  const hasLogo = Boolean(settings?.logo_url);
-  const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const buttonBg =
     (settings?.secondary_color || '').trim() ||
     (settings?.primary_color || '').trim() ||
@@ -55,20 +50,6 @@ export function ClientForgotPasswordPage() {
 
   return (
     <div className="login-page-container login-page-container--client" style={containerStyle}>
-      <header className="login-banner">
-        {settingsLoading ? (
-          <div className="login-banner-placeholder" aria-hidden="true" />
-        ) : hasLogo ? (
-          <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : platformName ? (
-          <div className="login-banner-title">{platformName}</div>
-        ) : (
-          <div className="login-banner-fallback" role="img" aria-label="Espace client">
-            <Building2 className="login-banner-fallback-icon" aria-hidden />
-          </div>
-        )}
-      </header>
-
       <div className="login-content">
         <Card className="login-card">
           <CardHeader className="login-card-header">

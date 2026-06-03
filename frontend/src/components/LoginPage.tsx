@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader } from './ui/card';
 import { clientSignIn } from '../utils/auth';
 import { useUser } from '../contexts/UserContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import '../styles/LoginPage.css';
 import { LegalFooterLinks } from './legal/LegalFooterLinks';
@@ -14,17 +13,13 @@ import { LegalFooterLinks } from './legal/LegalFooterLinks';
 export function LoginPage() {
   const navigate = useNavigate();
   const { refreshUser } = useUser();
-  const { settings, loading: settingsLoading } = useTheme();
+  const { settings } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
-  const hasLogo = Boolean(settings?.logo_url);
-  const bannerLogoSrc = settings?.logo_url || '';
-  const rawName = (settings?.platform_name || '').trim();
-  const platformName = rawName && rawName.toLowerCase() !== 'panorama' ? rawName : '';
   const showOtpBlock = Boolean(
     settings &&
       (settings.otp_email_enabled !== false || settings.otp_sms_enabled !== false)
@@ -110,20 +105,6 @@ export function LoginPage() {
 
   return (
     <div className="login-page-container login-page-container--client" style={containerStyle}>
-      <header className="login-banner">
-        {settingsLoading ? (
-          <div className="login-banner-placeholder" aria-hidden="true" />
-        ) : hasLogo ? (
-          <img className="login-banner-logo" src={bannerLogoSrc} alt="Logo" />
-        ) : platformName ? (
-          <div className="login-banner-title">{platformName}</div>
-        ) : (
-          <div className="login-banner-fallback" role="img" aria-label="Espace client">
-            <Building2 className="login-banner-fallback-icon" aria-hidden />
-          </div>
-        )}
-      </header>
-
       <div className="login-content">
         <Card className="login-card">
           <CardHeader className="login-card-header">
