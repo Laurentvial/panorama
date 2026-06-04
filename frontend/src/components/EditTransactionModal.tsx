@@ -454,17 +454,6 @@ export function EditTransactionModal({
     return toField;
   };
 
-  const buildNowDatetimeLocalISO = (): string => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-  };
-
   const handleCloseTransfer = async () => {
     if (!transaction || isClosingTransfer) return;
 
@@ -481,45 +470,19 @@ export function EditTransactionModal({
 
     setIsClosingTransfer(true);
     try {
-      const closureData: any = await apiCall(
-        `/api/clients/${clientId}/transactions/${transaction.id}/closure-amount/`,
-        { method: 'GET' }
-      );
-
-      const closureAmount = Number(closureData?.amount ?? closureData?.amount_decimal ?? 0);
-      if (!Number.isFinite(closureAmount) || closureAmount <= 0) {
-        toast.error("Aucun montant clôturable disponible pour ce transfert.");
-        return;
-      }
-
-      const productLabel = transferProduct?.name ? ` (${transferProduct.name})` : '';
-      const createdTransaction: any = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+      const closureData: any = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/close/`, {
         method: 'POST',
-        body: JSON.stringify({
-          type: 'transfert',
-          amount: closureAmount,
-          description: `Clôture automatique du transfert${productLabel} vers le solde.`,
-          status: 'valide',
-          datetime: buildNowDatetimeLocalISO(),
-          from_field: productId,
-          to_field: 'solde',
-          subscription_details: {
-            productId,
-          },
-        }),
-      });
-
-      await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: 'cloture',
-        }),
       });
 
       bustTransactionsCache(clientId);
-      toast.success('Clôture du transfert effectuée avec succès.');
+      const deletedPending = Number(closureData?.deleted_pending_positions ?? 0);
+      const remainingInterests = Number(closureData?.remaining_interests_amount ?? 0);
+      const successMessage = remainingInterests > 0
+        ? `Clôture effectuée: transfert vers solde, intérêts restants créés, ${deletedPending} position(s) en attente supprimée(s).`
+        : `Clôture effectuée: transfert vers solde, ${deletedPending} position(s) en attente supprimée(s).`;
+      toast.success(successMessage);
       handleClose();
-      onSuccess(createdTransaction?.transaction || createdTransaction);
+      onSuccess(closureData?.source_transaction || closureData);
     } catch (error: any) {
       console.error('Error closing transfer:', error);
       toast.error(error.message || 'Erreur lors de la clôture du transfert');

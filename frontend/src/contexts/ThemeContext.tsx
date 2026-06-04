@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
-import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
 
 export interface AppSettings {
   id: string;
@@ -137,32 +136,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     document.title = genericTitle;
     
-    // Apply favicon (normalize proxy URL for deployed / reverse-proxy setups)
-    const faviconUrl = appSettings.favicon_url
-      ? resolveMediaProxyUrlForBrowser(appSettings.favicon_url)
-      : '';
     // Remove existing favicon links
     const existingFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
     existingFavicons.forEach(link => link.remove());
-    
-    if (faviconUrl) {
-      // Create new favicon link
-      const link = document.createElement('link');
-      link.rel = 'icon';
-      // Try to detect the file type from the URL
-      const lowerUrl = faviconUrl.toLowerCase();
-      if (lowerUrl.includes('.ico')) {
-        link.type = 'image/x-icon';
-      } else if (lowerUrl.includes('.png')) {
-        link.type = 'image/png';
-      } else if (lowerUrl.includes('.svg')) {
-        link.type = 'image/svg+xml';
-      } else {
-        link.type = 'image/x-icon'; // Default
-      }
-      link.href = faviconUrl;
-      document.head.appendChild(link);
-    }
     
     // Apply primary color
     if (appSettings.primary_color) {

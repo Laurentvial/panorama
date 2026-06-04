@@ -108,6 +108,8 @@ from .position_service import (
     recalculate_positions_for_product_addition,
     recalculate_positions_for_product_withdrawal,
     calculate_withdrawal_recalculation_metadata,
+    calculate_remaining_interests_for_transaction,
+    delete_pending_positions_for_transaction,
     sync_position_statuses_from_schedule,
 )
 
@@ -10317,6 +10319,159 @@ def transaction_closure_amount(request, client_id, transaction_id):
             'transaction_id': transaction.id,
             'currency': client.account_currency or 'EUR',
         }
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def client_transaction_close(request, client_id, transaction_id):
+    """Close an investment transfer with withdrawal + remaining interests + pending cleanup."""
+    client = get_object_or_404(Client, id=client_id)
+    source_transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not is_client_token:
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+
+    if source_transaction.type != 'transfert':
+        return Response({'error': 'La transaction source doit être un transfert.'}, status=status.HTTP_400_BAD_REQUEST)
+    if source_transaction.status != 'valide':
+        return Response({'error': 'Le transfert source doit être au statut Validé.'}, status=status.HTTP_400_BAD_REQUEST)
+    if source_transaction.transfer_from != 'solde':
+        return Response(
+            {'error': "Le transfert source doit être un investissement (de solde vers produit)."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    product_id = str(source_transaction.transfer_to or '').strip()
+    if not product_id or product_id in ('solde', 'trading'):
+        return Response(
+            {'error': "Le transfert source doit cibler un produit d'investissement."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    product = Product.objects.filter(id=product_id).first()
+    if product is None:
+        return Response({'error': 'Produit introuvable pour la clôture.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    def _allocate_txn_id() -> str:
+        txn_id = uuid.uuid4().hex[:12]
+        while Transaction.objects.filter(id=txn_id).exists():
+            txn_id = uuid.uuid4().hex[:12]
+        return txn_id
+
+    try:
+        with db_transaction.atomic():
+            closable_raw = _calculate_real_invested_capital(client_id=client_id, product_id=product_id)
+            closable_amount = max(closable_raw, Decimal('0')).quantize(Decimal('0.01'))
+            if closable_amount <= 0:
+                return Response(
+                    {'error': "Aucun montant clôturable disponible pour ce transfert."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            now_dt = timezone.now()
+            withdrawal_subscription = dict(source_transaction.subscription_details or {})
+            withdrawal_subscription.update({
+                'productId': product_id,
+                'sourceTransactionId': source_transaction.id,
+                'closureOperation': True,
+            })
+            withdrawal_txn = Transaction.objects.create(
+                id=_allocate_txn_id(),
+                client=client,
+                type='transfert',
+                amount=closable_amount,
+                amount_currency=source_transaction.amount_currency or client.account_currency or 'EUR',
+                description=f"Clôture automatique du transfert {source_transaction.id} vers le solde.",
+                status='valide',
+                datetime=now_dt,
+                validated_at=now_dt,
+                transfer_from=product_id,
+                transfer_to='solde',
+                product=product,
+                subscription_details=withdrawal_subscription,
+            )
+
+            remaining_interests = calculate_remaining_interests_for_transaction(source_transaction)
+            interest_txn = None
+            if remaining_interests > 0:
+                interest_txn = Transaction.objects.create(
+                    id=_allocate_txn_id(),
+                    client=client,
+                    type='interets',
+                    amount=remaining_interests,
+                    amount_currency=source_transaction.amount_currency or client.account_currency or 'EUR',
+                    description=f"Intérêts restants (clôture) - Transaction {source_transaction.id}",
+                    status='valide',
+                    datetime=now_dt,
+                    validated_at=now_dt,
+                    product=product,
+                    subscription_details={
+                        'sourceTransactionId': source_transaction.id,
+                        'closureOperation': True,
+                    },
+                )
+
+            deleted_pending_positions = delete_pending_positions_for_transaction(
+                transaction_id=source_transaction.id,
+                trigger='close_transaction_source_pending_cleanup',
+            )
+
+            source_transaction.status = 'cloture'
+            source_transaction.save(update_fields=['status'])
+
+            recalculate_positions_for_product_withdrawal(
+                withdrawal_txn,
+                force_recalculate=True,
+                strict=False,
+            )
+            # Ensure the source transaction keeps no pending positions after global regeneration.
+            delete_pending_positions_for_transaction(
+                transaction_id=source_transaction.id,
+                trigger='close_transaction_source_pending_cleanup_post_recalc',
+            )
+
+            source_transaction.refresh_from_db()
+            withdrawal_txn.refresh_from_db()
+            if interest_txn is not None:
+                interest_txn.refresh_from_db()
+    except Exception:
+        logger.exception(
+            "client_transaction_close failed (client_id=%s, transaction_id=%s, product_id=%s)",
+            client_id,
+            transaction_id,
+            product_id,
+        )
+        return Response(
+            {'error': "Erreur lors de l'exécution de la clôture."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response(
+        {
+            'success': True,
+            'source_transaction': TransactionSerializer(source_transaction).data,
+            'withdrawal_transaction': TransactionSerializer(withdrawal_txn).data,
+            'interest_transaction': TransactionSerializer(interest_txn).data if interest_txn else None,
+            'deleted_pending_positions': int(deleted_pending_positions),
+            'closure_amount': str(closable_amount),
+            'remaining_interests_amount': str(remaining_interests),
+        },
+        status=status.HTTP_200_OK,
     )
 
 @api_view(['POST'])

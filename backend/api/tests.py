@@ -1,5 +1,6 @@
 import random
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timezone as dt_timezone
 
@@ -12,6 +13,8 @@ from .position_service import (
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
     _product_has_explicit_contract_duration,
+    calculate_remaining_interests_for_transaction,
+    delete_pending_positions_for_transaction,
 )
 from .views import (
     _build_preview_contract,
@@ -272,3 +275,78 @@ class AdditionPendingDetectionTest(SimpleTestCase):
             )
         )
         mock_filter.assert_not_called()
+
+
+class RemainingInterestsComputationTest(SimpleTestCase):
+    @patch('api.position_service._sum_paid_interest_transactions')
+    @patch('api.position_service.generate_rates_for_investment')
+    def test_calculates_remaining_interests_with_paid_deduction(self, mock_generate_rates, mock_sum_paid):
+        mock_generate_rates.return_value = [
+            {'targetProfit': '15.60'},
+            {'targetProfit': '4.40'},
+            {'targetProfit': '10.00'},
+        ]
+        mock_sum_paid.return_value = Decimal('12.50')
+        txn = SimpleNamespace(
+            id='txnA',
+            client_id='clientA',
+            type='transfert',
+            transfer_to='productA',
+        )
+
+        remaining = calculate_remaining_interests_for_transaction(txn)
+
+        self.assertEqual(remaining, Decimal('17.50'))
+        mock_sum_paid.assert_called_once()
+
+    @patch('api.position_service._sum_paid_interest_transactions')
+    @patch('api.position_service.generate_rates_for_investment')
+    def test_clamps_remaining_interests_to_zero(self, mock_generate_rates, mock_sum_paid):
+        mock_generate_rates.return_value = [{'targetProfit': '8.00'}]
+        mock_sum_paid.return_value = Decimal('12.00')
+        txn = SimpleNamespace(
+            id='txnA',
+            client_id='clientA',
+            type='transfert',
+            transfer_to='productA',
+        )
+
+        remaining = calculate_remaining_interests_for_transaction(txn)
+        self.assertEqual(remaining, Decimal('0.00'))
+
+    def test_returns_zero_for_non_investment_transfer(self):
+        txn = SimpleNamespace(
+            id='txnA',
+            client_id='clientA',
+            type='transfert',
+            transfer_to='solde',
+        )
+        remaining = calculate_remaining_interests_for_transaction(txn)
+        self.assertEqual(remaining, Decimal('0.00'))
+
+
+class DeletePendingPositionsForTransactionTest(SimpleTestCase):
+    @patch('api.position_service.position_deletion_audit')
+    @patch('api.position_service.Position.objects.filter')
+    def test_delete_pending_positions_uses_audit_context(self, mock_filter, mock_audit):
+        delete_qs = mock_filter.return_value
+        delete_qs.delete.return_value = (3, {'api.Position': 3})
+
+        class _Ctx:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        mock_audit.return_value = _Ctx()
+
+        deleted = delete_pending_positions_for_transaction(
+            transaction_id='txnA',
+            trigger='unit_test_cleanup',
+        )
+
+        self.assertEqual(deleted, 3)
+        mock_filter.assert_called_once_with(transaction_id='txnA', status='pending')
+        mock_audit.assert_called_once_with('unit_test_cleanup')
+        delete_qs.delete.assert_called_once()

@@ -3935,14 +3935,68 @@ def _sum_paid_interest_transactions(
 
     if investment_transaction_id:
         qs = qs.filter(
-            Q(description__icontains=f"transaction {investment_transaction_id}") |
-            Q(description__icontains=f"txn {investment_transaction_id}")
+            Q(subscription_details__sourceTransactionId=investment_transaction_id)
+            | Q(description__icontains=f"transaction {investment_transaction_id}")
+            | Q(description__icontains=f"txn {investment_transaction_id}")
         )
 
     total = Decimal('0')
     for txn in qs.only('amount').iterator():
         total += _to_decimal(txn.amount) or Decimal('0')
     return total.quantize(Decimal('0.01'))
+
+
+def calculate_remaining_interests_for_transaction(txn: Transaction) -> Decimal:
+    """
+    Compute remaining interests for one investment transaction:
+    projected interests - already paid interests.
+    """
+    if (
+        txn.type != 'transfert'
+        or not txn.transfer_to
+        or txn.transfer_to in ('solde', 'trading')
+    ):
+        return Decimal('0.00')
+
+    projected_total = Decimal('0')
+    for period in generate_rates_for_investment(txn) or []:
+        try:
+            projected_total += Decimal(str(period.get('targetProfit') or '0'))
+        except Exception:
+            continue
+    projected_total = projected_total.quantize(Decimal('0.01'))
+
+    paid_total = _sum_paid_interest_transactions(
+        client_id=txn.client_id,
+        product_id=txn.transfer_to,
+        up_to_datetime=timezone.now(),
+        investment_transaction_id=txn.id,
+    ).quantize(Decimal('0.01'))
+
+    remaining = (projected_total - paid_total).quantize(Decimal('0.01'))
+    if remaining <= 0:
+        return Decimal('0.00')
+    return remaining
+
+
+def delete_pending_positions_for_transaction(
+    *,
+    transaction_id: str,
+    trigger: str = 'delete_pending_positions_for_transaction',
+) -> int:
+    """
+    Delete pending positions linked to a specific transaction with deletion audit.
+    Returns number of deleted rows.
+    """
+    delete_qs = Position.objects.filter(
+        transaction_id=transaction_id,
+        status='pending',
+    )
+    with position_deletion_audit(trigger):
+        deleted_result = delete_qs.delete()
+    if isinstance(deleted_result, tuple):
+        return int(deleted_result[0] or 0)
+    return int(deleted_result or 0)
 
 
 def _sum_accrued_position_gains(

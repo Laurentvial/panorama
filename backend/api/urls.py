@@ -160,6 +160,11 @@ urlpatterns = [
         api_views.transaction_closure_amount,
         name='transaction-closure-amount'
     ),
+    path(
+        'clients/<str:client_id>/transactions/<str:transaction_id>/close/',
+        api_views.client_transaction_close,
+        name='client-transaction-close'
+    ),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-positions/', api_views.transaction_generate_positions, name='transaction-generate-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/save-positions/', api_views.transaction_save_positions, name='transaction-save-positions'),
