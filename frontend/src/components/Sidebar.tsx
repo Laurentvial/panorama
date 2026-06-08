@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { apiCall } from '../utils/api';
 import { Button } from './ui/button';
 import { 
@@ -145,27 +145,52 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
           
           return (
             <div key={item.id} className="sidebar-nav-item">
-              <Button
-                variant={isActive ? 'default' : 'ghost'}
-                className="sidebar-button"
-                onClick={() => handleNavigation(item)}
-                onMouseEnter={() => handleMouseEnter(item)}
-                data-active={isActive ? 'true' : 'false'}
-                aria-current={isActive ? 'page' : undefined}
-                type="button"
-                style={{ position: 'relative' }}
-              >
-                <Icon className="sidebar-icon" />
-                {item.label}
-                {item.id === 'messagerie' && unreadMessagesCount > 0 && (
-                  <span
-                    className="sidebar-messagerie-badge"
-                    aria-label={`${unreadMessagesCount} message(s) non lu(s)`}
-                  >
-                    {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
-                  </span>
-                )}
-              </Button>
+              {item.path ? (
+                <Button
+                  asChild
+                  variant={isActive ? 'default' : 'ghost'}
+                  className="sidebar-button"
+                  onMouseEnter={() => handleMouseEnter(item)}
+                  data-active={isActive ? 'true' : 'false'}
+                  aria-current={isActive ? 'page' : undefined}
+                  style={{ position: 'relative' }}
+                >
+                  <Link to={item.path}>
+                    <Icon className="sidebar-icon" />
+                    {item.label}
+                    {item.id === 'messagerie' && unreadMessagesCount > 0 && (
+                      <span
+                        className="sidebar-messagerie-badge"
+                        aria-label={`${unreadMessagesCount} message(s) non lu(s)`}
+                      >
+                        {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                      </span>
+                    )}
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  variant={isActive ? 'default' : 'ghost'}
+                  className="sidebar-button"
+                  onClick={() => handleNavigation(item)}
+                  onMouseEnter={() => handleMouseEnter(item)}
+                  data-active={isActive ? 'true' : 'false'}
+                  aria-current={isActive ? 'page' : undefined}
+                  type="button"
+                  style={{ position: 'relative' }}
+                >
+                  <Icon className="sidebar-icon" />
+                  {item.label}
+                  {item.id === 'messagerie' && unreadMessagesCount > 0 && (
+                    <span
+                      className="sidebar-messagerie-badge"
+                      aria-label={`${unreadMessagesCount} message(s) non lu(s)`}
+                    >
+                      {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                    </span>
+                  )}
+                </Button>
+              )}
             </div>
           );
         })}
