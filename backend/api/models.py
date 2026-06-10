@@ -461,6 +461,37 @@ class ClientRIB(models.Model):
     def __str__(self):
         return f"{self.client.fname} {self.client.lname} - {self.rib.name}"
 
+
+class Wallet(models.Model):
+    """Table des wallets crypto disponibles"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    name = models.CharField(max_length=200, default="")  # Nom du wallet
+    asset_symbol = models.CharField(max_length=30, default="")  # Symbole crypto (BTC, ETH, etc.)
+    network = models.CharField(max_length=120, default="")  # Réseau (ERC20, TRC20, BEP20, etc.)
+    wallet_address = models.CharField(max_length=255, default="")  # Adresse du wallet
+    memo_or_tag = models.CharField(max_length=120, default="", blank=True)  # Memo/Tag optionnel
+    default = models.BooleanField(default=False)  # Si True, disponible par défaut pour tous les clients
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.asset_symbol} ({self.network})"
+
+
+class ClientWallet(models.Model):
+    """Table relationnelle entre Client et Wallet"""
+    id = models.CharField(max_length=12, default="", unique=True, primary_key=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='client_wallets')
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='client_wallets')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['client', 'wallet']  # Un client ne peut avoir qu'une fois le même wallet
+
+    def __str__(self):
+        return f"{self.client.fname} {self.client.lname} - {self.wallet.name}"
+
 class UsefulLink(models.Model):
     """Table des liens utiles disponibles"""
     id = models.CharField(max_length=12, default="", unique=True, primary_key=True)

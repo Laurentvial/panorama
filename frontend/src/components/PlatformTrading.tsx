@@ -19,6 +19,17 @@ import { getCurrencySymbol, formatAmount } from '../utils/currency';
 import '../styles/PlatformTrading.css';
 import '../styles/PlatformPortfolio.css';
 
+type DepositPaymentMethod = 'virement' | 'carte_bancaire' | 'cryptomonnaie';
+
+function normalizeDepositPaymentMethod(raw: unknown): DepositPaymentMethod | null {
+  const value = String(raw || '').trim().toLowerCase();
+  if (!value) return null;
+  if (value === 'virement' || value === 'bank_transfer') return 'virement';
+  if (value === 'carte_bancaire' || value === 'carte bancaire' || value === 'card') return 'carte_bancaire';
+  if (value === 'cryptomonnaie' || value === 'crypto' || value === 'cryptocurrency') return 'cryptomonnaie';
+  return null;
+}
+
 export function PlatformTrading() {
   const { currentUser } = useUser();
   const location = useLocation();
@@ -29,7 +40,7 @@ export function PlatformTrading() {
   const [positions, setPositions] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [movementType, setMovementType] = useState<'depot' | 'retrait'>('depot');
-  const [paymentMethod, setPaymentMethod] = useState<'virement' | 'carte_bancaire'>('virement');
+  const [paymentMethod, setPaymentMethod] = useState<DepositPaymentMethod>('virement');
   const [amount, setAmount] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
@@ -40,11 +51,14 @@ export function PlatformTrading() {
   const [withdrawNote, setWithdrawNote] = useState('');
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
+  const [clientWallets, setClientWallets] = useState<any[]>([]);
   const [pendingAmount, setPendingAmount] = useState<number>(0);
   const [transferSuccess, setTransferSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const [cardDepositDialogOpen, setCardDepositDialogOpen] = useState(false);
   const [cardDepositSuccess, setCardDepositSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const [depositRibDialogOpen, setDepositRibDialogOpen] = useState(false);
+  const [cryptoDepositDialogOpen, setCryptoDepositDialogOpen] = useState(false);
+  const [cryptoDepositSuccess, setCryptoDepositSuccess] = useState<{ amount: number; transaction: any } | null>(null);
   const roundedCardStyle: React.CSSProperties = { borderRadius: '10px', overflow: 'hidden' };
 
   const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
@@ -65,6 +79,7 @@ export function PlatformTrading() {
     if (currentUser && currentUser.id) {
       loadData();
       loadClientRibs();
+      loadClientWallets();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
@@ -141,11 +156,34 @@ export function PlatformTrading() {
     }
   };
 
+  const loadClientWallets = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const walletsResponse = await apiCall(`/api/clients/${currentUser.id}/wallets/`);
+      const raw = (walletsResponse as any).wallets || [];
+      // Un seul wallet affiché côté plateforme (aligné API client ; sécurité si données anciennes).
+      setClientWallets(Array.isArray(raw) ? raw.slice(0, 1) : []);
+    } catch (error) {
+      console.error('Error loading client wallets:', error);
+      setClientWallets([]);
+    }
+  };
+
   // Get available payment methods from client data
   const availablePaymentMethods = useMemo(() => {
-    const methods = currentUser?.paymentMethods || [];
+    const methods: DepositPaymentMethod[] = [];
+    const rawMethods = Array.isArray(currentUser?.paymentMethods) ? currentUser.paymentMethods : [];
+    for (const rawMethod of rawMethods) {
+      const normalized = normalizeDepositPaymentMethod(rawMethod);
+      if (normalized && !methods.includes(normalized)) {
+        methods.push(normalized);
+      }
+    }
+    if (clientWallets.length > 0 && !methods.includes('cryptomonnaie')) {
+      methods.push('cryptomonnaie');
+    }
     return methods;
-  }, [currentUser]);
+  }, [currentUser, clientWallets]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search || '');
@@ -165,7 +203,7 @@ export function PlatformTrading() {
     if (movementType === 'depot' && availablePaymentMethods.length > 0) {
       // If current payment method is not available, switch to first available
       if (!availablePaymentMethods.includes(paymentMethod)) {
-        setPaymentMethod(availablePaymentMethods[0] as 'virement' | 'carte_bancaire');
+        setPaymentMethod(availablePaymentMethods[0]);
       }
     }
     // If no payment methods available and user is on depot tab, switch to retrait
@@ -411,7 +449,7 @@ export function PlatformTrading() {
   const isDepositFlow = movementType === 'depot';
   const flowTitle = isDepositFlow ? 'Dépôt de fonds' : 'Demande de retrait';
   const flowDescription = isDepositFlow
-    ? 'Vous allez initier un dépôt (virement ou carte selon vos moyens de paiement).'
+    ? 'Vous allez initier un dépôt (virement, carte ou cryptomonnaie selon vos moyens de paiement).'
     : 'Vous allez envoyer une demande de retrait vers votre compte bancaire.';
   const flowAmountLabel = isDepositFlow
     ? `Montant du dépôt (${getCurrencySymbol('EUR')})`
@@ -420,6 +458,11 @@ export function PlatformTrading() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const clientId = currentUser?.id;
+    if (!clientId) {
+      toast.error('Session client introuvable. Veuillez vous reconnecter.');
+      return;
+    }
 
     const amountNum = parseFloat(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
@@ -471,10 +514,25 @@ export function PlatformTrading() {
       return;
     }
 
+    if (movementType === 'depot' && paymentMethod === 'cryptomonnaie') {
+      setPendingAmount(amountNum);
+      await loadClientWallets();
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_crypto_dialog_opened',
+        amount: amountNum,
+        accountCurrency: 'EUR',
+        paymentMethod: 'cryptomonnaie',
+        route: '/platform/funds',
+      });
+      setCryptoDepositDialogOpen(true);
+      return;
+    }
+
     // This should not happen for deposits (handled above), but keep for safety
     try {
       setSubmitting(true);
-      await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+      await apiCall(`/api/clients/${clientId}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
           type: movementType,
@@ -497,9 +555,14 @@ export function PlatformTrading() {
   };
 
   const confirmCardDeposit = async () => {
+    const clientId = currentUser?.id;
+    if (!clientId) {
+      toast.error('Session client introuvable. Veuillez vous reconnecter.');
+      return;
+    }
     try {
       setSubmitting(true);
-      const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
           type: 'depot',
@@ -555,13 +618,21 @@ export function PlatformTrading() {
   };
 
   const selectedDepositClientRib = clientRibs.length === 0 ? null : clientRibs[0];
+  const selectedDepositClientWallet = clientWallets.length === 0 ? null : clientWallets[0];
 
   const depositWireMotifMissing =
     clientRibs.length > 0 && !(selectedDepositClientRib?.rib?.motif || '').trim();
 
   const canViewDepositRib =
     movementType === 'depot' &&
+    paymentMethod === 'virement' &&
     availablePaymentMethods.includes('virement');
+
+  const canViewDepositWallet =
+    movementType === 'depot' &&
+    paymentMethod === 'cryptomonnaie' &&
+    availablePaymentMethods.includes('cryptomonnaie') &&
+    !!selectedDepositClientWallet?.wallet;
 
   const copyShortcutButtonStyle: React.CSSProperties = {
     border: '1px solid #d1d5db',
@@ -594,10 +665,15 @@ export function PlatformTrading() {
   };
 
   const confirmTransfer = async () => {
+    const clientId = currentUser?.id;
+    if (!clientId) {
+      toast.error('Session client introuvable. Veuillez vous reconnecter.');
+      return;
+    }
     try {
       setSubmitting(true);
       const description = resolveWireDepositDescription();
-      const response = await apiCall(`/api/clients/${currentUser.id}/transactions/create/`, {
+      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
         method: 'POST',
         body: JSON.stringify({
           type: 'depot',
@@ -634,6 +710,69 @@ export function PlatformTrading() {
         amount: pendingAmount,
         accountCurrency: 'EUR',
         paymentMethod: 'virement',
+        success: false,
+        error: errMsg,
+        route: '/platform/funds',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirmCryptoDeposit = async () => {
+    const clientId = currentUser?.id;
+    if (!clientId) {
+      toast.error('Session client introuvable. Veuillez vous reconnecter.');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      const selectedWallet = selectedDepositClientWallet?.wallet;
+      const walletLabel = selectedWallet
+        ? `${selectedWallet.assetSymbol || 'Crypto'} - ${selectedWallet.network || 'Réseau'}`
+        : 'Cryptomonnaie';
+      const response = await apiCall(`/api/clients/${clientId}/transactions/create/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'depot',
+          amount: pendingAmount,
+          description: `Dépôt de fonds (${walletLabel})`,
+          subscription_details: {
+            paymentMethod: 'cryptomonnaie',
+            walletId: selectedWallet?.id || null,
+            walletSymbol: selectedWallet?.assetSymbol || '',
+            walletNetwork: selectedWallet?.network || '',
+          },
+          datetime: new Date().toISOString(),
+          status: 'en_attente_paiement',
+        }),
+      });
+
+      setCryptoDepositSuccess({
+        amount: pendingAmount,
+        transaction: response.transaction || null,
+      });
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_request_created',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'cryptomonnaie',
+        success: true,
+        route: '/platform/funds',
+      });
+      setAmount('');
+      loadData();
+    } catch (error: any) {
+      console.error('Error creating crypto deposit transaction:', error);
+      const errMsg = error?.error || error?.message || 'Erreur lors de la création de la transaction';
+      toast.error(errMsg);
+      void logPlatformAction('form_submit', {
+        form: 'funds_deposit_intent',
+        step: 'deposit_submit_failed',
+        amount: pendingAmount,
+        accountCurrency: 'EUR',
+        paymentMethod: 'cryptomonnaie',
         success: false,
         error: errMsg,
         route: '/platform/funds',
@@ -929,7 +1068,13 @@ export function PlatformTrading() {
                   {movementType === 'depot' && availablePaymentMethods.length > 0 && (
                     <div style={{ width: isMobile ? '100%' : 260 }}>
                       <Label>Type de paiement</Label>
-                      <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
+                      <Select
+                        value={paymentMethod}
+                        onValueChange={(v) => {
+                          const normalized = normalizeDepositPaymentMethod(v);
+                          if (normalized) setPaymentMethod(normalized);
+                        }}
+                      >
                         <SelectTrigger aria-label="Type de paiement">
                           <SelectValue placeholder="Choisir" />
                         </SelectTrigger>
@@ -939,6 +1084,9 @@ export function PlatformTrading() {
                           )}
                           {availablePaymentMethods.includes('carte_bancaire') && (
                             <SelectItem value="carte_bancaire">Carte bancaire</SelectItem>
+                          )}
+                          {availablePaymentMethods.includes('cryptomonnaie') && (
+                            <SelectItem value="cryptomonnaie">Cryptomonnaie</SelectItem>
                           )}
                         </SelectContent>
                       </Select>
@@ -957,10 +1105,19 @@ export function PlatformTrading() {
                   {canViewDepositRib && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="platform"
                       onClick={() => setDepositRibDialogOpen(true)}
                     >
                       Voir le RIB
+                    </Button>
+                  )}
+                  {canViewDepositWallet && (
+                    <Button
+                      type="button"
+                      variant="platform"
+                      onClick={() => setCryptoDepositDialogOpen(true)}
+                    >
+                      Voir le wallet
                     </Button>
                   )}
                 </div>
@@ -1519,6 +1676,199 @@ export function PlatformTrading() {
                       </DialogFooter>
                     </>
                   )}
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Crypto Deposit Dialog */}
+          <Dialog
+            open={cryptoDepositDialogOpen}
+            onOpenChange={(open) => {
+              if (!submitting && !cryptoDepositSuccess) {
+                setCryptoDepositDialogOpen(open);
+                if (!open) {
+                  setCryptoDepositSuccess(null);
+                  setPendingAmount(0);
+                }
+              }
+            }}
+          >
+            <DialogContent>
+              {cryptoDepositSuccess ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 9999,
+                        backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Check size={22} color="#16a34a" />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>Dépôt initié</div>
+                      <div style={{ fontSize: 14, color: '#6b7280' }}>
+                        Cryptomonnaie
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                      <span>Montant</span>
+                      <strong>
+                        {formatAmount(cryptoDepositSuccess.amount, 'EUR')}
+                      </strong>
+                    </div>
+                    {cryptoDepositSuccess.transaction && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginTop: 6 }}>
+                        <span>Statut</span>
+                        <strong style={{ color: '#f59e0b' }}>En attente de paiement</strong>
+                      </div>
+                    )}
+                    {cryptoDepositSuccess.transaction?.id && (
+                      <div style={{ marginTop: 10, fontSize: 14, color: '#6b7280' }}>
+                        Référence: <strong>{cryptoDepositSuccess.transaction.id}</strong>
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter style={{ marginTop: 0, paddingTop: 0 }}>
+                    <Button
+                      type="button"
+                      variant="platform"
+                      onClick={() => {
+                        setCryptoDepositDialogOpen(false);
+                        setCryptoDepositSuccess(null);
+                        setPendingAmount(0);
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      Fermer
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ) : (
+                <>
+                  <DialogHeader>
+                    <DialogTitle>Instructions pour le dépôt en cryptomonnaie</DialogTitle>
+                    <DialogDescription>
+                      Utilisez les informations du wallet ci-dessous pour effectuer votre transfert.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {!selectedDepositClientWallet?.wallet ? (
+                    <div style={{ padding: 12, backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 14, color: '#1e40af' }}>
+                      Aucun wallet n&apos;est disponible actuellement pour votre compte.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 12 }}>
+                      <div style={{ padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
+                        <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14 }}>
+                          Montant à transférer : {formatAmount(pendingAmount, 'EUR')}
+                        </div>
+                        <div style={{ fontSize: 14, color: '#6b7280' }}>
+                          Effectuez votre transfert crypto vers l&apos;adresse ci-dessous.
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: 12,
+                          border: '2px solid #bfdbfe',
+                          borderRadius: 6,
+                          backgroundColor: '#f8fafc',
+                        }}
+                      >
+                        <div style={{ display: 'grid', gap: 6, fontSize: 14 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ fontWeight: 500, color: '#6b7280' }}>Nom :</span>
+                            <span style={{ fontWeight: 600 }}>{selectedDepositClientWallet.wallet.name || '-'}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ fontWeight: 500, color: '#6b7280' }}>Symbole :</span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                              {selectedDepositClientWallet.wallet.assetSymbol || '-'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ fontWeight: 500, color: '#6b7280' }}>Réseau :</span>
+                            <span style={{ fontWeight: 600 }}>{selectedDepositClientWallet.wallet.network || '-'}</span>
+                          </div>
+                          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                            <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 13 }}>
+                              Adresse wallet :
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 600, wordBreak: 'break-all' }}>
+                                {selectedDepositClientWallet.wallet.walletAddress || '-'}
+                              </span>
+                              <button
+                                type="button"
+                                style={copyShortcutButtonStyle}
+                                onClick={() => copyToClipboard('Adresse wallet', selectedDepositClientWallet.wallet.walletAddress || '')}
+                                aria-label="Copier l'adresse wallet"
+                                title="Copier l'adresse wallet"
+                              >
+                                <Copy size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          {(selectedDepositClientWallet.wallet.memoOrTag || '').trim() ? (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+                              <div style={{ fontWeight: 500, color: '#6b7280', marginBottom: 4, fontSize: 13 }}>
+                                Memo / Tag :
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                                  {(selectedDepositClientWallet.wallet.memoOrTag || '').trim()}
+                                </span>
+                                <button
+                                  type="button"
+                                  style={copyShortcutButtonStyle}
+                                  onClick={() => copyToClipboard('Memo / Tag', (selectedDepositClientWallet.wallet.memoOrTag || '').trim())}
+                                  aria-label="Copier le memo ou tag"
+                                  title="Copier le memo ou tag"
+                                >
+                                  <Copy size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      style={{ color: 'white' }}
+                      disabled={submitting}
+                      onClick={() => {
+                        setCryptoDepositDialogOpen(false);
+                        setPendingAmount(0);
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="platform"
+                      disabled={submitting || !selectedDepositClientWallet?.wallet}
+                      onClick={confirmCryptoDeposit}
+                    >
+                      {submitting ? 'Traitement...' : 'Valider ma demande de dépôt crypto'}
+                    </Button>
+                  </DialogFooter>
                 </>
               )}
             </DialogContent>

@@ -22,6 +22,8 @@ from .models import Asset
 from .models import ClientAsset
 from .models import RIB
 from .models import ClientRIB
+from .models import Wallet
+from .models import ClientWallet
 from .models import UsefulLink
 from .models import ClientUsefulLink
 from .models import Transaction
@@ -40,7 +42,7 @@ from .text_variables import apply_to_product_dict, resolve_text_variables
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
-    AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
+    AssetSerializer, ClientAssetSerializer, RIBSerializer, ClientRIBSerializer, WalletSerializer, ClientWalletSerializer, UsefulLinkSerializer, ClientUsefulLinkSerializer,
     ReferralProspectCreateSerializer,
     TransactionSerializer, ProductCategorySerializer, ProductSerializer, ClientProductSerializer, PositionSerializer, AppSettingsSerializer, NewsPostSerializer, LogSerializer, PositionDeletionRecordSerializer,
     ClientChatMessageSerializer, ClientConversationSerializer, ClientVerificationConfigSerializer, ClientDocumentSerializer,
@@ -1484,7 +1486,7 @@ def client_create(request):
                 traceback.print_exc()
                 # Don't fail client creation if photo upload fails, just log it
         
-        # Automatically assign default assets, RIBs, and useful links
+        # Automatically assign default assets, RIBs, wallets, and useful links
         # Assign default assets
         default_assets = Asset.objects.filter(default=True)
         for asset in default_assets:
@@ -1509,6 +1511,18 @@ def client_create(request):
                 id=client_rib_id,
                 client=client,
                 rib=default_rib
+            )
+
+        # Assign at most one default wallet catalogue (un seul wallet affichable côté client)
+        default_wallet = Wallet.objects.filter(default=True).order_by('name', 'id').first()
+        if default_wallet and not ClientWallet.objects.filter(client=client, wallet=default_wallet).exists():
+            client_wallet_id = uuid.uuid4().hex[:12]
+            while ClientWallet.objects.filter(id=client_wallet_id).exists():
+                client_wallet_id = uuid.uuid4().hex[:12]
+            ClientWallet.objects.create(
+                id=client_wallet_id,
+                client=client,
+                wallet=default_wallet
             )
         
         # Assign default useful links
@@ -6753,8 +6767,8 @@ def rib_update(request, rib_id):
     rib = get_object_or_404(RIB, id=rib_id)
     serializer = RIBSerializer(rib, data=request.data, partial=True)
     if serializer.is_valid():
-        serializer.save()
-        return Response(RIBSerializer(rib).data, status=status.HTTP_200_OK)
+        updated_rib = serializer.save()
+        return Response(RIBSerializer(updated_rib).data, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['DELETE'])
@@ -6764,6 +6778,51 @@ def rib_delete(request, rib_id):
     rib = get_object_or_404(RIB, id=rib_id)
     rib.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def wallet_list(request):
+    """Liste tous les wallets crypto disponibles"""
+    wallets = Wallet.objects.all().order_by('name')
+    serializer = WalletSerializer(wallets, many=True)
+    return Response({'wallets': serializer.data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def wallet_create(request):
+    """Créer un nouveau wallet crypto"""
+    serializer = WalletSerializer(data=request.data)
+    if serializer.is_valid():
+        wallet_id = uuid.uuid4().hex[:12]
+        while Wallet.objects.filter(id=wallet_id).exists():
+            wallet_id = uuid.uuid4().hex[:12]
+        wallet = serializer.save(id=wallet_id)
+        return Response(WalletSerializer(wallet).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def wallet_update(request, wallet_id):
+    """Modifier un wallet crypto"""
+    wallet = get_object_or_404(Wallet, id=wallet_id)
+    serializer = WalletSerializer(wallet, data=request.data, partial=True)
+    if serializer.is_valid():
+        updated_wallet = serializer.save()
+        return Response(WalletSerializer(updated_wallet).data, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def wallet_delete(request, wallet_id):
+    """Supprimer un wallet crypto"""
+    wallet = get_object_or_404(Wallet, id=wallet_id)
+    wallet.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
@@ -6876,6 +6935,113 @@ def client_rib_remove(request, client_id, rib_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
     except ClientRIB.DoesNotExist:
         return Response({'error': 'Client RIB relationship not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
+@permission_classes([AllowAny])
+def client_wallets(request, client_id):
+    """Liste les wallets catalogue liés au client.
+
+    Avec un jeton client (`client_`), au plus un wallet est renvoyé (le plus ancien par date de liaison).
+    Avec un jeton CRM, la liste complète est renvoyée pour l'administration.
+    """
+    client = get_object_or_404(Client, id=client_id)
+
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    token = auth_header.replace('Bearer ', '')
+
+    if token.startswith('client_'):
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    else:
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        try:
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+            if user and user.is_authenticated:
+                request.user = user
+            else:
+                return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not token.startswith('client_'):
+        err = _check_gestionnaire_client_access(request, client)
+        if err:
+            return err
+
+    client_wallets_qs = (
+        ClientWallet.objects.filter(client=client)
+        .select_related('wallet')
+        .order_by('created_at', 'id')
+    )
+    if token.startswith('client_'):
+        client_wallets_qs = client_wallets_qs[:1]
+    serializer = ClientWalletSerializer(client_wallets_qs, many=True)
+    return Response({'wallets': serializer.data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_wallet_add(request, client_id):
+    """Ajouter un wallet à un client"""
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+    wallet_id = request.data.get('walletId')
+
+    if not wallet_id:
+        return Response({'error': 'walletId is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        wallet = Wallet.objects.get(id=wallet_id)
+
+        if ClientWallet.objects.filter(client=client, wallet=wallet).exists():
+            return Response({'error': 'Client already has this wallet'}, status=status.HTTP_400_BAD_REQUEST)
+
+        client_wallet_id = uuid.uuid4().hex[:12]
+        while ClientWallet.objects.filter(id=client_wallet_id).exists():
+            client_wallet_id = uuid.uuid4().hex[:12]
+
+        client_wallet = ClientWallet.objects.create(
+            id=client_wallet_id,
+            client=client,
+            wallet=wallet
+        )
+        # Un seul wallet catalogue par client : retirer les autres liaisons.
+        ClientWallet.objects.filter(client=client).exclude(pk=client_wallet.pk).delete()
+
+        serializer = ClientWalletSerializer(client_wallet)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Wallet.DoesNotExist:
+        return Response({'error': 'Wallet not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def client_wallet_remove(request, client_id, wallet_id):
+    """Retirer un wallet d'un client"""
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+    wallet = get_object_or_404(Wallet, id=wallet_id)
+
+    try:
+        client_wallet = ClientWallet.objects.get(client=client, wallet=wallet)
+        client_wallet.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except ClientWallet.DoesNotExist:
+        return Response({'error': 'Client wallet relationship not found'}, status=status.HTTP_404_NOT_FOUND)
 
 # Client Documents endpoints
 @api_view(['GET'])

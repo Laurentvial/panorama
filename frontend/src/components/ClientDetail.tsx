@@ -65,6 +65,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const [availableProducts, setAvailableProducts] = useState<any[]>([]);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [availableRibs, setAvailableRibs] = useState<any[]>([]);
+  const [clientWallets, setClientWallets] = useState<any[]>([]);
+  const [availableWallets, setAvailableWallets] = useState<any[]>([]);
   const [clientUsefulLinks, setClientUsefulLinks] = useState<any[]>([]);
   const [availableUsefulLinks, setAvailableUsefulLinks] = useState<any[]>([]);
   
@@ -138,14 +140,18 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           break;
         
         case 'misc':
-          const [ribsData, availableRibsData, usefulLinksData, availableUsefulLinksData] = await Promise.all([
+          const [ribsData, availableRibsData, walletsData, availableWalletsData, usefulLinksData, availableUsefulLinksData] = await Promise.all([
             apiCall(`/api/clients/${clientId}/ribs/`),
             apiCall(`/api/ribs/`),
+            apiCall(`/api/clients/${clientId}/wallets/`),
+            apiCall(`/api/wallets/`),
             apiCall(`/api/clients/${clientId}/useful-links/`),
             apiCall(`/api/useful-links/`)
           ]);
           setClientRibs((ribsData as any).ribs || []);
           setAvailableRibs((availableRibsData as any).ribs || []);
+          setClientWallets((walletsData as any).wallets || []);
+          setAvailableWallets((availableWalletsData as any).wallets || []);
           setClientUsefulLinks((usefulLinksData as any).usefulLinks || []);
           setAvailableUsefulLinks((availableUsefulLinksData as any).usefulLinks || []);
           setLoadedTabs(prev => new Set(prev).add('misc'));
@@ -448,6 +454,8 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
               client={client}
               clientRibs={clientRibs}
               availableRibs={availableRibs}
+              clientWallets={clientWallets}
+              availableWallets={availableWallets}
               clientUsefulLinks={clientUsefulLinks}
               availableUsefulLinks={availableUsefulLinks}
               onRefresh={loadClientData}

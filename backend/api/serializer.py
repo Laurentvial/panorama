@@ -2,7 +2,7 @@ from django.contrib.auth.models import User as DjangoUser
 from django.conf import settings
 from django.db import IntegrityError, transaction, connection
 from rest_framework import serializers
-from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
+from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, Wallet, ClientWallet, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 from .client_product_overrides import merge_serialized_product_with_overrides, normalize_overrides_incoming
 from .text_variables import apply_to_product_dict
 import uuid
@@ -1112,6 +1112,52 @@ class ClientRIBSerializer(serializers.ModelSerializer):
         ret = super().to_representation(instance)
         ret['clientId'] = instance.client.id
         ret['rib'] = RIBSerializer(instance.rib).data
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+
+class WalletSerializer(serializers.ModelSerializer):
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    name = serializers.CharField(required=True, allow_blank=False)
+    assetSymbol = serializers.CharField(source='asset_symbol', required=True, allow_blank=False)
+    walletAddress = serializers.CharField(source='wallet_address', required=True, allow_blank=False)
+    memoOrTag = serializers.CharField(source='memo_or_tag', required=False, allow_blank=True)
+    network = serializers.CharField(required=True, allow_blank=False)
+
+    class Meta:
+        model = Wallet
+        fields = ['id', 'name', 'assetSymbol', 'network', 'walletAddress', 'memoOrTag', 'default', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['assetSymbol'] = instance.asset_symbol
+        ret['walletAddress'] = instance.wallet_address
+        ret['memoOrTag'] = instance.memo_or_tag
+        ret['default'] = bool(instance.default)
+        ret['createdAt'] = instance.created_at
+        ret['updatedAt'] = instance.updated_at
+        return ret
+
+
+class ClientWalletSerializer(serializers.ModelSerializer):
+    wallet = WalletSerializer(read_only=True)
+    walletId = serializers.CharField(write_only=True, required=False)
+    clientId = serializers.CharField(source='client.id', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+
+    class Meta:
+        model = ClientWallet
+        fields = ['id', 'clientId', 'wallet', 'walletId', 'createdAt', 'updatedAt']
+        read_only_fields = ['id', 'createdAt', 'updatedAt']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['clientId'] = instance.client.id
+        ret['wallet'] = WalletSerializer(instance.wallet).data
         ret['createdAt'] = instance.created_at
         ret['updatedAt'] = instance.updated_at
         return ret

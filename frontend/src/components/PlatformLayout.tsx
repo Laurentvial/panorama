@@ -51,7 +51,6 @@ export function PlatformLayout() {
     (settings?.primary_color || '').trim() ||
     '#030213';
   const platformPrimaryBg = (settings?.primary_color || '').trim() || '#030213';
-  const platformSecondaryBg = (settings?.secondary_color || '').trim() || 'var(--secondary)';
   const platformAccentBg = 'var(--accent)';
   const navigate = useNavigate();
   const location = useLocation();
@@ -1035,13 +1034,13 @@ export function PlatformLayout() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 6,
-                      backgroundColor: platformSecondaryBg,
-                      border: `1px solid color-mix(in srgb, ${platformPrimaryBg} 35%, transparent)`,
+                      backgroundColor: platformButtonBg,
+                      border: 'none',
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontSize: '13px',
                       lineHeight: 1.2,
-                      color: 'var(--secondary-foreground)',
+                      color: 'white',
                       fontWeight: 500,
                       borderRadius: 8,
                       whiteSpace: 'nowrap',

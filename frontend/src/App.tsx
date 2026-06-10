@@ -25,6 +25,7 @@ const Clients = lazy(() => import('./components/Clients'));
 const AddClient = lazy(() => import('./components/AddClient'));
 const ClientDetail = lazy(() => import('./components/ClientDetail').then(m => ({ default: m.ClientDetail })));
 const ManageRibs = lazy(() => import('./components/ManageRibs').then(m => ({ default: m.ManageRibs })));
+const ManageWallets = lazy(() => import('./components/ManageWallets').then(m => ({ default: m.ManageWallets })));
 const ManageAssets = lazy(() => import('./components/ManageAssets').then(m => ({ default: m.ManageAssets })));
 const ExternalAssetDuplicatesPage = lazy(() => import('./components/ExternalAssetDuplicatesPage').then(m => ({ default: m.ExternalAssetDuplicatesPage })));
 const ManageUsefulLinks = lazy(() => import('./components/ManageUsefulLinks').then(m => ({ default: m.ManageUsefulLinks })));
@@ -263,6 +264,15 @@ function App() {
                             <Layout>
                                 <Suspense fallback={<LoadingFallback />}>
                                     <ManageRibs />
+                                </Suspense>
+                            </Layout>
+                        </AdminRoleProtectedRoute>
+                    } />
+                    <Route path="/admin/manage/wallets" element={
+                        <AdminRoleProtectedRoute allowedRoles={ROLES_ALL}>
+                            <Layout>
+                                <Suspense fallback={<LoadingFallback />}>
+                                    <ManageWallets />
                                 </Suspense>
                             </Layout>
                         </AdminRoleProtectedRoute>
@@ -509,6 +519,7 @@ function App() {
                     <Route path="/users" element={<Navigate to="/admin/users" replace />} />
                     <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />
                     <Route path="/manage/ribs" element={<Navigate to="/admin/manage/ribs" replace />} />
+                    <Route path="/manage/wallets" element={<Navigate to="/admin/manage/wallets" replace />} />
                     <Route path="/manage/assets" element={<Navigate to="/admin/manage/assets" replace />} />
                     <Route path="/manage/useful-links" element={<Navigate to="/admin/manage/useful-links" replace />} />
                     <Route path="/transactions" element={<Navigate to="/admin/transactions" replace />} />

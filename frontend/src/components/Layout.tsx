@@ -29,6 +29,7 @@ const LayoutComponent = ({ children }: LayoutProps) => {
     if (path === '/admin/produits-investissements' || path.startsWith('/admin/produits-investissements/')) return 'placements';
     if (path === '/admin/placements') return 'placements'; // Legacy support
     if (path === '/admin/manage/ribs') return 'manage-ribs';
+    if (path === '/admin/manage/wallets') return 'manage-wallets';
     if (path === '/admin/manage/assets') return 'manage-assets';
     if (path === '/admin/manage/useful-links') return 'manage-links';
     if (path === '/admin/manage/news') return 'manage-news';

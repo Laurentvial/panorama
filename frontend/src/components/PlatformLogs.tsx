@@ -96,6 +96,7 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
     '/admin/platform-logs': 'Logs plateforme',
     '/admin/messagerie': 'Messagerie',
     '/admin/manage/ribs': 'RIB',
+    '/admin/manage/wallets': 'Wallet',
     '/admin/manage/assets': 'Actifs',
     '/admin/manage/useful-links': 'Liens utiles (admin)',
     '/admin/manage/news': 'Actualités',

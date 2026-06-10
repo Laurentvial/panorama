@@ -129,6 +129,14 @@ urlpatterns = [
     path('clients/<str:client_id>/ribs/', api_views.client_ribs, name='client-ribs'),
     path('clients/<str:client_id>/ribs/add/', api_views.client_rib_add, name='client-rib-add'),
     path('clients/<str:client_id>/ribs/<str:rib_id>/', api_views.client_rib_remove, name='client-rib-remove'),
+    # Wallets endpoints
+    path('wallets/', api_views.wallet_list, name='wallet-list'),
+    path('wallets/create/', api_views.wallet_create, name='wallet-create'),
+    path('wallets/<str:wallet_id>/delete/', api_views.wallet_delete, name='wallet-delete'),
+    path('wallets/<str:wallet_id>/', api_views.wallet_update, name='wallet-update'),
+    path('clients/<str:client_id>/wallets/', api_views.client_wallets, name='client-wallets'),
+    path('clients/<str:client_id>/wallets/add/', api_views.client_wallet_add, name='client-wallet-add'),
+    path('clients/<str:client_id>/wallets/<str:wallet_id>/', api_views.client_wallet_remove, name='client-wallet-remove'),
     # Client Documents endpoints
     path('clients/<str:client_id>/documents/', api_views.client_documents, name='client-documents'),
     path('clients/<str:client_id>/documents/create/', api_views.client_document_create, name='client-document-create'),

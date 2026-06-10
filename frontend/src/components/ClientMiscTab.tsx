@@ -17,6 +17,8 @@ interface ClientMiscTabProps {
   client: any;
   clientRibs: any[];
   availableRibs: any[];
+  clientWallets: any[];
+  availableWallets: any[];
   clientUsefulLinks: any[];
   availableUsefulLinks: any[];
   onRefresh: () => void;
@@ -24,6 +26,13 @@ interface ClientMiscTabProps {
 
 /** RIB ids may be string or number depending on serializer path — normalize for comparisons. */
 function normalizeClientRibId(id: unknown): string | null {
+  if (id === null || id === undefined) return null;
+  const s = String(id).trim();
+  return s === '' ? null : s;
+}
+
+/** Wallet ids may be string or number depending on serializer path — normalize for comparisons. */
+function normalizeClientWalletId(id: unknown): string | null {
   if (id === null || id === undefined) return null;
   const s = String(id).trim();
   return s === '' ? null : s;
@@ -54,11 +63,31 @@ function renderRibTableCells(rib: any) {
   );
 }
 
+function renderWalletTableCells(wallet: any) {
+  return (
+    <>
+      <td className="p-2 align-middle font-mono text-sm">{wallet.assetSymbol || '—'}</td>
+      <td className="p-2 align-middle">{wallet.network || '—'}</td>
+      <td className="p-2 align-middle font-mono text-sm break-all max-w-[220px]">{wallet.walletAddress || '—'}</td>
+      <td className="p-2 align-middle font-mono text-sm">{wallet.memoOrTag || '—'}</td>
+      <td className="p-2 align-middle">
+        {wallet.default ? (
+          <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm">Oui</span>
+        ) : (
+          <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-sm">Non</span>
+        )}
+      </td>
+    </>
+  );
+}
+
 export function ClientMiscTab({
   clientId,
   client,
   clientRibs,
   availableRibs,
+  clientWallets,
+  availableWallets,
   clientUsefulLinks,
   availableUsefulLinks,
   onRefresh
@@ -67,6 +96,9 @@ export function ClientMiscTab({
   const [draftDisplayedRibId, setDraftDisplayedRibId] = useState<string | null>(null);
   const [savingRibDisplay, setSavingRibDisplay] = useState(false);
   const prevRibAssignmentKey = useRef<string>('');
+  const [draftDisplayedWalletId, setDraftDisplayedWalletId] = useState<string | null>(null);
+  const [savingWalletDisplay, setSavingWalletDisplay] = useState(false);
+  const prevWalletAssignmentKey = useRef<string>('');
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [savingPaymentMethods, setSavingPaymentMethods] = useState(false);
   const [tradingEnabled, setTradingEnabled] = useState<boolean>(false);
@@ -153,6 +185,33 @@ export function ClientMiscTab({
       });
   }, [clientRibs, availableRibs]);
 
+  const walletAssignmentKey = useMemo(() => {
+    if (!clientWallets?.length) return 'none';
+    return clientWallets
+      .map((cw: any) => normalizeClientWalletId(cw?.wallet?.id))
+      .filter((x): x is string => x !== null)
+      .sort()
+      .join(',');
+  }, [clientWallets]);
+
+  const sortedCatalogueWallets = useMemo(() => {
+    return [...(availableWallets || [])].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
+    );
+  }, [availableWallets]);
+
+  const orphanAssignedWallets = useMemo(() => {
+    const catalogueIds = new Set(
+      (availableWallets || []).map((w: any) => normalizeClientWalletId(w.id)).filter((x): x is string => x !== null)
+    );
+    return (clientWallets || [])
+      .map((cw: any) => cw?.wallet)
+      .filter((w: any) => {
+        const id = normalizeClientWalletId(w?.id);
+        return w && id && !catalogueIds.has(id);
+      });
+  }, [clientWallets, availableWallets]);
+
   useEffect(() => {
     if (ribAssignmentKey === prevRibAssignmentKey.current) return;
     prevRibAssignmentKey.current = ribAssignmentKey;
@@ -163,6 +222,17 @@ export function ClientMiscTab({
       setDraftDisplayedRibId(normalizeClientRibId(first));
     }
   }, [ribAssignmentKey]);
+
+  useEffect(() => {
+    if (walletAssignmentKey === prevWalletAssignmentKey.current) return;
+    prevWalletAssignmentKey.current = walletAssignmentKey;
+    if (walletAssignmentKey === 'none') {
+      setDraftDisplayedWalletId(null);
+    } else {
+      const first = walletAssignmentKey.split(',')[0];
+      setDraftDisplayedWalletId(normalizeClientWalletId(first));
+    }
+  }, [walletAssignmentKey]);
 
   const serverAssignedIds = useMemo(
     () =>
@@ -179,6 +249,21 @@ export function ClientMiscTab({
       ? draftRibNorm === null
       : serverAssignedIds.length === 1 && draftRibNorm === serverAssignedIds[0]);
   const ribSelectionDirty = !ribSelectionClean || (clientRibs?.length ?? 0) > 1;
+  const serverAssignedWalletIds = useMemo(
+    () =>
+      (clientWallets || [])
+        .map((cw: any) => normalizeClientWalletId(cw?.wallet?.id))
+        .filter((x): x is string => x !== null)
+        .sort(),
+    [clientWallets]
+  );
+  const draftWalletNorm = normalizeClientWalletId(draftDisplayedWalletId);
+  const walletSelectionClean =
+    (clientWallets?.length ?? 0) <= 1 &&
+    (serverAssignedWalletIds.length === 0
+      ? draftWalletNorm === null
+      : serverAssignedWalletIds.length === 1 && draftWalletNorm === serverAssignedWalletIds[0]);
+  const walletSelectionDirty = !walletSelectionClean || (clientWallets?.length ?? 0) > 1;
 
   function handlePaymentMethodChange(method: string, checked: boolean | 'indeterminate') {
     if (checked === true) {
@@ -344,6 +429,38 @@ export function ClientMiscTab({
       onRefresh();
     } finally {
       setSavingRibDisplay(false);
+    }
+  }
+
+  async function handleSaveDisplayedWallet() {
+    setSavingWalletDisplay(true);
+    try {
+      const targetWalletId = draftWalletNorm;
+      const currentWalletIds = (clientWallets || [])
+        .map((cw: any) => normalizeClientWalletId(cw?.wallet?.id))
+        .filter((x): x is string => x !== null);
+      for (const walletId of currentWalletIds) {
+        await apiCall(`/api/clients/${clientId}/wallets/${walletId}/`, { method: 'DELETE' });
+      }
+      if (targetWalletId) {
+        await apiCall(`/api/clients/${clientId}/wallets/add/`, {
+          method: 'POST',
+          body: JSON.stringify({ walletId: targetWalletId }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      toast.success(
+        targetWalletId
+          ? 'Wallet affiche sur la plateforme du client mis a jour.'
+          : 'Aucun wallet catalogue ne sera affiche au client.'
+      );
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving displayed wallet:', error);
+      toast.error(error?.message || "Erreur lors de l'enregistrement du wallet");
+      onRefresh();
+    } finally {
+      setSavingWalletDisplay(false);
     }
   }
 
@@ -740,6 +857,134 @@ export function ClientMiscTab({
             {(clientRibs?.length ?? 0) > 1 ? (
               <span className="text-xs text-amber-800">
                 Plusieurs RIB étaient associés : enregistrez pour n&apos;en conserver qu&apos;un seul (celui sélectionné).
+              </span>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Wallets Section — un seul wallet catalogue affichable sur la plateforme client */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wallet className="w-5 h-5" />
+            Wallet affiche sur la plateforme
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Tous les wallets du catalogue sont listes ci-dessous. Choisissez celui que le client verra pour ses depots
+            crypto (un seul a la fois), ou « Aucun » pour ne rien afficher.
+          </p>
+          {draftWalletNorm &&
+            !sortedCatalogueWallets.some((w: any) => normalizeClientWalletId(w.id) === draftWalletNorm) &&
+            !orphanAssignedWallets.some((w: any) => normalizeClientWalletId(w.id) === draftWalletNorm) ? (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Le wallet actuellement prevu n&apos;est plus dans le catalogue. Selectionnez un autre wallet ou « Aucun »,
+              puis enregistrez.
+            </p>
+          ) : null}
+          {sortedCatalogueWallets.length === 0 && orphanAssignedWallets.length === 0 ? (
+            <p className="text-slate-500 text-center py-6">
+              Aucun wallet dans le catalogue. Creez des wallets dans la section administration (wallets) pour les proposer ici.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-slate-50">
+                    <th className="text-center p-2 font-medium text-slate-700 w-14">Choix</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Nom</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Symbole</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Reseau</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Adresse wallet</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Memo / Tag</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Par defaut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b client-misc-rib-row">
+                    <td className="p-2 align-middle text-center">
+                      <input
+                        type="radio"
+                        id="wallet-choice-none"
+                        name={`client-wallet-display-${clientId}`}
+                        value="__none__"
+                        checked={draftWalletNorm === null}
+                        onChange={() => setDraftDisplayedWalletId(null)}
+                        className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-slate-800"
+                        aria-label="Aucun wallet affiche au client"
+                      />
+                    </td>
+                    <td className="p-2 align-middle" colSpan={6}>
+                      <Label htmlFor="wallet-choice-none" className="font-medium cursor-pointer">
+                        Aucun wallet (le client ne verra pas de wallet catalogue sur la plateforme)
+                      </Label>
+                    </td>
+                  </tr>
+                  {orphanAssignedWallets.map((wallet: any) => (
+                    <tr
+                      key={`orphan-wallet-${wallet.id}`}
+                      className="border-b client-misc-rib-row client-misc-rib-row--orphan bg-amber-50/30"
+                    >
+                      <td className="p-2 align-middle text-center">
+                        <input
+                          type="radio"
+                          id={`wallet-choice-orphan-${String(wallet.id)}`}
+                          name={`client-wallet-display-${clientId}`}
+                          value={String(wallet.id)}
+                          checked={draftWalletNorm !== null && draftWalletNorm === normalizeClientWalletId(wallet.id)}
+                          onChange={() => setDraftDisplayedWalletId(normalizeClientWalletId(wallet.id))}
+                          className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-amber-800"
+                          aria-label={`Selectionner le wallet ${wallet.name}`}
+                        />
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Label htmlFor={`wallet-choice-orphan-${String(wallet.id)}`} className="cursor-pointer">
+                          {wallet.name}
+                          <span className="ml-2 text-xs font-normal text-amber-900">(hors catalogue)</span>
+                        </Label>
+                      </td>
+                      {renderWalletTableCells(wallet)}
+                    </tr>
+                  ))}
+                  {sortedCatalogueWallets.map((wallet: any) => (
+                    <tr key={String(wallet.id)} className="border-b client-misc-rib-row">
+                      <td className="p-2 align-middle text-center">
+                        <input
+                          type="radio"
+                          id={`wallet-choice-${String(wallet.id)}`}
+                          name={`client-wallet-display-${clientId}`}
+                          value={String(wallet.id)}
+                          checked={draftWalletNorm !== null && draftWalletNorm === normalizeClientWalletId(wallet.id)}
+                          onChange={() => setDraftDisplayedWalletId(normalizeClientWalletId(wallet.id))}
+                          className="client-misc-rib-radio h-4 w-4 cursor-pointer align-middle accent-slate-800"
+                          aria-label={`Selectionner le wallet ${wallet.name}`}
+                        />
+                      </td>
+                      <td className="p-2 align-middle">
+                        <Label htmlFor={`wallet-choice-${String(wallet.id)}`} className="cursor-pointer">
+                          {wallet.name}
+                        </Label>
+                      </td>
+                      {renderWalletTableCells(wallet)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <Button
+              size="sm"
+              onClick={handleSaveDisplayedWallet}
+              disabled={!walletSelectionDirty || savingWalletDisplay}
+            >
+              {savingWalletDisplay ? 'Enregistrement...' : 'Enregistrer le wallet affiche'}
+            </Button>
+            {(clientWallets?.length ?? 0) > 1 ? (
+              <span className="text-xs text-amber-800">
+                Plusieurs wallets etaient associes : enregistrez pour n&apos;en conserver qu&apos;un seul (celui selectionne).
               </span>
             ) : null}
           </div>

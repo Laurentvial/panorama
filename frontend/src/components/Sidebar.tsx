@@ -16,6 +16,7 @@ import {
   HiOutlineCog as SettingsIcon,
   HiOutlineNewspaper as Newspaper
 } from 'react-icons/hi';
+import { FaBitcoin } from 'react-icons/fa';
 import { Wallet } from '../utils/iconMapping';
 import '../styles/Sidebar.css';
 
@@ -35,6 +36,7 @@ const menuItems = [
   { id: 'manage-assets', label: 'Actifs externes', icon: TrendingUp, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/assets' },
   { id: 'placements', label: 'Produits financiers internes', icon: Package, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/produits-investissements' },
   { id: 'manage-ribs', label: 'Gestion RIBs', icon: Wallet, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/ribs' },
+  { id: 'manage-wallets', label: 'Gestion Wallets', icon: FaBitcoin, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/wallets' },
   { id: 'manage-links', label: 'Gestion Liens Utiles', icon: LinkIcon, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/useful-links' },
   { id: 'manage-news', label: 'Gestion Actualités', icon: Newspaper, roles: ['admin', 'teamleader', 'gestionnaire'], path: '/admin/manage/news' },
   { id: 'users-teams', label: 'Utilisateurs / Équipes', icon: Users, roles: ['admin', 'teamleader'], path: '/admin/users' },
@@ -122,6 +124,7 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
       '/admin/produits-investissements': () => import('../components/ProduitsInvestissements').then(m => ({ default: m.ProduitsInvestissements })),
       '/admin/produits-investissements/add': () => import('../components/AddProduct').then(m => ({ default: m.AddProduct })),
       '/admin/manage/ribs': () => import('../components/ManageRibs').then(m => ({ default: m.ManageRibs })),
+      '/admin/manage/wallets': () => import('../components/ManageWallets').then(m => ({ default: m.ManageWallets })),
       '/admin/manage/useful-links': () => import('../components/ManageUsefulLinks').then(m => ({ default: m.ManageUsefulLinks })),
       '/admin/manage/news': () => import('../components/ManageNews').then(m => ({ default: m.ManageNews })),
       '/admin/settings': () => import('../components/Settings').then(m => ({ default: m.Settings })),
