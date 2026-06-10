@@ -12,6 +12,7 @@ import { ArrowLeft, Save, RefreshCw, Trash2, Plus, X } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { RichTextEditor } from './RichTextEditor';
+import { ProductTextVariablesHelp } from './ProductTextVariablesHelp';
 import { DateInput } from './ui/date-input';
 import '../styles/PageHeader.css';
 import '../styles/Modal.css';
@@ -889,6 +890,7 @@ export function AddProduct() {
               placeholder="Description détaillée du produit d'investissement..."
               rows={10}
               fixedHeight
+              enableVariablePicker
               onGenerateAI={generateAIDescription}
               aiContextSlot={
                 <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/90 p-3">
@@ -919,8 +921,11 @@ export function AddProduct() {
               placeholder="Conditions générales de vente du produit..."
               rows={10}
               fixedHeight
+              enableVariablePicker
               onGenerateAI={generateAICGV}
             />
+
+            <ProductTextVariablesHelp />
 
             {/* Gestion des prix */}
             <div className="space-y-4 pt-4 border-t bg-slate-50 rounded-lg p-6 border border-slate-200">

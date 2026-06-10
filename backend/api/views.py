@@ -36,6 +36,7 @@ from .models import ClientVerificationConfig
 from .models import ClientDocument
 from .models import AppNotification
 from .client_product_overrides import effective_product_for_client, merge_serialized_product_with_overrides
+from .text_variables import apply_to_product_dict, resolve_text_variables
 from .serializer import (
     UserSerializer, ClientSerializer, NoteSerializer,
     TeamSerializer, TeamDetailSerializer, UserDetailsSerializer, TeamMemberSerializer,
@@ -9800,9 +9801,10 @@ def _client_transaction_create_impl(request, client_id):
                 story.append(PageBreak())
                 story.append(Paragraph("TERMES & CONDITIONS", heading_style))
                 # Clean CGV text and convert to paragraphs
-                cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
+                cgv_text = resolve_text_variables(product.cgv)
+                cgv_text = cgv_text.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
                 story.append(Paragraph(cgv_text, ParagraphStyle('CGV', parent=normal_style, fontSize=10)))
-            
+
             # Build PDF
             doc.build(story)
             pdf_content = buffer.getvalue()
@@ -12026,7 +12028,15 @@ def product_list(request):
         pass
     
     products = Product.objects.all().order_by('-created_at')
-    serializer = ProductSerializer(products, many=True, context={'request': request})
+    is_client_access = bool(token and token.startswith('client_'))
+    serializer = ProductSerializer(
+        products,
+        many=True,
+        context={
+            'request': request,
+            'resolve_text_variables': is_client_access,
+        },
+    )
     return Response({'products': serializer.data})
 
 @api_view(['POST'])
@@ -12331,7 +12341,10 @@ def product_detail(request, product_id):
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
     
     product = get_object_or_404(Product, id=product_id)
-    serializer = ProductSerializer(product, context={'request': request})
+    serializer = ProductSerializer(
+        product,
+        context={'request': request, 'resolve_text_variables': False},
+    )
     pdata = dict(serializer.data)
     if is_client_token and client and client.active:
         try:
@@ -12342,6 +12355,7 @@ def product_detail(request, product_id):
             pdata['showRates'] = bool(cp.show_rates)
         except ClientProduct.DoesNotExist:
             pass
+        pdata = apply_to_product_dict(pdata)
     return Response({'product': pdata}, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'POST'])
@@ -12423,22 +12437,18 @@ def product_contract_pdf(request, product_id):
         investor_birth_date = subscription_birth_date or (current_client.birth_date.strftime('%d/%m/%Y') if current_client.birth_date else '')
         investor_city = subscription_city or (current_client.city or '')
     elif current_user:
-        # Try to get user details if available
+        investor_first_name = subscription_first_name or (getattr(current_user, 'first_name', None) or '')
+        investor_last_name = subscription_last_name or (getattr(current_user, 'last_name', None) or '')
+        investor_email = current_user.email or ''
+        investor_phone = ''
         try:
-            user_details = UserDetails.objects.get(user=current_user)
-            investor_first_name = subscription_first_name or (user_details.fname or getattr(current_user, 'first_name', None) or '')
-            investor_last_name = subscription_last_name or (user_details.lname or getattr(current_user, 'last_name', None) or '')
-            investor_email = current_user.email or ''
-            investor_phone = user_details.phone or user_details.mobile or ''
-            investor_birth_date = subscription_birth_date or (user_details.birth_date.strftime('%d/%m/%Y') if user_details.birth_date else '')
-            investor_city = subscription_city or (user_details.city or '')
+            user_details = UserDetails.objects.get(django_user=current_user)
+            if user_details.phone:
+                investor_phone = user_details.phone
         except UserDetails.DoesNotExist:
-            investor_first_name = subscription_first_name or (getattr(current_user, 'first_name', None) or '')
-            investor_last_name = subscription_last_name or (getattr(current_user, 'last_name', None) or '')
-            investor_email = current_user.email or ''
-            investor_phone = ''
-            investor_birth_date = subscription_birth_date or ''
-            investor_city = subscription_city or ''
+            pass
+        investor_birth_date = subscription_birth_date or ''
+        investor_city = subscription_city or ''
     else:
         investor_first_name = subscription_first_name
         investor_last_name = subscription_last_name
@@ -12867,9 +12877,10 @@ def product_contract_pdf(request, product_id):
         story.append(PageBreak())
         story.append(Paragraph("TERMES & CONDITIONS", heading_style))
         # Clean CGV text and convert to paragraphs
-        cgv_text = product.cgv.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
+        cgv_text = resolve_text_variables(product.cgv)
+        cgv_text = cgv_text.replace('\n\n', '<br/><br/>').replace('\n', '<br/>')
         story.append(Paragraph(cgv_text, ParagraphStyle('CGV', parent=normal_style, fontSize=10)))
-    
+
     # Build PDF
     doc.build(story)
     

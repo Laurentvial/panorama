@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction, connection
 from rest_framework import serializers
 from .models import Client, ClientSuccessor, ClientConversation, ClientChatMessage, Note, UserDetails, Team, TeamMember, Log, ClientPlatformLog, Asset, ClientAsset, RIB, ClientRIB, UsefulLink, ClientUsefulLink, Transaction, ProductCategory, Product, ProductAssetAllocation, ClientProduct, Position, PositionDeletionRecord, AppSettings, NewsPost, ClientVerificationConfig, ClientDocument, AppNotification
 from .client_product_overrides import merge_serialized_product_with_overrides, normalize_overrides_incoming
+from .text_variables import apply_to_product_dict
 import uuid
 from urllib.parse import urlparse, unquote, quote
 
@@ -1456,6 +1457,8 @@ class ProductSerializer(serializers.ModelSerializer):
             ret['technicalSheetUrl'] = None
         # Ne pas exposer le chemin brut du fichier
         ret.pop('technical_sheet', None)
+        if self.context.get('resolve_text_variables'):
+            ret = apply_to_product_dict(ret)
         return ret
 
 class ClientProductSerializer(serializers.ModelSerializer):
@@ -1489,7 +1492,8 @@ class ClientProductSerializer(serializers.ModelSerializer):
     def get_baseProduct(self, obj):
         if not obj.product or not (obj.overrides or {}):
             return None
-        return ProductSerializer(obj.product, context=self.context).data
+        base_context = {**self.context, 'resolve_text_variables': False}
+        return ProductSerializer(obj.product, context=base_context).data
 
     def validate_overrides(self, value):
         clean, err = normalize_overrides_incoming(value)
@@ -1502,13 +1506,20 @@ class ClientProductSerializer(serializers.ModelSerializer):
         ret['clientId'] = instance.client.id
         request = self.context.get('request')
         if instance.product:
-            base_data = ProductSerializer(instance.product, context={'request': request}).data
+            base_context = {**self.context, 'request': request, 'resolve_text_variables': False}
+            base_data = ProductSerializer(instance.product, context=base_context).data
             ovr = instance.overrides or {}
             if ovr:
-                ret['product'] = merge_serialized_product_with_overrides(base_data, ovr)
+                merged = merge_serialized_product_with_overrides(base_data, ovr)
+                if self.context.get('resolve_text_variables', True):
+                    merged = apply_to_product_dict(merged)
+                ret['product'] = merged
                 ret['baseProduct'] = base_data
             else:
-                ret['product'] = base_data
+                product_data = base_data
+                if self.context.get('resolve_text_variables', True):
+                    product_data = apply_to_product_dict(product_data)
+                ret['product'] = product_data
                 ret['baseProduct'] = None
             ret['productId'] = instance.product.id
         else:

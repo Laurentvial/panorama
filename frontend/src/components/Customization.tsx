@@ -11,6 +11,13 @@ import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { cn } from './ui/utils';
+import {
+  REGULATORY_COUNTRY_LABELS,
+  REGULATORY_COUNTRY_ORDER,
+  REGULATORY_CUSTOM_VALUE,
+  REGULATORY_MENTIONS_BY_COUNTRY,
+  resolveRegulatorySelectValue,
+} from '../constants/regulatoryMentions';
 import '../styles/Customization.css';
 import '../styles/Clients.css';
 
@@ -32,6 +39,7 @@ export function Customization() {
   const [dpoContact, setDpoContact] = useState('');
   const [consumerMediator, setConsumerMediator] = useState('');
   const [regulatoryMentions, setRegulatoryMentions] = useState('');
+  const [regulatorySelection, setRegulatorySelection] = useState('');
   const [companyCountry, setCompanyCountry] = useState<string>('FR');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -72,10 +80,14 @@ export function Customization() {
       setDpoContact(settings.dpo_contact || '');
       setConsumerMediator(settings.consumer_mediator || '');
       setRegulatoryMentions(settings.regulatory_mentions || '');
-      setCompanyCountry(
-        ['FR', 'BE', 'LU', 'CH', 'GR'].includes((settings.company_country || 'FR').toUpperCase())
-          ? (settings.company_country || 'FR').toUpperCase()
-          : 'FR'
+      const loadedCountry = ['FR', 'BE', 'LU', 'CH', 'GR'].includes(
+        (settings.company_country || 'FR').toUpperCase()
+      )
+        ? (settings.company_country || 'FR').toUpperCase()
+        : 'FR';
+      setCompanyCountry(loadedCountry);
+      setRegulatorySelection(
+        resolveRegulatorySelectValue(settings.regulatory_mentions || '')
       );
       setColors({
         primary: settings.primary_color || '#030213',
@@ -344,10 +356,14 @@ export function Customization() {
     setDpoContact(settings?.dpo_contact || '');
     setConsumerMediator(settings?.consumer_mediator || '');
     setRegulatoryMentions(settings?.regulatory_mentions || '');
-    setCompanyCountry(
-      ['FR', 'BE', 'LU', 'CH', 'GR'].includes((settings?.company_country || 'FR').toUpperCase())
-        ? (settings?.company_country || 'FR').toUpperCase()
-        : 'FR'
+    const resetCountry = ['FR', 'BE', 'LU', 'CH', 'GR'].includes(
+      (settings?.company_country || 'FR').toUpperCase()
+    )
+      ? (settings?.company_country || 'FR').toUpperCase()
+      : 'FR';
+    setCompanyCountry(resetCountry);
+    setRegulatorySelection(
+      resolveRegulatorySelectValue(settings?.regulatory_mentions || '')
     );
     setColors({
       primary: settings?.primary_color || '#030213',
@@ -587,14 +603,48 @@ export function Customization() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="regulatory-mentions">Mentions réglementaires</Label>
-              <Textarea
+              <select
                 id="regulatory-mentions"
-                value={regulatoryMentions}
-                onChange={(e) => setRegulatoryMentions(e.target.value)}
-                placeholder="ORIAS, AMF/ACPR (FR), FSMA (BE), CSSF (LU), FINMA (CH) ou autre selon votre activité"
-                rows={4}
-                className="resize-y min-h-[88px]"
-              />
+                value={regulatorySelection}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setRegulatorySelection(next);
+                  if (next === REGULATORY_CUSTOM_VALUE) {
+                    return;
+                  }
+                  setRegulatoryMentions(next);
+                }}
+                className={cn(
+                  'border-input flex h-9 w-full min-w-0 rounded-md border bg-input-background px-3 py-1 text-base md:text-sm',
+                  'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
+                )}
+              >
+                <option value="">— Sélectionner une autorité —</option>
+                {REGULATORY_COUNTRY_ORDER.map((code) => (
+                  <optgroup key={code} label={REGULATORY_COUNTRY_LABELS[code]}>
+                    {REGULATORY_MENTIONS_BY_COUNTRY[code].map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value={REGULATORY_CUSTOM_VALUE}>Autre (texte libre)</option>
+              </select>
+              {regulatorySelection === REGULATORY_CUSTOM_VALUE && (
+                <Textarea
+                  id="regulatory-mentions-custom"
+                  value={regulatoryMentions}
+                  onChange={(e) => setRegulatoryMentions(e.target.value)}
+                  placeholder="Saisissez vos mentions réglementaires (agréments, numéros d'enregistrement, etc.)"
+                  rows={4}
+                  className="resize-y min-h-[88px]"
+                />
+              )}
+              <p className="text-muted-foreground text-sm">
+                Choisissez l&apos;autorité de supervision correspondant à votre activité et à votre pays
+                d&apos;établissement.
+              </p>
             </div>
           </div>
         </CardContent>

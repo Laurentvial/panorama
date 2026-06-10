@@ -76,6 +76,12 @@ const parseTransactionDetails = (value: any): Record<string, any> => {
   return {};
 };
 
+const getTransferToField = (tx: any): string =>
+  String(tx?.to ?? tx?.transfer_to ?? tx?.to_field ?? tx?.transferTo ?? '');
+
+const isTransferToBalance = (tx: any): boolean =>
+  tx?.type === 'transfert' && getTransferToField(tx) === 'solde';
+
 const parseDateValue = (value: string | Date | null | undefined): Date | null => {
   if (!value) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
@@ -405,7 +411,7 @@ export function TransactionList({
     return token;
   };
 
-  const handleGenerateContract = async (transaction: any) => {
+  const handleGenerateContract = async (transaction: any, replaceDocId?: string | number) => {
     const txKey = String(transaction?.id || '');
     if (!txKey) return;
     if (!clientId) {
@@ -465,19 +471,29 @@ export function TransactionList({
       const safeProduct = productLabel || `Transaction ${transaction.id}`;
       const contractFile = new File([pdfBlob], `contrat_transaction_${transaction.id}.pdf`, { type: 'application/pdf' });
 
-      const form = new FormData();
-      form.append('name', `Contrat - ${safeProduct}`);
-      form.append('documentType', 'contract');
-      form.append('transactionId', String(transaction.id));
-      form.append('description', `Contrat généré manuellement pour la transaction ${transaction.id}`);
-      form.append('file', contractFile);
+      if (replaceDocId) {
+        const form = new FormData();
+        form.append('file', contractFile);
+        await apiCall(`/api/clients/${clientId}/documents/${replaceDocId}/replace/`, {
+          method: 'POST',
+          body: form,
+        });
+        toast.success('Contrat régénéré avec succès');
+      } else {
+        const form = new FormData();
+        form.append('name', `Contrat - ${safeProduct}`);
+        form.append('documentType', 'contract');
+        form.append('transactionId', String(transaction.id));
+        form.append('description', `Contrat généré manuellement pour la transaction ${transaction.id}`);
+        form.append('file', contractFile);
 
-      await apiCall(`/api/clients/${clientId}/documents/create/`, {
-        method: 'POST',
-        body: form,
-      });
+        await apiCall(`/api/clients/${clientId}/documents/create/`, {
+          method: 'POST',
+          body: form,
+        });
+        toast.success('Contrat généré avec succès');
+      }
 
-      toast.success('Contrat généré avec succès');
       onContractDocumentsChanged?.();
     } catch (err: any) {
       console.error('Error generating contract document:', err);
@@ -591,7 +607,8 @@ export function TransactionList({
             const contractDocs = transactionDocuments[String(transaction.id)] || [];
             const hasContract = contractDocs.length > 0;
             const isTransfer = transaction.type === 'transfert';
-            const transferTo = String(transaction.to ?? transaction.transfer_to ?? '');
+            const transferTo = getTransferToField(transaction);
+            const transferToBalance = isTransferToBalance(transaction);
             const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
             const tracksInterest = isTransfer && transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
             const isValidTransactionStatus = ['valide', 'cloture'].includes(normalizedStatus);
@@ -783,7 +800,9 @@ export function TransactionList({
                 )}
                 {showContractColumn && (
                   <td className="py-3 px-4">
-                    {hasContract ? (
+                    {transferToBalance ? (
+                      <span className="text-slate-400">-</span>
+                    ) : hasContract ? (
                       <div className="flex items-center gap-2">
                         {contractDocs[0]?.fileUrl ? (
                           <a
@@ -847,6 +866,26 @@ export function TransactionList({
                         >
                           -  Remplacer
                         </button>
+
+                        {canGenerateContract && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const docId = contractDocs[0]?.id;
+                              if (!docId) {
+                                toast.error('Impossible de régénérer le contrat (document manquant).');
+                                return;
+                              }
+                              void handleGenerateContract(transaction, docId);
+                            }}
+                            disabled={isGeneratingContract}
+                            className={`text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium ${isGeneratingContract ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title="Régénérer le contrat PDF à partir des données de la transaction"
+                          >
+                            {isGeneratingContract ? 'Régénération...' : 'Régénérer'}
+                          </button>
+                        )}
                       </div>
                     ) : isTransfer ? (
                       <div className="flex items-center gap-2">

@@ -345,3 +345,76 @@ class DeletePendingPositionsForTransactionTest(SimpleTestCase):
         mock_filter.assert_called_once_with(transaction_id='txnA', status='pending')
         mock_audit.assert_called_once_with('unit_test_cleanup')
         delete_qs.delete.assert_called_once()
+
+
+class TextVariablesTest(SimpleTestCase):
+    def test_resolve_known_and_unknown_variables(self):
+        from .text_variables import resolve_text_variables
+
+        variables = {
+            "platform_name": "Syz SA",
+            "email": "contact@example.com",
+            "address": "",
+        }
+        text = "Bienvenue sur {{ platform_name }} — contact: {{email}} — {{unknown_key}}"
+        resolved = resolve_text_variables(text, variables)
+        self.assertEqual(
+            resolved,
+            "Bienvenue sur Syz SA — contact: contact@example.com — {{unknown_key}}",
+        )
+
+    def test_resolve_empty_value_replaces_with_empty_string(self):
+        from .text_variables import resolve_text_variables
+
+        variables = {"platform_name": "", "email": "a@b.c"}
+        self.assertEqual(resolve_text_variables("{{platform_name}}", variables), "")
+        self.assertEqual(resolve_text_variables("A{{platform_name}}B", variables), "AB")
+
+    def test_text_without_variables_is_unchanged(self):
+        from .text_variables import resolve_text_variables
+
+        text = "Description statique sans placeholder."
+        self.assertEqual(resolve_text_variables(text, {"platform_name": "X"}), text)
+
+    def test_build_platform_variables_from_settings(self):
+        from .text_variables import build_platform_variables_from_settings
+
+        settings = SimpleNamespace(
+            platform_name="Syz SA",
+            address="Genève",
+            website="https://example.com",
+            email="service@example.com",
+            legal_form="SA",
+            share_capital="1 000 000 CHF",
+            siren="CHE-123",
+            siret="",
+            rcs="RC Genève",
+            vat_number="CHE123",
+            publication_director="Jean Dupont",
+            hosting_provider="Host SA",
+            dpo_contact="dpo@example.com",
+            consumer_mediator="Médiateur XYZ",
+            regulatory_mentions="FINMA",
+            company_country="CH",
+        )
+        variables = build_platform_variables_from_settings(settings)
+        self.assertEqual(variables["platform_name"], "Syz SA")
+        self.assertEqual(variables["company_country"], "Suisse")
+        self.assertEqual(variables["siret"], "")
+
+    def test_apply_to_product_dict_resolves_description_and_cgv(self):
+        from .text_variables import apply_to_product_dict
+
+        data = {
+            "id": "prod1",
+            "name": "Produit test",
+            "description": "Offre {{platform_name}}",
+            "cgv": "Email: {{email}}",
+        }
+        resolved = apply_to_product_dict(
+            data,
+            variables={"platform_name": "Panorama", "email": "info@panorama.test"},
+        )
+        self.assertEqual(resolved["description"], "Offre Panorama")
+        self.assertEqual(resolved["cgv"], "Email: info@panorama.test")
+        self.assertEqual(resolved["name"], "Produit test")

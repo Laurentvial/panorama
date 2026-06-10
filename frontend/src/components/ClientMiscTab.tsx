@@ -29,6 +29,31 @@ function normalizeClientRibId(id: unknown): string | null {
   return s === '' ? null : s;
 }
 
+function renderRibTableCells(rib: any) {
+  return (
+    <>
+      <td className="p-2 align-middle text-slate-700">{rib.accountHolder || '—'}</td>
+      <td className="p-2 font-mono text-sm break-all max-w-[140px] align-middle">{rib.iban || '—'}</td>
+      <td className="p-2 font-mono text-sm align-middle">{rib.bic || '—'}</td>
+      <td className="p-2 font-mono text-sm align-middle">{rib.bankCode || '—'}</td>
+      <td className="p-2 font-mono text-sm align-middle">{rib.branchCode || '—'}</td>
+      <td className="p-2 font-mono text-sm align-middle">{rib.accountNumber || '—'}</td>
+      <td className="p-2 font-mono text-sm align-middle">{rib.ribKey || '—'}</td>
+      <td className="p-2 align-middle text-slate-600">{rib.domiciliation || '—'}</td>
+      <td className="p-2 align-middle max-w-[200px] truncate" title={rib.motif || ''}>
+        {rib.motif || '—'}
+      </td>
+      <td className="p-2 align-middle">
+        {rib.default ? (
+          <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm">Oui</span>
+        ) : (
+          <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-sm">Non</span>
+        )}
+      </td>
+    </>
+  );
+}
+
 export function ClientMiscTab({
   clientId,
   client,
@@ -623,15 +648,18 @@ export function ClientMiscTab({
                 <thead>
                   <tr className="border-b bg-slate-50">
                     <th className="text-center p-2 font-medium text-slate-700 w-14">Choix</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Nom</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Titulaire</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Banque</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Guichet</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Compte</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Clé</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Domiciliation</th>
-                      <th className="text-left p-2 font-medium text-slate-700">Défaut</th>
-                    </tr>
+                    <th className="text-left p-2 font-medium text-slate-700">Nom</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Titulaire du compte</th>
+                    <th className="text-left p-2 font-medium text-slate-700">IBAN</th>
+                    <th className="text-left p-2 font-medium text-slate-700">BIC</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Code banque</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Code guichet</th>
+                    <th className="text-left p-2 font-medium text-slate-700">N° compte</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Clé RIB</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Domiciliation</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Motif virement</th>
+                    <th className="text-left p-2 font-medium text-slate-700">Par défaut</th>
+                  </tr>
                 </thead>
                 <tbody>
                     <tr className="border-b client-misc-rib-row">
@@ -647,7 +675,7 @@ export function ClientMiscTab({
                           aria-label="Aucun RIB affiché au client"
                         />
                       </td>
-                      <td className="p-2 align-middle" colSpan={8}>
+                      <td className="p-2 align-middle" colSpan={11}>
                         <Label htmlFor="rib-choice-none" className="font-medium cursor-pointer">
                           Aucun RIB (le client ne verra pas de RIB catalogue sur la plateforme)
                         </Label>
@@ -676,15 +704,7 @@ export function ClientMiscTab({
                             <span className="ml-2 text-xs font-normal text-amber-900">(hors catalogue)</span>
                           </Label>
                         </td>
-                        <td className="p-2 align-middle text-slate-700">{rib.accountHolder || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.bankCode || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.branchCode || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.accountNumber || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.ribKey || '—'}</td>
-                        <td className="p-2 align-middle text-slate-600 max-w-[140px] truncate" title={rib.domiciliation}>
-                          {rib.domiciliation || '—'}
-                        </td>
-                        <td className="p-2 align-middle">—</td>
+                        {renderRibTableCells(rib)}
                       </tr>
                     ))}
                     {sortedCatalogueRibs.map((rib: any) => (
@@ -706,17 +726,7 @@ export function ClientMiscTab({
                             {rib.name}
                           </Label>
                         </td>
-                        <td className="p-2 align-middle text-slate-700">{rib.accountHolder || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.bankCode || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.branchCode || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.accountNumber || '—'}</td>
-                        <td className="p-2 font-mono text-xs align-middle">{rib.ribKey || '—'}</td>
-                        <td className="p-2 align-middle text-slate-600 max-w-[140px] truncate" title={rib.domiciliation}>
-                          {rib.domiciliation || '—'}
-                        </td>
-                        <td className="p-2 align-middle text-xs">
-                          {rib.default ? <span className="text-slate-600">Oui</span> : <span className="text-slate-400">Non</span>}
-                        </td>
+                        {renderRibTableCells(rib)}
                       </tr>
                     ))}
                 </tbody>

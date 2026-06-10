@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
-import { Sparkles, List, ListOrdered, CornerDownLeft, Eraser, Search } from 'lucide-react';
+import { Sparkles, List, ListOrdered, CornerDownLeft, Eraser, Search, Braces } from 'lucide-react';
 import { toast } from 'sonner';
+import { ProductVariablePickerModal } from './ProductVariablePickerModal';
 
 interface RichTextEditorProps {
   id: string;
@@ -19,6 +20,8 @@ interface RichTextEditorProps {
   aiContextSlot?: React.ReactNode;
   /** id du champ contexte à focus à l’ouverture du panneau (évite les collisions entre écrans) */
   aiContextFocusFieldId?: string;
+  /** Ouvre un sélecteur de variables plateforme quand l'utilisateur tape « { » */
+  enableVariablePicker?: boolean;
 }
 
 export function RichTextEditor({
@@ -32,11 +35,15 @@ export function RichTextEditor({
   onGenerateAI,
   aiContextSlot,
   aiContextFocusFieldId = 'ai-description-context',
+  enableVariablePicker = false,
 }: RichTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const variablePickerWrapRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showAiContextPanel, setShowAiContextPanel] = useState(false);
   const [showSearchReplacePanel, setShowSearchReplacePanel] = useState(false);
+  const [showVariablePicker, setShowVariablePicker] = useState(false);
+  const [variableBracePos, setVariableBracePos] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [replaceTerm, setReplaceTerm] = useState('');
 
@@ -241,10 +248,79 @@ export function RichTextEditor({
     }
   }
 
+  function openVariablePicker(bracePos: number | null = null) {
+    setVariableBracePos(bracePos);
+    setShowVariablePicker(true);
+  }
+
+  function insertVariableToken(token: string) {
+    const textarea = textareaRef.current;
+    const bracePos = variableBracePos;
+
+    if (textarea && bracePos !== null && value[bracePos] === '{') {
+      const newValue = value.slice(0, bracePos) + token + value.slice(bracePos + 1);
+      onChange(newValue);
+      const nextCursor = bracePos + token.length;
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(nextCursor, nextCursor);
+      }, 0);
+    } else {
+      insertAtCursor(token);
+    }
+
+    setShowVariablePicker(false);
+    setVariableBracePos(null);
+  }
+
+  const handleVariablePickerOpenChange = useCallback((open: boolean) => {
+    setShowVariablePicker(open);
+    if (!open) {
+      setVariableBracePos(null);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showVariablePicker) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      const root = variablePickerWrapRef.current;
+      if (!root || root.contains(event.target as Node)) return;
+      handleVariablePickerOpenChange(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleVariablePickerOpenChange(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showVariablePicker, handleVariablePickerOpenChange]);
+
   function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
       e.preventDefault();
       setShowSearchReplacePanel((current) => !current);
+      return;
+    }
+
+    if (e.key === 'Escape' && showVariablePicker) {
+      e.preventDefault();
+      handleVariablePickerOpenChange(false);
+      return;
+    }
+
+    if (enableVariablePicker && e.key === '{' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const textarea = e.currentTarget;
+      openVariablePicker(textarea.selectionStart);
     }
   }
 
@@ -303,6 +379,18 @@ export function RichTextEditor({
           >
             <Search className="w-4 h-4" />
           </Button>
+          {enableVariablePicker && (
+            <Button
+              type="button"
+              variant={showVariablePicker ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => openVariablePicker(null)}
+              title="Insérer une variable dynamique (ou tapez « { »)"
+              className="h-8 w-8 p-0"
+            >
+              <Braces className="w-4 h-4" />
+            </Button>
+          )}
           {onGenerateAI && (
             <Button
               type="button"
@@ -355,20 +443,30 @@ export function RichTextEditor({
           </div>
         </div>
       ) : null}
-      <Textarea
-        ref={textareaRef}
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleTextareaKeyDown}
-        placeholder={placeholder}
-        rows={rows}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        className={`font-mono text-sm whitespace-pre-wrap transition-all duration-200 overflow-y-auto ${
-          fixedHeight ? 'h-40 resize-none field-sizing-fixed' : 'resize-y'
-        } ${isFocused ? '' : ''}`}
-      />
+      <div ref={variablePickerWrapRef} className="flex items-stretch gap-3">
+        <Textarea
+          ref={textareaRef}
+          id={id}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleTextareaKeyDown}
+          placeholder={placeholder}
+          rows={rows}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          className={`min-w-0 flex-1 font-mono text-sm whitespace-pre-wrap transition-all duration-200 overflow-y-auto ${
+            fixedHeight ? 'h-40 resize-none field-sizing-fixed' : 'resize-y'
+          } ${isFocused ? '' : ''}`}
+        />
+        {enableVariablePicker ? (
+          <ProductVariablePickerModal
+            open={showVariablePicker}
+            onOpenChange={handleVariablePickerOpenChange}
+            onSelect={insertVariableToken}
+            className={fixedHeight ? 'h-40' : 'max-h-64 self-start'}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
