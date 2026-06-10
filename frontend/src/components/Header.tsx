@@ -181,7 +181,7 @@ export function Header({ user }: HeaderProps) {
           
           <div className="header-actions">
             {/* Notifications */}
-            <DropdownMenu open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+            <DropdownMenu modal={false} open={notificationsOpen} onOpenChange={setNotificationsOpen}>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" className="header-button header-button-notifications" aria-label="Notifications">
                   <HiOutlineBell />
@@ -232,7 +232,7 @@ export function Header({ user }: HeaderProps) {
             </DropdownMenu>
 
             {/* User Menu */}
-            <DropdownMenu>
+            <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" className="header-button header-button-user" aria-label="Menu utilisateur">
                   <Avatar className="header-user-avatar">

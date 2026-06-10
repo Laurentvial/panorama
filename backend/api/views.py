@@ -2239,7 +2239,9 @@ def client_history(request, client_id):
 @authentication_classes([])  # Disable authentication - we'll check manually to reject client_ tokens
 @permission_classes([AllowAny])
 def platform_logs_list(request):
-    """Aggregated platform logs from all clients the user has access to. Filters: client_id, action_type, date_from, date_to."""
+    """Aggregated platform logs from all clients the user has access to.
+    Filters: client_id, action_type, date_from, date_to, actor_filter(all|client|conseiller|gestionnaire).
+    """
     from rest_framework_simplejwt.authentication import JWTAuthentication
     auth_header = request.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
@@ -2271,6 +2273,18 @@ def platform_logs_list(request):
     action_type = request.GET.get('action_type', '').strip()
     if action_type:
         qs = qs.filter(action_type=action_type)
+
+    actor_filter = request.GET.get('actor_filter', '').strip().lower()
+    if actor_filter in ('client', 'conseiller', 'gestionnaire'):
+        # Classification relies on server-issued origin values.
+        if _client_platform_log_has_origin_column():
+            if actor_filter == 'client':
+                qs = qs.filter(origin__in=['client_login', 'otp_login'])
+            else:
+                qs = qs.filter(origin='crm_impersonation')
+        else:
+            # Legacy schema without origin cannot classify actor reliably.
+            qs = qs.none()
 
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
@@ -9340,8 +9354,10 @@ def _client_transaction_create_impl(request, client_id):
                     "product_id": str(product.id) if product else None,
                 },
             )
-    # Use the same detailed contract generation logic as product_contract_pdf
-    if is_subscription_transfert:
+    # Contract generation is now manual from the transaction list (UI button).
+    # Keep this block disabled to prevent automatic contract creation on transfer creation.
+    auto_generate_contract_on_create = False
+    if is_subscription_transfert and auto_generate_contract_on_create:
         import logging
         logger = logging.getLogger(__name__)
         try:
@@ -10409,13 +10425,14 @@ def client_transaction_close(request, client_id, transaction_id):
             remaining_interests = calculate_remaining_interests_for_transaction(source_transaction)
             interest_txn = None
             if remaining_interests > 0:
+                product_name = product.name or f"Produit {product.id}"
                 interest_txn = Transaction.objects.create(
                     id=_allocate_txn_id(),
                     client=client,
                     type='interets',
                     amount=remaining_interests,
                     amount_currency=source_transaction.amount_currency or client.account_currency or 'EUR',
-                    description=f"Intérêts restants (clôture) - Transaction {source_transaction.id}",
+                    description=f"Intérêts {product_name} - Clôture",
                     status='valide',
                     datetime=now_dt,
                     validated_at=now_dt,

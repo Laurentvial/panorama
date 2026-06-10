@@ -3948,8 +3948,9 @@ def _sum_paid_interest_transactions(
 
 def calculate_remaining_interests_for_transaction(txn: Transaction) -> Decimal:
     """
-    Compute remaining interests for one investment transaction:
-    projected interests - already paid interests.
+    Compute interests at closure using realized benefits at closure time.
+    The amount corresponds to the sum of done positions' P&L for the
+    source transaction (no future projection).
     """
     if (
         txn.type != 'transfert'
@@ -3958,25 +3959,15 @@ def calculate_remaining_interests_for_transaction(txn: Transaction) -> Decimal:
     ):
         return Decimal('0.00')
 
-    projected_total = Decimal('0')
-    for period in generate_rates_for_investment(txn) or []:
-        try:
-            projected_total += Decimal(str(period.get('targetProfit') or '0'))
-        except Exception:
-            continue
-    projected_total = projected_total.quantize(Decimal('0.01'))
+    agg = Position.objects.filter(
+        transaction_id=txn.id,
+        status='done',
+    ).aggregate(total=Sum('profit_loss'))
 
-    paid_total = _sum_paid_interest_transactions(
-        client_id=txn.client_id,
-        product_id=txn.transfer_to,
-        up_to_datetime=timezone.now(),
-        investment_transaction_id=txn.id,
-    ).quantize(Decimal('0.01'))
-
-    remaining = (projected_total - paid_total).quantize(Decimal('0.01'))
-    if remaining <= 0:
+    realized_benefits = Decimal(str(agg.get('total') or '0')).quantize(Decimal('0.01'))
+    if realized_benefits <= 0:
         return Decimal('0.00')
-    return remaining
+    return realized_benefits
 
 
 def delete_pending_positions_for_transaction(

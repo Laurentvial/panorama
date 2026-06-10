@@ -30,6 +30,8 @@ interface PlatformLog {
   clientDisplayName?: string;
 }
 
+type PlatformLogFilter = 'client' | 'conseiller' | 'all';
+
 const ACTION_TYPE_LABELS: { [key: string]: string } = {
   login: 'Connexion',
   logout: 'Déconnexion',
@@ -126,6 +128,7 @@ export function PlatformLogs() {
     dateFrom: '',
     dateTo: '',
   });
+  const [actorFilter, setActorFilter] = useState<PlatformLogFilter>('client');
 
   const loadClients = useCallback(async () => {
     try {
@@ -136,8 +139,13 @@ export function PlatformLogs() {
     }
   }, []);
 
-  const loadPlatformLogs = useCallback(async (page: number = 1, filterOverrides?: typeof filters) => {
+  const loadPlatformLogs = useCallback(async (
+    page: number = 1,
+    filterOverrides?: typeof filters,
+    actorFilterOverride?: PlatformLogFilter
+  ) => {
     const f = filterOverrides ?? filters;
+    const actor = actorFilterOverride ?? actorFilter;
     try {
       setLoading(true);
       const params = new URLSearchParams();
@@ -148,6 +156,9 @@ export function PlatformLogs() {
       }
       if (f.actionType && f.actionType !== 'all') {
         params.set('action_type', f.actionType);
+      }
+      if (actor && actor !== 'all') {
+        params.set('actor_filter', actor);
       }
       if (f.dateFrom) {
         params.set('date_from', f.dateFrom);
@@ -173,7 +184,7 @@ export function PlatformLogs() {
   }, [loadClients]);
 
   useEffect(() => {
-    loadPlatformLogs(1, filters);
+    loadPlatformLogs(1, filters, actorFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -322,7 +333,7 @@ export function PlatformLogs() {
   }
 
   function applyFilters() {
-    loadPlatformLogs(1, filters);
+    loadPlatformLogs(1, filters, actorFilter);
   }
 
   return (
@@ -421,7 +432,61 @@ export function PlatformLogs() {
             </div>
           ) : platformLogs.length > 0 ? (
             <>
-              <div className="overflow-x-auto rounded-md border border-slate-200">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">Afficher :</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={actorFilter === 'all' ? 'default' : 'outline'}
+                  aria-pressed={actorFilter === 'all'}
+                  className={
+                    actorFilter === 'all'
+                      ? 'font-semibold ring-2 ring-slate-300'
+                      : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                  }
+                  onClick={() => {
+                    setActorFilter('all');
+                    loadPlatformLogs(1, filters, 'all');
+                  }}
+                >
+                  Tout
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={actorFilter === 'client' ? 'default' : 'outline'}
+                  aria-pressed={actorFilter === 'client'}
+                  className={
+                    actorFilter === 'client'
+                      ? 'font-semibold ring-2 ring-slate-300'
+                      : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                  }
+                  onClick={() => {
+                    setActorFilter('client');
+                    loadPlatformLogs(1, filters, 'client');
+                  }}
+                >
+                  Client
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={actorFilter === 'conseiller' ? 'default' : 'outline'}
+                  aria-pressed={actorFilter === 'conseiller'}
+                  className={
+                    actorFilter === 'conseiller'
+                      ? 'font-semibold ring-2 ring-slate-300'
+                      : 'text-slate-500 border-slate-300 bg-white hover:bg-slate-50'
+                  }
+                  onClick={() => {
+                    setActorFilter('conseiller');
+                    loadPlatformLogs(1, filters, 'conseiller');
+                  }}
+                >
+                  Conseiller
+                </Button>
+              </div>
+              <div className="overflow-x-auto rounded-md border border-slate-200 mb-10">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -476,11 +541,11 @@ export function PlatformLogs() {
               </div>
 
               {pagination.total_pages > 1 && (
-                <div className="flex items-center justify-between mt-6">
+                <div className="flex items-center justify-between gap-3 mt-8 pt-4 border-t border-slate-100">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => loadPlatformLogs(pagination.page - 1, filters)}
+                    onClick={() => loadPlatformLogs(pagination.page - 1, filters, actorFilter)}
                     disabled={pagination.page === 1}
                   >
                     <ChevronLeft className="w-4 h-4 mr-1" />
@@ -492,7 +557,7 @@ export function PlatformLogs() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => loadPlatformLogs(pagination.page + 1, filters)}
+                    onClick={() => loadPlatformLogs(pagination.page + 1, filters, actorFilter)}
                     disabled={pagination.page >= pagination.total_pages}
                   >
                     Suivant

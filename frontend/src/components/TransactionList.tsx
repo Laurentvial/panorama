@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { getStatusLabel, getTypeLabel, getStatusColors } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
 import { apiCall } from '../utils/api';
+import { getApiBaseUrl } from '../utils/apiBaseUrl';
+import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
 
 // Helper functions for French labels
@@ -283,6 +285,7 @@ export function TransactionList({
   const navigate = useNavigate();
   const defaultCcy = (accountCurrencyProp || 'EUR').toString().trim().toUpperCase();
   const fileInputRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
+  const [generatingContractByTransaction, setGeneratingContractByTransaction] = React.useState<Record<string, boolean>>({});
   const interestSourceTransactions = allTransactionsForInterest || transactions;
 
   const interestTransactionsBySourceId = React.useMemo(() => {
@@ -361,6 +364,127 @@ export function TransactionList({
     if (assetByName) return assetByName.id;
     
     return null;
+  };
+
+  const getRelevantTransferProductId = (tx: any): string | null => {
+    if (!tx) return null;
+    const details = parseTransactionDetails(tx.subscription_details ?? tx.subscriptionDetails);
+    const transferToId = String(tx.to ?? tx.transfer_to ?? tx.to_field ?? tx.transferTo ?? '');
+    const transferFromId = String(tx.from ?? tx.transfer_from ?? tx.from_field ?? '');
+    const productIdFromDetails = details?.productId ?? details?.product_id ?? details?.product?.id ?? null;
+    const directProductId = tx.productId ?? tx.product_id ?? tx.product?.id ?? null;
+
+    const candidateId =
+      (transferToId && transferToId !== 'solde' && transferToId !== 'trading' ? transferToId : '') ||
+      (transferFromId && transferFromId !== 'solde' && transferFromId !== 'trading' ? transferFromId : '') ||
+      (productIdFromDetails ? String(productIdFromDetails) : '') ||
+      (directProductId ? String(directProductId) : '');
+
+    return candidateId || null;
+  };
+
+  const resolveAuthTokenForBinaryFetch = (): string | null => {
+    const path = window.location?.pathname || '';
+    const isAdminRoute = path.startsWith('/admin');
+    let token: string | null = null;
+
+    if (!isAdminRoute) {
+      const sessionToken = sessionStorage.getItem(ACCESS_TOKEN);
+      const sessionUserType = sessionStorage.getItem('userType');
+      if (sessionToken && (sessionUserType === 'client' || sessionToken.startsWith('client_'))) {
+        token = sessionToken;
+      } else {
+        const clientToken = localStorage.getItem(CLIENT_ACCESS_TOKEN);
+        if (clientToken) token = clientToken;
+      }
+    }
+
+    if (!token) {
+      token = localStorage.getItem(ACCESS_TOKEN);
+    }
+    return token;
+  };
+
+  const handleGenerateContract = async (transaction: any) => {
+    const txKey = String(transaction?.id || '');
+    if (!txKey) return;
+    if (!clientId) {
+      toast.error('Impossible de générer le contrat (client manquant).');
+      return;
+    }
+    if (generatingContractByTransaction[txKey]) return;
+
+    const productId = getRelevantTransferProductId(transaction);
+    if (!productId) {
+      toast.error('Produit introuvable pour cette transaction.');
+      return;
+    }
+
+    setGeneratingContractByTransaction((prev) => ({ ...prev, [txKey]: true }));
+    try {
+      const apiUrl = getApiBaseUrl();
+      const token = resolveAuthTokenForBinaryFetch();
+      const details = parseTransactionDetails(transaction.subscription_details ?? transaction.subscriptionDetails);
+      const currency = (
+        transaction.amountCurrency ||
+        transaction.amount_currency ||
+        defaultCcy
+      ).toString().trim().toUpperCase();
+
+      const response = await fetch(`${apiUrl}/api/products/${productId}/contract-pdf/`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          firstName: details.firstName || '',
+          lastName: details.lastName || '',
+          birthDate: details.birthDate || '',
+          city: details.city || '',
+          amount: String(transaction.amount || ''),
+          interestPeriod: transaction.subscription_interest_period || details.interestPeriod || details.interest_period || '',
+          signature: details.signature || '',
+          currency,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        const msg =
+          err?.detail ||
+          err?.error ||
+          err?.message ||
+          response.statusText ||
+          'Erreur lors de la génération du contrat';
+        throw new Error(msg);
+      }
+
+      const pdfBlob = await response.blob();
+      const productLabel = getRelevantTransferProductLabel(transaction);
+      const safeProduct = productLabel || `Transaction ${transaction.id}`;
+      const contractFile = new File([pdfBlob], `contrat_transaction_${transaction.id}.pdf`, { type: 'application/pdf' });
+
+      const form = new FormData();
+      form.append('name', `Contrat - ${safeProduct}`);
+      form.append('documentType', 'contract');
+      form.append('transactionId', String(transaction.id));
+      form.append('description', `Contrat généré manuellement pour la transaction ${transaction.id}`);
+      form.append('file', contractFile);
+
+      await apiCall(`/api/clients/${clientId}/documents/create/`, {
+        method: 'POST',
+        body: form,
+      });
+
+      toast.success('Contrat généré avec succès');
+      onContractDocumentsChanged?.();
+    } catch (err: any) {
+      console.error('Error generating contract document:', err);
+      toast.error(err?.message || 'Erreur lors de la génération du contrat');
+    } finally {
+      setGeneratingContractByTransaction((prev) => ({ ...prev, [txKey]: false }));
+    }
   };
 
   const getLastInterestTransaction = (transferTransaction: any): any | null => {
@@ -492,6 +616,8 @@ export function TransactionList({
               ? products.find((p: any) => String(p?.id) === String(relevantProductIdForRecover))
               : null;
             const hasAllocationsForRecover = getAllocationsFromProduct(relevantRecoverProduct).length > 0;
+            const isGeneratingContract = !!generatingContractByTransaction[String(transaction.id)];
+            const canGenerateContract = !!getRelevantTransferProductId(transaction);
             const showRecoverPositions =
               !!onRecoverPositions &&
               normalizedStatus === 'valide' &&
@@ -765,6 +891,21 @@ export function TransactionList({
                             }
                           }}
                         />
+
+                        {canGenerateContract && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleGenerateContract(transaction);
+                            }}
+                            disabled={isGeneratingContract}
+                            className={`text-blue-600 hover:text-blue-700 hover:underline text-sm font-medium ${isGeneratingContract ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title="Générer et lier automatiquement un contrat à cette transaction"
+                          >
+                            {isGeneratingContract ? 'Génération...' : 'Générer'}
+                          </button>
+                        )}
 
                         <button
                           type="button"

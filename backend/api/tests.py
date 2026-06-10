@@ -278,15 +278,10 @@ class AdditionPendingDetectionTest(SimpleTestCase):
 
 
 class RemainingInterestsComputationTest(SimpleTestCase):
-    @patch('api.position_service._sum_paid_interest_transactions')
-    @patch('api.position_service.generate_rates_for_investment')
-    def test_calculates_remaining_interests_with_paid_deduction(self, mock_generate_rates, mock_sum_paid):
-        mock_generate_rates.return_value = [
-            {'targetProfit': '15.60'},
-            {'targetProfit': '4.40'},
-            {'targetProfit': '10.00'},
-        ]
-        mock_sum_paid.return_value = Decimal('12.50')
+    @patch('api.position_service.Position.objects.filter')
+    def test_calculates_interests_from_done_positions_pnl(self, mock_filter):
+        qs = mock_filter.return_value
+        qs.aggregate.return_value = {'total': Decimal('26.45')}
         txn = SimpleNamespace(
             id='txnA',
             client_id='clientA',
@@ -296,14 +291,14 @@ class RemainingInterestsComputationTest(SimpleTestCase):
 
         remaining = calculate_remaining_interests_for_transaction(txn)
 
-        self.assertEqual(remaining, Decimal('17.50'))
-        mock_sum_paid.assert_called_once()
+        self.assertEqual(remaining, Decimal('26.45'))
+        mock_filter.assert_called_once_with(transaction_id='txnA', status='done')
+        qs.aggregate.assert_called_once()
 
-    @patch('api.position_service._sum_paid_interest_transactions')
-    @patch('api.position_service.generate_rates_for_investment')
-    def test_clamps_remaining_interests_to_zero(self, mock_generate_rates, mock_sum_paid):
-        mock_generate_rates.return_value = [{'targetProfit': '8.00'}]
-        mock_sum_paid.return_value = Decimal('12.00')
+    @patch('api.position_service.Position.objects.filter')
+    def test_clamps_remaining_interests_to_zero(self, mock_filter):
+        qs = mock_filter.return_value
+        qs.aggregate.return_value = {'total': Decimal('-12.00')}
         txn = SimpleNamespace(
             id='txnA',
             client_id='clientA',
