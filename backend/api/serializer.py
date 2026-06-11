@@ -623,6 +623,8 @@ class ClientSerializer(serializers.ModelSerializer):
         ret['tradingEnabled'] = bool(ret.get('trading_enabled', False))
         ret['showPositionPrices'] = bool(ret.get('show_position_prices', False))
         ret['bannerMessage'] = ret.get('banner_message', '') or ''
+        ret['referralEnabled'] = bool(ret.get('referral_enabled', True))
+        ret['referralOfferText'] = ret.get('referral_offer_text', '') or ''
         ret['contractPreviewEnabled'] = bool(ret.get('contract_preview_enabled', True))
         ret['importedContractPreviewEnabled'] = bool(ret.get('imported_contract_preview_enabled', False))
 

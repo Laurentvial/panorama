@@ -105,6 +105,10 @@ export function ClientMiscTab({
   const [savingTradingEnabled, setSavingTradingEnabled] = useState(false);
   const [showPositionPrices, setShowPositionPrices] = useState<boolean>(false);
   const [savingShowPositionPrices, setSavingShowPositionPrices] = useState(false);
+  const [referralEnabled, setReferralEnabled] = useState<boolean>(true);
+  const [savingReferralEnabled, setSavingReferralEnabled] = useState(false);
+  const [referralOfferText, setReferralOfferText] = useState<string>('');
+  const [savingReferralOfferText, setSavingReferralOfferText] = useState(false);
   const [contractPreviewEnabled, setContractPreviewEnabled] = useState<boolean>(true);
   const [importedContractPreviewEnabled, setImportedContractPreviewEnabled] = useState<boolean>(false);
   const [savingContractPreviewEnabled, setSavingContractPreviewEnabled] = useState(false);
@@ -132,6 +136,20 @@ export function ClientMiscTab({
       setShowPositionPrices(Boolean(client.showPositionPrices));
     } else {
       setShowPositionPrices(false);
+    }
+  }, [client]);
+
+  // Initialize referral settings from client data
+  useEffect(() => {
+    if (client?.referralEnabled !== undefined) {
+      setReferralEnabled(Boolean(client.referralEnabled));
+    } else {
+      setReferralEnabled(true);
+    }
+    if (client?.referralOfferText !== undefined) {
+      setReferralOfferText(client.referralOfferText || '');
+    } else {
+      setReferralOfferText('');
     }
   }, [client]);
 
@@ -335,6 +353,48 @@ export function ClientMiscTab({
       }
     } finally {
       setSavingShowPositionPrices(false);
+    }
+  }
+
+  async function handleSaveReferralEnabled() {
+    setSavingReferralEnabled(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ referralEnabled }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Paramètre de parrainage mis à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving referral enabled:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour du paramètre de parrainage');
+      if (client?.referralEnabled !== undefined) {
+        setReferralEnabled(Boolean(client.referralEnabled));
+      }
+    } finally {
+      setSavingReferralEnabled(false);
+    }
+  }
+
+  async function handleSaveReferralOfferText() {
+    setSavingReferralOfferText(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ referralOfferText }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      toast.success('Offre de parrainage mise à jour avec succès');
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error saving referral offer text:', error);
+      toast.error(error.message || "Erreur lors de la mise à jour de l'offre de parrainage");
+      if (client?.referralOfferText !== undefined) {
+        setReferralOfferText(client.referralOfferText || '');
+      }
+    } finally {
+      setSavingReferralOfferText(false);
     }
   }
 
@@ -564,6 +624,62 @@ export function ClientMiscTab({
               >
                 {savingShowPositionPrices ? 'Enregistrement...' : 'Enregistrer'}
               </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Referral Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Parrainage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Activez/désactivez le parrainage pour ce client et personnalisez le texte affiché sur sa plateforme.
+            </p>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="referralEnabled"
+                checked={referralEnabled}
+                onCheckedChange={(checked) => setReferralEnabled(checked === true)}
+              />
+              <Label htmlFor="referralEnabled" className="font-normal cursor-pointer">
+                Activer le parrainage
+              </Label>
+            </div>
+            <div className="pt-1">
+              <Button
+                onClick={handleSaveReferralEnabled}
+                disabled={savingReferralEnabled}
+                size="sm"
+              >
+                {savingReferralEnabled ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <Label htmlFor="referralOfferText">Offre de parrainage affichée au client</Label>
+              <Textarea
+                id="referralOfferText"
+                value={referralOfferText}
+                onChange={(e) => setReferralOfferText(e.target.value)}
+                rows={3}
+                placeholder="Ex. : Parrainez un ami : jusqu'à 500€ pour vous, et lui aussi à l'inscription"
+              />
+              <p className="text-xs text-slate-500">
+                Si vide, le texte par défaut sera affiché côté plateforme client.
+              </p>
+              <div className="pt-1">
+                <Button
+                  onClick={handleSaveReferralOfferText}
+                  disabled={savingReferralOfferText}
+                  size="sm"
+                >
+                  {savingReferralOfferText ? 'Enregistrement...' : "Enregistrer l'offre"}
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>

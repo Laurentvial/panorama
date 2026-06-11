@@ -417,6 +417,9 @@ export function PlatformLayout() {
 
   const stickyTopOffset = `calc(var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px))`;
   const sidebarHeight = `calc(100vh - (var(--client-banner-height, 0px) + var(--platform-header-height, ${headerHeight}px)))`;
+  const defaultReferralOfferText = "Parrainez un ami : jusqu'à 500€ pour vous, et lui aussi à l'inscription";
+  const referralOfferText = (currentUser?.referralOfferText || '').trim() || defaultReferralOfferText;
+  const isReferralEnabled = currentUser?.referralEnabled !== false;
 
   return (
     <div
@@ -1098,45 +1101,47 @@ export function PlatformLayout() {
               </div>
 
               {/* Referral block - at bottom of sidebar */}
-              <div
-                style={{
-                  flexShrink: 0,
-                  padding: isMobile ? '12px 20px' : '16px 20px',
-                  borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--accent-foreground)',
-                }}
-              >
-                <div style={{ fontSize: isMobile ? '13px' : '14px', fontWeight: 500, color: 'color-mix(in srgb, var(--accent-foreground) 90%, white)', marginBottom: 8, lineHeight: 1.35 }}>
-                  Parrainez un ami : jusqu&apos;à 500€ pour vous, et lui aussi à l&apos;inscription
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReferralModalOpen(true);
-                    if (showBottomNav) setSidebarOpen(false);
-                  }}
+              {isReferralEnabled && (
+                <div
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    fontSize: isMobile ? '13px' : '14px',
-                    fontWeight: 500,
+                    flexShrink: 0,
+                    padding: isMobile ? '12px 20px' : '16px 20px',
+                    borderTop: '1px solid color-mix(in srgb, var(--accent-foreground) 20%, transparent)',
+                    backgroundColor: 'var(--primary)',
                     color: 'var(--accent-foreground)',
-                    backgroundColor: 'color-mix(in srgb, var(--accent-foreground) 15%, transparent)',
-                    border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    width: '100%',
-                    justifyContent: 'center',
                   }}
-                  className="platform-hoverable"
                 >
-                  <HiOutlineShare size={18} />
-                  Partager mon invitation
-                </button>
-              </div>
+                  <div style={{ fontSize: isMobile ? '13px' : '14px', fontWeight: 500, color: 'color-mix(in srgb, var(--accent-foreground) 90%, white)', marginBottom: 8, lineHeight: 1.35 }}>
+                    {referralOfferText}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReferralModalOpen(true);
+                      if (showBottomNav) setSidebarOpen(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 12px',
+                      fontSize: isMobile ? '13px' : '14px',
+                      fontWeight: 500,
+                      color: 'var(--accent-foreground)',
+                      backgroundColor: 'color-mix(in srgb, var(--accent-foreground) 15%, transparent)',
+                      border: '1px solid color-mix(in srgb, var(--accent-foreground) 25%, transparent)',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      width: '100%',
+                      justifyContent: 'center',
+                    }}
+                    className="platform-hoverable"
+                  >
+                    <HiOutlineShare size={18} />
+                    Partager mon invitation
+                  </button>
+                </div>
+              )}
               </div>
             </>
           )}
@@ -1195,7 +1200,7 @@ export function PlatformLayout() {
       </div>
 
       {/* Referral share modal */}
-      {referralModalOpen && (
+      {isReferralEnabled && referralModalOpen && (
         <div className="modal-overlay" onClick={() => setReferralModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '28rem' }}>
             <div className="modal-header">
@@ -1211,9 +1216,7 @@ export function PlatformLayout() {
               </Button>
             </div>
             <div style={{ display: 'grid', gap: 12 }}>
-              <p style={{ fontSize: 14, color: '#6b7280' }}>
-                Partagez ce lien avec un ami. Vous recevrez jusqu&apos;à 500€ et lui aussi à l&apos;inscription.
-              </p>
+              <p style={{ fontSize: 14, color: '#6b7280' }}>{referralOfferText}</p>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <Input
                   readOnly

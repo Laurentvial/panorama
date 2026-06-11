@@ -140,6 +140,8 @@ class Client(models.Model):
     trading_enabled = models.BooleanField(default=False)  # Activer le trading (afficher le bouton Trader dans les assets)
     show_position_prices = models.BooleanField(default=False)  # Afficher les prix d'achat/vente des positions au client
     banner_message = models.TextField(default="", blank=True)  # Message de bannière à afficher sur la plateforme client
+    referral_enabled = models.BooleanField(default=True)  # Activer le bloc parrainage pour ce client
+    referral_offer_text = models.TextField(default="", blank=True)  # Offre de parrainage personnalisée affichée au client
     contract_preview_enabled = models.BooleanField(default=True)  # Prévisualisation du contrat
     imported_contract_preview_enabled = models.BooleanField(
         default=False

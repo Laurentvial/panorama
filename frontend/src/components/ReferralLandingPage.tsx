@@ -21,6 +21,8 @@ export function ReferralLandingPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [codeValid, setCodeValid] = useState<boolean | null>(null);
+  const defaultReferralOfferText = "Parrainez un ami : jusqu'à 500€ pour vous, et lui aussi à l'inscription";
+  const [referralOfferText, setReferralOfferText] = useState<string>(defaultReferralOfferText);
 
   const hasLogo = Boolean(settings?.logo_url);
   const bannerLogoSrc = settings?.logo_url || '';
@@ -37,11 +39,27 @@ export function ReferralLandingPage() {
   }
 
   useEffect(() => {
-    if (!code || code.trim() === '') {
-      setCodeValid(false);
-    } else {
-      setCodeValid(true);
-    }
+    let isMounted = true;
+    const checkReferralCode = async () => {
+      const codeValue = (code || '').trim();
+      if (!codeValue) {
+        if (isMounted) setCodeValid(false);
+        return;
+      }
+      try {
+        const data = await apiCall(`/api/referral-prospects/?code=${encodeURIComponent(codeValue)}`);
+        if (!isMounted) return;
+        setCodeValid(Boolean(data?.valid));
+        setReferralOfferText((data?.referralOfferText || '').trim() || defaultReferralOfferText);
+      } catch (_error) {
+        if (!isMounted) return;
+        setCodeValid(false);
+      }
+    };
+    void checkReferralCode();
+    return () => {
+      isMounted = false;
+    };
   }, [code]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -174,7 +192,7 @@ export function ReferralLandingPage() {
         <Card className="login-card">
           <CardHeader className="login-card-header">
             <CardDescription style={{ fontSize: '1.1rem', fontWeight: 600, color: '#166534', marginBottom: 8 }}>
-              Rejoignez notre espace client et <strong>recevez jusqu&apos;à 500€</strong> de bonus grâce à cette invitation
+              {referralOfferText}
             </CardDescription>
             <CardDescription style={{ fontSize: '0.95rem', color: '#6b7280' }}>
               Laissez-nous vos coordonnées pour recevoir votre bonus et créer votre compte.

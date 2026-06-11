@@ -1446,6 +1446,8 @@ def client_create(request):
         # Miscellaneous features
         'trading_enabled': bool(request.data.get('tradingEnabled', False)) if not isinstance(request.data.get('tradingEnabled'), str) else request.data.get('tradingEnabled', 'false').lower() == 'true',
         'banner_message': request.data.get('bannerMessage', '') or '',
+        'referral_enabled': bool(request.data.get('referralEnabled', True)) if not isinstance(request.data.get('referralEnabled'), str) else request.data.get('referralEnabled', 'true').lower() == 'true',
+        'referral_offer_text': request.data.get('referralOfferText', '') or '',
     })
     
     try:
@@ -2044,6 +2046,15 @@ def client_detail(request, client_id):
         # Update banner message if provided
         if 'bannerMessage' in request.data:
             client.banner_message = request.data.get('bannerMessage', '') or ''
+
+        # Update referral feature flag if provided
+        if 'referralEnabled' in request.data:
+            v = request.data.get('referralEnabled')
+            client.referral_enabled = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+
+        # Update referral offer text if provided
+        if 'referralOfferText' in request.data:
+            client.referral_offer_text = request.data.get('referralOfferText', '') or ''
         
         # Update contract preview enabled if provided
         if 'contractPreviewEnabled' in request.data:
@@ -2693,7 +2704,7 @@ def client_password_reset_request(request):
     )
 
 
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 @authentication_classes([])
 def referral_prospect_create(request):
@@ -2701,11 +2712,15 @@ def referral_prospect_create(request):
     Public endpoint: create a referral prospect (invited by a client).
     Body: { code, fname, lname, email, phone }
     """
-    serializer = ReferralProspectCreateSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    default_offer_text = "Parrainez un ami : jusqu'à 500€ pour vous, et lui aussi à l'inscription"
+    if request.method == 'GET':
+        code = (request.GET.get('code') or '').strip()
+    else:
+        serializer = ReferralProspectCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        code = (serializer.validated_data.get('code') or '').strip()
 
-    code = (serializer.validated_data.get('code') or '').strip()
     if not code:
         return Response({'error': 'Code d\'invitation invalide'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2713,6 +2728,21 @@ def referral_prospect_create(request):
         referrer = Client.objects.get(id=code, active=True)
     except Client.DoesNotExist:
         return Response({'error': 'Lien d\'invitation invalide ou expiré'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not referrer.referral_enabled:
+        return Response({'error': 'Le parrainage n’est pas activé pour ce client'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'GET':
+        offer_text = (referrer.referral_offer_text or '').strip() or default_offer_text
+        return Response(
+            {
+                'valid': True,
+                'referrerId': referrer.id,
+                'referralEnabled': True,
+                'referralOfferText': offer_text,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     prospect_id = uuid.uuid4().hex[:12]
     fname_val = (serializer.validated_data.get('fname') or '').strip()
