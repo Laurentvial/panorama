@@ -944,7 +944,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                             {isUploadingDocument ? "Import..." : documentUrl ? 'Remplacer' : 'Ajouter'}
                           </label>
 
-                          {reviewStatus !== 'approved' && (
+                          {documentUrl && reviewStatus !== 'approved' && (
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'approved')}
@@ -954,7 +954,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                               Valider
                             </button>
                           )}
-                          {reviewStatus !== 'rejected' && (
+                          {documentUrl && reviewStatus !== 'rejected' && (
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'rejected')}
@@ -964,7 +964,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
                               Rejeter
                             </button>
                           )}
-                          {reviewStatus !== 'pending' && (
+                          {documentUrl && reviewStatus !== 'pending' && reviewStatus !== 'approved' && (
                             <button
                               type="button"
                               onClick={() => handleKycDocumentReviewStatusChange(documentKey, 'pending')}

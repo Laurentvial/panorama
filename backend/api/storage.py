@@ -56,6 +56,7 @@ class S3MediaStorage(Storage):
         # Prefix only tenant/private buckets that must not be shared globally.
         self._prefixed_top_level_dirs = {
             'app_settings',
+            'chat_attachments',
             'client_documents',
             'client_profiles',
             'kyc',

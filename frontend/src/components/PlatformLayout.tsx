@@ -5,7 +5,7 @@ import { usePlatformSearch } from '../contexts/PlatformSearchContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { clientSignOut } from '../utils/auth';
 import { apiCall, clearApiCache } from '../utils/api';
-import { LogOut, User, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
+import { LogOut, Search, Menu, X, ArrowDown, ArrowUp, Bell } from '../utils/iconMapping';
 import { HiOutlineShare } from 'react-icons/hi';
 import { Copy } from 'lucide-react';
 import { Button } from './ui/button';
@@ -307,6 +307,78 @@ export function PlatformLayout() {
       .filter(Boolean);
     return normalizedMethods.includes('virement') || normalizedMethods.includes('carte_bancaire');
   }, [currentUser?.paymentMethods]);
+  const profileFallbackInitials = useMemo(() => {
+    const firstName = String(currentUser?.fname || currentUser?.firstName || '').trim();
+    const lastName = String(currentUser?.lname || currentUser?.lastName || '').trim();
+    const email = String(currentUser?.email || '').trim();
+    const userId = String(currentUser?.id || '').trim();
+    const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9]/g, '');
+
+    if (firstName && lastName) {
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    }
+
+    const singleName = firstName || lastName;
+    if (singleName) {
+      const letters = sanitize(singleName);
+      if (letters.length >= 2) return letters.slice(0, 2).toUpperCase();
+      if (letters.length === 1) return letters.toUpperCase();
+    }
+
+    const emailLocalPart = email.includes('@') ? email.split('@')[0] : email;
+    const emailLetters = sanitize(emailLocalPart);
+    if (emailLetters.length >= 2) return emailLetters.slice(0, 2).toUpperCase();
+    if (emailLetters.length === 1) return emailLetters.toUpperCase();
+
+    const idLetters = sanitize(userId);
+    if (idLetters.length >= 2) return idLetters.slice(0, 2).toUpperCase();
+    if (idLetters.length === 1) return idLetters.toUpperCase();
+    return 'U';
+  }, [currentUser?.fname, currentUser?.firstName, currentUser?.lname, currentUser?.lastName, currentUser?.email, currentUser?.id]);
+  const profileAvatarSize = isMobile ? 40 : 50;
+  const profileAvatarBaseStyle: React.CSSProperties = {
+    width: profileAvatarSize,
+    height: profileAvatarSize,
+    minWidth: profileAvatarSize,
+    flexShrink: 0,
+    borderRadius: '50%',
+    border: '2px solid #e5e7eb',
+  };
+  const profileInitialSize = profileFallbackInitials.length >= 2
+    ? (isMobile ? '19px' : '23px')
+    : (isMobile ? '24px' : '30px');
+  const profileAvatarNode = currentUser?.profilePhoto ? (
+    <img
+      src={currentUser.profilePhoto}
+      alt="Profile"
+      style={{
+        ...profileAvatarBaseStyle,
+        objectFit: 'cover',
+      }}
+    />
+  ) : (
+    <div
+      style={{
+        ...profileAvatarBaseStyle,
+        backgroundColor: '#e5e7eb',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <span
+        style={{
+          fontSize: profileInitialSize,
+          fontWeight: 800,
+          lineHeight: 1,
+          letterSpacing: '-0.03em',
+          color: '#4b5563',
+        }}
+      >
+        {profileFallbackInitials}
+      </span>
+    </div>
+  );
 
   const handleMenuClick = (path: string) => {
     navigate(path);
@@ -875,36 +947,7 @@ export function PlatformLayout() {
                 aria-label="Ouvrir mon profil"
                 aria-current={location.pathname === '/platform/profile' ? 'page' : undefined}
               >
-                {currentUser?.profilePhoto ? (
-                  <img 
-                    src={currentUser.profilePhoto} 
-                    alt="Profile" 
-                    style={{ 
-                      width: isMobile ? '40px' : '50px', 
-                      height: isMobile ? '40px' : '50px', 
-                      minWidth: isMobile ? 40 : 50,
-                      borderRadius: '50%', 
-                      objectFit: 'cover',
-                      border: '2px solid #e5e7eb',
-                      flexShrink: 0,
-                    }} 
-                  />
-                ) : (
-                  <div style={{
-                    width: isMobile ? '40px' : '50px',
-                    height: isMobile ? '40px' : '50px',
-                    minWidth: isMobile ? 40 : 50,
-                    flexShrink: 0,
-                    borderRadius: '50%',
-                    backgroundColor: '#e5e7eb',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '2px solid #e5e7eb'
-                  }}>
-                    <User size={isMobile ? 20 : 24} color="#6b7280" />
-                  </div>
-                )}
+                {profileAvatarNode}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ 
                     fontSize: isMobile ? '14px' : '16px', 

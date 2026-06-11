@@ -219,6 +219,7 @@ class ClientChatMessage(models.Model):
     )
     sender = models.CharField(max_length=10, default="client")  # client | manager
     message = models.TextField(default="")
+    attachment = models.FileField(upload_to='chat_attachments/', storage=client_profile_storage, null=True, blank=True)
     read_by_client = models.BooleanField(default=False)
     read_by_manager = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

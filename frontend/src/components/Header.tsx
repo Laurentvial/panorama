@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger 
 } from './ui/dropdown-menu';
-import { HiOutlineBell, HiOutlineLogout, HiOutlineUser } from 'react-icons/hi';
+import { HiOutlineBell, HiOutlineLogout } from 'react-icons/hi';
 import { useTheme } from '../contexts/ThemeContext';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { apiCall } from '../utils/api';
@@ -140,24 +140,32 @@ export function Header({ user }: HeaderProps) {
   const mainUserDisplay = fullName || user?.email || user?.userId || 'User';
   const profilePhotoUrl: string | undefined = typeof user?.profilePhoto === 'string' ? user.profilePhoto : undefined;
   const fallbackInitials = (() => {
-    const source = (
-      fullName ||
-      (typeof user?.email === 'string' ? user.email : '') ||
-      (typeof user?.userId === 'string' ? user.userId : '') ||
-      ''
-    ).trim();
-    if (!source) return '';
-    if (source.toLowerCase() === 'user') return '';
+    const firstName = String(user?.firstName || '').trim();
+    const lastName = String(user?.lastName || '').trim();
+    const email = String(user?.email || '').trim();
+    const userId = String(user?.userId || '').trim();
+    const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9]/g, '');
 
-    const base = source.includes('@') ? source.split('@')[0] : source;
-    const parts = base
-      .replace(/[_\-.]+/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean);
+    if (firstName && lastName) {
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    }
 
-    const first = parts[0]?.[0] || '';
-    const second = parts.length > 1 ? (parts[1]?.[0] || '') : (parts[0]?.[1] || '');
-    return (first + second).toUpperCase();
+    const singleName = firstName || lastName;
+    if (singleName) {
+      const letters = sanitize(singleName);
+      if (letters.length >= 2) return letters.slice(0, 2).toUpperCase();
+      if (letters.length === 1) return letters.toUpperCase();
+    }
+
+    const emailLocalPart = email.includes('@') ? email.split('@')[0] : email;
+    const emailLetters = sanitize(emailLocalPart);
+    if (emailLetters.length >= 2) return emailLetters.slice(0, 2).toUpperCase();
+    if (emailLetters.length === 1) return emailLetters.toUpperCase();
+
+    const idLetters = sanitize(userId);
+    if (idLetters.length >= 2) return idLetters.slice(0, 2).toUpperCase();
+    if (idLetters.length === 1) return idLetters.toUpperCase();
+    return 'U';
   })();
 
   return (
@@ -238,12 +246,12 @@ export function Header({ user }: HeaderProps) {
                   <Avatar className="header-user-avatar">
                     <AvatarImage src={profilePhotoUrl} alt={mainUserDisplay} />
                     <AvatarFallback className="header-user-avatar-fallback" aria-label={mainUserDisplay}>
-                      {fallbackInitials ? (
-                        <span className="header-user-avatar-initials">{fallbackInitials}</span>
-                      ) : (
-                        <HiOutlineUser />
-                      )}
-                    </AvatarFallback>
+                        <span
+                          className={`header-user-avatar-initial ${fallbackInitials.length >= 2 ? 'header-user-avatar-initial--two' : ''}`}
+                        >
+                          {fallbackInitials}
+                        </span>
+                      </AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>

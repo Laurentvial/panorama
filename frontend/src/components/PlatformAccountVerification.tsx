@@ -30,11 +30,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from './ui/checkbox';
 
 import {
-
-  ArrowLeft,
-
-  X,
-
   Plus,
 
   Check,
@@ -671,37 +666,50 @@ export function PlatformAccountVerification() {
   // Helper functions to check if specific config steps are completed
   const isConfigStepCompleted = (configStepNumber: number): boolean => {
     if (!currentUser) return false;
+
+    const hasValue = (...keys: string[]): boolean =>
+      keys.some((key) => {
+        const value = (currentUser as any)?.[key];
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'string') return value.trim().length > 0;
+        return true;
+      });
+
+    const hasArrayValues = (...keys: string[]): boolean =>
+      keys.some((key) => Array.isArray((currentUser as any)?.[key]) && ((currentUser as any)[key] as unknown[]).length > 0);
     
     switch (configStepNumber) {
       case 1: // Identity
-        return !!(currentUser.firstName || currentUser.fname) && 
-               !!(currentUser.lastName || currentUser.lname) && 
-               currentUser.sex && 
-               (currentUser.birthDate || currentUser.birth_date);
+        return hasValue('firstName', 'fname') &&
+               hasValue('lastName', 'lname') &&
+               hasValue('sex') &&
+               hasValue('birthDate', 'birth_date');
       
       case 2: // Address
-        return !!(currentUser.address && currentUser.postalCode && currentUser.city);
+        return hasValue('address') &&
+               hasValue('postalCode', 'postal_code') &&
+               hasValue('city');
       
       case 3: // Profile
-        return !!(currentUser.primaryProfession || currentUser.primary_profession) && 
-               currentUser.annualNetIncome && 
-               currentUser.totalLiquidities;
+        return hasValue('primaryProfession', 'primary_profession') &&
+               hasValue('annualNetIncome', 'annual_net_income') &&
+               hasValue('totalLiquidities', 'total_liquidities');
       
       case 4: // Preferences
-        return Array.isArray(currentUser.preferences) && currentUser.preferences.length > 0;
+        return hasArrayValues('preferences');
       
       case 5: // Objectives
-        return !!(currentUser.tradingObjective || currentUser.trading_objective) && 
-               !!(currentUser.plannedInvestment12m || currentUser.planned_investment_12m);
+        return hasValue('tradingObjective', 'trading_objective') &&
+               hasValue('plannedInvestment12m', 'planned_investment_12m');
       
       case 6: // Compliance
-        return Array.isArray(currentUser.complianceFamilyFlags) && currentUser.complianceFamilyFlags.length > 0;
+        return hasArrayValues('complianceFamilyFlags', 'compliance_family_flags');
       
       case 7: // Funds Sources
-        return Array.isArray(currentUser.fundsSources) && currentUser.fundsSources.length > 0;
+        return hasArrayValues('fundsSources', 'funds_sources');
       
       case 8: // KYC
-        return currentUser.kycStatus === 'approved' || currentUser.kycStatus === 'submitted';
+        return ['approved', 'submitted'].includes((currentUser.kycStatus || currentUser.kyc_status || '').toString());
       
       default:
         return false;
@@ -797,54 +805,6 @@ export function PlatformAccountVerification() {
     isStep2Completed,
     isStep3Completed,
   ]);
-
-  const progress = useMemo(() => {
-    if (!step) return { percent: 0, label: 'Sélection' };
-
-    const enabledSteps = ([1, 2, 3] as const).filter((stepNumber) => isStepEnabled(stepNumber));
-    const currentStepIndex = enabledSteps.indexOf(step);
-    if (currentStepIndex === -1 || enabledSteps.length === 0) {
-      return { percent: 0, label: 'Sélection' };
-    }
-
-    const enabledStep2ConfigSteps = [3, 4, 5, 6, 7].filter((configStep) => isConfigStepEnabled(configStep));
-    const step2SubStepByConfigStep: Record<number, number> = { 3: 1, 4: 2, 5: 3, 6: 4, 7: 5 };
-    const enabledStep2SubSteps = enabledStep2ConfigSteps.map((configStep) => step2SubStepByConfigStep[configStep]);
-
-    const currentStepTotalSubSteps =
-      step === 1 ? (isConfigStepEnabled(2) ? 2 : 1) :
-      step === 2 ? Math.max(enabledStep2SubSteps.length, 1) :
-      1;
-
-    const currentSubStepPosition =
-      step === 1
-        ? (isConfigStepEnabled(2) ? Math.min(Math.max(subStep, 1), 2) : 1)
-        : step === 2
-          ? (() => {
-              const step2Index = enabledStep2SubSteps.indexOf(subStep);
-              return step2Index >= 0 ? step2Index + 1 : 1;
-            })()
-          : 1;
-
-    const completedWholeSteps = currentStepIndex;
-    const intraStepProgress = (currentSubStepPosition - 1) / currentStepTotalSubSteps;
-    const percent = Math.round(((completedWholeSteps + intraStepProgress) / enabledSteps.length) * 100);
-
-    if (step === 1) {
-      if (subStep === 1) return { percent, label: 'Identité' };
-      return { percent, label: 'Adresse' };
-    }
-    if (step === 2) {
-      if (subStep === 1) return { percent, label: 'Profil' };
-      if (subStep === 2) return { percent, label: 'Préférences' };
-      if (subStep === 3) return { percent, label: 'Objectifs' };
-      if (subStep === 4) return { percent, label: 'Conformité' };
-      return { percent, label: 'Sources de revenus' };
-    }
-    return { percent, label: 'KYC' };
-  }, [step, subStep, verificationConfig]);
-
-
 
   const handleIdentitySubmit = async (e: React.FormEvent) => {
 
@@ -1371,60 +1331,14 @@ export function PlatformAccountVerification() {
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: isMobile ? '100%' : 1200, width: '100%', margin: '0 auto' }}>
       <h1 className="platform-portfolioPageTitle">Vérification du compte</h1>
 
-      {/* Top progress header (inspired by screenshot) */}
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-
-        <button
-
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 18 }}>
+        <Button
           type="button"
-
-          onClick={handleBack}
-
-          aria-label="Retour"
-
-          style={{ border: 'none', background: 'transparent', padding: 8, cursor: 'pointer' }}
-
-        >
-
-          <ArrowLeft size={22} />
-
-        </button>
-
-
-
-        {step !== null && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{progress.percent}% Terminé</div>
-
-            <div style={{ width: '60%', maxWidth: 420, height: 3, backgroundColor: '#e5e7eb', borderRadius: 999 }}>
-
-              <div style={{ width: `${progress.percent}%`, height: '100%', backgroundColor: '#22c55e', borderRadius: 999 }} />
-
-            </div>
-
-          </div>
-        )}
-
-
-
-        <button
-
-          type="button"
-
+          variant="outline"
           onClick={() => navigate('/platform')}
-
-          aria-label="Fermer"
-
-          style={{ border: 'none', background: 'transparent', padding: 8, cursor: 'pointer' }}
-
         >
-
-          <X size={22} />
-
-        </button>
-
+          Fermer
+        </Button>
       </div>
 
 
@@ -1801,9 +1715,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -1887,9 +1807,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -2187,7 +2113,13 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
 
                 <Button
 
@@ -2196,6 +2128,7 @@ export function PlatformAccountVerification() {
                   disabled={submitting || !primaryProfession || !annualNetIncome || !totalLiquidities}
 
                   variant="platform"
+                  className="kyc-nav-button"
 
                 >
 
@@ -2267,9 +2200,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -2449,9 +2388,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -2515,9 +2460,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting || complianceFamilyFlags.length === 0} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting || complianceFamilyFlags.length === 0} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -2621,9 +2572,15 @@ export function PlatformAccountVerification() {
 
 
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
 
-                <Button type="submit" disabled={submitting || fundsSources.length === 0} variant="platform">
+                <Button type="button" variant="platform" className="kyc-nav-button" onClick={handleBack}>
+
+                  Retour
+
+                </Button>
+
+                <Button type="submit" disabled={submitting || fundsSources.length === 0} variant="platform" className="kyc-nav-button">
 
                   {submitting ? 'Enregistrement...' : 'Suivant'}
 
@@ -3099,6 +3056,26 @@ export function PlatformAccountVerification() {
           ) : null}
         </CardContent>
       </Card>
+      {step === 3 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <Button
+            type="button"
+            variant="platform"
+            className="kyc-nav-button"
+            onClick={handleBack}
+          >
+            Retour
+          </Button>
+          <Button
+            type="button"
+            variant="platform"
+            className="kyc-nav-button"
+            onClick={() => navigate('/platform')}
+          >
+            Suivant
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

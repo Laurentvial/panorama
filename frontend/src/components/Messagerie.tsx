@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
-import { Send, RefreshCw, Sparkles, Pencil, Trash2 } from 'lucide-react';
+import { Send, RefreshCw, Sparkles, Pencil, Trash2, Paperclip, X } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
@@ -25,6 +25,8 @@ type ChatMessage = {
   id: string;
   sender: 'client' | 'manager' | string;
   message: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
   createdAt?: string;
   conversationId?: string | null;
 };
@@ -48,6 +50,7 @@ type RequestItem = {
 
 export function Messagerie() {
   const { currentUser } = useUser();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
@@ -59,9 +62,11 @@ export function Messagerie() {
   const [sending, setSending] = useState(false);
   const [reformulating, setReformulating] = useState(false);
   const [draft, setDraft] = useState('');
+  const [draftAttachment, setDraftAttachment] = useState<File | null>(null);
   const [newConversationClientId, setNewConversationClientId] = useState('');
   const [newConversationSubject, setNewConversationSubject] = useState('');
   const [newConversationMessage, setNewConversationMessage] = useState('');
+  const [newConversationAttachment, setNewConversationAttachment] = useState<File | null>(null);
   const [newConversationError, setNewConversationError] = useState('');
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -85,24 +90,29 @@ export function Messagerie() {
     () => clients.find((c) => c.id === newConversationClientId) || null,
     [clients, newConversationClientId],
   );
+  const activeClientId = selectedRequest?.clientId || newConversationClientId || requestedClientId || '';
 
   async function loadClients() {
     setLoadingClients(true);
     try {
       const data = await apiCall('/api/clients/');
-      setClients((data?.clients || []) as Client[]);
+      const nextClients = (data?.clients || []) as Client[];
+      setClients(nextClients);
+      return nextClients;
     } catch (error) {
       console.error('Error loading clients:', error);
+      return [] as Client[];
     } finally {
       setLoadingClients(false);
     }
   }
 
-  async function loadRequests() {
+  async function loadRequests(sourceClients?: Client[]) {
     setLoadingRequests(true);
     try {
+      const clientsToUse = sourceClients ?? visibleClients;
       const conversationLists = await Promise.all(
-        visibleClients.map(async (c) => {
+        clientsToUse.map(async (c) => {
           try {
             const data = await apiCall(`/api/clients/${c.id}/conversations/`);
             return { client: c, conversations: (data?.conversations || []) as Conversation[] };
@@ -227,17 +237,23 @@ export function Messagerie() {
 
   async function sendChatMessage() {
     const text = draft.trim();
-    if (!selectedRequest || !text) return;
+    if (!selectedRequest || (!text && !draftAttachment)) return;
     setSending(true);
     try {
+      const payload = new FormData();
+      payload.append('message', text);
+      if (draftAttachment) {
+        payload.append('attachment', draftAttachment);
+      }
       const res = await apiCall(
         `/api/clients/${selectedRequest.clientId}/conversations/${selectedRequest.conversationId}/messages/`,
         {
           method: 'POST',
-          body: JSON.stringify({ message: text }),
+          body: payload,
         },
       );
       setDraft('');
+      setDraftAttachment(null);
       // Invalider le cache pour forcer un rechargement frais
       clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
       // Ajouter le nouveau message immédiatement (réponse API) ou recharger en secours
@@ -270,16 +286,22 @@ export function Messagerie() {
       setNewConversationError('Client introuvable.');
       return;
     }
-    if (!subject || !message) {
-      setNewConversationError('Le sujet et le message sont requis.');
+    if (!subject || (!message && !newConversationAttachment)) {
+      setNewConversationError('Le sujet et le message ou la pièce jointe sont requis.');
       return;
     }
     setCreatingConversation(true);
     setNewConversationError('');
     try {
+      const payload = new FormData();
+      payload.append('subject', subject);
+      payload.append('message', message);
+      if (newConversationAttachment) {
+        payload.append('attachment', newConversationAttachment);
+      }
       const response = await apiCall(`/api/clients/${newConversationClientId}/conversations/`, {
         method: 'POST',
-        body: JSON.stringify({ subject, message }),
+        body: payload,
       });
 
       clearApiCache(`/api/clients/${newConversationClientId}/conversations/`);
@@ -293,12 +315,14 @@ export function Messagerie() {
         setSelectedRequestId(requestId);
         setChatMessages([]);
         setDraft('');
+        setDraftAttachment(null);
       }
       if (conversationId) {
         clearNewConversationMode(newConversationClientId, conversationId);
       }
       setNewConversationSubject('');
       setNewConversationMessage('');
+      setNewConversationAttachment(null);
       setNewConversationClientId('');
       toast.success('Conversation créée avec succès.');
     } catch (error) {
@@ -332,6 +356,7 @@ export function Messagerie() {
     if (requestedMode !== 'new') {
       setNewConversationClientId('');
       setNewConversationError('');
+      setNewConversationAttachment(null);
       return;
     }
 
@@ -351,11 +376,13 @@ export function Messagerie() {
     setSelectedRequestId('');
     setChatMessages([]);
     setDraft('');
+    setDraftAttachment(null);
     setNewConversationError('');
     setNewConversationClientId((previousClientId) => {
       if (previousClientId !== requestedClientId) {
         setNewConversationSubject('');
         setNewConversationMessage('');
+        setNewConversationAttachment(null);
       }
       return requestedClientId;
     });
@@ -372,6 +399,7 @@ export function Messagerie() {
 
     setSelectedRequestId(targetId);
     setDraft('');
+    setDraftAttachment(null);
     setChatMessages([]);
   }, [requests, requestedClientId, requestedConversationId, selectedRequestId, requestedMode]);
 
@@ -401,8 +429,8 @@ export function Messagerie() {
           <Button
             variant="outline"
             onClick={async () => {
-              await loadClients();
-              await loadRequests();
+              const refreshedClients = await loadClients();
+              await loadRequests(refreshedClients);
             }}
             disabled={loadingClients || loadingRequests}
           >
@@ -440,6 +468,7 @@ export function Messagerie() {
                           }
                           setSelectedRequestId(r.id);
                           setDraft('');
+                          setDraftAttachment(null);
                           setChatMessages([]);
                         }}
                         className="w-full text-left px-3 py-3 border-b hover:bg-slate-50"
@@ -465,11 +494,35 @@ export function Messagerie() {
             {/* Right: conversation */}
             <div className="flex-1 border rounded-lg bg-white" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-700 truncate">
-                {isNewConversationMode
-                  ? `Nouveau message — ${requestedClient?.fullName || `${requestedClient?.firstName || ''} ${requestedClient?.lastName || ''}`.trim() || requestedClient?.email || 'Client'}`
-                  : selectedRequest
-                    ? `${selectedRequest.clientName} — ${selectedRequest.subject}`
-                    : 'Sélectionnez une demande'}
+                {isNewConversationMode ? (
+                  <>
+                    <span>Nouveau message — </span>
+                    <button
+                      type="button"
+                      className="font-semibold underline underline-offset-2 rounded px-1 -mx-1 transition-colors hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                      onClick={() => {
+                        if (!activeClientId) return;
+                        navigate(`/admin/clients/${activeClientId}`);
+                      }}
+                      disabled={!activeClientId}
+                    >
+                      {requestedClient?.fullName || `${requestedClient?.firstName || ''} ${requestedClient?.lastName || ''}`.trim() || requestedClient?.email || 'Client'}
+                    </button>
+                  </>
+                ) : selectedRequest ? (
+                  <>
+                    <button
+                      type="button"
+                      className="font-semibold underline underline-offset-2 rounded px-1 -mx-1 transition-colors hover:text-blue-700 hover:bg-blue-50 cursor-pointer"
+                      onClick={() => navigate(`/admin/clients/${selectedRequest.clientId}`)}
+                    >
+                      {selectedRequest.clientName}
+                    </button>
+                    <span>{` — ${selectedRequest.subject}`}</span>
+                  </>
+                ) : (
+                  'Sélectionnez une demande'
+                )}
               </div>
 
               <div ref={listRef} className="p-3 bg-slate-50" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -547,7 +600,20 @@ export function Messagerie() {
                                   isMe ? 'bg-primary text-accent-foreground' : 'bg-white border'
                                 }`}
                               >
-                                {m.message}
+                                {m.message ? <div>{m.message}</div> : null}
+                                {m.attachmentUrl && (
+                                  <a
+                                    href={m.attachmentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={`inline-flex items-center gap-1 mt-2 underline ${
+                                      isMe ? 'text-white/90 hover:text-white' : 'text-blue-700 hover:text-blue-900'
+                                    }`}
+                                  >
+                                    <Paperclip className="w-3 h-3" />
+                                    <span>{m.attachmentName || 'Pièce jointe'}</span>
+                                  </a>
+                                )}
                               </div>
                             )}
                             {!isEditing && (
@@ -610,8 +676,40 @@ export function Messagerie() {
                     rows={3}
                     disabled={!requestedClient || creatingConversation}
                   />
+                  <div className="flex items-center gap-2">
+                    <label className={`inline-flex items-center gap-2 text-sm ${!requestedClient || creatingConversation ? 'text-slate-400' : 'text-blue-700 cursor-pointer'}`}>
+                      <input
+                        type="file"
+                        className="hidden"
+                        disabled={!requestedClient || creatingConversation}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setNewConversationAttachment(file);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                      <Paperclip className="w-4 h-4" />
+                      Joindre un fichier
+                    </label>
+                    {newConversationAttachment && (
+                      <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700">
+                        <span className="max-w-[220px] truncate">{newConversationAttachment.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setNewConversationAttachment(null)}
+                          className="text-slate-500 hover:text-slate-700"
+                          aria-label="Retirer le fichier"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-2 justify-end">
-                    <Button type="submit" disabled={!requestedClient || creatingConversation || !newConversationSubject.trim() || !newConversationMessage.trim()}>
+                    <Button
+                      type="submit"
+                      disabled={!requestedClient || creatingConversation || !newConversationSubject.trim() || (!newConversationMessage.trim() && !newConversationAttachment)}
+                    >
                       <Send className="w-4 h-4 mr-2" />
                       {creatingConversation ? 'Création…' : 'Créer la conversation'}
                     </Button>
@@ -627,7 +725,7 @@ export function Messagerie() {
                     e.preventDefault();
                     sendChatMessage();
                   }}
-                  className="p-3 border-t flex gap-2 items-end bg-white"
+                  className="p-3 border-t space-y-2 bg-white"
                 >
                   <Textarea
                     value={draft}
@@ -636,28 +734,59 @@ export function Messagerie() {
                     disabled={!selectedRequest || sending}
                     rows={2}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      reformulateDraft();
-                    }}
-                    disabled={!draft.trim() || reformulating}
-                    title="Reformuler et corriger le message avec l'IA"
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    {reformulating ? 'Reformulation…' : 'Reformuler'}
-                  </Button>
-                  <Button type="submit" disabled={!selectedRequest || sending || !draft.trim()}>
-                    <Send className="w-4 h-4 mr-2" />
-                    Envoyer
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests}>
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Rafraîchir
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <label className={`inline-flex items-center gap-2 text-sm ${!selectedRequest || sending ? 'text-slate-400' : 'text-blue-700 cursor-pointer'}`}>
+                      <input
+                        type="file"
+                        className="hidden"
+                        disabled={!selectedRequest || sending}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setDraftAttachment(file);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                      <Paperclip className="w-4 h-4" />
+                      Joindre un fichier
+                    </label>
+                    {draftAttachment && (
+                      <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700">
+                        <span className="max-w-[220px] truncate">{draftAttachment.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setDraftAttachment(null)}
+                          className="text-slate-500 hover:text-slate-700"
+                          aria-label="Retirer le fichier"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        reformulateDraft();
+                      }}
+                      disabled={!draft.trim() || reformulating}
+                      title="Reformuler et corriger le message avec l'IA"
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {reformulating ? 'Reformulation…' : 'Reformuler'}
+                    </Button>
+                    <Button type="submit" disabled={!selectedRequest || sending || (!draft.trim() && !draftAttachment)}>
+                      <Send className="w-4 h-4 mr-2" />
+                      Envoyer
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests}>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Rafraîchir
+                    </Button>
+                  </div>
                 </form>
               )}
             </div>

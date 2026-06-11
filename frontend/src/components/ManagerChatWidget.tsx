@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, Send, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, Paperclip, Send, X } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import { useIsPhone } from './ui/use-mobile';
@@ -14,6 +14,8 @@ type ChatMessage = {
   id: string;
   sender: 'client' | 'manager' | string;
   message: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
   createdAt?: string;
   conversationId?: string | null;
 };
@@ -112,8 +114,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
   const [view, setView] = useState<'select' | 'thread'>('select');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [draftAttachment, setDraftAttachment] = useState<File | null>(null);
   const [newSubject, setNewSubject] = useState('');
   const [newMessage, setNewMessage] = useState('');
+  const [newAttachment, setNewAttachment] = useState<File | null>(null);
   const [showNewRequestForm, setShowNewRequestForm] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string>('');
@@ -300,17 +304,22 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
   async function createNewRequest() {
     const subject = newSubject.trim();
     const text = newMessage.trim();
-    if (!clientId || !subject || !text) return;
+    if (!clientId || !subject || (!text && !newAttachment)) return;
     setCreating(true);
     try {
+      const payload = new FormData();
+      payload.append('subject', subject);
+      payload.append('message', text);
+      if (newAttachment) payload.append('attachment', newAttachment);
       const res = await apiCall(`/api/clients/${clientId}/conversations/`, {
         method: 'POST',
-        body: JSON.stringify({ subject, message: text }),
+        body: payload,
       });
       const createdConv = res?.conversation as Conversation | undefined;
       const firstMsg = res?.message as ChatMessage | undefined;
       setNewSubject('');
       setNewMessage('');
+      setNewAttachment(null);
       setShowNewRequestForm(false);
       await loadConversations();
       if (createdConv?.id) {
@@ -333,15 +342,19 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
 
   async function sendMessage() {
     const text = draft.trim();
-    if (!text || !clientId || !selectedConversationId) return;
+    if ((!text && !draftAttachment) || !clientId || !selectedConversationId) return;
     setSending(true);
     try {
+      const payload = new FormData();
+      payload.append('message', text);
+      if (draftAttachment) payload.append('attachment', draftAttachment);
       const res = await apiCall(`/api/clients/${clientId}/conversations/${selectedConversationId}/messages/`, {
         method: 'POST',
-        body: JSON.stringify({ message: text }),
+        body: payload,
       });
       const newMsg = res?.message as ChatMessage | undefined;
       setDraft('');
+      setDraftAttachment(null);
       if (newMsg) {
         setMessages((prev) => [...prev, newMsg]);
       } else {
@@ -364,8 +377,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
     setMessages([]);
     setLoadingMessages(false);
     setDraft('');
+    setDraftAttachment(null);
     setNewSubject('');
     setNewMessage('');
+    setNewAttachment(null);
     setShowNewRequestForm(false);
     await loadConversations();
   };
@@ -375,8 +390,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
     setMessages([]);
     setLoadingMessages(false);
     setDraft('');
+    setDraftAttachment(null);
     setNewSubject('');
     setNewMessage('');
+    setNewAttachment(null);
     setShowNewRequestForm(false);
     setOpen(true);
   };
@@ -528,8 +545,10 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                   setMessages([]);
                   setLoadingMessages(false);
                   setDraft('');
+                  setDraftAttachment(null);
                   setNewSubject('');
                   setNewMessage('');
+                  setNewAttachment(null);
                   setShowNewRequestForm(false);
                 }}
                 aria-label="Fermer"
@@ -610,6 +629,27 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                           rows={4}
                           style={{ borderRadius: 12 }}
                         />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: creating ? 'not-allowed' : 'pointer', color: creating ? '#94a3b8' : '#1d4ed8', fontSize: 13 }}>
+                            <input
+                              type="file"
+                              className="hidden"
+                              disabled={creating}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                setNewAttachment(file);
+                                e.currentTarget.value = '';
+                              }}
+                            />
+                            <Paperclip size={14} />
+                            Joindre un fichier
+                          </label>
+                          {newAttachment ? (
+                            <span style={{ fontSize: 12, color: '#475569', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {newAttachment.name}
+                            </span>
+                          ) : null}
+                        </div>
                         <div style={{ display: 'flex', gap: 8 }}>
                           <Button
                             type="button"
@@ -618,6 +658,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                               setShowNewRequestForm(false);
                               setNewSubject('');
                               setNewMessage('');
+                              setNewAttachment(null);
                             }}
                             disabled={creating}
                             className="flex-1"
@@ -626,7 +667,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                           </Button>
                           <Button
                             type="submit"
-                            disabled={creating || !newSubject.trim() || !newMessage.trim()}
+                            disabled={creating || !newSubject.trim() || (!newMessage.trim() && !newAttachment)}
                             className="flex-1"
                           >
                             Envoyer
@@ -727,7 +768,25 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                             lineHeight: 1.4,
                           }}
                         >
-                          {m.message}
+                          {m.message ? <div>{m.message}</div> : null}
+                          {m.attachmentUrl ? (
+                            <a
+                              href={m.attachmentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                marginTop: m.message ? 8 : 0,
+                                textDecoration: 'underline',
+                                color: isMe ? '#e5e7eb' : '#1d4ed8',
+                              }}
+                            >
+                              <Paperclip size={12} />
+                              <span>{m.attachmentName || 'Pièce jointe'}</span>
+                            </a>
+                          ) : null}
                         </div>
                         {m.createdAt && (
                           <div style={{ marginTop: 4, fontSize: 12, color: '#9ca3af', textAlign: isMe ? 'right' : 'left' }}>
@@ -744,9 +803,6 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                 style={{
                   padding: 10,
                   borderTop: '1px solid rgba(2, 6, 23, 0.08)',
-                  display: 'flex',
-                  gap: 8,
-                  alignItems: 'flex-end',
                   background: 'white',
                   flexShrink: 0,
                 }}
@@ -756,7 +812,7 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                     e.preventDefault();
                     sendMessage();
                   }}
-                  style={{ display: 'flex', gap: 8, flex: 1, alignItems: 'flex-end' }}
+                  style={{ display: 'flex', gap: 8, flex: 1, alignItems: 'flex-end', flexDirection: 'column' }}
                 >
                   <Textarea
                     value={draft}
@@ -764,11 +820,32 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
                     placeholder="Votre message…"
                     disabled={sending}
                     rows={2}
-                    style={{ borderRadius: 12 }}
+                    style={{ borderRadius: 12, width: '100%' }}
                   />
-                  <Button type="submit" disabled={sending || !draft.trim()} style={{ height: 42, borderRadius: 12, padding: '0 16px' }}>
-                    <Send size={16} />
-                  </Button>
+                  <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: sending ? 'not-allowed' : 'pointer', color: sending ? '#94a3b8' : '#1d4ed8', fontSize: 13 }}>
+                      <input
+                        type="file"
+                        className="hidden"
+                        disabled={sending}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setDraftAttachment(file);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                      <Paperclip size={14} />
+                      Joindre un fichier
+                    </label>
+                    {draftAttachment ? (
+                      <span style={{ fontSize: 12, color: '#475569', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {draftAttachment.name}
+                      </span>
+                    ) : null}
+                    <Button type="submit" disabled={sending || (!draft.trim() && !draftAttachment)} style={{ height: 42, borderRadius: 12, padding: '0 16px' }}>
+                      <Send size={16} />
+                    </Button>
+                  </div>
                 </form>
               </div>
             </>

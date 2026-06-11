@@ -181,14 +181,34 @@
 }
 
 .header-user-avatar-fallback {
-  background: transparent;
+  background: color-mix(in srgb, var(--accent-foreground) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-foreground) 70%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.header-user-avatar-initials {
-  font-size: 0.9rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+.header-user-avatar-fallback svg {
+  width: 82%;
+  height: 82%;
+  stroke-width: 2.5;
+}
+
+.header-user-avatar-initial {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3em;
+  font-weight: 500;
   line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.header-user-avatar-initial--two {
+  font-size: 1.5rem;
+  padding: 0.25rem;
 }
 
 .header-dropdown {

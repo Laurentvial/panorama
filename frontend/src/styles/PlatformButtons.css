@@ -35,6 +35,11 @@
   filter: brightness(0.95);
 }
 
+/* KYC flow nav buttons must keep black text */
+.platform-button-primary.kyc-nav-button {
+  color: #000 !important;
+}
+
 .platform-button-primary:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent, var(--primary, #030213)) 35%, transparent);
   outline-offset: 3px;

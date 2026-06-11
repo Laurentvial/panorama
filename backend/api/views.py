@@ -8279,7 +8279,7 @@ def client_chat(request, client_id):
 
     if request.method == 'GET':
         qs = ClientChatMessage.objects.filter(client=client).order_by('created_at')
-        serializer = ClientChatMessageSerializer(qs, many=True)
+        serializer = ClientChatMessageSerializer(qs, many=True, context={'request': request})
         manager_photo = _get_manager_profile_photo(manager_user, request) if manager_user else ''
         
         # Get manager status, availability schedule, and phone from UserDetails
@@ -8315,8 +8315,9 @@ def client_chat(request, client_id):
         payload = {}
 
     message_text = str(payload.get('message', '') or '').strip()
-    if not message_text:
-        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+    attachment = request.FILES.get('attachment')
+    if not message_text and not attachment:
+        return Response({'error': 'Message ou pièce jointe requis'}, status=status.HTTP_400_BAD_REQUEST)
 
     message_id = uuid.uuid4().hex[:12]
     while ClientChatMessage.objects.filter(id=message_id).exists():
@@ -8329,6 +8330,7 @@ def client_chat(request, client_id):
         manager_user=manager_user,
         sender=sender,
         message=message_text,
+        attachment=attachment,
         read_by_client=(sender == 'client'),
         read_by_manager=(sender == 'manager'),
     )
@@ -8353,7 +8355,10 @@ def client_chat(request, client_id):
             payload={"message_id": msg.id},
         )
 
-    return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
+    return Response(
+        {'message': ClientChatMessageSerializer(msg, context={'request': request}).data},
+        status=status.HTTP_201_CREATED,
+    )
 
 
 def _resolve_client_manager_user(client: Client):
@@ -8454,6 +8459,8 @@ def client_conversations(request, client_id):
             last_msg = legacy_qs.order_by('-created_at').first()
             first_msg = legacy_qs.first()
             preview = (last_msg.message or '').strip() if last_msg else ''
+            if not preview and last_msg and getattr(last_msg, 'attachment', None):
+                preview = 'Pièce jointe'
             if len(preview) > 120:
                 preview = preview[:120] + '…'
             legacy_item = {
@@ -8503,10 +8510,11 @@ def client_conversations(request, client_id):
 
     subject = str(payload.get('subject', '') or '').strip()
     message_text = str(payload.get('message', '') or '').strip()
+    attachment = request.FILES.get('attachment')
     if not subject:
         return Response({'error': 'Sujet requis'}, status=status.HTTP_400_BAD_REQUEST)
-    if not message_text:
-        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if not message_text and not attachment:
+        return Response({'error': 'Message ou pièce jointe requis'}, status=status.HTTP_400_BAD_REQUEST)
 
     conversation_id = uuid.uuid4().hex[:12]
     while ClientConversation.objects.filter(id=conversation_id).exists():
@@ -8532,6 +8540,7 @@ def client_conversations(request, client_id):
         manager_user=manager_user,
         sender=sender,
         message=message_text,
+        attachment=attachment,
         read_by_client=(sender == 'client'),
         read_by_manager=(sender == 'manager'),
     )
@@ -8559,7 +8568,7 @@ def client_conversations(request, client_id):
     return Response(
         {
             'conversation': ClientConversationSerializer(conversation).data,
-            'message': ClientChatMessageSerializer(msg).data,
+            'message': ClientChatMessageSerializer(msg, context={'request': request}).data,
         },
         status=status.HTTP_201_CREATED,
     )
@@ -8605,7 +8614,7 @@ def client_conversation_messages(request, client_id, conversation_id):
                 read_by_client=False,
                 conversation=None if is_legacy else conversation,
             ).update(read_by_client=True)
-        serializer = ClientChatMessageSerializer(qs, many=True)
+        serializer = ClientChatMessageSerializer(qs, many=True, context={'request': request})
         
         # Get manager status, availability schedule, and phone from UserDetails
         manager_status = 'offline'
@@ -8641,8 +8650,9 @@ def client_conversation_messages(request, client_id, conversation_id):
         payload = {}
 
     message_text = str(payload.get('message', '') or '').strip()
-    if not message_text:
-        return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
+    attachment = request.FILES.get('attachment')
+    if not message_text and not attachment:
+        return Response({'error': 'Message ou pièce jointe requis'}, status=status.HTTP_400_BAD_REQUEST)
 
     message_id = uuid.uuid4().hex[:12]
     while ClientChatMessage.objects.filter(id=message_id).exists():
@@ -8656,6 +8666,7 @@ def client_conversation_messages(request, client_id, conversation_id):
         manager_user=manager_user,
         sender=sender,
         message=message_text,
+        attachment=attachment,
         read_by_client=(sender == 'client'),
         read_by_manager=(sender == 'manager'),
     )
@@ -8692,7 +8703,10 @@ def client_conversation_messages(request, client_id, conversation_id):
             },
         )
 
-    return Response({'message': ClientChatMessageSerializer(msg).data}, status=status.HTTP_201_CREATED)
+    return Response(
+        {'message': ClientChatMessageSerializer(msg, context={'request': request}).data},
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(['PATCH', 'DELETE'])
@@ -8728,7 +8742,7 @@ def client_conversation_message_detail(request, client_id, conversation_id, mess
             return Response({'error': 'Message requis'}, status=status.HTTP_400_BAD_REQUEST)
         msg.message = message_text
         msg.save(update_fields=['message'])
-        return Response({'message': ClientChatMessageSerializer(msg).data})
+        return Response({'message': ClientChatMessageSerializer(msg, context={'request': request}).data})
 
     if request.method == 'DELETE':
         msg.delete()

@@ -662,6 +662,8 @@ class ClientSuccessorSerializer(serializers.ModelSerializer):
 class ClientChatMessageSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     conversationId = serializers.SerializerMethodField()
+    attachmentUrl = serializers.SerializerMethodField()
+    attachmentName = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientChatMessage
@@ -672,6 +674,8 @@ class ClientChatMessageSerializer(serializers.ModelSerializer):
             'manager_user',
             'sender',
             'message',
+            'attachmentUrl',
+            'attachmentName',
             'read_by_client',
             'read_by_manager',
             'createdAt',
@@ -679,6 +683,17 @@ class ClientChatMessageSerializer(serializers.ModelSerializer):
 
     def get_conversationId(self, obj):
         return getattr(obj.conversation, 'id', None)
+
+    def get_attachmentUrl(self, obj):
+        return _get_media_url_for_field(self.context.get('request'), obj.attachment)
+
+    def get_attachmentName(self, obj):
+        if not getattr(obj, 'attachment', None):
+            return ''
+        try:
+            return (obj.attachment.name or '').split('/')[-1]
+        except Exception:
+            return ''
 
 
 class ClientConversationSerializer(serializers.ModelSerializer):
@@ -717,6 +732,8 @@ class ClientConversationSerializer(serializers.ModelSerializer):
         if not m:
             return ''
         text = (m.message or '').strip()
+        if not text and getattr(m, 'attachment', None):
+            return 'Pièce jointe'
         return (text[:120] + '…') if len(text) > 120 else text
 
 class TeamSerializer(serializers.ModelSerializer):
