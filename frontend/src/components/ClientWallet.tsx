@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Card, CardContent } from './ui/card';
 import { Label } from './ui/label';
 import { formatAmount } from '../utils/currency';
+import { getTransferGlobalDelta } from '../utils/portfolioTransfers';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface ClientWalletProps {
@@ -118,14 +119,7 @@ export function ClientWallet({ client, transactions = [], positions = [] }: Clie
           runningProfitLoss -= amount;
           break;
         case 'transfert': {
-          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-          if (transferTo && transferTo !== 'solde') {
-            runningTradingPortfolio += amount;
-          } else if (transferTo === 'solde') {
-            runningTradingPortfolio -= amount;
-          } else if (transaction.productId) {
-            runningTradingPortfolio += amount;
-          }
+          runningTradingPortfolio += getTransferGlobalDelta(transaction, amount);
           break;
         }
       }

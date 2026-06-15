@@ -16,6 +16,7 @@ import { useIsMobile } from './ui/use-mobile';
 import { logPlatformAction } from '../utils/platformLogger';
 import { getStatusColors, getStatusLabel } from './transactionUtils';
 import { getCurrencySymbol, formatAmount } from '../utils/currency';
+import { getTransferGlobalDelta, getTransferProductMovements, normalizeProductEndpointId } from '../utils/portfolioTransfers';
 import '../styles/PlatformTrading.css';
 import '../styles/PlatformPortfolio.css';
 
@@ -287,11 +288,7 @@ export function PlatformTrading() {
           tradingPortfolio -= amt;
           break;
         case 'transfert': {
-          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-          const hasProductId = transaction.productId || null;
-          if (transferTo && transferTo !== 'solde') tradingPortfolio += amt;
-          else if (transferTo === 'solde') tradingPortfolio -= amt;
-          else if (hasProductId) tradingPortfolio += amt;
+          tradingPortfolio += getTransferGlobalDelta(transaction, amt);
           break;
         }
         default:
@@ -350,39 +347,19 @@ export function PlatformTrading() {
 
     const netByProduct = new Map<string, number>();
     const toKey = (value: any) => String(value ?? '').trim().toLowerCase();
-    const normalizeId = (value: any): string | null => {
-      if (value == null) return null;
-      const v = String(value).trim();
-      if (!v || v === 'solde' || v === 'trading') return null;
-      return v;
-    };
-
     for (const t of completedTransactions) {
       if (String(t?.type || '') !== 'transfert') continue;
 
       const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
       const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
       if (!amt) continue;
-
-      const rawTo = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
-      const rawFrom = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
-      const to = normalizeId(rawTo);
-      const from = normalizeId(rawFrom);
-      const fallbackProductId = normalizeId(t?.productId ?? t?.product_id ?? t?.subscription_details?.productId ?? null);
-
-      // Inflow: solde -> product (or legacy transfer with productId and no explicit source/target).
-      const inflowProductId = to || (!from && !to ? fallbackProductId : null);
-      if (inflowProductId && availableFundsProductKeys.has(toKey(inflowProductId))) {
-        const key = toKey(inflowProductId);
-        netByProduct.set(key, (netByProduct.get(key) || 0) + amt);
-      }
-
-      // Outflow: product -> solde.
-      const isTransferToSolde = String(rawTo ?? '').trim().toLowerCase() === 'solde';
-      const outflowProductId = isTransferToSolde ? (from || fallbackProductId) : null;
-      if (outflowProductId && availableFundsProductKeys.has(toKey(outflowProductId))) {
-        const key = toKey(outflowProductId);
-        netByProduct.set(key, (netByProduct.get(key) || 0) - amt);
+      const movements = getTransferProductMovements(t, amt);
+      for (const movement of movements) {
+        const productId = normalizeProductEndpointId(movement.productId);
+        if (!productId) continue;
+        const key = toKey(productId);
+        if (!availableFundsProductKeys.has(key)) continue;
+        netByProduct.set(key, (netByProduct.get(key) || 0) + movement.delta);
       }
     }
 

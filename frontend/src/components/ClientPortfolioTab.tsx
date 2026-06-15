@@ -5,6 +5,7 @@ import { ClientWallet } from './ClientWallet';
 import { apiCall } from '../utils/api';
 import { formatAmount } from '../utils/currency';
 import { CurrencyIcon } from './CurrencyIcon';
+import { classifyTransferDirection, getTransferGlobalDelta, getTransferProductMovements } from '../utils/portfolioTransfers';
 
 interface ClientPortfolioTabProps {
   client: any;
@@ -179,36 +180,12 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         case 'perte':
           calculatedProfitLoss -= amount;
           break;
-        case 'transfert':
-          // Simplified logic: only check transfer_to (to_field)
-          // If transfer_to = product ID → investment (solde → product)
-          // If transfer_to = 'solde' → withdrawal (product → solde)
-          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-          const hasProductId = transaction.productId || null;
-          
-          // If transfer_to is a product ID (not 'solde'), it's an investment
-          if (transferTo && transferTo !== 'solde') {
-            // Investment: solde → product
-            calculatedTotalInvesti += amount;
-            calculatedTradingPortfolio += amount;
-            // Don't affect profit/loss - investments start at 0 profit/loss
-            // Profit/loss will only change when position values change (future feature)
-          } else if (transferTo === 'solde') {
-            // Withdrawal: product → solde
-            // When status is 'valide', subtract from totalInvesti (capital returned from terminated product)
-            calculatedTotalInvesti -= amount;
-            calculatedTradingPortfolio -= amount;
-            // Note: Withdrawal profit/loss will be calculated based on position values when that feature is implemented
-            // For now, we don't adjust profit/loss for withdrawals since we don't track position values
-          } else if (hasProductId) {
-            // Fallback: If transaction has productId but no transfer_to, assume it's a subscription (solde → product)
-            calculatedTotalInvesti += amount;
-            calculatedTradingPortfolio += amount;
-            // Don't affect profit/loss - investments start at 0 profit/loss
-            // Profit/loss will only change when position values change (future feature)
-          }
-          // Other cases don't affect calculations
+        case 'transfert': {
+          const transferDelta = getTransferGlobalDelta(transaction, amount);
+          calculatedTotalInvesti += transferDelta;
+          calculatedTradingPortfolio += transferDelta;
           break;
+        }
         default:
           break;
       }
@@ -407,13 +384,6 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       const amount = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
       if (!amount) continue;
 
-      const toRaw = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
-      const fromRaw = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
-      const to = normalizeId(toRaw);
-      const from = normalizeId(fromRaw);
-      const toValue = String(toRaw ?? '').trim();
-      const fromValue = String(fromRaw ?? '').trim();
-
       const applyDelta = (productId: string, delta: number) => {
         const product = productsById.get(String(productId));
         const prev = map.get(String(productId)) || {
@@ -430,15 +400,12 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         });
       };
 
-      if (fromValue === 'solde' && to) {
-        applyDelta(to, amount);
-        continue;
+      const productMovements = getTransferProductMovements(t, amount);
+      for (const movement of productMovements) {
+        const productId = normalizeId(movement.productId);
+        if (!productId) continue;
+        applyDelta(productId, movement.delta);
       }
-      if (toValue === 'solde' && from) {
-        applyDelta(from, -amount);
-        continue;
-      }
-      if (to) applyDelta(to, amount);
     }
 
     // P&L produits depuis positions clôturées
@@ -500,14 +467,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
 
       if (transaction.type === 'transfert') {
-        const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-        const hasProductId = transaction.productId || null;
-        if (transferTo && transferTo !== 'solde') {
+        const direction = classifyTransferDirection(transaction);
+        if (direction === 'solde_to_product' || direction === 'legacy_to_product') {
           transfertsEntrants += amount;
-        } else if (transferTo === 'solde') {
+        } else if (direction === 'product_to_solde' || direction === 'legacy_from_product') {
           transfertsSortants += amount;
-        } else if (hasProductId) {
-          transfertsEntrants += amount;
         }
       }
 

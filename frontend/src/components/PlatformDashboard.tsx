@@ -11,6 +11,7 @@ import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatSubcategoryForDisplay } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
+import { getTransferGlobalDelta, getTransferProductMovements } from '../utils/portfolioTransfers';
 import '../styles/PlatformDashboardMovers.css';
 import '../styles/PlatformPortfolio.css';
 
@@ -448,15 +449,7 @@ export function PlatformDashboard() {
           calculatedTradingPortfolio -= amt;
           break;
         case 'transfert': {
-          const transferTo = transaction.to || transaction.to_field || transaction.transfer_to || null;
-          const hasProductId = transaction.productId || null;
-          if (transferTo && transferTo !== 'solde') {
-            calculatedTradingPortfolio += amt;
-          } else if (transferTo === 'solde') {
-            calculatedTradingPortfolio -= amt;
-          } else if (hasProductId) {
-            calculatedTradingPortfolio += amt;
-          }
+          calculatedTradingPortfolio += getTransferGlobalDelta(transaction, amt);
           break;
         }
         default:
@@ -591,44 +584,26 @@ export function PlatformDashboard() {
       const amount = parseFinancialValue(t?.amount);
       if (!amount) continue;
 
-      // Transfer direction fields can come from several aliases (serializer exposes from/to and from_field/to_field)
-      const to = t?.to ?? t?.to_field ?? t?.transfer_to ?? t?.transferTo ?? null;
-      const from = t?.from ?? t?.from_field ?? t?.transfer_from ?? t?.transferFrom ?? null;
-
-      // What counts for "portfolio allocation" is the product/asset side, not deposits/withdrawals.
-      // - transfert: solde → product (invest) / product → solde (withdraw)
-      // - achat / investissement: invest
-      // - vente: disinvest (if resolvable)
-      let delta = 0;
-      let typeLabel: string | null = null;
-
       if (t?.type === 'transfert') {
-        if (to && String(to) !== 'solde') {
-          // solde -> product
-          delta = amount;
-          typeLabel = resolveTypeLabel(t, to);
-        } else if (to && String(to) === 'solde') {
-          // product -> solde
-          const productId = from && String(from) !== 'solde' ? from : t?.productId || null;
-          delta = -amount;
-          typeLabel = resolveTypeLabel(t, productId);
-        } else {
-          // Best-effort fallback: treat as investment into linked product
-          delta = amount;
-          typeLabel = resolveTypeLabel(t);
+        const movements = getTransferProductMovements(t, amount);
+        for (const movement of movements) {
+          const typeLabel = resolveTypeLabel(t, movement.productId);
+          const key = String(typeLabel || 'Autre');
+          totals.set(key, (totals.get(key) || 0) + movement.delta);
         }
       } else if (t?.type === 'achat') {
-        delta = amount;
-        typeLabel = resolveTypeLabel(t);
+        const delta = amount;
+        const typeLabel = resolveTypeLabel(t);
+        const key = String(typeLabel || 'Autre');
+        totals.set(key, (totals.get(key) || 0) + delta);
       } else if (t?.type === 'vente') {
-        delta = -amount;
-        typeLabel = resolveTypeLabel(t);
+        const delta = -amount;
+        const typeLabel = resolveTypeLabel(t);
+        const key = String(typeLabel || 'Autre');
+        totals.set(key, (totals.get(key) || 0) + delta);
       } else {
         continue;
       }
-
-      const key = String(typeLabel || 'Autre');
-      totals.set(key, (totals.get(key) || 0) + delta);
     }
 
     // Ajouter le solde (fonds disponibles)
