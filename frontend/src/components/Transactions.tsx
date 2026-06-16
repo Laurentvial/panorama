@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { DateInputWithCalendar } from './ui/date-input';
 import { apiCall } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
@@ -245,6 +246,7 @@ export function Transactions() {
   const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
   const [isEditTransactionModalOpen, setIsEditTransactionModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(true);
 
   const openEditModal = (transaction: any) => {
     setSelectedTransaction(transaction);
@@ -270,6 +272,14 @@ export function Transactions() {
   };
 
   const selectedTypeCount = filters.types.length;
+  const activeFiltersCount =
+    selectedTypeCount +
+    (filters.status !== 'all' ? 1 : 0) +
+    (filters.amountMin ? 1 : 0) +
+    (filters.amountMax ? 1 : 0) +
+    (filters.dateFrom ? 1 : 0) +
+    (filters.dateTo ? 1 : 0) +
+    (filters.teamId !== 'all' ? 1 : 0);
   const typeFilterLabel =
     selectedTypeCount === 0
       ? 'Tous les types'
@@ -286,21 +296,41 @@ export function Transactions() {
       </div>
 
       {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Filtres</CardTitle>
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3 min-h-8">
+            <CardTitle className="text-base leading-none">Filtres</CardTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFiltersCollapsed((prev) => !prev)}
+              className="h-8 px-2 text-slate-600 hover:text-slate-900"
+              aria-expanded={!isFiltersCollapsed}
+              aria-label={isFiltersCollapsed ? 'Afficher les filtres' : 'Masquer les filtres'}
+            >
+              <span className="mr-1 text-xs">
+                {isFiltersCollapsed ? 'Afficher' : 'Masquer'}
+                {activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ''}
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${isFiltersCollapsed ? '' : 'rotate-180'}`}
+              />
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {!isFiltersCollapsed && (
+          <CardContent className="pt-0 pb-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3">
             {/* Type filter (multiple selection) */}
-            <div className="space-y-2">
-              <Label>Type de transaction</Label>
-              <DropdownMenu>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Type de transaction</Label>
+              <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 w-full justify-between rounded-md border bg-input-background px-3 py-2 font-normal text-black hover:bg-input-background/80"
+                    className="h-8 w-full justify-between rounded-md border border-input bg-input-background px-3 text-sm font-normal text-black hover:bg-input-background/80"
                   >
                     {typeFilterLabel}
                     <ChevronDown className="h-4 w-4 opacity-50" />
@@ -335,10 +365,10 @@ export function Transactions() {
             </div>
 
             {/* Status filter */}
-            <div className="space-y-2">
-              <Label>Statut</Label>
-              <Select value={filters.status} onValueChange={(value) => setFilters({ ...filters, status: value })}>
-                <SelectTrigger>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Statut</Label>
+              <Select modal={false} value={filters.status} onValueChange={(value) => setFilters({ ...filters, status: value })}>
+                <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -353,8 +383,8 @@ export function Transactions() {
             </div>
 
             {/* Amount filter */}
-            <div className="space-y-2">
-              <Label>Montant (€)</Label>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Montant (€)</Label>
               <div className="flex gap-2">
                 <Input
                   type="number"
@@ -362,6 +392,7 @@ export function Transactions() {
                   placeholder="Min"
                   value={filters.amountMin}
                   onChange={(e) => setFilters({ ...filters, amountMin: e.target.value })}
+                  className="h-8 placeholder:text-slate-500"
                 />
                 <Input
                   type="number"
@@ -369,34 +400,35 @@ export function Transactions() {
                   placeholder="Max"
                   value={filters.amountMax}
                   onChange={(e) => setFilters({ ...filters, amountMax: e.target.value })}
+                  className="h-8 placeholder:text-slate-500"
                 />
               </div>
             </div>
 
             {/* Date filter */}
-            <div className="space-y-2">
-              <Label>Date de début</Label>
-              <Input
-                type="date"
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Date de début</Label>
+              <DateInputWithCalendar
                 value={filters.dateFrom}
-                onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                onChange={(value) => setFilters({ ...filters, dateFrom: value })}
+                className="h-8"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Date de fin</Label>
-              <Input
-                type="date"
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Date de fin</Label>
+              <DateInputWithCalendar
                 value={filters.dateTo}
-                onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                onChange={(value) => setFilters({ ...filters, dateTo: value })}
+                className="h-8"
               />
             </div>
 
             {/* Team filter */}
-            <div className="space-y-2">
-              <Label>Équipe</Label>
-              <Select value={filters.teamId} onValueChange={(value) => setFilters({ ...filters, teamId: value })}>
-                <SelectTrigger>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Équipe</Label>
+              <Select modal={false} value={filters.teamId} onValueChange={(value) => setFilters({ ...filters, teamId: value })}>
+                <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -411,18 +443,19 @@ export function Transactions() {
             </div>
 
             {/* Clear filters button */}
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label className="opacity-0">Actions</Label>
               <Button
                 variant="outline"
                 onClick={clearFilters}
-                className="w-full rounded-md"
+                className="h-8 w-full rounded-md px-3 text-sm"
               >
                 Réinitialiser les filtres
               </Button>
             </div>
-          </div>
-        </CardContent>
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {/* Transactions List */}

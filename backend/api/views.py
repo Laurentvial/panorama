@@ -8110,6 +8110,63 @@ def client_process_positions(request, client_id):
     return Response({"status": "ok", **result})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def client_backfill_missing_interests(request, client_id):
+    """
+    Create missing periodic interest transactions for selected source transfers.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    raw_dry_run = payload.get("dry_run", False)
+    dry_run = raw_dry_run is True or str(raw_dry_run).strip().lower() in {"1", "true", "yes", "on"}
+    raw_ids = payload.get("transaction_ids")
+    if not isinstance(raw_ids, list):
+        return Response(
+            {"error": "transaction_ids doit être une liste"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    transaction_ids: list[str] = []
+    seen: set[str] = set()
+    for raw_id in raw_ids:
+        txn_id = str(raw_id or "").strip()
+        if not txn_id or txn_id in seen:
+            continue
+        seen.add(txn_id)
+        transaction_ids.append(txn_id)
+
+    if not transaction_ids:
+        return Response(
+            {"error": "Aucune transaction valide fournie"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from .process_positions_runner import create_missing_interest_for_transactions
+
+    try:
+        result = create_missing_interest_for_transactions(
+            timezone.now(),
+            client_id=client_id,
+            transaction_ids=transaction_ids,
+            dry_run=dry_run,
+            trigger="backfill_interests_api",
+            only_without_positions=False,
+        )
+    except Exception as e:
+        logger.exception("client_backfill_missing_interests failed for client %s", client_id)
+        return Response(
+            {"status": "error", "message": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response({"status": "ok", **result})
+
+
 @api_view(['GET'])
 @authentication_classes([])  # Disable authentication - we'll check manually to support client_ tokens
 @permission_classes([AllowAny])
@@ -14478,8 +14535,51 @@ def app_settings(request):
 def news_list(request):
     """List published news posts (public endpoint for platform dashboard)"""
     posts = NewsPost.objects.filter(published=True).order_by('-created_at')
+    total = posts.count()
+
+    page_param = request.GET.get('page')
+    limit_param = request.GET.get('limit')
+
+    if page_param is not None or limit_param is not None:
+        try:
+            page = int(page_param or '1')
+            limit = int(limit_param or '3')
+            if page < 1:
+                page = 1
+            if limit < 1:
+                limit = 3
+            if limit > 50:
+                limit = 50
+        except (TypeError, ValueError):
+            page = 1
+            limit = 3
+
+        offset = (page - 1) * limit
+        items = posts[offset:offset + limit]
+        total_pages = (total + limit - 1) // limit if limit > 0 else 1
+        serializer = NewsPostSerializer(items, many=True, context={'request': request})
+        return Response({
+            'news': serializer.data,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'totalPages': total_pages,
+                'hasMore': page < total_pages,
+            }
+        })
+
     serializer = NewsPostSerializer(posts, many=True, context={'request': request})
-    return Response({'news': serializer.data})
+    return Response({
+        'news': serializer.data,
+        'pagination': {
+            'page': 1,
+            'limit': total,
+            'total': total,
+            'totalPages': 1,
+            'hasMore': False,
+        }
+    })
 
 
 @api_view(['GET'])

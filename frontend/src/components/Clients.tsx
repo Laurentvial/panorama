@@ -291,6 +291,14 @@ export function Clients({ onSelectClient }: ClientsProps) {
                 <Search className="clients-search-icon" />
                 <Input
                   className="clients-search-input"
+                  type="search"
+                  name="client-search"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  inputMode="search"
+                  data-form-type="other"
                   placeholder="Nom, email..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}

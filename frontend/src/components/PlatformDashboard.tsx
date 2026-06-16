@@ -17,24 +17,30 @@ import '../styles/PlatformPortfolio.css';
 
 /** Stops runaway pagination if the API omits or misreports pagination metadata. */
 const DASHBOARD_PAGINATION_MAX_PAGES = 250;
-/** Avoid infinite skeleton when the API never responds (browser fetch has no default timeout). */
-const DASHBOARD_FETCH_TIMEOUT_MS = 120_000;
+const NEWS_PAGE_LIMIT = 3;
 
 export function PlatformDashboard() {
   const { currentUser, loading: userCtxLoading } = useUser();
-  const { settings } = useTheme();
+  const { settings, loading: themeLoading } = useTheme();
   const isMobile = useIsMobile();
   const isPhone = useIsPhone();
   const isNarrowForCards = useIsNarrowForCards();
   const navigate = useNavigate();
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [newsPosts, setNewsPosts] = useState<any[]>([]);
-  const [visibleNewsCount, setVisibleNewsCount] = useState(3);
+  const [newsPage, setNewsPage] = useState(0);
+  const [newsHasMore, setNewsHasMore] = useState(false);
+  const [newsLoadingMore, setNewsLoadingMore] = useState(false);
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [verificationConfigLoading, setVerificationConfigLoading] = useState(true);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [assetsLoading, setAssetsLoading] = useState(true);
+  const [productsLoading, setProductsLoading] = useState(true);
   const [verificationConfig, setVerificationConfig] = useState<Record<string, { enabled: boolean }>>({});
   const [documents, setDocuments] = useState<any[]>([]);
   const [clientAssets, setClientAssets] = useState<any[]>([]);
@@ -45,9 +51,11 @@ export function PlatformDashboard() {
 
   const loadNewsPostsWithSignal = async (signal: AbortSignal) => {
     try {
-      const newsResponse = await apiCall('/api/news/', { signal });
+      const newsResponse = await apiCall(`/api/news/?page=1&limit=${NEWS_PAGE_LIMIT}`, { signal });
       setNewsPosts(newsResponse?.news || []);
-      setVisibleNewsCount(3);
+      setNewsPage(1);
+      const pagination = newsResponse?.pagination;
+      setNewsHasMore(Boolean(pagination?.hasMore));
     } catch (error: any) {
       if (error?.name === 'AbortError') {
         return;
@@ -56,7 +64,7 @@ export function PlatformDashboard() {
       if (error?.status === 401) {
         try {
           const apiUrl = getApiBaseUrl();
-          const response = await fetch(`${apiUrl}/api/news/`, {
+          const response = await fetch(`${apiUrl}/api/news/?page=1&limit=${NEWS_PAGE_LIMIT}`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
@@ -66,7 +74,8 @@ export function PlatformDashboard() {
           if (response.ok) {
             const data = await response.json();
             setNewsPosts(data.news || []);
-            setVisibleNewsCount(3);
+            setNewsPage(1);
+            setNewsHasMore(Boolean(data?.pagination?.hasMore));
             return;
           }
         } catch (fallbackError: any) {
@@ -77,9 +86,33 @@ export function PlatformDashboard() {
         }
       }
       setNewsPosts([]);
-      setVisibleNewsCount(3);
+      setNewsPage(0);
+      setNewsHasMore(false);
     } finally {
       setNewsLoading(false);
+    }
+  };
+
+  const loadMoreNewsPosts = async () => {
+    if (newsLoadingMore || !newsHasMore) {
+      return;
+    }
+    setNewsLoadingMore(true);
+    try {
+      const nextPage = newsPage + 1;
+      const newsResponse = await apiCall(`/api/news/?page=${nextPage}&limit=${NEWS_PAGE_LIMIT}`);
+      const incoming = newsResponse?.news || [];
+      setNewsPosts((prev) => {
+        const existingIds = new Set(prev.map((item: any) => String(item?.id)));
+        const dedupedIncoming = incoming.filter((item: any) => !existingIds.has(String(item?.id)));
+        return [...prev, ...dedupedIncoming];
+      });
+      setNewsPage(nextPage);
+      setNewsHasMore(Boolean(newsResponse?.pagination?.hasMore));
+    } catch (error: any) {
+      console.error('Error loading more news posts:', error);
+    } finally {
+      setNewsLoadingMore(false);
     }
   };
 
@@ -241,145 +274,179 @@ export function PlatformDashboard() {
     if (!currentUser?.id) {
       setLoading(false);
       setNewsLoading(false);
+      setPortfolioLoading(false);
+      setVerificationConfigLoading(false);
+      setDocumentsLoading(false);
+      setAssetsLoading(false);
+      setProductsLoading(false);
       setDashboardLoadError(null);
       return;
     }
 
     let cancelled = false;
-    let loadTimedOut = false;
     const ac = new AbortController();
     const { signal } = ac;
-    const timeoutId = window.setTimeout(() => {
-      loadTimedOut = true;
-      ac.abort();
-    }, DASHBOARD_FETCH_TIMEOUT_MS);
 
     const clientId = currentUser.id;
     const limit = 500;
+    setDashboardLoadError(null);
+    setNewsLoading(true);
+    setPortfolioLoading(true);
+    setVerificationConfigLoading(true);
+    setDocumentsLoading(true);
+    setAssetsLoading(true);
+    setProductsLoading(true);
+    setLoading(false);
 
-    const loadAllPositions = async (): Promise<any[]> => {
-      const list: any[] = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore && page <= DASHBOARD_PAGINATION_MAX_PAGES) {
-        const res = await apiCall(`/api/clients/${clientId}/positions/?page=${page}&limit=${limit}`, { signal });
-        const items = (res as any)?.positions || [];
-        list.push(...items);
-        const pagination = (res as any).pagination;
-        if (pagination && page >= pagination.total_pages) hasMore = false;
-        else if (items.length < limit) hasMore = false;
-        else page++;
-      }
-      return list;
+    const loadPaginatedCollection = async (
+      pathPrefix: string,
+      responseKey: string,
+    ): Promise<{ firstPageItems: any[]; loadRemainingPages: () => Promise<any[]> }> => {
+      const firstPageResponse = await apiCall(`${pathPrefix}?page=1&limit=${limit}`, { signal });
+      const firstPageItems = (firstPageResponse as any)?.[responseKey] || [];
+      const firstPagePagination = (firstPageResponse as any)?.pagination;
+      const hasMorePages = firstPagePagination
+        ? 1 < Number(firstPagePagination.total_pages || 1)
+        : firstPageItems.length >= limit;
+
+      const loadRemainingPages = async (): Promise<any[]> => {
+        if (!hasMorePages) {
+          return firstPageItems;
+        }
+
+        const list = [...firstPageItems];
+        let page = 2;
+        let hasMore = true;
+
+        while (hasMore && page <= DASHBOARD_PAGINATION_MAX_PAGES) {
+          const res = await apiCall(`${pathPrefix}?page=${page}&limit=${limit}`, { signal });
+          const items = (res as any)?.[responseKey] || [];
+          list.push(...items);
+          const pagination = (res as any)?.pagination;
+          if (pagination && page >= Number(pagination.total_pages || 1)) hasMore = false;
+          else if (items.length < limit) hasMore = false;
+          else page++;
+        }
+
+        return list;
+      };
+
+      return { firstPageItems, loadRemainingPages };
     };
 
-    const loadAllTransactions = async (): Promise<any[]> => {
-      const list: any[] = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore && page <= DASHBOARD_PAGINATION_MAX_PAGES) {
-        const res = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`, { signal });
-        const items = (res as any)?.transactions || [];
-        list.push(...items);
-        const pagination = (res as any).pagination;
-        if (pagination && page >= pagination.total_pages) hasMore = false;
-        else if (items.length < limit) hasMore = false;
-        else page++;
-      }
-      return list;
-    };
+    void loadNewsPostsWithSignal(signal);
 
-    (async () => {
+    void (async () => {
       try {
-        setLoading(true);
-        setNewsLoading(true);
+        const verificationConfigResult = await apiCall(`/api/clients/${clientId}/verification-config/?_t=${Date.now()}`, {
+          signal,
+        });
+        if (cancelled) return;
+        setVerificationConfig((verificationConfigResult as any)?.stepsConfig || {});
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || cancelled) return;
+        console.warn('Dashboard: unable to load verification config', err);
+        setVerificationConfig({});
+      } finally {
+        if (!cancelled) {
+          setVerificationConfigLoading(false);
+        }
+      }
+    })();
+
+    void (async () => {
+      try {
+        const documentsResult = await apiCall(`/api/clients/${clientId}/documents/?excludeProductOnly=1`, { signal });
+        if (cancelled) return;
+        setDocuments((documentsResult as any)?.documents || []);
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || cancelled) return;
+        console.warn('Dashboard: unable to load documents', err);
+        setDocuments([]);
+      } finally {
+        if (!cancelled) setDocumentsLoading(false);
+      }
+    })();
+
+    void (async () => {
+      try {
+        const clientAssetsResponse = await apiCall(`/api/clients/${clientId}/assets/`, { signal });
+        if (cancelled) return;
+        const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
+        const assetsList = clientAssetsData.map((ca: any) => ca.asset || ca).filter(Boolean);
+        setAssets(assetsList);
+        setClientAssets(clientAssetsData);
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || cancelled) return;
+        console.warn('Dashboard: unable to load client assets', err);
+        setAssets([]);
+        setClientAssets([]);
+      } finally {
+        if (!cancelled) setAssetsLoading(false);
+      }
+    })();
+
+    void (async () => {
+      try {
+        const clientProductsResponse = await apiCall(`/api/clients/${clientId}/products/`, { signal });
+        if (cancelled) return;
+        const clientProductsData = (clientProductsResponse as any)?.products || [];
+        const productsList = clientProductsData.map((cp: any) => cp.product || cp).filter(Boolean);
+        setProducts(productsList);
+        setClientProducts(clientProductsData);
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || cancelled) return;
+        console.warn('Dashboard: unable to load client products', err);
+        setProducts([]);
+        setClientProducts([]);
+      } finally {
+        if (!cancelled) setProductsLoading(false);
+      }
+    })();
+
+    void (async () => {
+      try {
+        const [positionsPages, transactionsPages] = await Promise.all([
+          loadPaginatedCollection(`/api/clients/${clientId}/positions/`, 'positions'),
+          loadPaginatedCollection(`/api/clients/${clientId}/transactions/`, 'transactions'),
+        ]);
+        if (cancelled) return;
+        setPositions((positionsPages.firstPageItems || []).filter((p: any) => String(p?.status || '') !== 'cancelled'));
+        setAllTransactions(transactionsPages.firstPageItems || []);
+        setPortfolioLoading(false);
         setDashboardLoadError(null);
 
-        const loadDashboardMain = async () => {
-          const verificationConfigResult = await apiCall(`/api/clients/${clientId}/verification-config/?_t=${Date.now()}`, {
-            signal,
-          }).catch((err: any) => {
-            if (err?.name === 'AbortError') throw err;
-            return { stepsConfig: {} };
-          });
-
-          const documentsResult = await apiCall(`/api/clients/${clientId}/documents/?excludeProductOnly=1`, { signal }).catch((err: any) => {
-            if (err?.name === 'AbortError') throw err;
-            return { documents: [] };
-          });
-
-          const [
-            allPositionsList,
-            allTransactionsList,
-            clientAssetsResponse,
-            clientProductsResponse,
-          ] = await Promise.all([
-            loadAllPositions(),
-            loadAllTransactions(),
-            apiCall(`/api/clients/${clientId}/assets/`, { signal }),
-            apiCall(`/api/clients/${clientId}/products/`, { signal }),
-          ]);
-
-          if (cancelled) {
-            return;
+        void (async () => {
+          try {
+            const [allPositionsList, allTransactionsList] = await Promise.all([
+              positionsPages.loadRemainingPages(),
+              transactionsPages.loadRemainingPages(),
+            ]);
+            if (cancelled) return;
+            setPositions((allPositionsList || []).filter((p: any) => String(p?.status || '') !== 'cancelled'));
+            setAllTransactions(allTransactionsList || []);
+          } catch (err: any) {
+            if (err?.name === 'AbortError' || cancelled) return;
+            console.warn('Dashboard: unable to load full paginated data in background', err);
           }
-
-          // Cancelled positions must never appear on the client platform.
-          setPositions((allPositionsList || []).filter((p: any) => String(p?.status || '') !== 'cancelled'));
-          setAllTransactions(allTransactionsList);
-
-          const clientAssetsData = (clientAssetsResponse as any)?.assets || [];
-          const assetsList = clientAssetsData.map((ca: any) => ca.asset || ca).filter(Boolean);
-          setAssets(assetsList);
-          setClientAssets(clientAssetsData);
-
-          const clientProductsData = (clientProductsResponse as any)?.products || [];
-          const productsList = clientProductsData.map((cp: any) => cp.product || cp).filter(Boolean);
-          setProducts(productsList);
-          setClientProducts(clientProductsData);
-
-          setVerificationConfig((verificationConfigResult as any)?.stepsConfig || {});
-          setDocuments((documentsResult as any)?.documents || []);
-        };
-
-        await Promise.all([loadDashboardMain(), loadNewsPostsWithSignal(signal)]);
+        })();
       } catch (error: any) {
-        if (cancelled) {
-          return;
-        }
-        if (error?.isRedirecting) {
-          return;
-        }
-        if (error?.status === 401 || error?.message?.includes('token') || error?.message?.includes('Authentication')) {
-          return;
-        }
-        if (error?.name === 'AbortError' && loadTimedOut) {
-          setDashboardLoadError(
-            'Le chargement du tableau de bord a expiré. Vérifiez votre connexion puis réessayez.'
-          );
-          return;
-        }
-        if (error?.name === 'AbortError') {
-          return;
-        }
-        console.error('Error loading dashboard data:', error);
+        if (cancelled) return;
+        if (error?.isRedirecting) return;
+        if (error?.status === 401 || error?.message?.includes('token') || error?.message?.includes('Authentication')) return;
+        if (error?.name === 'AbortError') return;
+        console.error('Error loading dashboard portfolio data:', error);
         const msg =
           error?.isNetworkError || error?.status === 0
             ? 'Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez.'
             : (error?.message as string) || 'Une erreur est survenue lors du chargement.';
         setDashboardLoadError(msg);
-      } finally {
-        window.clearTimeout(timeoutId);
-        if (!cancelled) {
-          setLoading(false);
-          setNewsLoading(false);
-        }
+        setPortfolioLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeoutId);
       ac.abort();
     };
   }, [userCtxLoading, currentUser?.id, retryTick]);
@@ -663,6 +730,7 @@ export function PlatformDashboard() {
   };
 
   const { gainers, losers } = getGainersAndLosers();
+  const isPageLoading = loading || themeLoading;
 
   // Helper function to map UI step numbers to config step numbers
   // UI Step 1 = Config Steps 1-2 (Identity + Address)
@@ -809,6 +877,7 @@ export function PlatformDashboard() {
   const hasIncompleteEnabledSteps = (isStepEnabled(1) && !isStep1Completed) || 
                                      (isStepEnabled(2) && !isStep2Completed) || 
                                      (isStepEnabled(3) && !isStep3Completed);
+  const showVerificationBlock = !verificationConfigLoading && hasIncompleteEnabledSteps;
   
   const verificationStepperSteps = [
     { id: 1 as const, label: 'Inscription', enabled: isStepEnabled(1), completed: isStep1Completed },
@@ -875,7 +944,7 @@ export function PlatformDashboard() {
     <div style={{ padding: isPhone ? 0 : isMobile ? '16px' : '20px 20px' }}>
       <h1 className="platform-portfolioPageTitle">Tableau de bord</h1>
 
-      {dashboardLoadError && !loading ? (
+      {dashboardLoadError && !isPageLoading ? (
         <div
           role="alert"
           style={{
@@ -904,7 +973,7 @@ export function PlatformDashboard() {
         </div>
       ) : null}
 
-      {loading ? (
+      {isPageLoading ? (
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? 16 : 24 }}
           aria-busy="true"
@@ -950,7 +1019,7 @@ export function PlatformDashboard() {
       ) : (
         <>
           {/* Photo banner above verification block (from app settings) */}
-          {hasIncompleteEnabledSteps && settings?.platform_banner_image_url && (
+          {settings?.platform_banner_image_url && (
             <div
               style={{
                 marginTop: 0,
@@ -976,14 +1045,14 @@ export function PlatformDashboard() {
           {/* Verification block + Valeur du portefeuille: side by side on desktop, stacked on mobile */}
           <div
             style={{
-              display: hasIncompleteEnabledSteps ? 'flex' : 'block',
+              display: showVerificationBlock ? 'flex' : 'block',
               flexDirection: isMobile ? 'column' : 'row',
               gap: isPhone ? '12px' : isMobile ? '20px' : '24px',
               marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px',
               alignItems: 'stretch',
             }}
           >
-          {hasIncompleteEnabledSteps && (
+          {showVerificationBlock && (
             <Card
               style={{
                 flex: isMobile ? undefined : 1,
@@ -1144,84 +1213,92 @@ export function PlatformDashboard() {
                 </div>
               </CardHeader>
               <CardContent style={{ minWidth: 0 }}>
-                <div
-                  className="text-2xl font-bold"
-                  style={{
-                    fontSize: isMobile ? '22px' : '28px',
-                    minWidth: 0,
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {formatAmount(portfolioValue, accountCurrency)}
-                </div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: isMobile ? '16px' : '18px',
-                    fontWeight: 600,
-                    color: isProfit ? '#10b981' : '#ef4444',
-                    minWidth: 0,
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
-                  {(() => {
-                    const costBasis = portfolioValue - profitLoss;
-                    const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
-                    return (
-                      <span style={{ marginLeft: 6 }}>
-                        ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
-                      </span>
-                    );
-                  })()}
-                </div>
-
-                {allocationByType.total > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <div
-                      style={{
-                        width: '100%',
-                        height: isMobile ? 10 : 12,
-                        borderRadius: 999,
-                        overflow: 'hidden',
-                        backgroundColor: '#eef2f7',
-                        display: 'flex',
-                      }}
-                      aria-label="Répartition du portefeuille par type d'actif"
-                    >
-                      {allocationByType.segments.map((seg) => (
-                        <div
-                          key={seg.type}
-                          title={`${seg.type} • ${seg.pct.toFixed(0)}%`}
-                          style={{
-                            width: `${seg.pct}%`,
-                            backgroundColor: seg.color,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 10,
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: 10,
-                        fontSize: isMobile ? 11 : 12,
-                        color: '#6b7280',
-                      }}
-                    >
-                      {allocationByType.segments.slice(0, 6).map((seg) => (
-                        <div key={seg.type} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: seg.color }} />
-                          <span>
-                            {seg.type} {seg.pct.toFixed(0)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                {portfolioLoading ? (
+                  <div style={{ fontSize: isMobile ? 14 : 15, color: '#6b7280' }}>
+                    Chargement des données portefeuille...
                   </div>
+                ) : (
+                  <>
+                    <div
+                      className="text-2xl font-bold"
+                      style={{
+                        fontSize: isMobile ? '22px' : '28px',
+                        minWidth: 0,
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {formatAmount(portfolioValue, accountCurrency)}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: isMobile ? '16px' : '18px',
+                        fontWeight: 600,
+                        color: isProfit ? '#10b981' : '#ef4444',
+                        minWidth: 0,
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
+                      {(() => {
+                        const costBasis = portfolioValue - profitLoss;
+                        const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
+                        return (
+                          <span style={{ marginLeft: 6 }}>
+                            ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    {allocationByType.total > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div
+                          style={{
+                            width: '100%',
+                            height: isMobile ? 10 : 12,
+                            borderRadius: 999,
+                            overflow: 'hidden',
+                            backgroundColor: '#eef2f7',
+                            display: 'flex',
+                          }}
+                          aria-label="Répartition du portefeuille par type d'actif"
+                        >
+                          {allocationByType.segments.map((seg) => (
+                            <div
+                              key={seg.type}
+                              title={`${seg.type} • ${seg.pct.toFixed(0)}%`}
+                              style={{
+                                width: `${seg.pct}%`,
+                                backgroundColor: seg.color,
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 10,
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 10,
+                            fontSize: isMobile ? 11 : 12,
+                            color: '#6b7280',
+                          }}
+                        >
+                          {allocationByType.segments.slice(0, 6).map((seg) => (
+                            <div key={seg.type} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: seg.color }} />
+                              <span>
+                                {seg.type} {seg.pct.toFixed(0)}%
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
                 <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                   <Button
@@ -1237,7 +1314,7 @@ export function PlatformDashboard() {
           </div>
 
           {/* Produits et actifs du moment - cartes style Découvrir */}
-          {featuredItems.length > 0 && (
+          {!assetsLoading && !productsLoading && featuredItems.length > 0 && (
             <div style={{ marginBottom: isPhone ? '16px' : isMobile ? '20px' : '30px' }}>
               <div style={{
                 display: 'flex',
@@ -1598,7 +1675,7 @@ export function PlatformDashboard() {
                   <p style={{ fontSize: isMobile ? '14px' : '16px' }}>Aucune actualité disponible</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '12px' : isMobile ? '16px' : '20px' }}>
-                    {newsPosts.slice(0, visibleNewsCount).map((post: any) => (
+                    {newsPosts.map((post: any) => (
                       <div
                         key={post.id}
                         role={post.articleUrl ? 'button' : undefined}
@@ -1707,12 +1784,13 @@ export function PlatformDashboard() {
                       </div>
                     ))}
 
-                    {newsPosts.length > visibleNewsCount && (
+                    {newsHasMore && (
                       <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <button
                           type="button"
                           className="platform-hoverable"
-                          onClick={() => setVisibleNewsCount((c) => c + 5)}
+                          onClick={loadMoreNewsPosts}
+                          disabled={newsLoadingMore}
                           aria-label="Voir plus d'actualités"
                           style={{
                             border: 'none',
@@ -1726,9 +1804,11 @@ export function PlatformDashboard() {
                             fontWeight: 700,
                             lineHeight: 1,
                             whiteSpace: 'nowrap',
+                            opacity: newsLoadingMore ? 0.7 : 1,
+                            cursor: newsLoadingMore ? 'wait' : 'pointer',
                           }}
                         >
-                          Voir plus
+                          {newsLoadingMore ? 'Chargement...' : 'Voir plus'}
                         </button>
                       </div>
                     )}
@@ -1775,7 +1855,9 @@ export function PlatformDashboard() {
                 </div>
               </CardHeader>
               <CardContent>
-                {documents.length === 0 ? (
+                {documentsLoading ? (
+                  <p style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>Chargement des documents...</p>
+                ) : documents.length === 0 ? (
                   <p style={{ fontSize: isMobile ? '14px' : '16px', color: '#6b7280' }}>Aucun document</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: isPhone ? '8px' : '10px' }}>
@@ -1851,7 +1933,7 @@ export function PlatformDashboard() {
             </Card>
 
               {/* Plus fortes hausses / baisses - below Mes documents */}
-              {assets.length > 0 && (gainers.length > 0 || losers.length > 0) && (
+              {!assetsLoading && assets.length > 0 && (gainers.length > 0 || losers.length > 0) && (
                   <>
                     {gainers.length > 0 && (
                       <Card className="platform-moversCard">

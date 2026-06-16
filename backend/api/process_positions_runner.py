@@ -17,6 +17,142 @@ from api.position_service import (
 )
 
 
+def create_missing_interest_for_transactions(
+    now: datetime,
+    *,
+    client_id: str | None = None,
+    transaction_ids: list[str] | None = None,
+    dry_run: bool = False,
+    trigger: str = "process_positions_backfill",
+    only_without_positions: bool = False,
+) -> dict:
+    """
+    Create missing periodic interest transactions for selected source transfers.
+
+    Returns a JSON-serializable dict with per-transaction and summary stats.
+    """
+    candidates = (
+        Transaction.objects.filter(type="transfert", status__in=["valide", "cloture"])
+        .exclude(transfer_to__isnull=True)
+        .exclude(transfer_to="solde")
+        .select_related("product", "client")
+    )
+    if client_id is not None:
+        candidates = candidates.filter(client_id=client_id)
+
+    normalized_ids: list[str] | None = None
+    if transaction_ids is not None:
+        seen: set[str] = set()
+        normalized_ids = []
+        for raw_id in transaction_ids:
+            txn_id = str(raw_id or "").strip()
+            if not txn_id or txn_id in seen:
+                continue
+            seen.add(txn_id)
+            normalized_ids.append(txn_id)
+        candidates = candidates.filter(id__in=normalized_ids)
+
+    checked_count = 0
+    created_count = 0
+    skipped_count = 0
+    results: list[dict] = []
+
+    for txn in candidates.iterator():
+        result: dict = {
+            "source_transaction_id": str(txn.id),
+            "periods_checked": 0,
+            "created_count": 0,
+            "skipped_reason": None,
+        }
+
+        has_positions = Position.objects.filter(transaction_id=txn.id).exists()
+        if only_without_positions and has_positions:
+            result["skipped_reason"] = "has_positions"
+            skipped_count += 1
+            results.append(result)
+            continue
+
+        product = txn.product
+        if not product and txn.transfer_to and txn.transfer_to != "solde":
+            product = Product.objects.filter(id=txn.transfer_to).first()
+        if not product:
+            result["skipped_reason"] = "missing_product"
+            skipped_count += 1
+            results.append(result)
+            continue
+
+        checked_count += 1
+
+        period_summaries = generate_rates_for_investment(txn)
+        if not period_summaries:
+            result["skipped_reason"] = "no_periods"
+            skipped_count += 1
+            results.append(result)
+            continue
+
+        payment_periods = _group_calculation_periods_by_payment_period(
+            txn, product, period_summaries
+        )
+
+        for payment_group in payment_periods:
+            payment_end = payment_group.get("endDate")
+            if not payment_end:
+                continue
+            try:
+                payment_end_date = date.fromisoformat(str(payment_end))
+            except Exception:
+                continue
+            if payment_end_date > now.date():
+                continue
+
+            calculation_periods = payment_group.get("calculationPeriods", [])
+            if not calculation_periods:
+                continue
+
+            representative_period_idx = calculation_periods[-1]
+            result["periods_checked"] += 1
+
+            if dry_run:
+                sp = db_transaction.savepoint()
+                try:
+                    interest_txn = create_interest_transaction_for_period_if_complete(
+                        txn,
+                        int(representative_period_idx),
+                        trigger=f"{trigger}_dry_run",
+                    )
+                    if interest_txn:
+                        created_count += 1
+                        result["created_count"] += 1
+                finally:
+                    db_transaction.savepoint_rollback(sp)
+            else:
+                interest_txn = create_interest_transaction_for_period_if_complete(
+                    txn,
+                    int(representative_period_idx),
+                    trigger=trigger,
+                )
+                if interest_txn:
+                    created_count += 1
+                    result["created_count"] += 1
+
+        if result["created_count"] == 0 and result["periods_checked"] == 0:
+            result["skipped_reason"] = "no_elapsed_periods"
+            skipped_count += 1
+
+        results.append(result)
+
+    return {
+        "dry_run": dry_run,
+        "client_id": client_id,
+        "requested_transaction_ids": normalized_ids if normalized_ids is not None else None,
+        "now": now.isoformat(),
+        "checked_count": checked_count,
+        "created_count": created_count,
+        "skipped_count": skipped_count,
+        "results": results,
+    }
+
+
 def _create_interest_transfers_for_validated_transactions_without_positions(
     now: datetime,
     *,
@@ -27,81 +163,15 @@ def _create_interest_transfers_for_validated_transactions_without_positions(
     Validated transfer transactions with no related positions: create interest at period end.
     Returns (checked_count, created_count).
     """
-    candidates = (
-        Transaction.objects.filter(type="transfert", status="valide")
-        .exclude(transfer_to__isnull=True)
-        .exclude(transfer_to="solde")
-        .select_related("product", "client")
+    result = create_missing_interest_for_transactions(
+        now,
+        client_id=client_id,
+        transaction_ids=None,
+        dry_run=dry_run,
+        trigger="process_positions_command_no_positions",
+        only_without_positions=True,
     )
-    if client_id is not None:
-        candidates = candidates.filter(client_id=client_id)
-
-    created_count = 0
-    checked_count = 0
-    for txn in candidates.iterator():
-        if Position.objects.filter(transaction_id=txn.id).exists():
-            continue
-
-        product = txn.product
-        if not product and txn.transfer_to and txn.transfer_to != "solde":
-            product = Product.objects.filter(id=txn.transfer_to).first()
-        if not product:
-            continue
-        checked_count += 1
-
-        period_summaries = generate_rates_for_investment(txn)
-        if not period_summaries:
-            continue
-
-        payment_periods = _group_calculation_periods_by_payment_period(
-            txn, product, period_summaries
-        )
-
-        for payment_group in payment_periods:
-            payment_idx = payment_group.get("paymentPeriodIndex")
-            if payment_idx is None:
-                continue
-
-            try:
-                payment_end = payment_group.get("endDate")
-                if not payment_end:
-                    continue
-                payment_end_date = date.fromisoformat(str(payment_end))
-                if payment_end_date > now.date():
-                    continue
-            except Exception:
-                continue
-
-            calculation_periods = payment_group.get("calculationPeriods", [])
-            if not calculation_periods:
-                continue
-
-            representative_period_idx = calculation_periods[-1]
-
-            # In dry-run, we want to report "would create" without persisting any DB writes.
-            # We rely on a savepoint rollback because the underlying helper creates rows.
-            if dry_run:
-                sp = db_transaction.savepoint()
-                try:
-                    interest_txn = create_interest_transaction_for_period_if_complete(
-                        txn,
-                        int(representative_period_idx),
-                        trigger="process_positions_command_no_positions_dry_run",
-                    )
-                    if interest_txn:
-                        created_count += 1
-                finally:
-                    db_transaction.savepoint_rollback(sp)
-            else:
-                interest_txn = create_interest_transaction_for_period_if_complete(
-                    txn,
-                    int(representative_period_idx),
-                    trigger="process_positions_command_no_positions",
-                )
-                if interest_txn:
-                    created_count += 1
-
-    return checked_count, created_count
+    return int(result.get("checked_count", 0)), int(result.get("created_count", 0))
 
 
 @db_transaction.atomic

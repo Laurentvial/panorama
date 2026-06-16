@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { DateInputWithCalendar } from './ui/date-input';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
 import { Plus, X, ChevronDown, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react';
@@ -85,6 +86,13 @@ const STATUS_LABELS: { [key: string]: string } = {
 export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTransactionsTabProps) {
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [allTransactionsForInterest, setAllTransactionsForInterest] = useState<any[]>([]);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
+  const [isBackfillingInterests, setIsBackfillingInterests] = useState(false);
+  const [isBackfillPreviewModalOpen, setIsBackfillPreviewModalOpen] = useState(false);
+  const [isLoadingBackfillPreview, setIsLoadingBackfillPreview] = useState(false);
+  const [backfillPreviewResult, setBackfillPreviewResult] = useState<any | null>(null);
+  const [previewTransactionIds, setPreviewTransactionIds] = useState<string[]>([]);
   const [contractDocumentsByTransaction, setContractDocumentsByTransaction] = useState<Record<string, any[]>>({});
   const [unlinkedContractDocuments, setUnlinkedContractDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,6 +156,29 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     }
   };
 
+  const loadAllTransactionsForInterest = async () => {
+    try {
+      const collected: any[] = [];
+      const pageSize = 500;
+      let page = 1;
+      let totalPages = 1;
+
+      do {
+        const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${pageSize}`);
+        const pageTransactions = (data as any).transactions || [];
+        collected.push(...pageTransactions);
+        const paginationData = (data as any).pagination || {};
+        totalPages = Number(paginationData.total_pages || 1);
+        page += 1;
+      } while (page <= totalPages);
+
+      setAllTransactionsForInterest(collected);
+    } catch (error) {
+      console.error('Error loading all transactions for interest tracking:', error);
+      setAllTransactionsForInterest([]);
+    }
+  };
+
   const loadContractDocuments = async () => {
     try {
       const data = await apiCall(`/api/clients/${clientId}/documents/`);
@@ -181,6 +212,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   useEffect(() => {
     loadTransactions(1, 50);
     loadContractDocuments();
+    loadAllTransactionsForInterest();
+    setSelectedTransactionIds(new Set());
   }, [clientId]);
 
   // Load assets and products to find IDs
@@ -402,6 +435,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     dateTo: ''
   });
   const [isTypeFilterOpen, setIsTypeFilterOpen] = useState(false);
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(true);
   const [transactionForm, setTransactionForm] = useState({
     type: 'depot',
     amount: '',
@@ -1012,6 +1046,101 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     return true;
   });
 
+  const isInterestEligibleTransfer = (transaction: any): boolean => {
+    const type = String(transaction?.type || '').trim().toLowerCase();
+    if (type !== 'transfert') return false;
+    const statusValue = String(transaction?.status || '').trim().toLowerCase();
+    if (!['valide', 'cloture'].includes(statusValue)) return false;
+    const transferTo = String(transaction?.transfer_to ?? transaction?.to_field ?? transaction?.to ?? '').trim().toLowerCase();
+    return transferTo !== '' && transferTo !== 'solde' && transferTo !== 'trading';
+  };
+
+  const handleToggleSelectTransaction = (transaction: any, checked: boolean) => {
+    const txId = String(transaction?.id || '').trim();
+    if (!txId) return;
+    if (!isInterestEligibleTransfer(transaction)) return;
+    setSelectedTransactionIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(txId);
+      else next.delete(txId);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllTransactions = (rows: any[], checked: boolean) => {
+    const eligibleIds = rows
+      .filter((row) => isInterestEligibleTransfer(row))
+      .map((row) => String(row?.id || '').trim())
+      .filter(Boolean);
+    setSelectedTransactionIds((prev) => {
+      const next = new Set(prev);
+      for (const txId of eligibleIds) {
+        if (checked) next.add(txId);
+        else next.delete(txId);
+      }
+      return next;
+    });
+  };
+
+  const clearSelectedTransactions = () => {
+    setSelectedTransactionIds(new Set());
+  };
+
+  const runBackfillMissingInterests = async (transactionIds: string[], dryRun: boolean) => {
+    const response: any = await apiCall(`/api/clients/${clientId}/transactions/backfill-interests/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        transaction_ids: transactionIds,
+        dry_run: dryRun,
+      }),
+    });
+    return response;
+  };
+
+  const openBackfillPreviewModal = async () => {
+    const transactionIds = Array.from(selectedTransactionIds);
+    if (transactionIds.length === 0) return;
+    try {
+      setIsLoadingBackfillPreview(true);
+      const response = await runBackfillMissingInterests(transactionIds, true);
+      setPreviewTransactionIds(transactionIds);
+      setBackfillPreviewResult(response);
+      setIsBackfillPreviewModalOpen(true);
+    } catch (error: any) {
+      console.error('Error previewing missing interests:', error);
+      toast.error(error?.message || 'Erreur lors de la prévisualisation des intérêts');
+    } finally {
+      setIsLoadingBackfillPreview(false);
+    }
+  };
+
+  const handleConfirmBackfillMissingInterests = async () => {
+    if (previewTransactionIds.length === 0) return;
+    try {
+      setIsBackfillingInterests(true);
+      const response = await runBackfillMissingInterests(previewTransactionIds, false);
+      const createdCount = Number(response?.created_count || 0);
+      const checkedCount = Number(response?.checked_count || 0);
+      const skippedCount = Number(response?.skipped_count || 0);
+      toast.success(
+        `${createdCount} intérêt(s) créé(s) • ${checkedCount} transaction(s) vérifiée(s) • ${skippedCount} ignorée(s)`
+      );
+      clearApiCache(`/api/clients/${clientId}/transactions/`);
+      setIsBackfillPreviewModalOpen(false);
+      setBackfillPreviewResult(null);
+      setPreviewTransactionIds([]);
+      clearSelectedTransactions();
+      await loadTransactions(pagination.page, pagination.limit);
+      await loadAllTransactionsForInterest();
+      onRefresh();
+    } catch (error: any) {
+      console.error('Error backfilling missing interests:', error);
+      toast.error(error?.message || 'Erreur lors de la création des intérêts manquants');
+    } finally {
+      setIsBackfillingInterests(false);
+    }
+  };
+
   const handleTypeFilterChange = (type: string, checked: boolean) => {
     if (checked) {
       setFilters(prev => ({ ...prev, types: [...prev.types, type] }));
@@ -1060,12 +1189,42 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     : null;
   const interestPeriodOptions = getInterestPeriodOptions(transferProduct);
   const currencySym = getCurrencySymbol(accountCurrency);
+  const activeFiltersCount =
+    filters.types.length +
+    (filters.status !== 'all' ? 1 : 0) +
+    (filters.amountMin ? 1 : 0) +
+    (filters.amountMax ? 1 : 0) +
+    (filters.dateFrom ? 1 : 0) +
+    (filters.dateTo ? 1 : 0);
   
   const hasAvailableFunds = sourceProduct 
     ? (sourceProduct.availableFunds ?? sourceProduct.available_funds ?? false)
     : true;
   
   const showAvailableFundsWarning = shouldShowWarning && !hasAvailableFunds;
+
+  useEffect(() => {
+    clearSelectedTransactions();
+    setIsBackfillPreviewModalOpen(false);
+    setBackfillPreviewResult(null);
+    setPreviewTransactionIds([]);
+  }, [filters, pagination.page, pagination.limit]);
+
+  useEffect(() => {
+    setSelectedTransactionIds((prev) => {
+      if (prev.size === 0) return prev;
+      const eligibleCurrentIds = new Set(
+        transactions
+          .filter((transaction) => isInterestEligibleTransfer(transaction))
+          .map((transaction) => String(transaction.id))
+      );
+      const next = new Set<string>();
+      for (const txId of prev) {
+        if (eligibleCurrentIds.has(txId)) next.add(txId);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [transactions]);
 
   return (
     <div className="space-y-6">
@@ -1081,21 +1240,39 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
       </div>
 
       {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Filtres</CardTitle>
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3 min-h-8">
+            <CardTitle className="text-base leading-none">Filtres</CardTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFiltersCollapsed((prev) => !prev)}
+              className="h-8 px-2 text-slate-600 hover:text-slate-900"
+              aria-expanded={!isFiltersCollapsed}
+              aria-label={isFiltersCollapsed ? 'Afficher les filtres' : 'Masquer les filtres'}
+            >
+              <span className="mr-1 text-xs">
+                {isFiltersCollapsed ? 'Afficher' : 'Masquer'}
+                {activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ''}
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${isFiltersCollapsed ? '' : 'rotate-180'}`} />
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {!isFiltersCollapsed && (
+        <CardContent className="pt-0 pb-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
             {/* Type filter (multiple selection) */}
-            <div className="space-y-2">
-              <Label>Type de transaction</Label>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Type de transaction</Label>
               <Popover open={isTypeFilterOpen} onOpenChange={setIsTypeFilterOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     role="combobox"
-                    className="w-full justify-between h-9 rounded-md border-input bg-input-background px-4 py-2 text-sm text-black"
+                    className="h-8 w-full justify-between rounded-md border-input bg-input-background px-3 text-sm text-black"
                   >
                     <span className="truncate">{getTypeFilterDisplayText()}</span>
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1124,10 +1301,10 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             </div>
 
             {/* Status filter */}
-            <div className="space-y-2">
-              <Label>Statut</Label>
-              <Select value={filters.status} onValueChange={(value) => setFilters({ ...filters, status: value })}>
-                <SelectTrigger>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Statut</Label>
+              <Select modal={false} value={filters.status} onValueChange={(value) => setFilters({ ...filters, status: value })}>
+                <SelectTrigger className="h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1140,8 +1317,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             </div>
 
             {/* Amount filter */}
-            <div className="space-y-2">
-              <Label>Montant ({currencySym})</Label>
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Montant ({currencySym})</Label>
               <div className="flex gap-2">
                 <Input
                   type="number"
@@ -1149,7 +1326,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                   placeholder="Min"
                   value={filters.amountMin}
                   onChange={(e) => setFilters({ ...filters, amountMin: e.target.value })}
-                  className="text-slate-700 placeholder:text-slate-600"
+                  className="h-8 text-slate-700 placeholder:text-slate-500"
                 />
                 <Input
                   type="number"
@@ -1157,46 +1334,160 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                   placeholder="Max"
                   value={filters.amountMax}
                   onChange={(e) => setFilters({ ...filters, amountMax: e.target.value })}
-                  className="text-slate-700 placeholder:text-slate-600"
+                  className="h-8 text-slate-700 placeholder:text-slate-500"
                 />
               </div>
             </div>
 
             {/* Date filter */}
-            <div className="space-y-2">
-              <Label>Date de début</Label>
-              <Input
-                type="date"
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Date de début</Label>
+              <DateInputWithCalendar
                 value={filters.dateFrom}
-                onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
-                className="text-slate-700 placeholder:text-slate-600"
+                onChange={(value) => setFilters({ ...filters, dateFrom: value })}
+                className="h-8"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Date de fin</Label>
-              <Input
-                type="date"
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600">Date de fin</Label>
+              <DateInputWithCalendar
                 value={filters.dateTo}
-                onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
-                className="text-slate-700 placeholder:text-slate-600"
+                onChange={(value) => setFilters({ ...filters, dateTo: value })}
+                className="h-8"
               />
             </div>
 
             {/* Clear filters button */}
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label className="opacity-0">Actions</Label>
               <Button
                 variant="outline"
                 onClick={clearFilters}
-                className="w-full rounded-md"
+                className="h-8 w-full rounded-md px-3 text-sm"
               >
                 Réinitialiser les filtres
               </Button>
             </div>
           </div>
         </CardContent>
+        )}
       </Card>
+
+      {selectedTransactionIds.size > 0 && (
+        <Card>
+          <CardContent className="py-4 flex flex-col items-start gap-2">
+            <div className="text-sm text-slate-700">
+              {selectedTransactionIds.size} transaction(s) sélectionnée(s)
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={clearSelectedTransactions} disabled={isBackfillingInterests || isLoadingBackfillPreview}>
+                Annuler la sélection
+              </Button>
+              <Button onClick={openBackfillPreviewModal} disabled={isBackfillingInterests || isLoadingBackfillPreview}>
+                {isLoadingBackfillPreview ? 'Prévisualisation...' : 'Prévisualiser les intérêts manquants'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isBackfillPreviewModalOpen && (
+        <div className="modal-overlay" onClick={() => {
+          if (isBackfillingInterests) return;
+          setIsBackfillPreviewModalOpen(false);
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '48rem' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Prévisualisation des intérêts manquants</h2>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="modal-close"
+                disabled={isBackfillingInterests}
+                onClick={() => {
+                  setIsBackfillPreviewModalOpen(false);
+                }}
+              >
+                <X className="planning-icon-md" />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">
+                {Number(backfillPreviewResult?.created_count || 0) > 0
+                  ? 'Voici les intérêts qui seront créés après validation.'
+                  : 'Aucun intérêt à créer pour la sélection actuelle.'}
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-md border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Transactions vérifiées</div>
+                  <div className="text-lg font-semibold text-slate-800">{Number(backfillPreviewResult?.checked_count || 0)}</div>
+                </div>
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="text-xs text-emerald-700">Intérêts à créer</div>
+                  <div className="text-lg font-semibold text-emerald-800">{Number(backfillPreviewResult?.created_count || 0)}</div>
+                </div>
+                <div className="rounded-md border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Transactions ignorées</div>
+                  <div className="text-lg font-semibold text-slate-800">{Number(backfillPreviewResult?.skipped_count || 0)}</div>
+                </div>
+              </div>
+
+              {Array.isArray(backfillPreviewResult?.results) && backfillPreviewResult.results.length > 0 && (
+                <div className="max-h-64 overflow-auto rounded-md border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left py-2 px-3">Transaction source</th>
+                        <th className="text-left py-2 px-3">Périodes vérifiées</th>
+                        <th className="text-left py-2 px-3">Intérêts à créer</th>
+                        <th className="text-left py-2 px-3">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {backfillPreviewResult.results.map((row: any) => {
+                        const sourceId = String(row?.source_transaction_id || '-');
+                        const periodsChecked = Number(row?.periods_checked || 0);
+                        const toCreateCount = Number(row?.created_count || 0);
+                        const skippedReason = row?.skipped_reason ? String(row.skipped_reason) : '';
+                        const statusText = toCreateCount > 0 ? 'À créer' : (skippedReason || 'Aucun intérêt à créer');
+                        return (
+                          <tr key={sourceId} className="border-b border-slate-100 last:border-b-0">
+                            <td className="py-2 px-3 text-slate-700">{sourceId}</td>
+                            <td className="py-2 px-3 text-slate-700">{periodsChecked}</td>
+                            <td className="py-2 px-3 text-slate-700">{toCreateCount}</td>
+                            <td className="py-2 px-3 text-slate-700">{statusText}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="modal-form-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isBackfillingInterests}
+                  onClick={() => setIsBackfillPreviewModalOpen(false)}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isBackfillingInterests || Number(backfillPreviewResult?.created_count || 0) <= 0}
+                  onClick={handleConfirmBackfillMissingInterests}
+                >
+                  {isBackfillingInterests ? 'Création en cours...' : 'Valider la création'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isTransactionDialogOpen && (
         <div className="modal-overlay" onClick={() => {
@@ -1224,7 +1515,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               <div className="grid grid-cols-2" style={{ columnGap: '2rem', rowGap: '1rem' }}>
               <div className="modal-form-field">
                 <Label>Type</Label>
-                <Select value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
+                <Select modal={false} value={transactionForm.type} onValueChange={(value) => setTransactionForm({ ...transactionForm, type: value })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1514,7 +1805,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               </div>
               <div className="modal-form-field">
                 <Label>Statut</Label>
-                <Select value={transactionForm.status} onValueChange={(value) => setTransactionForm({ ...transactionForm, status: value })}>
+                <Select modal={false} value={transactionForm.status} onValueChange={(value) => setTransactionForm({ ...transactionForm, status: value })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1571,7 +1862,14 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
                 showContractColumn={true}
                 accountCurrency={accountCurrency}
                 showClientColumn={false}
+                showInterestTrackingColumns={true}
+                allTransactionsForInterest={allTransactionsForInterest}
                 showIcons={false}
+                selectable={true}
+                selectedTransactionIds={selectedTransactionIds}
+                onToggleSelect={handleToggleSelectTransaction}
+                onToggleSelectAll={handleToggleSelectAllTransactions}
+                isRowSelectable={isInterestEligibleTransfer}
                 onContractDocumentsChanged={() => {
                   loadContractDocuments();
                 }}

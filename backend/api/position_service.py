@@ -350,37 +350,39 @@ def _is_payment_due_for_period_index(
         return False
 
     payment_idx = int(target_group.get("paymentPeriodIndex", 0))
-    payment_period_months = _parse_interest_payment_period_months(
-        _resolve_interest_period_for_txn(txn, product)
-    )
-    if payment_period_months == 0.0:
-        return False
 
-    contract_start = _get_contract_start_date(txn)
-    if not contract_start:
-        return False
-
-    # Due date by interest payment schedule.
-    if payment_period_months >= 1.0:
-        tz = timezone.get_current_timezone()
-        start_dt = timezone.make_aware(
-            datetime.combine(contract_start, datetime.min.time()),
-            tz,
-        )
-        due_date = _add_months_dt(start_dt, payment_period_months * (payment_idx + 1)).date()
-    else:
-        period_days = max(1, round(payment_period_months * 30))
-        due_date = contract_start + timedelta(days=period_days * (payment_idx + 1))
-
-    # Safety: never pay before the generated payment group's own end date.
+    # Primary rule: pay when the grouped payment period has ended.
+    due_date: date | None = None
     group_end_raw = target_group.get("endDate")
     if group_end_raw:
         try:
             group_end_date = date.fromisoformat(str(group_end_raw))
-            if group_end_date > due_date:
-                due_date = group_end_date
+            due_date = group_end_date
         except Exception:
             pass
+
+    # Fallback schedule if group end date is unavailable.
+    if due_date is None:
+        payment_period_months = _parse_interest_payment_period_months(
+            _resolve_interest_period_for_txn(txn, product)
+        )
+        if payment_period_months == 0.0:
+            return False
+
+        contract_start = _get_contract_start_date(txn)
+        if not contract_start:
+            return False
+
+        if payment_period_months >= 1.0:
+            tz = timezone.get_current_timezone()
+            start_dt = timezone.make_aware(
+                datetime.combine(contract_start, datetime.min.time()),
+                tz,
+            )
+            due_date = _add_months_dt(start_dt, payment_period_months * (payment_idx + 1)).date()
+        else:
+            period_days = max(1, round(payment_period_months * 30))
+            due_date = contract_start + timedelta(days=period_days * (payment_idx + 1))
 
     if check_date >= due_date:
         return True
@@ -5705,9 +5707,14 @@ def _group_calculation_periods_by_payment_period(
     
     # Group calculation periods into payment periods
     payment_groups: list[dict] = []
-    current_payment_idx = 0
-    
-    # Calculate payment period boundaries in days
+    tz = timezone.get_current_timezone()
+    contract_start_dt = timezone.make_aware(
+        datetime.combine(contract_start, datetime.min.time()),
+        tz,
+    )
+
+    # Calculate payment period boundaries.
+    # For monthly+ cadences we use calendar arithmetic to avoid drifting/skipping indexes.
     payment_period_days = payment_period_months * 30
     
     for period in period_summaries:
@@ -5720,9 +5727,22 @@ def _group_calculation_periods_by_payment_period(
         except Exception:
             continue
         
-        # Determine which payment period this calculation period belongs to
-        days_since_start = (period_end - contract_start).days
-        payment_idx = int(days_since_start / payment_period_days)
+        # Determine which payment period this calculation period belongs to.
+        if payment_period_months >= 1.0:
+            period_end_dt = timezone.make_aware(
+                datetime.combine(period_end, datetime.min.time()),
+                tz,
+            )
+            payment_idx = 0
+            period_boundary_dt = _add_months_dt(contract_start_dt, payment_period_months)
+            while period_end_dt > period_boundary_dt:
+                payment_idx += 1
+                period_boundary_dt = _add_months_dt(
+                    contract_start_dt, payment_period_months * (payment_idx + 1)
+                )
+        else:
+            days_since_start = (period_end - contract_start).days
+            payment_idx = int(days_since_start / payment_period_days)
         
         # Find or create the payment group
         payment_group = next(

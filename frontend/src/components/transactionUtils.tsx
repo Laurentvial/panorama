@@ -75,10 +75,10 @@ export const getStatusLabel = (status: string, transactionType?: string): string
 export const getStatusColors = (status: string, transactionType?: string): { bg: string; text: string } => {
   const s = String(status || '').trim().toLowerCase();
   const type = String(transactionType || '').toLowerCase();
-  if (s === 'valide' || s === 'validé' || s === 'cloture') return { bg: '#dcfce7', text: '#15803d' }; // green
+  if (s === 'valide' || s === 'validé') return { bg: '#dcfce7', text: '#15803d' }; // green
   if (s === 'en_cours' || s === 'en_attente_paiement' || s === 'en_verification') return { bg: '#fed7aa', text: '#c2410c' }; // orange
-  if (s === 'conteste') return { bg: '#fee2e2', text: '#991b1b' }; // red
-  if (s === 'annule') return { bg: '#e5e7eb', text: '#6b7280' }; // gray
+  if (s === 'conteste' || s === 'annule') return { bg: '#fee2e2', text: '#991b1b' }; // red
+  if (s === 'cloture') return { bg: '#e5e7eb', text: '#6b7280' }; // gray
   return { bg: '#f1f5f9', text: '#475569' };
 };
 

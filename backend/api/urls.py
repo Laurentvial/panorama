@@ -164,6 +164,11 @@ urlpatterns = [
     path('clients/<str:client_id>/transactions/', api_views.client_transactions, name='client-transactions'),
     path('clients/<str:client_id>/transactions/create/', api_views.client_transaction_create, name='client-transaction-create'),
     path(
+        'clients/<str:client_id>/transactions/backfill-interests/',
+        api_views.client_backfill_missing_interests,
+        name='client-backfill-interests',
+    ),
+    path(
         'clients/<str:client_id>/transactions/<str:transaction_id>/closure-amount/',
         api_views.transaction_closure_amount,
         name='transaction-closure-amount'
