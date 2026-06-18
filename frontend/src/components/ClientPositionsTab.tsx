@@ -386,7 +386,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
-        <CardTitle>Positions ({loading ? '...' : pagination.total})</CardTitle>
+        <CardTitle className="tab-section-title">Positions ({loading ? '...' : pagination.total})</CardTitle>
         <Button variant="outline" onClick={() => { void handleRefresh(); }} disabled={loading}>
           <RefreshCw className="w-4 h-4 mr-2" />
           {loading ? 'Chargement...' : 'Rafraîchir'}

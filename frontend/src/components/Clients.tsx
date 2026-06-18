@@ -1,19 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Search, Eye, LogIn, Trash2, Users, UserCheck, X, RefreshCw } from 'lucide-react';
+import { Plus, Search, LogIn, Trash2, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useUsers } from '../hooks/useUsers';
 import { useUser } from '../contexts/UserContext';
 import LoadingIndicator from './LoadingIndicator';
 import { toast } from 'sonner';
 import '../styles/Clients.css';
 import '../styles/PageHeader.css';
+import '../styles/Filters.css';
 
 interface ClientsProps {
   onSelectClient: (clientId: string) => void;
@@ -22,7 +21,6 @@ interface ClientsProps {
 export function Clients({ onSelectClient }: ClientsProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { users, loading: usersLoading, error: usersError } = useUsers();
   const { currentUser } = useUser();
   const [clients, setClients] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
@@ -30,24 +28,9 @@ export function Clients({ onSelectClient }: ClientsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
-  const [showBulkActions, setShowBulkActions] = useState(false);
-  const [bulkTeamId, setBulkTeamId] = useState('');
-  const [bulkManagerId, setBulkManagerId] = useState('');
   const [onlineClientIds, setOnlineClientIds] = useState<Set<string>>(new Set());
-  
-  const isGestionnaire = currentUser?.role === 'gestionnaire';
 
-  useEffect(() => {
-    if (usersError) {
-      console.error('Error loading users:', usersError);
-    }
-    if (users.length > 0) {
-      console.log('Users loaded:', users);
-    } else if (!usersLoading) {
-      console.warn('No users found. Users array is empty.');
-    }
-  }, [users, usersLoading, usersError]);
+  const isGestionnaire = currentUser?.role === 'gestionnaire';
 
   // Refetch when navigating to clients page (e.g. after creating or returning from add)
   useEffect(() => {
@@ -126,110 +109,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
 
   const displayedClients = sortedClients.slice(0, itemsPerPage);
 
-  // Gestion de la sélection
-  function handleSelectClient(clientId: string) {
-    const newSelected = new Set(selectedClients);
-    if (newSelected.has(clientId)) {
-      newSelected.delete(clientId);
-    } else {
-      newSelected.add(clientId);
-    }
-    setSelectedClients(newSelected);
-    setShowBulkActions(newSelected.size > 0);
-  }
-
-  function handleSelectAll() {
-    if (selectedClients.size === displayedClients.length) {
-      setSelectedClients(new Set());
-      setShowBulkActions(false);
-    } else {
-      setSelectedClients(new Set(displayedClients.map(c => c.id)));
-      setShowBulkActions(true);
-    }
-  }
-
-  function handleClearSelection() {
-    setSelectedClients(new Set());
-    setShowBulkActions(false);
-  }
-
-  const allSelected = displayedClients.length > 0 && selectedClients.size === displayedClients.length;
-  const someSelected = selectedClients.size > 0 && selectedClients.size < displayedClients.length;
-
-  // Actions multiples
-  async function handleBulkChangeTeam(teamId: string) {
-    if (!teamId) return;
-    
-    try {
-      const promises = Array.from(selectedClients).map(clientId =>
-        apiCall(`/api/clients/${clientId}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({ teamId: teamId === 'none' ? null : teamId })
-        })
-      );
-      await Promise.all(promises);
-      loadData(true);
-      handleClearSelection();
-      setBulkTeamId('');
-    } catch (error) {
-      alert('Erreur lors du changement d\'équipe');
-    }
-  }
-
-  async function handleBulkAssignManager(managerId: string) {
-    if (!managerId) return;
-    
-    try {
-      const managerIdValue = managerId !== 'none' ? managerId : '';
-      
-      const promises = Array.from(selectedClients).map(clientId =>
-        apiCall(`/api/clients/${clientId}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({ managed_by: managerIdValue })
-        })
-      );
-      await Promise.all(promises);
-      loadData(true);
-      handleClearSelection();
-      setBulkManagerId('');
-    } catch (error) {
-      console.error('Error assigning manager:', error);
-      alert('Erreur lors de l\'attribution du gestionnaire');
-    }
-  }
-
-  async function handleBulkToggleActive() {
-    if (!confirm(`Êtes-vous sûr de vouloir ${displayedClients.filter(c => selectedClients.has(c.id)).some(c => c.active) ? 'désactiver' : 'activer'} ${selectedClients.size} client(s) ?`)) return;
-    
-    try {
-      const promises = Array.from(selectedClients).map(clientId =>
-        apiCall(`/api/clients/${clientId}/toggle-active/`, { method: 'POST' })
-      );
-      await Promise.all(promises);
-      loadData(true);
-      handleClearSelection();
-    } catch (error) {
-      console.error('Error toggling active status:', error);
-      alert('Erreur lors de la modification du statut');
-    }
-  }
-
-  async function handleBulkDelete() {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer ${selectedClients.size} client(s) ? Cette action est irréversible.`)) return;
-    
-    try {
-      const promises = Array.from(selectedClients).map(clientId =>
-        apiCall(`/api/clients/${clientId}/delete/`, { method: 'DELETE' })
-      );
-      await Promise.all(promises);
-      loadData(true);
-      handleClearSelection();
-    } catch (error) {
-      console.error('Error deleting clients:', error);
-      alert('Erreur lors de la suppression des clients');
-    }
-  }
-
   function handlePlatformAccess(clientId: string) {
     const client = clients.find(c => c.id === clientId);
     
@@ -261,193 +140,148 @@ export function Clients({ onSelectClient }: ClientsProps) {
     }
   }
 
+  const activeFiltersCount = (searchTerm ? 1 : 0) + (selectedTeam !== 'all' ? 1 : 0);
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
+
   return (
     <div className="clients-container">
+      {/* Page header */}
       <div className="page-header">
         <div className="page-title-section">
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">Gestion de vos clients</p>
         </div>
-        
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => loadData(true)} disabled={loading} className="gap-2">
+        <div className="clients-header-actions">
+          <button
+            className="clients-header-btn clients-header-btn--outline"
+            onClick={() => loadData(true)}
+            disabled={loading}
+          >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Actualiser
-          </Button>
-          <Button onClick={() => navigate('/admin/clients/add')}>
-            <Plus className="w-4 h-4 mr-2" />
+          </button>
+          <button
+            className="clients-header-btn clients-header-btn--primary"
+            onClick={() => navigate('/admin/clients/add')}
+          >
+            <Plus className="w-4 h-4" />
             Ajouter un client
-          </Button>
+          </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="clients-filters">
-            <div className="clients-filter-section">
-              <Label>Recherche</Label>
-              <div className="clients-search-wrapper">
-                <Search className="clients-search-icon" />
-                <Input
-                  className="clients-search-input"
-                  type="search"
-                  name="client-search"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  inputMode="search"
-                  data-form-type="other"
-                  placeholder="Nom, email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
+      {/* Filter card */}
+      <div className="filter-card">
+        <div className="filter-card-header">
+          <div className="filter-card-left">
+            <div className="filter-card-icon">
+              <SlidersHorizontal className="h-4 w-4" />
             </div>
-            
-            <div className="clients-filter-section">
-              <Label>Équipe</Label>
-              <Select value={selectedTeam} onValueChange={setSelectedTeam}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Toutes les équipes" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Toutes les équipes</SelectItem>
-                  {teams.map((team) => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="clients-filter-section">
-              <Label>Affichage par</Label>
-              <Select value={itemsPerPage.toString()} onValueChange={(value) => setItemsPerPage(Number(value))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="25" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="25">25</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
+            <div>
+              <p className="filter-card-title">Filtres clients</p>
+              <p className="filter-card-subtitle">Affinez la liste par nom, email ou équipe.</p>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Barre d'actions multiples */}
-      {showBulkActions && (
-        <Card className="clients-bulk-actions">
-          <CardContent className="pt-4">
-            <div className="clients-bulk-actions-content">
-              <div className="clients-bulk-actions-info">
-                <span>{selectedClients.size} client(s) sélectionné(s)</span>
-                <Button variant="ghost" size="sm" onClick={handleClearSelection}>
-                  <X className="w-4 h-4 mr-2" />
-                  Annuler
-                </Button>
-              </div>
-              <div className="clients-bulk-actions-buttons">
-                <div className="clients-bulk-action-select">
-                  <Label className="sr-only">Changer d'équipe</Label>
-                  <Select value={bulkTeamId} onValueChange={handleBulkChangeTeam}>
-                    <SelectTrigger className="w-[180px]">
-                      <Users className="w-4 h-4 mr-2" />
-                      <SelectValue placeholder="Changer d'équipe" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Aucune équipe</SelectItem>
-                      {teams.map((team) => (
-                        <SelectItem key={team.id} value={team.id}>
-                          {team.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <div className="filter-card-right">
+            <span className={`filter-card-badge ${activeFiltersCount > 0 ? 'filter-card-badge--active' : ''}`}>
+              {activeFiltersCount} actif{activeFiltersCount > 1 ? 's' : ''}
+            </span>
+            <button
+              type="button"
+              className="filter-card-toggle"
+              onClick={() => setIsFiltersCollapsed(p => !p)}
+            >
+              <span>{isFiltersCollapsed ? 'Afficher' : 'Masquer'}</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ transition: 'transform 0.2s', transform: isFiltersCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {!isFiltersCollapsed && (
+          <div className="filter-card-body">
+            <div className="clients-filters">
+              <div className="clients-filter-section">
+                <Label>Recherche</Label>
+                <div className="clients-search-wrapper">
+                  <Search className="clients-search-icon" />
+                  <Input
+                    className="clients-search-input"
+                    type="search"
+                    name="client-search"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    inputMode="search"
+                    data-form-type="other"
+                    placeholder="Nom, email..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
                 </div>
-
-                {!isGestionnaire && (
-                  <div className="clients-bulk-action-select">
-                    <Label className="sr-only">Attribuer un gestionnaire</Label>
-                    <Select value={bulkManagerId} onValueChange={handleBulkAssignManager}>
-                      <SelectTrigger className="w-[200px]">
-                        <UserCheck className="w-4 h-4 mr-2" />
-                        <SelectValue placeholder="Attribuer un gestionnaire" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Aucun gestionnaire</SelectItem>
-                        {usersLoading ? (
-                          <SelectItem value="loading" disabled>Chargement...</SelectItem>
-                        ) : usersError ? (
-                          <SelectItem value="error" disabled>Erreur de chargement</SelectItem>
-                        ) : users.length === 0 ? (
-                          <SelectItem value="empty" disabled>Aucun utilisateur disponible</SelectItem>
-                        ) : (
-                          users.map((user) => {
-                            const displayName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || user.email || `Utilisateur ${user.id}`;
-                            return (
-                              <SelectItem key={user.id} value={user.id}>
-                                {displayName}
-                              </SelectItem>
-                            );
-                          })
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                <Button variant="outline" size="sm" onClick={handleBulkToggleActive}>
-                  Activer/Désactiver
-                </Button>
-
-                <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Supprimer
-                </Button>
+              </div>
+              <div className="clients-filter-section">
+                <Label>Équipe</Label>
+                <Select value={selectedTeam} onValueChange={setSelectedTeam}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Toutes les équipes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes les équipes</SelectItem>
+                    {teams.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="clients-filter-section">
+                <Label>Affichage par</Label>
+                <Select value={itemsPerPage.toString()} onValueChange={(value) => setItemsPerPage(Number(value))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="25" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* Clients List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Liste des clients ({loading ? '...' : filteredClients.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
+      {/* Clients list */}
+      <div className="clients-list-card">
+        <div className="clients-list-header">
+          <p className="clients-list-title">
+            Liste des clients
+            <span className="clients-list-count">{loading ? '…' : filteredClients.length}</span>
+          </p>
+        </div>
+        <div className="clients-list-body">
           {loading && clients.length === 0 ? (
-            <div style={{ padding: '3rem 0', display: 'flex', justifyContent: 'center' }}>
+            <div className="clients-loading">
               <LoadingIndicator />
             </div>
           ) : filteredClients.length > 0 ? (
             <div className="clients-table-wrapper">
               {loading && clients.length > 0 && (
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 20 }}>
+                <div className="clients-table-overlay">
                   <LoadingIndicator />
                 </div>
               )}
               <table className="clients-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '40px' }}>
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        ref={(input) => {
-                          if (input) input.indeterminate = someSelected;
-                        }}
-                        onChange={handleSelectAll}
-                        className="clients-checkbox"
-                      />
-                    </th>
                     <th>Id</th>
                     <th>Nom entier</th>
                     <th>Téléphone</th>
@@ -466,17 +300,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
                 <tbody>
                   {displayedClients.map((client) => (
                     <tr key={client.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selectedClients.has(client.id)}
-                          onChange={() => handleSelectClient(client.id)}
-                          className="clients-checkbox"
-                        />
-                      </td>
-                      <td className="clients-table-id">
-                        {client.id.substring(0, 8)}
-                      </td>
+                      <td className="clients-table-id">{client.id.substring(0, 8)}</td>
                       <td>
                         <div className="flex items-center gap-2 flex-wrap">
                           <button
@@ -487,19 +311,11 @@ export function Clients({ onSelectClient }: ClientsProps) {
                           </button>
                           {typeof client.pendingPositionsCount === 'number' && client.pendingPositionsCount < 5 && (
                             client.pendingPositionsCount === 0 ? (
-                              <Badge
-                                variant="outline"
-                                className="border-red-300 bg-red-50 text-red-800 font-normal"
-                                title="Aucune position au statut « en attente »"
-                              >
+                              <Badge variant="outline" className="border-red-300 bg-red-50 text-red-800 font-normal" title="Aucune position au statut « en attente »">
                                 0 en attente
                               </Badge>
                             ) : (
-                              <Badge
-                                variant="outline"
-                                className="border-orange-300 bg-orange-50 text-orange-900 font-normal"
-                                title={`${client.pendingPositionsCount} position(s) en attente (moins de 5)`}
-                              >
+                              <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-900 font-normal" title={`${client.pendingPositionsCount} position(s) en attente (moins de 5)`}>
                                 {client.pendingPositionsCount} en attente
                               </Badge>
                             )
@@ -509,72 +325,45 @@ export function Clients({ onSelectClient }: ClientsProps) {
                       <td>{client.phone || client.mobile || '-'}</td>
                       <td className="clients-table-email">{client.email || '-'}</td>
                       <td>
-                        {client.createdAt 
-                          ? new Date(client.createdAt).toLocaleString('fr-FR', {
-                              dateStyle: 'short',
-                              timeStyle: 'short'
-                            })
-                          : '-'
-                        }
+                        {client.createdAt
+                          ? new Date(client.createdAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+                          : '-'}
                       </td>
                       {!isGestionnaire && <td>{client.managerName || client.manager || '-'}</td>}
                       <td>{client.source || '-'}</td>
                       <td>
-                        {client.capital 
-                          ? new Intl.NumberFormat('fr-FR', {
-                              style: 'currency',
-                              currency: 'EUR'
-                            }).format(client.capital)
-                          : '0,00 €'
-                        }
+                        {client.capital
+                          ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(client.capital)
+                          : '0,00 €'}
                       </td>
                       <td>
                         <span className={client.active ? 'clients-status-active' : 'clients-status-inactive'}>
                           {client.active ? 'Actif' : 'Inactif'}
                         </span>
                       </td>
+                      <td>{teams.find(t => t.id === client.teamId)?.name || '-'}</td>
                       <td>
-                        {(() => {
-                          const team = teams.find(t => t.id === client.teamId);
-                          return team ? team.name : '-';
-                        })()}
-                      </td>
-                      <td>
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                        <button
+                          className={`clients-toggle-btn ${client.active ? 'clients-toggle-btn--active' : 'clients-toggle-btn--inactive'}`}
                           onClick={() => handleToggleActive(client.id)}
-                          className={client.active ? 'clients-status-active' : 'clients-status-inactive'}
                         >
                           {client.active ? 'Désactiver' : 'Activer'}
-                        </Button>
+                        </button>
                       </td>
                       <td>
                         <span
                           className={`clients-online-indicator ${onlineClientIds.has(client.id) ? 'clients-online' : 'clients-offline'}`}
                           title={onlineClientIds.has(client.id) ? 'Connecté' : 'Déconnecté'}
-                          aria-label={onlineClientIds.has(client.id) ? 'Connecté' : 'Déconnecté'}
                         />
                       </td>
                       <td>
                         <div className="clients-actions">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handlePlatformAccess(client.id)}
-                            title="Connexion à la plateforme client"
-                          >
+                          <button className="clients-action-icon" onClick={() => handlePlatformAccess(client.id)} title="Connexion à la plateforme client">
                             <LogIn className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteClient(client.id)}
-                            title="Supprimer"
-                            className="text-red-600 hover:text-red-700"
-                          >
+                          </button>
+                          <button className="clients-action-icon clients-action-icon--danger" onClick={() => handleDeleteClient(client.id)} title="Supprimer">
                             <Trash2 className="w-4 h-4" />
-                          </Button>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -585,8 +374,8 @@ export function Clients({ onSelectClient }: ClientsProps) {
           ) : (
             <p className="clients-empty">Aucun client trouvé</p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

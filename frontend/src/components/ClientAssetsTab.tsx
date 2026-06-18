@@ -835,7 +835,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
             <Card>
               <CardHeader>
-                <CardTitle>Actifs visibles par le client</CardTitle>
+                <CardTitle className="tab-section-title">Actifs visibles par le client</CardTitle>
               </CardHeader>
               <CardContent>
                 {(() => {
@@ -1299,7 +1299,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
             <Card>
               <CardHeader>
-                <CardTitle>Produits visibles par le client</CardTitle>
+                <CardTitle className="tab-section-title">Produits visibles par le client</CardTitle>
               </CardHeader>
               <CardContent>
                 {(() => {

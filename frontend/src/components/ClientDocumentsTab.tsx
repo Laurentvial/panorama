@@ -419,7 +419,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="tab-section-title flex items-center gap-2">
               <FileText className="w-5 h-5" />
               Documents
             </CardTitle>

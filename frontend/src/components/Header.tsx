@@ -177,15 +177,16 @@ export function Header({ user }: HeaderProps) {
             </div>
             <div className="header-title-section">
               {settings?.logo_url ? (
-                <img src={settings.logo_url} alt="Logo" className="header-logo-img" style={{ maxHeight: 100, maxWidth: 140 }} />
+                <img src={settings.logo_url} alt="Logo" className="header-logo-img" style={{ maxHeight: 48, maxWidth: 160, marginTop: 10, marginBottom: 10 }} />
               ) : (
                 <div className="header-platform-name">
                   {platformName || 'panorama - administration'}
                 </div>
               )}
-              <p className="header-subtitle">Protected Asset Network Offering Robust All‑class Market Access</p>
             </div>
           </div>
+
+          <p className="header-subtitle-center">Protected Asset Network Offering Robust All‑class Market Access</p>
           
           <div className="header-actions">
             {/* Notifications */}

@@ -321,7 +321,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Logs plateforme</CardTitle>
+        <CardTitle className="tab-section-title">Logs plateforme</CardTitle>
         <p className="text-sm text-slate-600 mt-1 max-w-3xl">
           La colonne <strong>Origine</strong> utilise d&apos;abord la classification serveur de connexion
           (`client_login`, `otp_login`, `crm_impersonation`) et n&apos;utilise plus l&apos;IP pour

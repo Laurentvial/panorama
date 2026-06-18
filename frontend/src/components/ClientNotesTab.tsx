@@ -81,7 +81,7 @@ export function ClientNotesTab({ notes: notesFromParent, clientId, onRefresh, on
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Notes</CardTitle>
+        <CardTitle className="tab-section-title">Notes</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <form onSubmit={handleCreateNote} className="space-y-3">

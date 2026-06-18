@@ -212,7 +212,7 @@ export function Dashboard({ user: userProp }: DashboardProps) {
                     <th>Client</th>
                     <th>Pour</th>
                     <th>Date</th>
-                    <th>Statut</th>
+                    <th className="dashboard-table-status-cell">Statut</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -302,7 +302,7 @@ export function Dashboard({ user: userProp }: DashboardProps) {
                       </td>
                       <td className="dashboard-table-type">{transaction.type}</td>
                       <td>{parseFloat(transaction.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
-                      <td>
+                      <td className="dashboard-table-status-cell">
                         {(() => {
                           const { bg, text } = getStatusColors(transaction.status, transaction.type);
                           return (

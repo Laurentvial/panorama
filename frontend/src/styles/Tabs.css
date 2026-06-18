@@ -1,0 +1,60 @@
+/* ─── Global tab strip ────────────────────────────────────────────────────── */
+
+.app-tabs-list {
+  display: inline-flex !important;
+  width: max-content !important;
+  max-width: 100%;
+  height: auto !important;
+  align-items: center;
+  gap: 3px;
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--muted, #f5f3f0);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+  overflow: visible !important;
+}
+
+.app-tabs-trigger {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 10px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--muted-foreground, #6b7280) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease, border-color 0.13s ease;
+}
+
+.app-tabs-trigger:hover {
+  background: rgba(0, 0, 0, 0.07) !important;
+  color: var(--foreground, #111827) !important;
+}
+
+.app-tabs-trigger[data-state="active"] {
+  background: var(--accent, #e5dfd5) !important;
+  border-color: var(--accent, #e5dfd5) !important;
+  color: var(--primary, #030213) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-tabs-trigger[data-state="active"]:hover {
+  filter: brightness(0.94) !important;
+}
+
+/* ─── Tab section title (main heading inside each tab's content) ─────────── */
+
+.tab-section-title {
+  font-size: 1.5rem !important;
+  font-weight: 600 !important;
+  line-height: 1.1 !important;
+}

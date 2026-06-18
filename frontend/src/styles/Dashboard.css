@@ -219,8 +219,16 @@
 }
 
 .dashboard-table-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.25rem 0.5rem;
   background-color: #f1f5f9;
   border-radius: 0.25rem;
   font-size: 0.75rem;
+  text-align: center;
+}
+
+.dashboard-table-status-cell {
+  text-align: center !important;
 }

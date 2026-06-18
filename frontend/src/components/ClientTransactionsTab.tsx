@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DateInputWithCalendar } from './ui/date-input';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Checkbox } from './ui/checkbox';
-import { Plus, X, ChevronDown, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react';
+import { Plus, X, ChevronDown, ChevronLeft, ChevronRight, CalendarIcon, SlidersHorizontal } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +22,7 @@ import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
 import { SimpleCalendar } from './ui/simple-calendar';
 import '../styles/Modal.css';
+import '../styles/Filters.css';
 
 interface ClientTransactionsTabProps {
   onRefresh: () => void;
@@ -1229,41 +1230,51 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Transactions</h2>
+        <h2 className="tab-section-title">
+          Transactions
+          <span style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle', marginLeft: '10px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--muted-foreground, #6b7280)', background: 'var(--muted, #f5f3f0)', border: '1px solid var(--border, #e5e7eb)', borderRadius: '999px', padding: '2px 10px', position: 'relative', top: '-2px' }}>
+            {loading ? '…' : pagination.total}
+          </span>
+        </h2>
         <Button onClick={() => {
           setIsTransactionDialogOpen(true);
           resetTransactionForm();
-        }}>
+        }} className="h-8 rounded-md !border !border-amber-300 !bg-amber-100 px-3 !text-amber-900 shadow-sm transition-colors duration-200 hover:!bg-amber-300 hover:!text-amber-950 hover:!opacity-100 client-quick-action-button">
           <Plus className="w-4 h-4 mr-2" />
           Ajouter une transaction
         </Button>
       </div>
 
       {/* Filters */}
-      <Card className="border-slate-200 shadow-sm">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between gap-3 min-h-8">
-            <CardTitle className="text-base leading-none">Filtres</CardTitle>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsFiltersCollapsed((prev) => !prev)}
-              className="h-8 px-2 text-slate-600 hover:text-slate-900"
-              aria-expanded={!isFiltersCollapsed}
-              aria-label={isFiltersCollapsed ? 'Afficher les filtres' : 'Masquer les filtres'}
-            >
-              <span className="mr-1 text-xs">
-                {isFiltersCollapsed ? 'Afficher' : 'Masquer'}
-                {activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ''}
-              </span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${isFiltersCollapsed ? '' : 'rotate-180'}`} />
-            </Button>
+      <div className="filter-card">
+        <div className="filter-card-header">
+          <div className="filter-card-left">
+            <div className="filter-card-icon">
+              <SlidersHorizontal className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="filter-card-title">Filtres transactions</p>
+              <p className="filter-card-subtitle">Affinez la liste par type, statut, montant et date.</p>
+            </div>
           </div>
-        </CardHeader>
+          <div className="filter-card-right">
+            <span className={`filter-card-badge ${activeFiltersCount > 0 ? 'filter-card-badge--active' : ''}`}>
+              {activeFiltersCount} actif{activeFiltersCount > 1 ? 's' : ''}
+            </span>
+            <button
+              type="button"
+              className="filter-card-toggle"
+              onClick={() => setIsFiltersCollapsed((prev) => !prev)}
+              aria-expanded={!isFiltersCollapsed}
+            >
+              <span>{isFiltersCollapsed ? 'Afficher' : 'Masquer'}</span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${isFiltersCollapsed ? '' : 'rotate-180'}`} />
+            </button>
+          </div>
+        </div>
         {!isFiltersCollapsed && (
-        <CardContent className="pt-0 pb-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+        <div className="filter-card-body">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3">
             {/* Type filter (multiple selection) */}
             <div className="space-y-1">
               <Label className="text-xs text-slate-600">Type de transaction</Label>
@@ -1370,9 +1381,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               </Button>
             </div>
           </div>
-        </CardContent>
+        </div>
         )}
-      </Card>
+      </div>
 
       {selectedTransactionIds.size > 0 && (
         <Card>
@@ -1836,11 +1847,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Transactions ({loading ? '...' : pagination.total})</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div>
           {loading && transactions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12">
               <LoadingIndicator />
@@ -2010,8 +2017,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
               )}
             </>
           )}
-        </CardContent>
-      </Card>
+      </div>
 
       {/* View Transaction Modal */}
       <ViewTransactionModal

@@ -5,7 +5,13 @@ import { ClientWallet } from './ClientWallet';
 import { apiCall } from '../utils/api';
 import { formatAmount } from '../utils/currency';
 import { CurrencyIcon } from './CurrencyIcon';
-import { classifyTransferDirection, getTransferGlobalDelta, getTransferProductMovements } from '../utils/portfolioTransfers';
+import {
+  classifyTransferDirection,
+  computeProductAccruedGains,
+  getTransferGlobalDelta,
+  getTransferProductMovements,
+  sumOpenPositionAccruedGains,
+} from '../utils/portfolioTransfers';
 
 interface ClientPortfolioTabProps {
   client: any;
@@ -279,7 +285,9 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     const adjustedClosedPositionsProfitLoss =
       closedPositionsProfitLoss - surperformanceInterests + surchargeAmortization;
 
-    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss;
+    const openAccruedGains = sumOpenPositionAccruedGains(positions);
+
+    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss + openAccruedGains;
   }, [positions, calculatedValues, hasCompletedTransactions, transactions]);
   
   // Total Investi: only achat and transfert (solde → product)
@@ -408,17 +416,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
 
-    // P&L produits depuis positions clôturées
-    for (const p of positions || []) {
-      if (p?.status !== 'done') continue;
-      const productId = p?.productId || p?.product_id || null;
-      if (!productId) continue;
-      const key = String(productId);
-      if (!map.has(key)) continue;
-      const pnlNum = p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
-      if (pnlNum != null && Number.isFinite(pnlNum)) {
+    for (const [key] of map.entries()) {
+      const accruedGains = computeProductAccruedGains(key, positions);
+      if (accruedGains !== 0) {
         const prev = map.get(key)!;
-        map.set(key, { ...prev, pnl: prev.pnl + pnlNum });
+        map.set(key, { ...prev, pnl: accruedGains });
       }
     }
 
@@ -535,7 +537,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     <div className="space-y-6">
       {/* Header with Add Product Button */}
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Portefeuille</h2>
+        <h2 className="tab-section-title">Portefeuille</h2>
       </div>
 
       {/* Summary Cards */}

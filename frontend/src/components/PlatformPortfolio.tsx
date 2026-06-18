@@ -9,7 +9,14 @@ import { logPlatformAction } from '../utils/platformLogger';
 import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { CurrencyIcon } from './CurrencyIcon';
-import { getTransferGlobalDelta, getTransferProductMovements } from '../utils/portfolioTransfers';
+import {
+  computePortfolioDisplayPerformance,
+  computeProductAccruedGains,
+  computeNetContributions,
+  getTransferGlobalDelta,
+  getTransferProductMovements,
+  sumOpenPositionAccruedGains,
+} from '../utils/portfolioTransfers';
 import { PlatformPortfolioTransactionsSection } from './PlatformPortfolioTransactionsSection';
 import { PlatformPortfolioOrdersSection } from './PlatformPortfolioOrdersSection';
 import '../styles/PlatformPortfolio.css';
@@ -597,25 +604,8 @@ export function PlatformPortfolio() {
       // This is the net amount invested in the product (deposits - withdrawals)
       const investedEur = p.netInvested > 0 ? p.netInvested : null;
       
-      // Calculate P&L from closed positions only. Open positions are hidden from
-      // client-facing gains until they are actually closed.
-      let totalPnl = 0;
-      
-      for (const pos of positions || []) {
-        if (pos?.status !== 'done') continue;
-        
-        // Check if this position belongs to this product
-        const posProductId = pos?.productId || pos?.product_id || null;
-        if (!posProductId || String(posProductId) !== String(p.productId)) continue;
-        
-        // Sum P&L
-        const pnlNum = pos.profit_loss == null ? null : typeof pos.profit_loss === 'string' ? parseFloat(pos.profit_loss) : Number(pos.profit_loss);
-        if (pnlNum != null && Number.isFinite(pnlNum)) {
-          // profit_loss est toujours en EUR (objectif de période)
-          totalPnl += pnlNum;
-        }
-      }
-      
+      // P&L affiché = intérêts/gains cumulés (périodes clôturées + en cours), base = capital investi
+      const totalPnl = computeProductAccruedGains(String(p.productId), positions);
       const pnl = totalPnl !== 0 ? totalPnl : null;
       const pnlPct = investedEur != null && investedEur > 0 && pnl != null ? (pnl / investedEur) * 100 : null;
       
@@ -650,7 +640,7 @@ export function PlatformPortfolio() {
       if (ta !== tb) return tb - ta;
       return a.kind === b.kind ? 0 : a.kind === 'asset' ? -1 : 1;
     });
-  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions, positions]);
+  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions, positions, transactions]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -798,7 +788,9 @@ export function PlatformPortfolio() {
     const adjustedClosedPositionsProfitLoss =
       closedPositionsProfitLoss - surperformanceInterests + surchargeAmortization;
 
-    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss;
+    const openAccruedGains = sumOpenPositionAccruedGains(positions);
+
+    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss + openAccruedGains;
   }, [positions, calculatedValues, transactions]);
 
   // Bonus est du cash, donc inclus dans investedCapital -> on ne le soustrait pas
@@ -808,7 +800,14 @@ export function PlatformPortfolio() {
     () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
     [availableFunds, tradingPortfolio, profitLoss]
   );
+
+  const portfolioDisplayPerformance = useMemo(() => {
+    const netContributions = computeNetContributions(transactions, isCompletedStatus);
+    return computePortfolioDisplayPerformance(portfolioValue, netContributions);
+  }, [transactions, portfolioValue]);
+
   const isProfit = profitLoss >= 0;
+  const isPortfolioDisplayProfit = portfolioDisplayPerformance.gain >= 0;
 
   // Répartition du portefeuille: se baser sur les TRANSACTIONS + inclure la BALANCE (liquidités disponibles)
   const allocationByType = useMemo(() => {
@@ -954,17 +953,18 @@ export function PlatformPortfolio() {
                 <div className="platform-portfolioStatValue">
                   {formatAmount(portfolioValue, accountCurrency)}
                 </div>
-                <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: isProfit ? '#10b981' : '#ef4444' }}>
-                  {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
-                  {(() => {
-                    const costBasis = portfolioValue - profitLoss;
-                    const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
-                    return (
-                      <span style={{ marginLeft: 6 }}>
-                        ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
-                      </span>
-                    );
-                  })()}
+                <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: isPortfolioDisplayProfit ? '#10b981' : '#ef4444' }}>
+                  {isPortfolioDisplayProfit ? '+' : ''}{formatAmount(portfolioDisplayPerformance.gain, accountCurrency)}
+                  {portfolioDisplayPerformance.pct != null && (
+                    <span style={{ marginLeft: 6 }}>
+                      ({isPortfolioDisplayProfit ? '+' : ''}
+                      {portfolioDisplayPerformance.pct.toLocaleString('fr-FR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      %)
+                    </span>
+                  )}
                 </div>
 
                 {allocationByType.total > 0 && (

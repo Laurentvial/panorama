@@ -292,6 +292,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         <Button 
           size="sm" 
           variant="outline"
+          className="h-8 rounded-md !border !border-amber-300 !bg-amber-100 px-3 !text-amber-900 shadow-sm transition-colors duration-200 hover:!bg-amber-300 hover:!text-amber-950 hover:!opacity-100 client-quick-action-button"
           onClick={() => {
             setActiveTab('notes');
             sessionStorage.setItem(`${CLIENT_DETAIL_TAB_STORAGE_PREFIX}${clientId}`, 'notes');
@@ -305,6 +306,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         <Button 
           size="sm" 
           variant="outline"
+          className="h-8 rounded-md !border !border-blue-300 !bg-blue-100 px-3 !text-blue-900 shadow-sm transition-colors duration-200 hover:!bg-blue-300 hover:!text-blue-950 hover:!opacity-100 client-quick-action-button"
           onClick={() => navigate(`/admin/messagerie?clientId=${clientId}&mode=new`)}
         >
           <Mail className="w-4 h-4 mr-2" />
@@ -314,6 +316,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
         <Button 
           size="sm" 
           variant="outline"
+          className="h-8 rounded-md !border !border-purple-300 !bg-purple-100 px-3 !text-purple-900 shadow-sm transition-colors duration-200 hover:!bg-purple-300 hover:!text-purple-950 hover:!opacity-100 client-quick-action-button"
           onClick={handlePlatformAccess}
         >
           <Power className="w-4 h-4 mr-2" />
@@ -324,7 +327,11 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           size="sm" 
           variant="outline"
           onClick={handleToggleActive}
-          className={client.active ? 'client-action-button-deactivate' : 'client-action-button-activate'}
+          className={
+            client.active
+              ? 'h-8 rounded-md !border !border-red-300 !bg-red-100 px-3 !text-red-900 shadow-sm transition-colors duration-200 hover:!bg-red-300 hover:!text-red-950 hover:!opacity-100 client-quick-action-button'
+              : 'h-8 rounded-md !border !border-green-300 !bg-green-100 px-3 !text-green-900 shadow-sm transition-colors duration-200 hover:!bg-green-300 hover:!text-green-950 hover:!opacity-100 client-quick-action-button'
+          }
         >
           {client.active ? (
             <>

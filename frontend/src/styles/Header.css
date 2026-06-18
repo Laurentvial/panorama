@@ -11,13 +11,14 @@
 }
 
 .header-container {
-  padding: 1rem 1.5rem;
+  padding: 0.5rem 1.5rem;
 }
 
 .header-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative;
 }
 
 .header-brand {
@@ -68,6 +69,19 @@
   color: color-mix(in srgb, var(--accent-foreground) 75%, transparent);
   margin: 0;
   line-height: 1.5;
+}
+
+.header-subtitle-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--accent-foreground) 55%, transparent);
+  margin: 0;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .header-actions {

@@ -96,3 +96,132 @@ export const getTransferProductMovements = (
   if (fallbackProductId) return [{ productId: fallbackProductId, delta: amount }];
   return [];
 };
+
+const parseProfitLoss = (value: unknown): number | null => {
+  if (value == null) return null;
+  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const resolveProductId = (value: any): string | null => {
+  const raw =
+    value?.productId ??
+    value?.product_id ??
+    value?.product?.id ??
+    value?.subscription_details?.productId ??
+    value?.subscriptionDetails?.productId ??
+    null;
+  if (raw == null) return null;
+  const id = String(raw).trim();
+  return id ? id : null;
+};
+
+/** Sum profit_loss on open + done positions for one product (total interest/gains created). */
+export function computeProductAccruedGains(productId: string, positions: any[]): number {
+  const productKey = String(productId);
+
+  let accruedGains = 0;
+  for (const p of positions || []) {
+    const status = String(p?.status || '').trim().toLowerCase();
+    if (status !== 'open' && status !== 'done') continue;
+
+    const posProductId = resolveProductId(p);
+    if (!posProductId || posProductId !== productKey) continue;
+
+    const gainNum = parseProfitLoss(p?.profit_loss);
+    if (gainNum != null) accruedGains += gainNum;
+  }
+
+  return accruedGains;
+}
+
+/** Accrued gains (open + done positions) minus paid interest transactions for one product. */
+export function computeProductUnpaidGains(
+  productId: string,
+  positions: any[],
+  transactions: any[],
+  isCompletedStatus: (status: unknown) => boolean
+): number {
+  const productKey = String(productId);
+  const accruedGains = computeProductAccruedGains(productKey, positions);
+
+  let paidInterests = 0;
+  for (const t of transactions || []) {
+    if (!isCompletedStatus(t?.status) || String(t?.type || '') !== 'interets') continue;
+
+    const txnProductId = resolveProductId(t);
+    if (!txnProductId || txnProductId !== productKey) continue;
+
+    const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+    const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+    if (amt > 0) paidInterests += amt;
+  }
+
+  return accruedGains - paidInterests;
+}
+
+/** Sum profit_loss on open positions (accrued but not yet closed). */
+export function sumOpenPositionAccruedGains(positions: any[]): number {
+  let total = 0;
+  for (const p of positions || []) {
+    if (String(p?.status || '').trim().toLowerCase() !== 'open') continue;
+    const gainNum = parseProfitLoss(p?.profit_loss);
+    if (gainNum != null) total += gainNum;
+  }
+  return total;
+}
+
+/** Net capital contributed (depots + bonus − retraits), excluding reintegrated interest. */
+export function computeNetContributions(
+  transactions: any[],
+  isCompletedStatus: (status: unknown) => boolean
+): number {
+  let net = 0;
+  let effectiveCurrency: string | null = null;
+
+  const completed = (transactions || [])
+    .filter((t) => isCompletedStatus(t?.status))
+    .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+
+  for (const transaction of completed) {
+    const amount =
+      typeof transaction.amount === 'string' ? parseFloat(transaction.amount) : Number(transaction.amount);
+    const amt = Number.isFinite(amount) ? amount : 0;
+    const txnCcy = (transaction.amountCurrency || transaction.amount_currency || 'EUR')
+      .toString()
+      .trim()
+      .toUpperCase();
+
+    if (transaction.type === 'conversion') {
+      net = amt;
+      effectiveCurrency = txnCcy;
+      continue;
+    }
+    if (effectiveCurrency === null) effectiveCurrency = txnCcy;
+    if (txnCcy !== effectiveCurrency) continue;
+
+    switch (transaction.type) {
+      case 'depot':
+      case 'bonus':
+        net += amt;
+        break;
+      case 'retrait':
+        net -= amt;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return net;
+}
+
+/** Client-facing portfolio gain: current value minus net contributions. */
+export function computePortfolioDisplayPerformance(
+  portfolioValue: number,
+  netContributions: number
+): { gain: number; pct: number | null } {
+  const gain = portfolioValue - netContributions;
+  const pct = netContributions > 0 ? (gain / netContributions) * 100 : null;
+  return { gain, pct };
+}

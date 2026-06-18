@@ -11,7 +11,13 @@ import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatSubcategoryForDisplay } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
-import { getTransferGlobalDelta, getTransferProductMovements } from '../utils/portfolioTransfers';
+import {
+  computeNetContributions,
+  computePortfolioDisplayPerformance,
+  getTransferGlobalDelta,
+  getTransferProductMovements,
+  sumOpenPositionAccruedGains,
+} from '../utils/portfolioTransfers';
 import '../styles/PlatformDashboardMovers.css';
 import '../styles/PlatformPortfolio.css';
 
@@ -605,7 +611,9 @@ export function PlatformDashboard() {
     const adjustedClosedPositionsProfitLoss =
       closedPositionsProfitLoss - surperformanceInterests + surchargeAmortization;
 
-    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss;
+    const openAccruedGains = sumOpenPositionAccruedGains(positions);
+
+    return transactionsProfitLoss + adjustedClosedPositionsProfitLoss + openAccruedGains;
   }, [positions, calculatedValues, allTransactions]);
 
   const availableFunds = React.useMemo(() => investedCapital - tradingPortfolio, [investedCapital, tradingPortfolio]);
@@ -704,7 +712,14 @@ export function PlatformDashboard() {
     () => Math.max(0, availableFunds) + tradingPortfolio + profitLoss,
     [availableFunds, tradingPortfolio, profitLoss]
   );
+
+  const portfolioDisplayPerformance = React.useMemo(() => {
+    const netContributions = computeNetContributions(allTransactions, isCompletedStatus);
+    return computePortfolioDisplayPerformance(portfolioValue, netContributions);
+  }, [allTransactions, portfolioValue]);
+
   const isProfit = profitLoss >= 0;
+  const isPortfolioDisplayProfit = portfolioDisplayPerformance.gain >= 0;
 
   // Calculate gainers and losers
   const getGainersAndLosers = () => {
@@ -1235,22 +1250,23 @@ export function PlatformDashboard() {
                         marginTop: 8,
                         fontSize: isMobile ? '16px' : '18px',
                         fontWeight: 600,
-                        color: isProfit ? '#10b981' : '#ef4444',
+                        color: isPortfolioDisplayProfit ? '#10b981' : '#ef4444',
                         minWidth: 0,
                         overflowWrap: 'anywhere',
                         wordBreak: 'break-word',
                       }}
                     >
-                      {isProfit ? '+' : ''}{formatAmount(profitLoss, accountCurrency)}
-                      {(() => {
-                        const costBasis = portfolioValue - profitLoss;
-                        const pct = costBasis > 0 ? (profitLoss / costBasis) * 100 : 0;
-                        return (
-                          <span style={{ marginLeft: 6 }}>
-                            ({isProfit ? '+' : ''}{pct.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %)
-                          </span>
-                        );
-                      })()}
+                      {isPortfolioDisplayProfit ? '+' : ''}{formatAmount(portfolioDisplayPerformance.gain, accountCurrency)}
+                      {portfolioDisplayPerformance.pct != null && (
+                        <span style={{ marginLeft: 6 }}>
+                          ({isPortfolioDisplayProfit ? '+' : ''}
+                          {portfolioDisplayPerformance.pct.toLocaleString('fr-FR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          %)
+                        </span>
+                      )}
                     </div>
 
                     {allocationByType.total > 0 && (
