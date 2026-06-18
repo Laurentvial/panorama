@@ -9622,9 +9622,9 @@ def _client_transaction_create_impl(request, client_id):
                     "product_id": str(product.id) if product else None,
                 },
             )
-    # Contract generation is now manual from the transaction list (UI button).
-    # Keep this block disabled to prevent automatic contract creation on transfer creation.
-    auto_generate_contract_on_create = False
+    # Auto-generate contract for client self-service subscriptions (product page form).
+    # Admin-created investment transfers keep manual generation from the transaction list.
+    auto_generate_contract_on_create = bool(is_client_token and is_subscription_transfert)
     if is_subscription_transfert and auto_generate_contract_on_create:
         import logging
         logger = logging.getLogger(__name__)
