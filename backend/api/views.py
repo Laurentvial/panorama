@@ -7957,6 +7957,151 @@ def positions_list(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def client_position_create(request, client_id):
+    """
+    Crée manuellement une position pour un client.
+    Accessible uniquement aux utilisateurs authentifiés (admin/gestionnaire) ayant accès au client.
+    """
+    from django.utils.dateparse import parse_datetime
+
+    client = get_object_or_404(Client, id=client_id)
+    err = _check_gestionnaire_client_access(request, client)
+    if err:
+        return err
+
+    payload = request.data or {}
+
+    def _parse_dt(value, field_name):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            value = raw
+        dt = parse_datetime(str(value))
+        if not dt:
+            raise ValueError(f'{field_name} invalide (attendu ISO datetime)')
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    if 'opened_at' not in payload or payload.get('opened_at') in (None, ''):
+        return Response({'error': 'opened_at est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'closed_at' not in payload or payload.get('closed_at') in (None, ''):
+        return Response({'error': 'closed_at est requis'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'invested_amount' not in payload or payload.get('invested_amount') in (None, ''):
+        return Response({'error': 'invested_amount est requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        opened_at = _parse_dt(payload.get('opened_at'), 'opened_at')
+        closed_at = _parse_dt(payload.get('closed_at'), 'closed_at')
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not opened_at or not closed_at:
+        return Response({'error': 'opened_at et closed_at sont requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if closed_at < opened_at:
+        return Response(
+            {'error': "La date de fermeture doit être postérieure à la date d'ouverture"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        invested_amount = Decimal(str(payload.get('invested_amount')))
+    except (InvalidOperation, TypeError, ValueError):
+        return Response({'error': 'Montant investi invalide'}, status=status.HTTP_400_BAD_REQUEST)
+    if invested_amount < 0:
+        return Response({'error': 'Le montant investi ne peut pas être négatif'}, status=status.HTTP_400_BAD_REQUEST)
+
+    asset = None
+    if 'asset_id' in payload:
+        raw_asset_id = payload.get('asset_id')
+        asset_id = str(raw_asset_id).strip() if raw_asset_id is not None else ''
+        if asset_id:
+            try:
+                asset = Asset.objects.get(id=asset_id)
+            except Asset.DoesNotExist:
+                return Response({'error': 'Asset introuvable'}, status=status.HTTP_404_NOT_FOUND)
+
+    profit_loss = None
+    if 'profit_loss' in payload and payload.get('profit_loss') not in (None, ''):
+        try:
+            profit_loss = Decimal(str(payload.get('profit_loss')))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'error': 'Profit / perte invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    product = None
+    if 'product_id' in payload:
+        raw_product_id = payload.get('product_id')
+        product_id = str(raw_product_id).strip() if raw_product_id is not None else ''
+        if product_id:
+            if not ClientProduct.objects.filter(client=client, product_id=product_id).exists():
+                return Response({'error': 'Produit non assigné à ce client'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                product = Product.objects.get(id=product_id)
+            except Product.DoesNotExist:
+                return Response({'error': 'Produit introuvable'}, status=status.HTTP_404_NOT_FOUND)
+
+    transaction = None
+    if 'transaction_id' in payload:
+        raw_transaction_id = payload.get('transaction_id')
+        transaction_id = str(raw_transaction_id).strip() if raw_transaction_id is not None else ''
+        if transaction_id:
+            transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+            if product is None:
+                product = transaction.product
+                if not product and transaction.transfer_to and transaction.transfer_to != 'solde':
+                    try:
+                        product = Product.objects.get(id=transaction.transfer_to)
+                    except Product.DoesNotExist:
+                        product = None
+
+    allowed_statuses = {'pending', 'open', 'done'}
+    status_override = payload.get('status')
+    if status_override not in (None, ''):
+        computed_status = str(status_override).strip().lower()
+        if computed_status not in allowed_statuses:
+            return Response(
+                {'error': "Statut invalide (attendu: pending, open, done)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        now_ref = timezone.now()
+        if closed_at <= now_ref:
+            computed_status = 'done'
+        elif opened_at <= now_ref < closed_at:
+            computed_status = 'open'
+        else:
+            computed_status = 'pending'
+
+    position_id = uuid.uuid4().hex[:12]
+    while Position.objects.filter(id=position_id).exists():
+        position_id = uuid.uuid4().hex[:12]
+
+    pos = Position.objects.create(
+        id=position_id,
+        client=client,
+        product=product,
+        transaction=transaction,
+        asset=asset,
+        opened_at=opened_at,
+        closed_at=closed_at,
+        invested_amount=invested_amount,
+        profit_loss=profit_loss,
+        status=computed_status,
+        period_index=None,
+        period_date=None,
+    )
+
+    pos = Position.objects.select_related('client', 'product', 'transaction', 'asset').get(id=pos.id)
+    serializer = PositionSerializer(pos)
+    return Response({'position': serializer.data}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def client_position_cancel(request, client_id, position_id):
     """
     Annuler (soft-delete) une position: status -> 'cancelled'.

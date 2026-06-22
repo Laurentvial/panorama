@@ -23,7 +23,7 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronLeft, ChevronRight, Pencil, ChevronDown, X } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Pencil, ChevronDown, X, Plus } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 import {
   PositionStatusBadge,
@@ -129,6 +129,25 @@ export function ClientPositionsTab({
   const [isAssetSearchOpen, setIsAssetSearchOpen] = useState(false);
   const [editAssetQuery, setEditAssetQuery] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [savingCreate, setSavingCreate] = useState(false);
+  const [createOpenedDate, setCreateOpenedDate] = useState('');
+  const [createOpenedTime, setCreateOpenedTime] = useState('');
+  const [createClosedDate, setCreateClosedDate] = useState('');
+  const [createClosedTime, setCreateClosedTime] = useState('');
+  const [createAssetId, setCreateAssetId] = useState<string>('none');
+  const [isCreateAssetSearchOpen, setIsCreateAssetSearchOpen] = useState(false);
+  const [createAssetQuery, setCreateAssetQuery] = useState('');
+  const [createAmount, setCreateAmount] = useState('');
+  const [createProfitLoss, setCreateProfitLoss] = useState('');
+  const [createProductId, setCreateProductId] = useState<string>('none');
+  const [createTransactionId, setCreateTransactionId] = useState<string>('none');
+  const [createStatusMode, setCreateStatusMode] = useState<'auto' | 'pending' | 'open' | 'done'>('auto');
+  const [clientProducts, setClientProducts] = useState<any[]>([]);
+  const [clientTransactions, setClientTransactions] = useState<any[]>([]);
+  const [loadingCreateData, setLoadingCreateData] = useState(false);
+  const [createTransactionQuery, setCreateTransactionQuery] = useState('');
+  const [isCreateTransactionSearchOpen, setIsCreateTransactionSearchOpen] = useState(false);
   const prevRefreshTokenRef = useRef(refreshToken);
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
@@ -394,6 +413,150 @@ export function ClientPositionsTab({
     }
   }
 
+  function resetCreateForm() {
+    setCreateOpenedDate('');
+    setCreateOpenedTime('');
+    setCreateClosedDate('');
+    setCreateClosedTime('');
+    setCreateAssetId('none');
+    setCreateAssetQuery('');
+    setIsCreateAssetSearchOpen(false);
+    setCreateAmount('');
+    setCreateProfitLoss('');
+    setCreateProductId('none');
+    setCreateTransactionId('none');
+    setCreateStatusMode('auto');
+    setCreateTransactionQuery('');
+    setIsCreateTransactionSearchOpen(false);
+  }
+
+  async function loadCreateFormData() {
+    setLoadingCreateData(true);
+    try {
+      const allTransactions: any[] = [];
+      let page = 1;
+      const limit = 500;
+      let hasMore = true;
+
+      while (hasMore) {
+        const data = await apiCall(`/api/clients/${clientId}/transactions/?page=${page}&limit=${limit}`);
+        const transactions = (data as any)?.transactions || [];
+        allTransactions.push(...transactions);
+        const pag = (data as any)?.pagination;
+        if (pag && page >= pag.total_pages) {
+          hasMore = false;
+        } else if (transactions.length < limit) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      }
+
+      const productsData = await apiCall(`/api/clients/${clientId}/products/`);
+      setClientProducts((productsData as any)?.products || []);
+      setClientTransactions(allTransactions);
+    } catch (error) {
+      console.error('Error loading create form data:', error);
+      toast.error('Erreur lors du chargement des produits et transactions');
+      setClientProducts([]);
+      setClientTransactions([]);
+    } finally {
+      setLoadingCreateData(false);
+    }
+  }
+
+  function openCreateModal() {
+    resetCreateForm();
+    setIsCreateOpen(true);
+    void loadCreateFormData();
+  }
+
+  function statusToTab(status: string): 'upcoming' | 'open' | 'closed' | 'cancelled' {
+    if (status === 'pending') return 'upcoming';
+    if (status === 'open') return 'open';
+    if (status === 'done') return 'closed';
+    if (status === 'cancelled') return 'cancelled';
+    return 'upcoming';
+  }
+
+  async function handleSavePositionCreate() {
+    const openedAt = combineDateAndTimeForApi(createOpenedDate, createOpenedTime);
+    if (!createOpenedDate.trim() || openedAt === '') {
+      toast.error("Veuillez renseigner la date et l'heure d'ouverture");
+      return;
+    }
+    const closedAt = combineDateAndTimeForApi(createClosedDate, createClosedTime);
+    if (!createClosedDate.trim() || closedAt === '') {
+      toast.error("Veuillez renseigner la date et l'heure de fermeture");
+      return;
+    }
+    if (openedAt && closedAt && new Date(closedAt).getTime() < new Date(openedAt).getTime()) {
+      toast.error("La date de fermeture doit être postérieure à la date d'ouverture");
+      return;
+    }
+
+    const normalizedAmount = String(createAmount ?? '').trim();
+    if (!normalizedAmount) {
+      toast.error('Le montant investi est requis');
+      return;
+    }
+    const parsedAmount = parseFloat(normalizedAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      toast.error('Le montant doit être un nombre positif ou nul');
+      return;
+    }
+
+    const payload: Record<string, string | number | null> = {
+      opened_at: openedAt,
+      closed_at: closedAt,
+      invested_amount: parsedAmount,
+      asset_id: createAssetId === 'none' ? null : createAssetId,
+    };
+
+    if (createProductId !== 'none') {
+      payload.product_id = createProductId;
+    }
+    if (createTransactionId !== 'none') {
+      payload.transaction_id = createTransactionId;
+    }
+
+    const normalizedProfitLoss = String(createProfitLoss ?? '').trim();
+    if (normalizedProfitLoss !== '') {
+      const parsedProfitLoss = parseFloat(normalizedProfitLoss);
+      if (!Number.isFinite(parsedProfitLoss)) {
+        toast.error('Le profit / perte doit être un nombre valide');
+        return;
+      }
+      payload.profit_loss = parsedProfitLoss;
+    }
+
+    if (createStatusMode !== 'auto') {
+      payload.status = createStatusMode;
+    }
+
+    setSavingCreate(true);
+    try {
+      const response = await apiCall(`/api/clients/${clientId}/positions/create/`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      clearApiCache(`clients/${clientId}/positions`);
+      const createdStatus = String((response as any)?.position?.status || 'pending');
+      const targetTab = statusToTab(createdStatus);
+      setActiveTab(targetTab);
+      await loadAllPositionsForCounts();
+      await loadPositionsForTab(targetTab, 1, pagination.limit, false);
+      toast.success('Position créée avec succès');
+      setIsCreateOpen(false);
+      resetCreateForm();
+    } catch (error: any) {
+      console.error('Error creating position:', error);
+      toast.error(error?.message || 'Erreur lors de la création de la position');
+    } finally {
+      setSavingCreate(false);
+    }
+  }
+
   const selectedEditAsset = useMemo(() => {
     if (editAssetId === 'none') return null;
     return assets.find((asset) => String(asset.id) === String(editAssetId)) || null;
@@ -417,6 +580,76 @@ export function ClientPositionsTab({
       })
       .slice(0, 150);
   }, [assets, editAssetQuery]);
+
+  const createProductOptions = useMemo(() => {
+    return clientProducts
+      .map((cp) => {
+        const product = cp?.product || cp;
+        const id = String(product?.id || cp?.productId || '').trim();
+        if (!id) return null;
+        const name = String(product?.name || id).trim();
+        return { id, name };
+      })
+      .filter(Boolean) as { id: string; name: string }[];
+  }, [clientProducts]);
+
+  const selectedCreateAsset = useMemo(() => {
+    if (createAssetId === 'none') return null;
+    return assets.find((asset) => String(asset.id) === String(createAssetId)) || null;
+  }, [assets, createAssetId]);
+
+  const selectedCreateAssetLabel =
+    createAssetId === 'none'
+      ? 'Aucun asset'
+      : selectedCreateAsset
+        ? `${selectedCreateAsset.name || selectedCreateAsset.id}${selectedCreateAsset.reference ? ` (${selectedCreateAsset.reference})` : ''}`
+        : 'Asset sélectionné';
+
+  const filteredCreateAssetOptions = useMemo(() => {
+    const query = createAssetQuery.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return assets
+      .filter((asset) => {
+        const name = String(asset?.name || '').toLowerCase();
+        const reference = String(asset?.reference || '').toLowerCase();
+        return name.includes(query) || reference.includes(query);
+      })
+      .slice(0, 150);
+  }, [assets, createAssetQuery]);
+
+  const formatTransactionLabel = (tx: any) => {
+    const id = String(tx?.id || '').trim();
+    const type = String(tx?.type || tx?.transactionType || '-').trim();
+    const amount = tx?.amount != null ? `${tx.amount} €` : '-';
+    const dateRaw = tx?.date || tx?.transactionDate || tx?.createdAt || '';
+    const dateLabel = dateRaw ? formatPositionDateOnly(String(dateRaw)) : '-';
+    return `${id} · ${type} · ${amount} · ${dateLabel}`;
+  };
+
+  const selectedCreateTransaction = useMemo(() => {
+    if (createTransactionId === 'none') return null;
+    return clientTransactions.find((tx) => String(tx.id) === String(createTransactionId)) || null;
+  }, [clientTransactions, createTransactionId]);
+
+  const selectedCreateTransactionLabel =
+    createTransactionId === 'none'
+      ? 'Aucune transaction'
+      : selectedCreateTransaction
+        ? formatTransactionLabel(selectedCreateTransaction)
+        : 'Transaction sélectionnée';
+
+  const filteredCreateTransactionOptions = useMemo(() => {
+    const query = createTransactionQuery.trim().toLowerCase();
+    if (query.length < 1) return clientTransactions.slice(0, 100);
+    return clientTransactions
+      .filter((tx) => {
+        const id = String(tx?.id || '').toLowerCase();
+        const type = String(tx?.type || tx?.transactionType || '').toLowerCase();
+        const amount = String(tx?.amount ?? '').toLowerCase();
+        return id.includes(query) || type.includes(query) || amount.includes(query);
+      })
+      .slice(0, 100);
+  }, [clientTransactions, createTransactionQuery]);
 
   return (
     <Card>
@@ -462,6 +695,15 @@ export function ClientPositionsTab({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    variant="outline"
+                    className="app-tabs-toolbar-control shrink-0"
+                    onClick={openCreateModal}
+                    disabled={loading}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Créer une position
+                  </Button>
                   <Button
                     variant="outline"
                     className="app-tabs-toolbar-control shrink-0"
@@ -830,6 +1072,279 @@ export function ClientPositionsTab({
               </Button>
               <Button type="button" onClick={() => { void handleSavePositionEdit(); }} disabled={savingEdit}>
                 {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={isCreateOpen} onOpenChange={(open) => { if (!open && !savingCreate) { setIsCreateOpen(false); resetCreateForm(); } else if (open) setIsCreateOpen(true); }}>
+          <DialogContent
+            className="max-h-[90vh] overflow-y-auto"
+            style={{ width: 'min(92vw, 48rem)', maxWidth: '48rem' }}
+          >
+            <DialogHeader>
+              <DialogTitle>Créer une position</DialogTitle>
+            </DialogHeader>
+            {loadingCreateData ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                <LoadingIndicator />
+                <p className="mt-4 text-sm text-slate-500">Chargement des données...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 py-2" style={{ columnGap: '2.5rem', rowGap: '1rem' }}>
+                <div className="space-y-2">
+                  <Label>Date (JJ/MM/AAAA) et heure d&apos;ouverture</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <DateInput
+                      id="create-position-opened-date"
+                      value={createOpenedDate}
+                      onChange={setCreateOpenedDate}
+                      disabled={savingCreate}
+                    />
+                    <Input
+                      id="create-position-opened-time"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="HH:mm"
+                      pattern="^([01]\d|2[0-3]):([0-5]\d)$"
+                      value={createOpenedTime}
+                      onChange={(e) => setCreateOpenedTime(e.target.value)}
+                      disabled={savingCreate}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Date (JJ/MM/AAAA) et heure de fermeture</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <DateInput
+                      id="create-position-closed-date"
+                      value={createClosedDate}
+                      onChange={setCreateClosedDate}
+                      disabled={savingCreate}
+                    />
+                    <Input
+                      id="create-position-closed-time"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="HH:mm"
+                      pattern="^([01]\d|2[0-3]):([0-5]\d)$"
+                      value={createClosedTime}
+                      onChange={(e) => setCreateClosedTime(e.target.value)}
+                      disabled={savingCreate}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-asset">Asset</Label>
+                  <Popover
+                    open={isCreateAssetSearchOpen}
+                    onOpenChange={(open) => {
+                      setIsCreateAssetSearchOpen(open);
+                      if (!open) setCreateAssetQuery('');
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="create-position-asset"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={isCreateAssetSearchOpen}
+                        disabled={savingCreate}
+                        className="w-full justify-between h-9 rounded-md border-input bg-input-background px-3 py-2 text-sm font-normal text-slate-700"
+                      >
+                        <span className="truncate">{selectedCreateAssetLabel}</span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 z-[10050]" align="start" style={{ zIndex: 10050 }}>
+                      <Command>
+                        <CommandInput
+                          placeholder="Rechercher un asset (nom ou référence)..."
+                          value={createAssetQuery}
+                          onValueChange={setCreateAssetQuery}
+                        />
+                        <CommandList className="max-h-[220px]">
+                          <CommandEmpty>
+                            {createAssetQuery.trim().length < 2
+                              ? 'Tapez au moins 2 caractères.'
+                              : 'Aucun asset trouvé.'}
+                          </CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              value="aucun asset none"
+                              onSelect={() => {
+                                setCreateAssetId('none');
+                                setIsCreateAssetSearchOpen(false);
+                              }}
+                            >
+                              Aucun asset
+                            </CommandItem>
+                            {filteredCreateAssetOptions.map((asset) => {
+                              const assetLabel = asset.name || asset.id;
+                              const searchValue = `${assetLabel} ${asset.reference || ''}`.toLowerCase();
+                              return (
+                                <CommandItem
+                                  key={String(asset.id)}
+                                  value={searchValue}
+                                  onSelect={() => {
+                                    setCreateAssetId(String(asset.id));
+                                    setIsCreateAssetSearchOpen(false);
+                                  }}
+                                >
+                                  {assetLabel}
+                                  {asset.reference ? ` (${asset.reference})` : ''}
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-amount">Montant investi (EUR)</Label>
+                  <Input
+                    id="create-position-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={createAmount}
+                    onChange={(e) => setCreateAmount(e.target.value)}
+                    disabled={savingCreate}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-product">Produit</Label>
+                  <Select
+                    modal={false}
+                    value={createProductId}
+                    onValueChange={setCreateProductId}
+                    disabled={savingCreate}
+                  >
+                    <SelectTrigger id="create-position-product" className="w-full">
+                      <SelectValue placeholder="Sélectionner un produit" />
+                    </SelectTrigger>
+                    <SelectContent style={{ zIndex: 10050 }}>
+                      <SelectItem value="none">Aucun produit</SelectItem>
+                      {createProductOptions.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>
+                          {product.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-status">Statut</Label>
+                  <Select
+                    modal={false}
+                    value={createStatusMode}
+                    onValueChange={(value) => setCreateStatusMode(value as 'auto' | 'pending' | 'open' | 'done')}
+                    disabled={savingCreate}
+                  >
+                    <SelectTrigger id="create-position-status" className="w-full">
+                      <SelectValue placeholder="Statut" />
+                    </SelectTrigger>
+                    <SelectContent style={{ zIndex: 10050 }}>
+                      <SelectItem value="auto">Automatique (selon dates)</SelectItem>
+                      <SelectItem value="pending">En attente</SelectItem>
+                      <SelectItem value="open">Ouverte</SelectItem>
+                      <SelectItem value="done">Terminée</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-profit-loss">Profit / Perte (EUR)</Label>
+                  <Input
+                    id="create-position-profit-loss"
+                    type="number"
+                    step="0.01"
+                    value={createProfitLoss}
+                    onChange={(e) => setCreateProfitLoss(e.target.value)}
+                    disabled={savingCreate}
+                    placeholder="Optionnel"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-position-transaction">Transaction liée</Label>
+                  <Popover
+                    open={isCreateTransactionSearchOpen}
+                    onOpenChange={(open) => {
+                      setIsCreateTransactionSearchOpen(open);
+                      if (!open) setCreateTransactionQuery('');
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="create-position-transaction"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={isCreateTransactionSearchOpen}
+                        disabled={savingCreate}
+                        className="w-full justify-between h-9 rounded-md border-input bg-input-background px-3 py-2 text-sm font-normal text-slate-700"
+                      >
+                        <span className="truncate">{selectedCreateTransactionLabel}</span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 z-[10050]" align="start" style={{ zIndex: 10050 }}>
+                      <Command>
+                        <CommandInput
+                          placeholder="Rechercher une transaction (id, type, montant)..."
+                          value={createTransactionQuery}
+                          onValueChange={setCreateTransactionQuery}
+                        />
+                        <CommandList className="max-h-[220px]">
+                          <CommandEmpty>Aucune transaction trouvée.</CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              value="aucune transaction none"
+                              onSelect={() => {
+                                setCreateTransactionId('none');
+                                setIsCreateTransactionSearchOpen(false);
+                              }}
+                            >
+                              Aucune transaction
+                            </CommandItem>
+                            {filteredCreateTransactionOptions.map((tx) => {
+                              const label = formatTransactionLabel(tx);
+                              return (
+                                <CommandItem
+                                  key={String(tx.id)}
+                                  value={label.toLowerCase()}
+                                  onSelect={() => {
+                                    setCreateTransactionId(String(tx.id));
+                                    setIsCreateTransactionSearchOpen(false);
+                                  }}
+                                >
+                                  {label}
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setIsCreateOpen(false); resetCreateForm(); }}
+                disabled={savingCreate}
+              >
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                onClick={() => { void handleSavePositionCreate(); }}
+                disabled={savingCreate || loadingCreateData}
+              >
+                {savingCreate ? 'Création...' : 'Créer'}
               </Button>
             </DialogFooter>
           </DialogContent>
