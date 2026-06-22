@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 interface ClientVerificationTabProps {
   client: any;
   clientId?: string;
+  refreshToken?: number;
 }
 
 const SEX_LABELS: Record<string, string> = {
@@ -104,7 +105,7 @@ const STEP_LABELS: Record<string, string> = {
   step_8: 'Question 8 : Vérification KYC',
 };
 
-export function ClientVerificationTab({ client, clientId }: ClientVerificationTabProps) {
+export function ClientVerificationTab({ client, clientId, refreshToken = 0 }: ClientVerificationTabProps) {
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -135,7 +136,7 @@ export function ClientVerificationTab({ client, clientId }: ClientVerificationTa
     if (actualClientId) {
       loadConfig();
     }
-  }, [actualClientId]);
+  }, [actualClientId, refreshToken]);
 
   const loadConfig = async () => {
     if (!actualClientId) return;

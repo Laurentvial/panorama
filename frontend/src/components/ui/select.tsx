@@ -11,9 +11,10 @@ import {
 import { cn } from "./utils";
 
 function Select({
+  modal = false,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+  return <SelectPrimitive.Root modal={modal} data-slot="select" {...props} />;
 }
 
 function SelectGroup({

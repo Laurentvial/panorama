@@ -12,14 +12,28 @@ import {
   getTransferProductMovements,
   sumOpenPositionAccruedGains,
 } from '../utils/portfolioTransfers';
+import {
+  AssetLogo,
+  ASSET_LOGO_NAME_GAP_PX,
+  getAssetLogoUrl,
+  positionsTableBodyClass,
+  positionsTableCellClass,
+  positionsTableClass,
+  positionsTableHeadCellClass,
+  positionsTableHeadClass,
+  positionsTableHeadRowClass,
+  positionsTableRowClass,
+  positionsTableShellClass,
+} from './positionUtils';
 
 interface ClientPortfolioTabProps {
   client: any;
   clientId?: string;
   onRefresh?: () => void;
+  refreshToken?: number;
 }
 
-export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfolioTabProps) {
+export function ClientPortfolioTab({ client, clientId, onRefresh, refreshToken = 0 }: ClientPortfolioTabProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
@@ -66,7 +80,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
     loadTransactions();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   useEffect(() => {
     async function loadAssetsAndProducts() {
@@ -89,7 +103,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
     loadAssetsAndProducts();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   useEffect(() => {
     async function loadPositions() {
@@ -126,7 +140,7 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
       }
     }
     loadPositions();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   // Calculate values from transactions
   const calculateValuesFromTransactions = () => {
@@ -312,6 +326,11 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   const accountCurrency = (client?.accountCurrency || client?.account_currency || 'EUR').toString().trim().toUpperCase();
   const formatCurrency = (amount: number) => formatAmount(amount, accountCurrency);
   const formatSignedCurrency = (amount: number) => `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
+  const formatPnlWithPct = (pnl: number, pnlPct: number | null) => {
+    const main = formatSignedCurrency(pnl);
+    if (pnlPct == null || !Number.isFinite(pnlPct)) return main;
+    return `${main} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+  };
 
   const productsById = useMemo(() => {
     const map = new Map<string, any>();
@@ -321,6 +340,15 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
     }
     return map;
   }, [productsIndex]);
+
+  const assetsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const a of assetsIndex || []) {
+      const id = a?.id != null ? String(a.id) : '';
+      if (id) map.set(id, a);
+    }
+    return map;
+  }, [assetsIndex]);
 
   const assetHoldings = useMemo(() => {
     const map = new Map<
@@ -428,26 +456,39 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
   }, [transactions, positions, productsById]);
 
   const holdingsRows = useMemo(() => {
+    const computePnlPct = (pnl: number, invested: number): number | null => {
+      if (!Number.isFinite(invested) || invested <= 0 || !Number.isFinite(pnl)) return null;
+      const pct = (pnl / invested) * 100;
+      return Number.isFinite(pct) ? pct : null;
+    };
+
     const assetRows = assetHoldings.map((a) => ({
-      kind: 'asset',
+      kind: 'asset' as const,
       key: `asset-${a.assetId}`,
       name: a.name,
+      logoUrl: getAssetLogoUrl(assetsById.get(a.assetId)),
       type: a.type || 'Trading',
       reference: a.reference || '-',
       invested: a.invested,
       pnl: a.pnl,
+      pnlPct: computePnlPct(a.pnl, a.invested),
     }));
-    const productRows = investedProducts.map((p) => ({
-      kind: 'product',
-      key: `product-${p.productId}`,
-      name: p.name,
-      type: p.type || 'Produit',
-      reference: p.reference || '-',
-      invested: p.invested,
-      pnl: p.pnl,
-    }));
+    const productRows = investedProducts.map((p) => {
+      const product = productsById.get(String(p.productId));
+      return {
+        kind: 'product' as const,
+        key: `product-${p.productId}`,
+        name: p.name,
+        logoUrl: String(product?.imageUrl || product?.image_url || '').trim(),
+        type: p.type || 'Produit',
+        reference: p.reference || '-',
+        invested: p.invested,
+        pnl: p.pnl,
+        pnlPct: computePnlPct(p.pnl, p.invested),
+      };
+    });
     return [...assetRows, ...productRows].sort((a, b) => b.invested - a.invested);
-  }, [assetHoldings, investedProducts]);
+  }, [assetHoldings, investedProducts, assetsById, productsById]);
 
   const recap = useMemo(() => {
     let achats = 0;
@@ -666,41 +707,59 @@ export function ClientPortfolioTab({ client, clientId, onRefresh }: ClientPortfo
         </CardHeader>
         <CardContent>
           {holdingsRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Aucun actif détenu.</p>
+            <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+              Aucun actif détenu.
+            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="py-2 text-left font-medium text-muted-foreground">Actif / Produit</th>
-                    <th className="py-2 text-left font-medium text-muted-foreground">Type</th>
-                    <th className="py-2 text-left font-medium text-muted-foreground">Réf</th>
-                    <th className="py-2 text-right font-medium text-muted-foreground">Valeur investie</th>
-                    <th className="py-2 text-right font-medium text-muted-foreground">P&L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {holdingsRows.map((row) => (
-                    <tr key={row.key} className="border-b last:border-b-0">
-                      <td className="py-2">
-                        <div className="font-medium">{row.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {row.kind === 'asset' ? 'Actif' : 'Produit'}
-                        </div>
-                      </td>
-                      <td className="py-2">{row.type}</td>
-                      <td className="py-2">{row.reference}</td>
-                      <td className="py-2 text-right font-medium">{formatCurrency(row.invested)}</td>
-                      <td
-                        className="py-2 text-right font-medium"
-                        style={{ color: row.pnl >= 0 ? '#16a34a' : '#dc2626' }}
-                      >
-                        {formatSignedCurrency(row.pnl)}
-                      </td>
+            <div className={positionsTableShellClass}>
+              <div className="overflow-x-auto">
+                <table className={positionsTableClass}>
+                  <thead className={positionsTableHeadClass}>
+                    <tr className={positionsTableHeadRowClass}>
+                      <th className={`${positionsTableHeadCellClass} text-left`}>Actif / Produit</th>
+                      <th className={`${positionsTableHeadCellClass} text-left`}>Type</th>
+                      <th className={`${positionsTableHeadCellClass} text-left`}>Réf</th>
+                      <th className={`${positionsTableHeadCellClass} text-right`}>Valeur investie</th>
+                      <th className={`${positionsTableHeadCellClass} text-right`}>P&L</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className={positionsTableBodyClass}>
+                    {holdingsRows.map((row) => (
+                      <tr key={row.key} className={positionsTableRowClass}>
+                        <td className={positionsTableCellClass}>
+                          <div className="flex min-w-0 items-center">
+                            <div className="shrink-0" style={{ marginRight: ASSET_LOGO_NAME_GAP_PX }}>
+                              <AssetLogo
+                                logoUrl={row.logoUrl}
+                                name={row.name}
+                                objectFit={row.kind === 'product' ? 'cover' : 'contain'}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate font-medium text-slate-900">{row.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {row.kind === 'asset' ? 'Actif' : 'Produit'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className={`${positionsTableCellClass} text-slate-600`}>{row.type}</td>
+                        <td className={`${positionsTableCellClass} font-mono text-xs text-slate-600`}>{row.reference}</td>
+                        <td className={`${positionsTableCellClass} text-right font-medium whitespace-nowrap`}>
+                          {formatCurrency(row.invested)}
+                        </td>
+                        <td
+                          className={`${positionsTableCellClass} text-right font-medium whitespace-nowrap ${
+                            row.pnl >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}
+                        >
+                          {formatPnlWithPct(row.pnl, row.pnlPct)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </CardContent>

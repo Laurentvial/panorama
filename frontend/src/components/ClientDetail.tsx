@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect, useRef } from 'react';
 import { lazy } from '../utils/lazyImport';
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
@@ -47,6 +47,17 @@ const CLIENT_DETAIL_TABS = [
 
 type ClientDetailTab = typeof CLIENT_DETAIL_TABS[number];
 
+const SELF_LOADING_TABS = new Set<string>([
+  'assets',
+  'portfolio',
+  'transactions',
+  'positions',
+  'verification',
+  'documents',
+  'history',
+  'platform-logs',
+]);
+
 export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   const navigate = useNavigate();
   const [client, setClient] = useState<any>(null);
@@ -59,16 +70,14 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   
   // Data for tabs (loaded lazily)
   const [notes, setNotes] = useState<any[]>([]);
-  const [clientAssets, setClientAssets] = useState<any[]>([]);
-  const [availableAssets, setAvailableAssets] = useState<any[]>([]);
-  const [clientProducts, setClientProducts] = useState<any[]>([]);
-  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
   const [clientRibs, setClientRibs] = useState<any[]>([]);
   const [availableRibs, setAvailableRibs] = useState<any[]>([]);
   const [clientWallets, setClientWallets] = useState<any[]>([]);
   const [availableWallets, setAvailableWallets] = useState<any[]>([]);
   const [clientUsefulLinks, setClientUsefulLinks] = useState<any[]>([]);
   const [availableUsefulLinks, setAvailableUsefulLinks] = useState<any[]>([]);
+  const loadingTabRequestRef = useRef(0);
+  const [selfLoadingRefreshToken, setSelfLoadingRefreshToken] = useState(0);
   
   // Dialogs
   const [isEditPersonalInfoOpen, setIsEditPersonalInfoOpen] = useState(false);
@@ -108,10 +117,16 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
   // Load tab data lazily when tab is accessed
   async function loadTabData(tabName: string, forceReload: boolean = false, silent: boolean = false) {
+    if (SELF_LOADING_TABS.has(tabName)) {
+      setLoadedTabs((prev) => new Set(prev).add(tabName));
+      return;
+    }
+
     if (!forceReload && loadedTabs.has(tabName)) {
       return; // Already loaded, skip unless forced
     }
 
+    const requestId = ++loadingTabRequestRef.current;
     if (!silent) {
       setLoadingTab(tabName);
     }
@@ -124,21 +139,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
           setNotes(clientNotes);
           setLoadedTabs(prev => new Set(prev).add('notes'));
           break;
-        
-        case 'assets':
-          const [assetsData, availableAssetsData, productsData, availableProductsData] = await Promise.all([
-            apiCall(`/api/clients/${clientId}/assets/`),
-            apiCall(`/api/assets/`),
-            apiCall(`/api/clients/${clientId}/products/`),
-            apiCall(`/api/products/`)
-          ]);
-          setClientAssets((assetsData as any).assets || []);
-          setAvailableAssets((availableAssetsData as any).assets || []);
-          setClientProducts((productsData as any).products || []);
-          setAvailableProducts((availableProductsData as any).products || []);
-          setLoadedTabs(prev => new Set(prev).add('assets'));
-          break;
-        
+
         case 'misc':
           const [ribsData, availableRibsData, walletsData, availableWalletsData, usefulLinksData, availableUsefulLinksData] = await Promise.all([
             apiCall(`/api/clients/${clientId}/ribs/`),
@@ -166,7 +167,7 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
       console.error(`Error loading tab data for ${tabName}:`, error);
       toast.error(`Erreur lors du chargement des données de l'onglet`);
     } finally {
-      if (!silent) {
+      if (!silent && loadingTabRequestRef.current === requestId) {
         setLoadingTab(null);
       }
     }
@@ -187,17 +188,18 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
   async function loadClientData() {
     // Refresh essential client data
     await loadEssentialClientData();
-    // Reload currently loaded tabs (force reload to refresh data after mutations)
+    // Self-loading tabs watch refreshToken; parent-managed tabs reload via loadTabData
+    const hasLoadedSelfLoadingTabs = [...loadedTabs].some(
+      (tab) => tab !== 'info' && SELF_LOADING_TABS.has(tab),
+    );
+    if (hasLoadedSelfLoadingTabs) {
+      setSelfLoadingRefreshToken((token) => token + 1);
+    }
     for (const tab of loadedTabs) {
-      if (tab !== 'info') {
-        await loadTabData(tab, true); // Force reload even if already loaded
+      if (tab !== 'info' && !SELF_LOADING_TABS.has(tab)) {
+        await loadTabData(tab, true);
       }
     }
-  }
-
-  async function refreshAssetsTabData() {
-    // Force-refresh this tab payload so new assignments appear immediately
-    await loadTabData('assets', true, true);
   }
 
   function handleOpenEditModal() {
@@ -380,31 +382,22 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
             onRefresh={loadClientData}
             clientId={clientId}
             client={client}
+            refreshToken={selfLoadingRefreshToken}
           />
         </TabsContent>
 
         {/* Positions Tab */}
         <TabsContent value="positions">
-          <ClientPositionsTab clientId={clientId} accountCurrency={client?.accountCurrency || 'EUR'} />
+          <ClientPositionsTab
+            clientId={clientId}
+            accountCurrency={client?.accountCurrency || 'EUR'}
+            refreshToken={selfLoadingRefreshToken}
+          />
         </TabsContent>
 
         {/* Assets Tab */}
         <TabsContent value="assets">
-          {loadingTab === 'assets' ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <LoadingIndicator />
-              <p className="mt-4 text-slate-600">Chargement des actifs...</p>
-            </div>
-          ) : (
-            <ClientAssetsTab 
-              clientId={clientId}
-              clientAssets={clientAssets}
-              availableAssets={availableAssets}
-              clientProducts={clientProducts}
-              availableProducts={availableProducts}
-              onRefresh={refreshAssetsTabData}
-            />
-          )}
+          <ClientAssetsTab clientId={clientId} refreshToken={selfLoadingRefreshToken} />
         </TabsContent>
 
         {/* Portfolio Tab */}
@@ -417,7 +410,12 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
               </div>
             }
           >
-            <ClientPortfolioTab client={client} clientId={clientId} onRefresh={loadClientData} />
+            <ClientPortfolioTab
+              client={client}
+              clientId={clientId}
+              onRefresh={loadClientData}
+              refreshToken={selfLoadingRefreshToken}
+            />
           </Suspense>
         </TabsContent>
 
@@ -440,12 +438,21 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Verification Tab */}
         <TabsContent value="verification">
-          <ClientVerificationTab client={client} clientId={clientId} />
+          <ClientVerificationTab
+            client={client}
+            clientId={clientId}
+            refreshToken={selfLoadingRefreshToken}
+          />
         </TabsContent>
 
         {/* Documents Tab */}
         <TabsContent value="documents">
-          <ClientDocumentsTab clientId={clientId} accountCurrency={client?.accountCurrency || 'EUR'} onRefresh={loadClientData} />
+          <ClientDocumentsTab
+            clientId={clientId}
+            accountCurrency={client?.accountCurrency || 'EUR'}
+            onRefresh={loadClientData}
+            refreshToken={selfLoadingRefreshToken}
+          />
         </TabsContent>
 
         {/* Misc Tab */}
@@ -472,12 +479,12 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* History Tab */}
         <TabsContent value="history">
-          <ClientHistoryTab clientId={clientId} />
+          <ClientHistoryTab clientId={clientId} refreshToken={selfLoadingRefreshToken} />
         </TabsContent>
 
         {/* Platform Logs Tab */}
         <TabsContent value="platform-logs">
-          <ClientPlatformLogsTab clientId={clientId} />
+          <ClientPlatformLogsTab clientId={clientId} refreshToken={selfLoadingRefreshToken} />
         </TabsContent>
       </Tabs>
 

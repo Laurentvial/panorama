@@ -19,6 +19,13 @@ import { apiCall } from '../utils/api';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN } from '../utils/constants';
 import { toast } from 'sonner';
+import '../styles/Tabs.css';
+import {
+  positionsTableHeadCellClass,
+  positionsTableHeadClass,
+  positionsTableHeadRowClass,
+  tableStatusBadgeClass,
+} from './positionUtils';
 
 // Helper functions for French labels
 const getTypeColors = (type: string): { bg: string; text: string } => {
@@ -684,30 +691,30 @@ export function TransactionList({
     <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full caption-bottom text-sm">
-          <thead className="bg-slate-50/90 shadow-[inset_0_-1px_0_0_rgba(148,163,184,0.25)]">
-            <tr className="border-b border-slate-200/90">
+          <thead className={positionsTableHeadClass}>
+            <tr className={positionsTableHeadRowClass}>
             {selectable && (
-              <th className="h-12 w-10 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap" />
+              <th className={`${positionsTableHeadCellClass} w-10 text-left`} />
             )}
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Date</th>
-            {showClientColumn && <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Client</th>}
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Type</th>
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Actif</th>
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Description</th>
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Montant</th>
-            <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Statut</th>
+            <th className={`${positionsTableHeadCellClass} text-left`}>Date</th>
+            {showClientColumn && <th className={`${positionsTableHeadCellClass} text-left`}>Client</th>}
+            <th className={`${positionsTableHeadCellClass} text-left`}>Type</th>
+            <th className={`${positionsTableHeadCellClass} text-left`}>Actif</th>
+            <th className={`${positionsTableHeadCellClass} text-left`}>Description</th>
+            <th className={`${positionsTableHeadCellClass} text-left`}>Montant</th>
+            <th className={`${positionsTableHeadCellClass} text-left`}>Statut</th>
             {showInterestTrackingColumns && (
               <>
-                <th className="h-12 w-40 px-3 text-left align-middle text-sm font-semibold leading-tight text-slate-700">
-                  Dernier versement d'intérêt
+                <th className={`${positionsTableHeadCellClass} w-40 text-left leading-tight`}>
+                  Der versement d'intérêt
                 </th>
-                <th className="h-12 w-40 px-3 text-left align-middle text-sm font-semibold leading-tight text-slate-700">
-                  Prochain versement d'intérêt
+                <th className={`${positionsTableHeadCellClass} w-40 text-left leading-tight`}>
+                  Pro versement d'intérêt
                 </th>
               </>
             )}
-            {showContractColumn && <th className="h-12 px-4 text-left align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Contrat</th>}
-            <th className="h-12 px-4 text-right align-middle text-sm font-semibold text-slate-700 whitespace-nowrap">Actions</th>
+            {showContractColumn && <th className={`${positionsTableHeadCellClass} text-left`}>Contrat</th>}
+            <th className={`${positionsTableHeadCellClass} text-right`}>Actions</th>
           </tr>
         </thead>
         <tbody className="[&_tr:last-child]:border-0">
@@ -844,7 +851,7 @@ export function TransactionList({
                     const typeColors = getTypeColors(transaction.type);
                     return (
                       <span 
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold leading-4 shadow-sm"
+                        className={tableStatusBadgeClass}
                         style={{
                           backgroundColor: typeColors.bg,
                           color: typeColors.text,
@@ -853,7 +860,6 @@ export function TransactionList({
                           position: 'relative'
                         }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: typeColors.text }} />
                         {getTypeLabel(transaction.type)}
                       </span>
                     );
@@ -893,7 +899,7 @@ export function TransactionList({
                     const { bg, text } = getStatusColors(transaction.status, transaction.type);
                     return (
                       <span
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-semibold leading-4 shadow-sm"
+                        className={tableStatusBadgeClass}
                         style={{
                           backgroundColor: bg,
                           color: text,
@@ -902,7 +908,6 @@ export function TransactionList({
                           position: 'relative'
                         }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: text }} />
                         {getStatusLabel(transaction.status, transaction.type)}
                       </span>
                     );

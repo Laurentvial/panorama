@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 
 interface ClientHistoryTabProps {
   clientId: string;
+  refreshToken?: number;
 }
 
 interface HistoryLog {
@@ -39,14 +40,14 @@ const EVENT_TYPE_LABELS: { [key: string]: string } = {
   deleteUsefulLink: 'Suppression de lien utile',
 };
 
-export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
+export function ClientHistoryTab({ clientId, refreshToken = 0 }: ClientHistoryTabProps) {
   const [history, setHistory] = useState<HistoryLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
 
   useEffect(() => {
     loadHistory();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   async function loadHistory(page: number = 1) {
     try {

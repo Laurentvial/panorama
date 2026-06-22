@@ -13,6 +13,7 @@ import '../styles/PlatformLogOrigin.css';
 
 interface ClientPlatformLogsTabProps {
   clientId: string;
+  refreshToken?: number;
 }
 
 interface PlatformLog {
@@ -84,7 +85,7 @@ function getFriendlyPageNameFromRoute(route: unknown): string {
   return '';
 }
 
-export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) {
+export function ClientPlatformLogsTab({ clientId, refreshToken = 0 }: ClientPlatformLogsTabProps) {
   const [platformLogs, setPlatformLogs] = useState<PlatformLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
@@ -94,7 +95,7 @@ export function ClientPlatformLogsTab({ clientId }: ClientPlatformLogsTabProps) 
   useEffect(() => {
     loadPlatformLogs();
     loadClientDisplayName();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   async function loadPlatformLogs(page: number = 1) {
     try {

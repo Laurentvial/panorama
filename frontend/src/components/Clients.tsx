@@ -290,7 +290,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
                     {!isGestionnaire && <th>Gestionnaire</th>}
                     <th>Source</th>
                     <th>Capital</th>
-                    <th>Statut</th>
                     <th>Équipe</th>
                     <th>Actif</th>
                     <th>En ligne</th>
@@ -335,11 +334,6 @@ export function Clients({ onSelectClient }: ClientsProps) {
                         {client.capital
                           ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(client.capital)
                           : '0,00 €'}
-                      </td>
-                      <td>
-                        <span className={client.active ? 'clients-status-active' : 'clients-status-inactive'}>
-                          {client.active ? 'Actif' : 'Inactif'}
-                        </span>
                       </td>
                       <td>{teams.find(t => t.id === client.teamId)?.name || '-'}</td>
                       <td>

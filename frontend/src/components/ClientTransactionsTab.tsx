@@ -28,6 +28,7 @@ interface ClientTransactionsTabProps {
   onRefresh: () => void;
   clientId: string;
   client?: any;
+  refreshToken?: number;
 }
 
 // Transaction types with their allowed statuses
@@ -84,7 +85,7 @@ const STATUS_LABELS: { [key: string]: string } = {
   annule: 'Annulé'
 };
 
-export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTransactionsTabProps) {
+export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToken = 0 }: ClientTransactionsTabProps) {
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [allTransactionsForInterest, setAllTransactionsForInterest] = useState<any[]>([]);
@@ -209,13 +210,13 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
     }
   };
 
-  // Load transactions on mount and when clientId changes
+  // Load transactions on mount and when clientId or refreshToken changes
   useEffect(() => {
     loadTransactions(1, 50);
     loadContractDocuments();
     loadAllTransactionsForInterest();
     setSelectedTransactionIds(new Set());
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   // Load assets and products to find IDs
   useEffect(() => {
@@ -1228,23 +1229,21 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
   }, [transactions]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="tab-section-title">
-          Transactions
-          <span style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle', marginLeft: '10px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--muted-foreground, #6b7280)', background: 'var(--muted, #f5f3f0)', border: '1px solid var(--border, #e5e7eb)', borderRadius: '999px', padding: '2px 10px', position: 'relative', top: '-2px' }}>
-            {loading ? '…' : pagination.total}
-          </span>
-        </h2>
+    <>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+        <CardTitle className="tab-section-title">
+          Transactions ({loading ? '...' : pagination.total})
+        </CardTitle>
         <Button onClick={() => {
           setIsTransactionDialogOpen(true);
           resetTransactionForm();
-        }} className="h-8 rounded-md !border !border-amber-300 !bg-amber-100 px-3 !text-amber-900 shadow-sm transition-colors duration-200 hover:!bg-amber-300 hover:!text-amber-950 hover:!opacity-100 client-quick-action-button">
+        }} className="h-8 shrink-0 rounded-md !border !border-amber-300 !bg-amber-100 px-3 !text-amber-900 shadow-sm transition-colors duration-200 hover:!bg-amber-300 hover:!text-amber-950 hover:!opacity-100 client-quick-action-button">
           <Plus className="w-4 h-4 mr-2" />
           Ajouter une transaction
         </Button>
-      </div>
-
+      </CardHeader>
+      <CardContent className="space-y-4">
       {/* Filters */}
       <div className="filter-card">
         <div className="filter-card-header">
@@ -2018,6 +2017,8 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
             </>
           )}
       </div>
+      </CardContent>
+    </Card>
 
       {/* View Transaction Modal */}
       <ViewTransactionModal
@@ -2147,7 +2148,7 @@ export function ClientTransactionsTab({ onRefresh, clientId, client }: ClientTra
           isWithdrawal={isWithdrawalForPositionGeneration}
         />
       )}
-    </div>
+    </>
   );
 }
 

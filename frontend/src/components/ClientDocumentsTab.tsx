@@ -15,6 +15,7 @@ interface ClientDocumentsTabProps {
   clientId: string;
   accountCurrency?: string;
   onRefresh: () => void;
+  refreshToken?: number;
 }
 
 interface Document {
@@ -43,7 +44,12 @@ const DOCUMENT_TYPES = [
   { value: 'other', label: 'Autre' },
 ];
 
-export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefresh }: ClientDocumentsTabProps) {
+export function ClientDocumentsTab({
+  clientId,
+  accountCurrency = 'EUR',
+  onRefresh,
+  refreshToken = 0,
+}: ClientDocumentsTabProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   /** Catalogue complet : le contrat peut être rattaché à un produit même sans ClientProduct. */
@@ -122,7 +128,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
 
   useEffect(() => {
     loadDocuments();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   useEffect(() => {
     async function loadTransferTransactions() {
@@ -159,7 +165,7 @@ export function ClientDocumentsTab({ clientId, accountCurrency = 'EUR', onRefres
       }
     }
     loadTransferTransactions();
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
   useEffect(() => {
     async function loadCatalogProducts() {

@@ -9,6 +9,20 @@ import { toast } from 'sonner';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
+import {
+  PositionStatusBadge,
+  AssetNameWithLogo,
+  getAssetLogoUrlFromSources,
+  formatPositionPnlWithPct,
+  positionsTableBodyClass,
+  positionsTableCellClass,
+  positionsTableClass,
+  positionsTableHeadCellClass,
+  positionsTableHeadClass,
+  positionsTableHeadRowClass,
+  positionsTableRowClass,
+  positionsTableShellClass,
+} from './positionUtils';
 
 type PositionRow = {
   id: string;
@@ -42,22 +56,6 @@ const formatMonth = (isoDate: string) => {
   return new Intl.DateTimeFormat('fr-FR', { year: 'numeric', month: 'long' }).format(d);
 };
 
-const formatPnlWithPct = (pnlValue: any, amountValue: any) => {
-  const pnl = typeof pnlValue === 'string' ? parseFloat(pnlValue) : Number(pnlValue);
-  const amount = typeof amountValue === 'string' ? parseFloat(amountValue) : Number(amountValue);
-  if (!Number.isFinite(pnl)) return '-';
-
-  const sign = pnl > 0 ? '+' : '';
-  const pnlText = `${sign}${formatCurrency(pnl)}`;
-
-  if (!Number.isFinite(amount) || amount === 0) return pnlText;
-
-  const pct = (pnl / amount) * 100;
-  const pctSign = pct > 0 ? '+' : '';
-  const pctText = `${pctSign}${pct.toFixed(2)}%`;
-  return `${pnlText} (${pctText})`;
-};
-
 const formatPositionDateRange = (p: PositionRow) => {
   if (p.opened_at) {
     const start = formatPositionDateTime(p.opened_at);
@@ -82,6 +80,7 @@ export function Positions() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+  const [assets, setAssets] = useState<any[]>([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, total_pages: 1 });
   const [counts, setCounts] = useState({ pending: 0, open: 0, closed: 0 });
   const [activeTab, setActiveTab] = useState<'upcoming' | 'open' | 'closed'>('upcoming');
@@ -161,6 +160,27 @@ export function Positions() {
   useEffect(() => {
     loadPositions(1);
   }, [loadPositions]);
+
+  useEffect(() => {
+    const loadAssets = async () => {
+      try {
+        const assetsData = await apiCall('/api/assets/').catch(() => ({ assets: [] }));
+        setAssets((assetsData as any)?.assets || assetsData || []);
+      } catch (error) {
+        console.error('Error loading assets for positions:', error);
+        setAssets([]);
+      }
+    };
+    loadAssets();
+  }, []);
+
+  const assetsById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const asset of assets || []) {
+      if (asset?.id != null) map.set(String(asset.id), asset);
+    }
+    return map;
+  }, [assets]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= pagination.total_pages) {
@@ -267,7 +287,7 @@ export function Positions() {
                       <LoadingIndicator />
                     </div>
                   )}
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assetsById={assetsById} />
                   <PaginationBar />
                 </div>
               )}
@@ -284,7 +304,7 @@ export function Positions() {
                       <LoadingIndicator />
                     </div>
                   )}
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assetsById={assetsById} />
                   <PaginationBar />
                 </div>
               )}
@@ -301,7 +321,7 @@ export function Positions() {
                       <LoadingIndicator />
                     </div>
                   )}
-                  <PositionsTable rows={filtered} />
+                  <PositionsTable rows={filtered} assetsById={assetsById} />
                   <PaginationBar />
                 </div>
               )}
@@ -313,53 +333,88 @@ export function Positions() {
   );
 }
 
-function PositionsTable({ rows }: { rows: PositionRow[] }) {
+function PositionsTable({
+  rows,
+  assetsById,
+}: {
+  rows: PositionRow[];
+  assetsById: Map<string, any>;
+}) {
   if (!rows.length) {
-    return <div className="text-sm text-slate-600">Aucune position.</div>;
+    return (
+      <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+        Aucune position.
+      </div>
+    );
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="text-left py-2 px-3">Date et heure</th>
-            <th className="text-left py-2 px-3">Client</th>
-            <th className="text-left py-2 px-3">Produit</th>
-            <th className="text-left py-2 px-3">Asset</th>
-            <th className="text-left py-2 px-3">Montant</th>
-            <th className="text-left py-2 px-3">P&amp;L</th>
-            <th className="text-left py-2 px-3">Statut</th>
-            <th className="text-left py-2 px-3">Transaction</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((p) => (
-            <tr key={p.id} className="border-b border-slate-100">
-              <td className="py-2 px-3">{formatPositionDateRange(p)}</td>
-              <td className="py-2 px-3">{p.clientName || p.clientId}</td>
-              <td className="py-2 px-3">{p.productName || p.productId}</td>
-              <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
-              <td className="py-2 px-3">{formatCurrency(p.invested_amount)}</td>
-              <td className="py-2 px-3">
-                {formatPnlWithPct(p.profit_loss, p.invested_amount)}
-              </td>
-              <td className="py-2 px-3">
-                {p.status === 'pending'
-                  ? 'À venir'
-                  : p.status === 'open'
-                    ? 'Ouverte'
-                    : p.status === 'done'
-                      ? 'Fermée'
-                      : p.status === 'cancelled'
-                        ? 'Annulée'
-                        : p.status}
-              </td>
-              <td className="py-2 px-3">{p.transactionId || '-'}</td>
+    <div className={positionsTableShellClass}>
+      <div className="overflow-x-auto">
+        <table className={positionsTableClass}>
+          <thead className={positionsTableHeadClass}>
+            <tr className={positionsTableHeadRowClass}>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Date et heure</th>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Client</th>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Produit</th>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Asset</th>
+              <th className={`${positionsTableHeadCellClass} text-right`}>Montant</th>
+              <th className={`${positionsTableHeadCellClass} text-right`}>P&amp;L</th>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Statut</th>
+              <th className={`${positionsTableHeadCellClass} text-left`}>Transaction</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className={positionsTableBodyClass}>
+            {rows.map((p) => {
+              const pnl = typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
+              const invested =
+                typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
+              const pnlFormatted = formatPositionPnlWithPct(
+                Number.isFinite(pnl) ? pnl : null,
+                Number.isFinite(invested) ? invested : null,
+                'EUR'
+              );
+              const pnlColorClass =
+                pnlFormatted.isPositive == null
+                  ? 'text-slate-700'
+                  : pnlFormatted.isPositive
+                    ? 'text-green-600'
+                    : 'text-red-600';
+
+              return (
+                <tr key={p.id} className={positionsTableRowClass}>
+                  <td className={`${positionsTableCellClass} whitespace-nowrap`}>{formatPositionDateRange(p)}</td>
+                  <td className={positionsTableCellClass}>
+                    <div className="font-medium text-slate-900">{p.clientName || p.clientId}</div>
+                  </td>
+                  <td className={positionsTableCellClass}>
+                    <div className="font-medium text-slate-900">{p.productName || p.productId}</div>
+                  </td>
+                  <td className={positionsTableCellClass}>
+                    <AssetNameWithLogo
+                      name={p.assetName || p.assetId}
+                      logoUrl={getAssetLogoUrlFromSources(assetsById.get(String(p.assetId || '')), p)}
+                      nameClassName="text-slate-700"
+                    />
+                  </td>
+                  <td className={`${positionsTableCellClass} text-right font-medium whitespace-nowrap`}>
+                    {formatCurrency(p.invested_amount)}
+                  </td>
+                  <td className={`${positionsTableCellClass} text-right font-medium whitespace-nowrap ${pnlColorClass}`}>
+                    {pnlFormatted.pct ? `${pnlFormatted.main} ${pnlFormatted.pct}` : pnlFormatted.main}
+                  </td>
+                  <td className={positionsTableCellClass}>
+                    <PositionStatusBadge status={p.status} />
+                  </td>
+                  <td className={`${positionsTableCellClass} font-mono text-xs text-slate-600`}>
+                    {p.transactionId || '-'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

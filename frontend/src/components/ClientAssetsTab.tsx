@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -7,23 +7,47 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Checkbox } from './ui/checkbox';
-import { TrendingUp, Plus, Trash2, X, Star, SlidersHorizontal } from 'lucide-react';
+import { TrendingUp, Plus, Trash2, X, Star, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import { toast } from 'sonner';
 import { AssetAvailabilityModal } from './AssetAvailabilityModal';
 import { ProductAvailabilityModal } from './ProductAvailabilityModal';
+import LoadingIndicator from './LoadingIndicator';
+import {
+  AssetNameWithLogo,
+  getAssetLogoUrl,
+  positionsTableBodyClass,
+  positionsTableCellClass,
+  positionsTableClass,
+  positionsTableHeadCellClass,
+  positionsTableHeadClass,
+  positionsTableHeadRowClass,
+  positionsTableRowClass,
+  positionsTableShellClass,
+} from './positionUtils';
 import '../styles/Modal.css';
+
+const TABLE_PAGE_SIZE = 50;
+
+const TABLE_ACTION_CONFIGURE_CLASS =
+  'h-8 rounded-md border border-purple-200/80 bg-purple-50/40 px-2.5 text-slate-700 shadow-sm hover:!bg-purple-50 hover:!text-purple-800 transition-colors duration-200';
+const TABLE_ACTION_DELETE_CLASS =
+  'h-8 rounded-md border border-red-200/80 bg-red-50/40 px-2.5 text-slate-700 shadow-sm hover:!bg-red-50 hover:!text-red-700 transition-colors duration-200';
+
+type InnerAssetsTab = 'products' | 'assets';
 
 interface ClientAssetsTabProps {
   clientId: string;
-  clientAssets: any[];
-  availableAssets: any[];
-  clientProducts: any[];
-  availableProducts: any[];
-  onRefresh: () => void;
+  refreshToken?: number;
 }
 
-export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clientProducts, availableProducts, onRefresh }: ClientAssetsTabProps) {
+export function ClientAssetsTab({ clientId, refreshToken = 0 }: ClientAssetsTabProps) {
+  const [activeInnerTab, setActiveInnerTab] = useState<InnerAssetsTab>('products');
+  const [loadedInnerTabs, setLoadedInnerTabs] = useState<Set<InnerAssetsTab>>(new Set());
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [availableAssets, setAvailableAssets] = useState<any[]>([]);
+  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
   const [isAddAssetDialogOpen, setIsAddAssetDialogOpen] = useState(false);
   const [isAddProductDialogOpen, setIsAddProductDialogOpen] = useState(false);
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
@@ -33,8 +57,8 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [filterType, setFilterType] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterSubcategory, setFilterSubcategory] = useState<string>('all');
-  const [localClientAssets, setLocalClientAssets] = useState<any[]>(clientAssets || []);
-  const [localClientProducts, setLocalClientProducts] = useState<any[]>(clientProducts || []);
+  const [localClientAssets, setLocalClientAssets] = useState<any[]>([]);
+  const [localClientProducts, setLocalClientProducts] = useState<any[]>([]);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   // Add asset modal: filters + search + multi-select (modal-only; ne pas mélanger avec filterType/filterCategory du tableau)
@@ -50,16 +74,216 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
   const [filterProductType, setFilterProductType] = useState<string>('all');
   const [filterProductCategory, setFilterProductCategory] = useState<string>('all');
   const [filterProductSubcategory, setFilterProductSubcategory] = useState<string>('all');
+  const [assetsPage, setAssetsPage] = useState(1);
+  const [productsPage, setProductsPage] = useState(1);
+
+  const loadProductsTabData = useCallback(async (options?: { silent?: boolean }) => {
+    if (!clientId) {
+      setLocalClientProducts([]);
+      setAvailableProducts([]);
+      setSelectedProductIds(new Set());
+      setLoadingProducts(false);
+      return;
+    }
+
+    if (!options?.silent) {
+      setLoadingProducts(true);
+    }
+
+    try {
+      const [productsData, availableProductsData] = await Promise.all([
+        apiCall(`/api/clients/${clientId}/products/`),
+        apiCall(`/api/products/`),
+      ]);
+
+      setLocalClientProducts((productsData as any)?.products || []);
+      setAvailableProducts((availableProductsData as any)?.products || []);
+      if (!options?.silent) {
+        setSelectedProductIds(new Set());
+      }
+      setLoadedInnerTabs((prev) => new Set(prev).add('products'));
+    } catch (error) {
+      console.error('Error loading client products tab data:', error);
+      toast.error('Erreur lors du chargement des produits visibles');
+    } finally {
+      if (!options?.silent) {
+        setLoadingProducts(false);
+      }
+    }
+  }, [clientId]);
+
+  const loadAssetsTabData = useCallback(async (options?: { silent?: boolean }) => {
+    if (!clientId) {
+      setLocalClientAssets([]);
+      setAvailableAssets([]);
+      setSelectedAssetIds(new Set());
+      setLoadingAssets(false);
+      return;
+    }
+
+    if (!options?.silent) {
+      setLoadingAssets(true);
+    }
+
+    try {
+      const [assetsData, availableAssetsData] = await Promise.all([
+        apiCall(`/api/clients/${clientId}/assets/`),
+        apiCall(`/api/assets/`),
+      ]);
+
+      setLocalClientAssets((assetsData as any)?.assets || []);
+      setAvailableAssets((availableAssetsData as any)?.assets || []);
+      if (!options?.silent) {
+        setSelectedAssetIds(new Set());
+      }
+      setLoadedInnerTabs((prev) => new Set(prev).add('assets'));
+    } catch (error) {
+      console.error('Error loading client assets tab data:', error);
+      toast.error('Erreur lors du chargement des actifs visibles');
+    } finally {
+      if (!options?.silent) {
+        setLoadingAssets(false);
+      }
+    }
+  }, [clientId]);
+
+  const prevRefreshTokenRef = useRef(refreshToken);
+  const loadedInnerTabsRef = useRef(loadedInnerTabs);
+  loadedInnerTabsRef.current = loadedInnerTabs;
 
   useEffect(() => {
-    setLocalClientAssets(clientAssets || []);
-    setSelectedAssetIds(new Set());
-  }, [clientAssets]);
+    setLoadedInnerTabs(new Set());
+    setActiveInnerTab('products');
+    void loadProductsTabData();
+  }, [clientId, loadProductsTabData]);
 
   useEffect(() => {
-    setLocalClientProducts(clientProducts || []);
-    setSelectedProductIds(new Set());
-  }, [clientProducts]);
+    const isExternalRefresh =
+      prevRefreshTokenRef.current !== refreshToken && refreshToken > 0;
+    prevRefreshTokenRef.current = refreshToken;
+    if (!isExternalRefresh) return;
+
+    if (loadedInnerTabsRef.current.has('products')) {
+      void loadProductsTabData({ silent: true });
+    }
+    if (loadedInnerTabsRef.current.has('assets')) {
+      void loadAssetsTabData({ silent: true });
+    }
+  }, [refreshToken, loadProductsTabData, loadAssetsTabData]);
+
+  function handleInnerTabChange(value: string) {
+    const tab = value as InnerAssetsTab;
+    setActiveInnerTab(tab);
+    if (tab === 'products' && !loadedInnerTabsRef.current.has('products')) {
+      void loadProductsTabData();
+    } else if (tab === 'assets' && !loadedInnerTabsRef.current.has('assets')) {
+      void loadAssetsTabData();
+    }
+  }
+
+  const getProductSubcategoryList = (productSub: any): string[] => {
+    if (Array.isArray(productSub)) return productSub.filter(Boolean).map(String);
+    if (productSub === null || productSub === undefined || productSub === '') return [];
+    return [String(productSub)];
+  };
+
+  const filteredClientAssets = useMemo(() => {
+    return localClientAssets.filter((clientAsset: any) => {
+      const asset = clientAsset.asset;
+      if (!asset) return false;
+      const typeMatch = filterType === 'all' || asset.type === filterType;
+      const categoryMatch = filterCategory === 'all' || asset.category === filterCategory;
+      const subcategoryMatch = filterSubcategory === 'all' || asset.subcategory === filterSubcategory;
+      return typeMatch && categoryMatch && subcategoryMatch;
+    });
+  }, [localClientAssets, filterType, filterCategory, filterSubcategory]);
+
+  const filteredClientProducts = useMemo(() => {
+    return localClientProducts.filter((clientProduct: any) => {
+      const product = clientProduct.product;
+      if (!product) return false;
+      const typeMatch = filterProductType === 'all' || product.type === filterProductType;
+      const categoryMatch =
+        filterProductCategory === 'all' ||
+        (product.categoryTitle || product.category?.title) === filterProductCategory;
+      const productSubList = getProductSubcategoryList(product.subcategory);
+      const subcategoryMatch =
+        filterProductSubcategory === 'all' ||
+        productSubList.includes(filterProductSubcategory) ||
+        product.subcategory === filterProductSubcategory;
+      return typeMatch && categoryMatch && subcategoryMatch;
+    });
+  }, [localClientProducts, filterProductType, filterProductCategory, filterProductSubcategory]);
+
+  const assetsPagination = useMemo(() => {
+    const total = filteredClientAssets.length;
+    const total_pages = Math.max(1, Math.ceil(total / TABLE_PAGE_SIZE));
+    const page = Math.min(Math.max(1, assetsPage), total_pages);
+    const start = (page - 1) * TABLE_PAGE_SIZE;
+    return {
+      page,
+      limit: TABLE_PAGE_SIZE,
+      total,
+      total_pages,
+      items: filteredClientAssets.slice(start, start + TABLE_PAGE_SIZE),
+    };
+  }, [filteredClientAssets, assetsPage]);
+
+  const productsPagination = useMemo(() => {
+    const total = filteredClientProducts.length;
+    const total_pages = Math.max(1, Math.ceil(total / TABLE_PAGE_SIZE));
+    const page = Math.min(Math.max(1, productsPage), total_pages);
+    const start = (page - 1) * TABLE_PAGE_SIZE;
+    return {
+      page,
+      limit: TABLE_PAGE_SIZE,
+      total,
+      total_pages,
+      items: filteredClientProducts.slice(start, start + TABLE_PAGE_SIZE),
+    };
+  }, [filteredClientProducts, productsPage]);
+
+  const assetsPageCheckboxState = useMemo(() => {
+    const pageIds = assetsPagination.items
+      .map((ca: any) => ca.asset?.id)
+      .filter(Boolean) as string[];
+    if (pageIds.length === 0) return false;
+    const selectedOnPage = pageIds.filter((id) => selectedAssetIds.has(id)).length;
+    if (selectedOnPage === 0) return false;
+    if (selectedOnPage === pageIds.length) return true;
+    return 'indeterminate';
+  }, [assetsPagination.items, selectedAssetIds]);
+
+  const productsPageCheckboxState = useMemo(() => {
+    const pageIds = productsPagination.items
+      .map((cp: any) => cp.product?.id)
+      .filter(Boolean) as string[];
+    if (pageIds.length === 0) return false;
+    const selectedOnPage = pageIds.filter((id) => selectedProductIds.has(id)).length;
+    if (selectedOnPage === 0) return false;
+    if (selectedOnPage === pageIds.length) return true;
+    return 'indeterminate';
+  }, [productsPagination.items, selectedProductIds]);
+
+  useEffect(() => {
+    setAssetsPage(1);
+  }, [filterType, filterCategory, filterSubcategory]);
+
+  useEffect(() => {
+    setProductsPage(1);
+  }, [filterProductType, filterProductCategory, filterProductSubcategory]);
+
+  useEffect(() => {
+    if (assetsPage > assetsPagination.total_pages) {
+      setAssetsPage(assetsPagination.total_pages);
+    }
+  }, [assetsPage, assetsPagination.total_pages]);
+
+  useEffect(() => {
+    if (productsPage > productsPagination.total_pages) {
+      setProductsPage(productsPagination.total_pages);
+    }
+  }, [productsPage, productsPagination.total_pages]);
 
   // Selection handlers for assets
   function handleSelectAsset(assetId: string) {
@@ -71,13 +295,18 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     });
   }
 
-  function handleSelectAllAssets(filteredAssets: any[]) {
-    const visibleIds = filteredAssets.map((ca: any) => ca.asset?.id).filter(Boolean) as string[];
-    if (selectedAssetIds.size === visibleIds.length) {
-      setSelectedAssetIds(new Set());
-    } else {
-      setSelectedAssetIds(new Set(visibleIds));
-    }
+  function handleSelectAllAssets(pageItems: any[]) {
+    const pageIds = pageItems.map((ca: any) => ca.asset?.id).filter(Boolean) as string[];
+    setSelectedAssetIds((prev) => {
+      const allPageSelected = pageIds.length > 0 && pageIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
   }
 
   function handleClearAssetSelection() {
@@ -94,15 +323,18 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     });
   }
 
-  function handleSelectAllProducts(filteredProducts: any[]) {
-    const visibleIds = filteredProducts
-      .map((cp: any) => cp.product?.id)
-      .filter(Boolean) as string[];
-    if (selectedProductIds.size === visibleIds.length) {
-      setSelectedProductIds(new Set());
-    } else {
-      setSelectedProductIds(new Set(visibleIds));
-    }
+  function handleSelectAllProducts(pageItems: any[]) {
+    const pageIds = pageItems.map((cp: any) => cp.product?.id).filter(Boolean) as string[];
+    setSelectedProductIds((prev) => {
+      const allPageSelected = pageIds.length > 0 && pageIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
   }
 
   function handleClearProductSelection() {
@@ -124,7 +356,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
         )
       );
       toast.success(`${count} actif(s) retiré(s) avec succès`);
-      onRefresh();
+      void loadAssetsTabData({ silent: true });
     } catch (error) {
       setLocalClientAssets(previous);
       setSelectedAssetIds(idsToRemove);
@@ -147,7 +379,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
         )
       );
       toast.success(`${count} produit(s) retiré(s) avec succès`);
-      onRefresh();
+      void loadProductsTabData({ silent: true });
     } catch (error) {
       setLocalClientProducts(previous);
       setSelectedProductIds(idsToRemove);
@@ -181,12 +413,6 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     if (hasMin) return `À partir de ${formatEur(minEntry)}`;
     if (hasMax) return `Jusqu’à ${formatEur(maxEntry)}`;
     return '-';
-  };
-
-  const getProductSubcategoryList = (productSub: any): string[] => {
-    if (Array.isArray(productSub)) return productSub.filter(Boolean).map(String);
-    if (productSub === null || productSub === undefined || productSub === '') return [];
-    return [String(productSub)];
   };
 
   const formatProductProfitability = (product: any): { main: string; sub?: string } => {
@@ -277,14 +503,14 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
           if (msg.includes('already') || msg.includes('déjà') || msg.includes('assign')) skippedCount++;
         }
       });
-      onRefresh();
+      void loadAssetsTabData({ silent: true });
       if (skippedCount > 0) {
         toast.success(`${addedCount} actif(s) ajouté(s), ${skippedCount} déjà assigné(s)`);
       } else {
         toast.success(`${addedCount} actif(s) ajouté(s) avec succès`);
       }
     } catch (error: any) {
-      onRefresh();
+      void loadAssetsTabData({ silent: true });
       console.error('Error adding assets:', error);
       toast.error(error.message || "Erreur lors de l'ajout des actifs");
     }
@@ -327,14 +553,14 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
           if (msg.includes('already has') || msg.includes('déjà')) skippedCount++;
         }
       });
-      onRefresh();
+      void loadProductsTabData({ silent: true });
       if (skippedCount > 0) {
         toast.success(`${addedCount} produit(s) ajouté(s), ${skippedCount} déjà assigné(s)`);
       } else {
         toast.success(`${addedCount} produit(s) ajouté(s) avec succès`);
       }
     } catch (error: any) {
-      onRefresh();
+      void loadProductsTabData({ silent: true });
       console.error('Error adding products:', error);
       toast.error(error.message || 'Erreur lors de l\'ajout des produits');
     }
@@ -347,7 +573,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     try {
       await apiCall(`/api/clients/${clientId}/assets/${assetId}/`, { method: 'DELETE' });
       toast.success('Actif retiré avec succès');
-      onRefresh();
+      void loadAssetsTabData({ silent: true });
     } catch (error) {
       setLocalClientAssets(previous);
       console.error('Error removing asset:', error);
@@ -362,7 +588,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     try {
       await apiCall(`/api/clients/${clientId}/products/${productId}/`, { method: 'DELETE' });
       toast.success('Produit retiré avec succès');
-      onRefresh();
+      void loadProductsTabData({ silent: true });
     } catch (error) {
       setLocalClientProducts(previous);
       console.error('Error removing product:', error);
@@ -462,7 +688,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
   function handleAssetAvailabilitySuccess(updatedClientAsset?: any) {
     if (!updatedClientAsset || typeof updatedClientAsset !== 'object') {
-      onRefresh();
+      void loadAssetsTabData({ silent: true });
       return;
     }
 
@@ -479,12 +705,12 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
       })
     );
 
-    void onRefresh();
+    void loadAssetsTabData({ silent: true });
   }
 
   function handleProductAvailabilitySuccess(updatedClientProduct?: any) {
     if (!updatedClientProduct || typeof updatedClientProduct !== 'object') {
-      onRefresh();
+      void loadProductsTabData({ silent: true });
       return;
     }
 
@@ -502,12 +728,12 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
     );
 
     // Background sync to keep local cache aligned with server.
-    void onRefresh();
+    void loadProductsTabData({ silent: true });
   }
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="products" className="space-y-6">
+      <Tabs value={activeInnerTab} onValueChange={handleInnerTabChange} className="space-y-6">
         <TabsList>
           <TabsTrigger value="products">Produits</TabsTrigger>
           <TabsTrigger value="assets">Actifs</TabsTrigger>
@@ -515,6 +741,12 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
         {/* Assets Tab */}
         <TabsContent value="assets">
+          {loadingAssets && !loadedInnerTabs.has('assets') ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-500">Chargement des actifs...</p>
+            </div>
+          ) : (
           <div className="space-y-6">
             <div className="flex justify-between items-center gap-4 flex-wrap">
               {/* Filters */}
@@ -579,7 +811,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         headers: { 'Content-Type': 'application/json' }
                       });
                       toast.success(`Actifs réinitialisés : ${(response as any).added} ajouté(s), ${(response as any).removed} retiré(s)`);
-                      onRefresh();
+                      void loadAssetsTabData({ silent: true });
                     } catch (error: any) {
                       console.error('Error resetting assets:', error);
                       toast.error(error.message || 'Erreur lors de la réinitialisation des actifs');
@@ -835,143 +1067,155 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
             <Card>
               <CardHeader>
-                <CardTitle className="tab-section-title">Actifs visibles par le client</CardTitle>
+                <CardTitle className="tab-section-title">
+                  Actifs visibles par le client ({filteredClientAssets.length})
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                {(() => {
-                  // Filter assets based on selected filters
-                  const filteredAssets = localClientAssets.filter((clientAsset: any) => {
-                    const asset = clientAsset.asset;
-                    if (!asset) return false; // Skip if asset was deleted
-                    const typeMatch = filterType === 'all' || asset.type === filterType;
-                    const categoryMatch = filterCategory === 'all' || asset.category === filterCategory;
-                    const subcategoryMatch = filterSubcategory === 'all' || asset.subcategory === filterSubcategory;
-                    return typeMatch && categoryMatch && subcategoryMatch;
-                  });
-
-                  return filteredAssets.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-slate-200">
-                            <th className="w-10 py-2 px-3 pr-0">
-                              <Checkbox
-                                checked={
-                                  selectedAssetIds.size === 0
-                                    ? false
-                                    : selectedAssetIds.size === filteredAssets.length
-                                    ? true
-                                    : 'indeterminate'
-                                }
-                                onCheckedChange={() => handleSelectAllAssets(filteredAssets)}
-                                aria-label="Tout sélectionner"
-                              />
-                            </th>
-                            <th className="text-left py-2 px-3">Type</th>
-                            <th className="text-left py-2 px-3">Nom</th>
-                            <th className="text-left py-2 px-3">Référence</th>
-                            <th className="text-left py-2 px-3">Catégorie</th>
-                            <th className="text-left py-2 px-3">Sous-catégorie</th>
-                            <th className="text-center py-2 px-3">Mis en avant</th>
-                            <th className="text-left py-2 px-3">Dates de disponibilité</th>
-                            <th className="text-left py-2 px-3">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredAssets.map((clientAsset: any) => {
-                            const asset = clientAsset.asset;
-                            if (!asset) return null; // Skip if asset was deleted
-                            const isFeatured = clientAsset.featured || false;
-                            return (
-                              <tr key={clientAsset.id} className="border-b border-slate-100">
-                                <td className="w-10 py-2 px-3 pr-0">
-                                  <Checkbox
-                                    checked={selectedAssetIds.has(asset.id)}
-                                    onCheckedChange={() => handleSelectAsset(asset.id)}
-                                    aria-label={`Sélectionner ${asset.name}`}
-                                  />
-                                </td>
-                                <td className="py-2 px-3">{asset.type || '-'}</td>
-                                <td className="py-2 px-3">{asset.name || '-'}</td>
-                                <td className="py-2 px-3">{asset.reference || '-'}</td>
-                                <td className="py-2 px-3">{asset.category || '-'}</td>
-                                <td className="py-2 px-3">{asset.subcategory || '-'}</td>
-                                <td className="py-2 px-3 text-center">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleToggleFeaturedAsset(clientAsset.id, asset.id, isFeatured)}
-                                    className="p-1 hover:bg-transparent cursor-pointer"
-                                  >
-                                    {isFeatured ? (
-                                      <Star 
-                                        className="w-5 h-5 transition-colors"
-                                        fill="#facc15"
-                                        stroke="#facc15"
-                                      />
+                {filteredClientAssets.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className={positionsTableShellClass}>
+                      <div className="overflow-x-auto">
+                        <table className={positionsTableClass}>
+                          <thead className={positionsTableHeadClass}>
+                            <tr className={positionsTableHeadRowClass}>
+                              <th className={`${positionsTableHeadCellClass} w-10 pr-0`}>
+                                <Checkbox
+                                  checked={assetsPageCheckboxState}
+                                  onCheckedChange={() => handleSelectAllAssets(assetsPagination.items)}
+                                  aria-label="Tout sélectionner"
+                                />
+                              </th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Type</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Nom</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Référence</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Catégorie</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Sous-catégorie</th>
+                              <th className={`${positionsTableHeadCellClass} text-center`}>Mis en avant</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Dates de disponibilité</th>
+                              <th className={`${positionsTableHeadCellClass} text-right`}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className={positionsTableBodyClass}>
+                            {assetsPagination.items.map((clientAsset: any) => {
+                              const asset = clientAsset.asset;
+                              if (!asset) return null;
+                              const isFeatured = clientAsset.featured || false;
+                              return (
+                                <tr key={clientAsset.id} className={positionsTableRowClass}>
+                                  <td className={`${positionsTableCellClass} w-10 pr-0`}>
+                                    <Checkbox
+                                      checked={selectedAssetIds.has(asset.id)}
+                                      onCheckedChange={() => handleSelectAsset(asset.id)}
+                                      aria-label={`Sélectionner ${asset.name}`}
+                                    />
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-slate-600`}>{asset.type || '-'}</td>
+                                  <td className={positionsTableCellClass}>
+                                    <AssetNameWithLogo
+                                      name={asset.name}
+                                      logoUrl={getAssetLogoUrl(asset)}
+                                    />
+                                  </td>
+                                  <td className={`${positionsTableCellClass} font-mono text-xs text-slate-600`}>
+                                    {asset.reference || '-'}
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-slate-600`}>{asset.category || '-'}</td>
+                                  <td className={`${positionsTableCellClass} text-slate-600`}>{asset.subcategory || '-'}</td>
+                                  <td className={`${positionsTableCellClass} text-center`}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleToggleFeaturedAsset(clientAsset.id, asset.id, isFeatured)}
+                                      className="p-1 hover:bg-transparent cursor-pointer"
+                                    >
+                                      {isFeatured ? (
+                                        <Star className="w-5 h-5 transition-colors" fill="#facc15" stroke="#facc15" />
+                                      ) : (
+                                        <Star
+                                          className="w-5 h-5 transition-colors text-slate-400 hover:text-yellow-300"
+                                          fill="none"
+                                          stroke="currentColor"
+                                        />
+                                      )}
+                                    </Button>
+                                  </td>
+                                  <td className={positionsTableCellClass}>
+                                    {clientAsset.availabilityStart || clientAsset.availabilityEnd ? (
+                                      <div className="text-xs text-slate-600">
+                                        {clientAsset.availabilityStart && (
+                                          <div>Début: {formatDate(clientAsset.availabilityStart)}</div>
+                                        )}
+                                        {clientAsset.availabilityEnd && (
+                                          <div>Fin: {formatDate(clientAsset.availabilityEnd)}</div>
+                                        )}
+                                      </div>
                                     ) : (
-                                      <Star 
-                                        className="w-5 h-5 transition-colors text-slate-400 hover:text-yellow-300"
-                                        fill="none"
-                                        stroke="currentColor"
-                                      />
+                                      <span className="text-xs text-slate-400">Toujours visible</span>
                                     )}
-                                  </Button>
-                                </td>
-                                <td className="py-2 px-3">
-                                  {clientAsset.availabilityStart || clientAsset.availabilityEnd ? (
-                                    <div className="text-xs">
-                                      {clientAsset.availabilityStart && (
-                                        <div>Début: {formatDate(clientAsset.availabilityStart)}</div>
-                                      )}
-                                      {clientAsset.availabilityEnd && (
-                                        <div>Fin: {formatDate(clientAsset.availabilityEnd)}</div>
-                                      )}
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-right whitespace-nowrap`}>
+                                    <div className="relative flex flex-nowrap justify-end gap-1.5">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => openAvailabilityModal(clientAsset)}
+                                        className={TABLE_ACTION_CONFIGURE_CLASS}
+                                        title="Configurer (disponibilité + personnalisation)"
+                                        aria-label="Configurer (disponibilité + personnalisation)"
+                                      >
+                                        <SlidersHorizontal className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleRemoveAsset(asset.id)}
+                                        className={TABLE_ACTION_DELETE_CLASS}
+                                        title="Retirer l'actif"
+                                        aria-label="Retirer l'actif"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
                                     </div>
-                                  ) : (
-                                    <span className="text-gray-400 text-xs">Toujours visible</span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3">
-                                  <div className="flex gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => openAvailabilityModal(clientAsset)}
-                                      className="text-blue-600"
-                                      title="Configurer (disponibilité + personnalisation)"
-                                    >
-                                      <SlidersHorizontal className="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleRemoveAsset(asset.id)}
-                                      className="text-red-600"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  ) : localClientAssets.length > 0 ? (
-                    <p className="text-sm text-slate-500">Aucun actif ne correspond aux filtres sélectionnés</p>
-                  ) : (
-                    <p className="text-sm text-slate-500">Aucun actif assigné</p>
-                  );
-                })()}
+                    <ClientAssetsTablePagination
+                      page={assetsPagination.page}
+                      totalPages={assetsPagination.total_pages}
+                      total={assetsPagination.total}
+                      itemLabel="actifs"
+                      onPageChange={setAssetsPage}
+                    />
+                  </div>
+                ) : localClientAssets.length > 0 ? (
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucun actif ne correspond aux filtres sélectionnés
+                  </div>
+                ) : (
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucun actif assigné
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
+          )}
         </TabsContent>
 
         {/* Products Tab */}
         <TabsContent value="products">
+          {loadingProducts && !loadedInnerTabs.has('products') ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <LoadingIndicator />
+              <p className="mt-4 text-slate-500">Chargement des produits...</p>
+            </div>
+          ) : (
           <div className="space-y-6">
             <div className="flex justify-between items-center gap-4 flex-wrap">
               {/* Filters */}
@@ -1050,7 +1294,7 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
                         headers: { 'Content-Type': 'application/json' }
                       });
                       toast.success(`Produits réinitialisés : ${(response as any).added} ajouté(s), ${(response as any).removed} retiré(s)`);
-                      onRefresh();
+                      void loadProductsTabData({ silent: true });
                     } catch (error: any) {
                       console.error('Error resetting products:', error);
                       toast.error(error.message || 'Erreur lors de la réinitialisation des produits');
@@ -1299,186 +1543,194 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
 
             <Card>
               <CardHeader>
-                <CardTitle className="tab-section-title">Produits visibles par le client</CardTitle>
+                <CardTitle className="tab-section-title">
+                  Produits visibles par le client ({filteredClientProducts.length})
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                {(() => {
-                  const filteredProducts = localClientProducts.filter((clientProduct: any) => {
-                    const product = clientProduct.product;
-                    if (!product) return false;
-                    const typeMatch = filterProductType === 'all' || product.type === filterProductType;
-                    const categoryMatch = filterProductCategory === 'all' || (product.categoryTitle || product.category?.title) === filterProductCategory;
-                    const productSub = product.subcategory;
-                    const productSubList = Array.isArray(productSub) ? productSub : (productSub ? [productSub] : []);
-                    const subcategoryMatch = filterProductSubcategory === 'all' || productSubList.includes(filterProductSubcategory) || productSub === filterProductSubcategory;
-                    return typeMatch && categoryMatch && subcategoryMatch;
-                  });
-                  return (
-                    filteredProducts.length > 0 ? (
+                {filteredClientProducts.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className={positionsTableShellClass}>
                       <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200">
-                          <th className="w-10 py-2 px-3 pr-0">
-                            <Checkbox
-                              checked={
-                                selectedProductIds.size === 0
-                                  ? false
-                                  : selectedProductIds.size === filteredProducts.length
-                                  ? true
-                                  : 'indeterminate'
-                              }
-                              onCheckedChange={() => handleSelectAllProducts(filteredProducts)}
-                              aria-label="Tout sélectionner"
-                            />
-                          </th>
-                          <th className="text-left py-2 px-3">Type</th>
-                          <th className="text-left py-2 px-3">Nom</th>
-                          <th className="text-left py-2 px-3">Référence</th>
-                          <th className="text-left py-2 px-3">Rentabilité</th>
-                          <th className="text-left py-2 px-3">Souscription</th>
-                          <th className="text-left py-2 px-3">Durée</th>
-                          <th className="text-left py-2 px-3">Statut</th>
-                          <th className="text-center py-2 px-3">Mis en avant</th>
-                          <th className="text-center py-2 px-3">Afficher les taux</th>
-                          <th className="text-left py-2 px-3">Dates de disponibilité</th>
-                          <th className="text-left py-2 px-3">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredProducts.map((clientProduct: any) => {
-                          const product = clientProduct.product;
-                          if (!product) return null; // Skip if product was deleted
-                          const isFeatured = clientProduct.featured || false;
-                          const showRates = clientProduct.showRates !== false;
-                          const profitability = formatProductProfitability(product);
-                          const minEntry = product.minEntryValue;
-                          const maxEntry = product.maxEntryValue;
-                          const subscriptionText = formatSubscriptionText(minEntry, maxEntry);
-                          return (
-                            <tr key={clientProduct.id} className="border-b border-slate-100">
-                              <td className="w-10 py-2 px-3 pr-0">
+                        <table className={positionsTableClass}>
+                          <thead className={positionsTableHeadClass}>
+                            <tr className={positionsTableHeadRowClass}>
+                              <th className={`${positionsTableHeadCellClass} w-10 pr-0`}>
                                 <Checkbox
-                                  checked={selectedProductIds.has(product.id)}
-                                  onCheckedChange={() => handleSelectProduct(product.id)}
-                                  aria-label={`Sélectionner ${product.name}`}
+                                  checked={productsPageCheckboxState}
+                                  onCheckedChange={() => handleSelectAllProducts(productsPagination.items)}
+                                  aria-label="Tout sélectionner"
                                 />
-                              </td>
-                              <td className="py-2 px-3">{product.type || '-'}</td>
-                              <td className="py-2 px-3">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span>{product.name || '-'}</span>
-                                  {clientProduct.isCustomized ? (
-                                    <Badge variant="secondary" className="text-xs font-normal">
-                                      Personnalisé
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3">{product.reference || '-'}</td>
-                              <td className="py-2 px-3">
-                                <div className="text-sm text-slate-900">{profitability.main}</div>
-                                {profitability.sub && (
-                                  <div className="text-xs text-slate-500">{profitability.sub}</div>
-                                )}
-                              </td>
-                              <td className="py-2 px-3">
-                                <div className="text-sm text-slate-900">{subscriptionText}</div>
-                                {(product.availableFunds === true) && (
-                                  <div className="text-xs text-slate-500">Fonds disponibles</div>
-                                )}
-                              </td>
-                              <td className="py-2 px-3">{product.duration || '-'}</td>
-                              <td className="py-2 px-3">{product.status || '-'}</td>
-                              <td className="py-2 px-3 text-center">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleToggleFeaturedProduct(clientProduct.id, product.id, isFeatured)}
-                                  className="p-1 hover:bg-transparent cursor-pointer"
-                                >
-                                  {isFeatured ? (
-                                    <Star 
-                                      className="w-5 h-5 transition-colors"
-                                      fill="#facc15"
-                                      stroke="#facc15"
-                                    />
-                                  ) : (
-                                    <Star 
-                                      className="w-5 h-5 transition-colors text-slate-400 hover:text-yellow-300"
-                                      fill="none"
-                                      stroke="currentColor"
-                                    />
-                                  )}
-                                </Button>
-                              </td>
-                              <td className="py-2 px-3 text-center">
-                                <Checkbox
-                                  checked={showRates}
-                                  onCheckedChange={() => handleToggleProductRates(clientProduct.id, product.id, showRates)}
-                                  aria-label={`${showRates ? 'Masquer' : 'Afficher'} les taux de ${product.name}`}
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                {clientProduct.availabilityStart || clientProduct.availabilityEnd ? (
-                                  <div className="text-xs">
-                                    {clientProduct.availabilityStart && (
-                                      <div className="font-medium text-green-600">Client: {formatDate(clientProduct.availabilityStart)}</div>
-                                    )}
-                                    {clientProduct.availabilityEnd && (
-                                      <div className="font-medium text-green-600">Fin: {formatDate(clientProduct.availabilityEnd)}</div>
-                                    )}
-                                  </div>
-                                ) : (product.availabilityStart || product.availabilityEnd) ? (
-                                  <div className="text-xs text-gray-500">
-                                    {product.availabilityStart && (
-                                      <div>Défaut: {formatDate(product.availabilityStart)}</div>
-                                    )}
-                                    {product.availabilityEnd && (
-                                      <div>Fin: {formatDate(product.availabilityEnd)}</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-gray-400 text-xs">Toujours visible</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3">
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => openProductAvailabilityModal(clientProduct)}
-                                    className="text-blue-600"
-                                    title="Configurer (disponibilité + personnalisation)"
-                                  >
-                                    <SlidersHorizontal className="w-4 h-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleRemoveProduct(product.id)}
-                                    className="text-red-600"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              </td>
+                              </th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Type</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Nom</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Référence</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Rentabilité</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Souscription</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Durée</th>
+                              <th className={`${positionsTableHeadCellClass} text-center`}>Mis en avant</th>
+                              <th className={`${positionsTableHeadCellClass} text-center`}>Afficher les taux</th>
+                              <th className={`${positionsTableHeadCellClass} text-left`}>Dates de disponibilité</th>
+                              <th className={`${positionsTableHeadCellClass} text-right`}>Actions</th>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          </thead>
+                          <tbody className={positionsTableBodyClass}>
+                            {productsPagination.items.map((clientProduct: any) => {
+                              const product = clientProduct.product;
+                              if (!product) return null;
+                              const isFeatured = clientProduct.featured || false;
+                              const showRates = clientProduct.showRates !== false;
+                              const profitability = formatProductProfitability(product);
+                              const minEntry = product.minEntryValue;
+                              const maxEntry = product.maxEntryValue;
+                              const subscriptionText = formatSubscriptionText(minEntry, maxEntry);
+                              const productLogoUrl = String(product.imageUrl || product.image_url || '').trim();
+                              return (
+                                <tr key={clientProduct.id} className={positionsTableRowClass}>
+                                  <td className={`${positionsTableCellClass} w-10 pr-0`}>
+                                    <Checkbox
+                                      checked={selectedProductIds.has(product.id)}
+                                      onCheckedChange={() => handleSelectProduct(product.id)}
+                                      aria-label={`Sélectionner ${product.name}`}
+                                    />
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-slate-600`}>{product.type || '-'}</td>
+                                  <td className={positionsTableCellClass}>
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <AssetNameWithLogo
+                                        name={product.name}
+                                        logoUrl={productLogoUrl}
+                                        nameClassName="font-medium text-slate-900"
+                                      />
+                                      {clientProduct.isCustomized ? (
+                                        <Badge variant="secondary" className="shrink-0 text-xs font-normal">
+                                          Personnalisé
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                  <td className={`${positionsTableCellClass} font-mono text-xs text-slate-600`}>
+                                    {product.reference || '-'}
+                                  </td>
+                                  <td className={positionsTableCellClass}>
+                                    <div className="text-sm font-medium text-slate-900">{profitability.main}</div>
+                                    {profitability.sub && (
+                                      <div className="text-xs text-slate-500">{profitability.sub}</div>
+                                    )}
+                                  </td>
+                                  <td className={positionsTableCellClass}>
+                                    <div className="text-sm text-slate-900">{subscriptionText}</div>
+                                    {product.availableFunds === true && (
+                                      <div className="text-xs text-slate-500">Fonds disponibles</div>
+                                    )}
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-slate-600`}>{product.duration || '-'}</td>
+                                  <td className={`${positionsTableCellClass} text-center`}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleToggleFeaturedProduct(clientProduct.id, product.id, isFeatured)}
+                                      className="p-1 hover:bg-transparent cursor-pointer"
+                                    >
+                                      {isFeatured ? (
+                                        <Star className="w-5 h-5 transition-colors" fill="#facc15" stroke="#facc15" />
+                                      ) : (
+                                        <Star
+                                          className="w-5 h-5 transition-colors text-slate-400 hover:text-yellow-300"
+                                          fill="none"
+                                          stroke="currentColor"
+                                        />
+                                      )}
+                                    </Button>
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-center`}>
+                                    <Checkbox
+                                      checked={showRates}
+                                      onCheckedChange={() =>
+                                        handleToggleProductRates(clientProduct.id, product.id, showRates)
+                                      }
+                                      aria-label={`${showRates ? 'Masquer' : 'Afficher'} les taux de ${product.name}`}
+                                    />
+                                  </td>
+                                  <td className={positionsTableCellClass}>
+                                    {clientProduct.availabilityStart || clientProduct.availabilityEnd ? (
+                                      <div className="text-xs text-slate-600">
+                                        {clientProduct.availabilityStart && (
+                                          <div className="font-medium text-green-600">
+                                            Client: {formatDate(clientProduct.availabilityStart)}
+                                          </div>
+                                        )}
+                                        {clientProduct.availabilityEnd && (
+                                          <div className="font-medium text-green-600">
+                                            Fin: {formatDate(clientProduct.availabilityEnd)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : product.availabilityStart || product.availabilityEnd ? (
+                                      <div className="text-xs text-slate-500">
+                                        {product.availabilityStart && (
+                                          <div>Défaut: {formatDate(product.availabilityStart)}</div>
+                                        )}
+                                        {product.availabilityEnd && (
+                                          <div>Fin: {formatDate(product.availabilityEnd)}</div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-slate-400">Toujours visible</span>
+                                    )}
+                                  </td>
+                                  <td className={`${positionsTableCellClass} text-right whitespace-nowrap`}>
+                                    <div className="relative flex flex-nowrap justify-end gap-1.5">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => openProductAvailabilityModal(clientProduct)}
+                                        className={TABLE_ACTION_CONFIGURE_CLASS}
+                                        title="Configurer (disponibilité + personnalisation)"
+                                        aria-label="Configurer (disponibilité + personnalisation)"
+                                      >
+                                        <SlidersHorizontal className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleRemoveProduct(product.id)}
+                                        className={TABLE_ACTION_DELETE_CLASS}
+                                        title="Retirer le produit"
+                                        aria-label="Retirer le produit"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
-                    ) : localClientProducts.length > 0 ? (
-                      <p className="text-sm text-slate-500">Aucun produit ne correspond aux filtres sélectionnés</p>
-                    ) : (
-                      <p className="text-sm text-slate-500">Aucun produit assigné</p>
-                    )
-                  );
-                })()}
+                    </div>
+                    <ClientAssetsTablePagination
+                      page={productsPagination.page}
+                      totalPages={productsPagination.total_pages}
+                      total={productsPagination.total}
+                      itemLabel="produits"
+                      onPageChange={setProductsPage}
+                    />
+                  </div>
+                ) : localClientProducts.length > 0 ? (
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucun produit ne correspond aux filtres sélectionnés
+                  </div>
+                ) : (
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucun produit assigné
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -1509,6 +1761,95 @@ export function ClientAssetsTab({ clientId, clientAssets, availableAssets, clien
           onSuccess={handleProductAvailabilitySuccess}
         />
       )}
+    </div>
+  );
+}
+
+function ClientAssetsTablePagination({
+  page,
+  totalPages,
+  total,
+  itemLabel,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-200 pt-4 sm:flex-row">
+      <div className="text-sm text-slate-600">
+        Page {page} sur {totalPages} ({total} {itemLabel})
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(1)}
+          disabled={page <= 1}
+          title="Première page"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="-ml-2 h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+        >
+          <ChevronLeft className="mr-1 h-4 w-4" />
+          Précédent
+        </Button>
+        <div className="flex items-center gap-1">
+          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+            let pageNum: number;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (page <= 3) {
+              pageNum = i + 1;
+            } else if (page >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = page - 2 + i;
+            }
+            return (
+              <Button
+                key={pageNum}
+                variant={page === pageNum ? 'default' : 'outline'}
+                size="sm"
+                className="min-w-[2.5rem]"
+                onClick={() => onPageChange(pageNum)}
+              >
+                {pageNum}
+              </Button>
+            );
+          })}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+        >
+          Suivant
+          <ChevronRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(totalPages)}
+          disabled={page >= totalPages}
+          title="Dernière page"
+        >
+          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="-ml-2 h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 }

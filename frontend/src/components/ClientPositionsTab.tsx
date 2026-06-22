@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -23,8 +23,23 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { formatPositionDateTime, formatPositionDateOnly } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronLeft, ChevronRight, Pencil, ChevronDown } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Pencil, ChevronDown, X } from 'lucide-react';
 import LoadingIndicator from './LoadingIndicator';
+import {
+  PositionStatusBadge,
+  AssetNameWithLogo,
+  getAssetLogoUrlFromSources,
+  computePositionPnlPct,
+  formatPositionPnlWithPct,
+  positionsTableBodyClass,
+  positionsTableCellClass,
+  positionsTableClass,
+  positionsTableHeadCellClass,
+  positionsTableHeadClass,
+  positionsTableHeadRowClass,
+  positionsTableRowClass,
+  positionsTableShellClass,
+} from './positionUtils';
 
 type ClientPositionRow = {
   id: string;
@@ -88,7 +103,15 @@ const combineDateAndTimeForApi = (date: string, time: string): string | null => 
   return `${normalizedDate}T${normalizedTime}`;
 };
 
-export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clientId: string; accountCurrency?: string }) {
+export function ClientPositionsTab({
+  clientId,
+  accountCurrency = 'EUR',
+  refreshToken = 0,
+}: {
+  clientId: string;
+  accountCurrency?: string;
+  refreshToken?: number;
+}) {
   const [loading, setLoading] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [positions, setPositions] = useState<ClientPositionRow[]>([]);
@@ -106,6 +129,7 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
   const [isAssetSearchOpen, setIsAssetSearchOpen] = useState(false);
   const [editAssetQuery, setEditAssetQuery] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const prevRefreshTokenRef = useRef(refreshToken);
 
   const upcomingStatuses = useMemo(() => new Set(['pending']), []);
   const openStatuses = useMemo(() => new Set(['open']), []);
@@ -201,17 +225,28 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
     }
   }
 
-  // Load all positions for counts on mount and when clientId changes
+  // Load all positions for counts on mount and when clientId or refreshToken changes
   useEffect(() => {
     loadAllPositionsForCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+  }, [clientId, refreshToken]);
 
-  // Load paginated positions when tab changes
+  // Load paginated positions when tab or client changes
   useEffect(() => {
     loadPositionsForTab(activeTab, 1, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, activeTab]);
+
+  // Silent reload of current page when parent triggers a full client refresh
+  useEffect(() => {
+    if (prevRefreshTokenRef.current === refreshToken || refreshToken === 0) {
+      prevRefreshTokenRef.current = refreshToken;
+      return;
+    }
+    prevRefreshTokenRef.current = refreshToken;
+    void loadPositionsForTab(activeTab, pagination.page, pagination.limit, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken]);
 
   useEffect(() => {
     const loadAssets = async () => {
@@ -385,35 +420,10 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-3">
+      <CardHeader>
         <CardTitle className="tab-section-title">Positions ({loading ? '...' : pagination.total})</CardTitle>
-        <Button variant="outline" onClick={() => { void handleRefresh(); }} disabled={loading}>
-          <RefreshCw className="w-4 h-4 mr-2" />
-          {loading ? 'Chargement...' : 'Rafraîchir'}
-        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="w-full md:w-[300px]">
-            <Select 
-              value={selectedProductId || 'all'} 
-              onValueChange={(value) => setSelectedProductId(value === 'all' ? undefined : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Filtrer par produit" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous les produits</SelectItem>
-                {productOptions.map((product) => (
-                  <SelectItem key={product.id} value={product.id}>
-                    {product.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
         {loading && positions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <LoadingIndicator />
@@ -427,20 +437,54 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
               </div>
             )}
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-              <TabsList>
-                <TabsTrigger value="upcoming">À venir ({counts.upcoming})</TabsTrigger>
-                <TabsTrigger value="open">Ouvertes ({counts.open})</TabsTrigger>
-                <TabsTrigger value="closed">Fermées ({counts.closed})</TabsTrigger>
-                <TabsTrigger value="cancelled">Annulées ({counts.cancelled})</TabsTrigger>
-              </TabsList>
+              <div className="mb-4 flex flex-nowrap items-center gap-3">
+                <TabsList className="h-auto shrink-0">
+                  <TabsTrigger value="upcoming">À venir ({counts.upcoming})</TabsTrigger>
+                  <TabsTrigger value="open">Ouvertes ({counts.open})</TabsTrigger>
+                  <TabsTrigger value="closed">Fermées ({counts.closed})</TabsTrigger>
+                  <TabsTrigger value="cancelled">Annulées ({counts.cancelled})</TabsTrigger>
+                </TabsList>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <Select
+                    modal={false}
+                    value={selectedProductId || 'all'}
+                    onValueChange={(value) => setSelectedProductId(value === 'all' ? undefined : value)}
+                  >
+                    <SelectTrigger className="app-tabs-toolbar-control w-[200px]">
+                      <SelectValue placeholder="Filtrer par produit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tous les produits</SelectItem>
+                      {productOptions.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>
+                          {product.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    className="app-tabs-toolbar-control shrink-0"
+                    onClick={() => {
+                      void handleRefresh();
+                    }}
+                    disabled={loading}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    {loading ? 'Chargement...' : 'Rafraîchir'}
+                  </Button>
+                </div>
+              </div>
 
-              <TabsContent value="upcoming" className="mt-4">
+              <TabsContent value="upcoming" className="mt-0">
                 {loading && positions.length > 0 ? (
                   <div className="flex items-center justify-center py-8">
                     <LoadingIndicator />
                   </div>
                 ) : !filtered.length ? (
-                  <div className="text-sm text-slate-600">Aucune position.</div>
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucune position.
+                  </div>
                 ) : (
                   <PositionsTable
                     rows={filtered}
@@ -463,13 +507,15 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                   />
                 )}
               </TabsContent>
-              <TabsContent value="open" className="mt-4">
+              <TabsContent value="open" className="mt-0">
                 {loading && positions.length > 0 ? (
                   <div className="flex items-center justify-center py-8">
                     <LoadingIndicator />
                   </div>
                 ) : !filtered.length ? (
-                  <div className="text-sm text-slate-600">Aucune position.</div>
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucune position.
+                  </div>
                 ) : (
                   <PositionsTable
                     rows={filtered}
@@ -492,13 +538,15 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                   />
                 )}
               </TabsContent>
-              <TabsContent value="closed" className="mt-4">
+              <TabsContent value="closed" className="mt-0">
                 {loading && positions.length > 0 ? (
                   <div className="flex items-center justify-center py-8">
                     <LoadingIndicator />
                   </div>
                 ) : !filtered.length ? (
-                  <div className="text-sm text-slate-600">Aucune position.</div>
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucune position.
+                  </div>
                 ) : (
                   <PositionsTable
                     rows={filtered}
@@ -520,13 +568,15 @@ export function ClientPositionsTab({ clientId, accountCurrency = 'EUR' }: { clie
                   />
                 )}
               </TabsContent>
-              <TabsContent value="cancelled" className="mt-4">
+              <TabsContent value="cancelled" className="mt-0">
                 {loading && positions.length > 0 ? (
                   <div className="flex items-center justify-center py-8">
                     <LoadingIndicator />
                   </div>
                 ) : !filtered.length ? (
-                  <div className="text-sm text-slate-600">Aucune position.</div>
+                  <div className={`${positionsTableShellClass} px-4 py-10 text-center text-sm text-slate-500`}>
+                    Aucune position.
+                  </div>
                 ) : (
                   <PositionsTable
                     rows={filtered}
@@ -829,7 +879,7 @@ function PositionsTable({
   };
 
   return (
-    <div className="overflow-x-auto">
+    <>
       <AlertDialog
         open={cancelOpen}
         onOpenChange={(open) => {
@@ -901,21 +951,23 @@ function PositionsTable({
         </AlertDialogContent>
       </AlertDialog>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="text-left py-2 px-3">Date et heure</th>
-            <th className="text-left py-2 px-3">Produit</th>
-            <th className="text-left py-2 px-3">Asset</th>
-            <th className="text-right py-2 px-3">Montant</th>
-            <th className="text-right py-2 px-3">P&amp;L</th>
-            <th className="text-left py-2 px-3">Statut</th>
-            <th className="text-left py-2 px-3">Transaction</th>
-            <th className="text-right py-2 px-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((p) => {
+      <div className={positionsTableShellClass}>
+        <div className="overflow-x-auto">
+          <table className={positionsTableClass}>
+            <thead className={positionsTableHeadClass}>
+              <tr className={positionsTableHeadRowClass}>
+                <th className={`${positionsTableHeadCellClass} text-left`}>Date et heure</th>
+                <th className={`${positionsTableHeadCellClass} text-left`}>Produit</th>
+                <th className={`${positionsTableHeadCellClass} text-left`}>Asset</th>
+                <th className={`${positionsTableHeadCellClass} text-right`}>Montant</th>
+                <th className={`${positionsTableHeadCellClass} text-right`}>P&amp;L</th>
+                <th className={`${positionsTableHeadCellClass} text-left`}>Statut</th>
+                <th className={`${positionsTableHeadCellClass} text-left`}>Transaction</th>
+                <th className={`${positionsTableHeadCellClass} text-right`}>Actions</th>
+              </tr>
+            </thead>
+            <tbody className={positionsTableBodyClass}>
+              {rows.map((p) => {
             const pnlNum =
               p.profit_loss == null ? null : typeof p.profit_loss === 'string' ? parseFloat(p.profit_loss) : Number(p.profit_loss);
             const investedEur = typeof p.invested_amount === 'string' ? parseFloat(p.invested_amount) : Number(p.invested_amount);
@@ -980,82 +1032,111 @@ function PositionsTable({
             let pnlLabelMain: string;
             let pnlLabelSub: string | null = null;
             let finalPnlColor: string;
+            let pnlPct: number | null = null;
 
             if (assetCurrency === 'EUR') {
-              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAmount(pnlEur, 'EUR') : '-';
-              finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? 'text-green-600' : 'text-red-600') : 'text-slate-700';
+              const formatted = formatPositionPnlWithPct(pnlEur, investedEur, 'EUR');
+              pnlLabelMain = formatted.main;
+              pnlPct = computePositionPnlPct(pnlEur, investedEur);
+              finalPnlColor =
+                formatted.isPositive == null
+                  ? 'text-slate-700'
+                  : formatted.isPositive
+                    ? 'text-green-600'
+                    : 'text-red-600';
             } else if (hasStoredProfitLoss && pnlEur != null && Number.isFinite(pnlEur)) {
-              // profit_loss stocké : EUR principal, devise actif secondaire
-              pnlLabelMain = formatAmount(pnlEur, 'EUR');
+              const formatted = formatPositionPnlWithPct(pnlEur, investedEur, 'EUR');
+              pnlLabelMain = formatted.main;
+              pnlPct = computePositionPnlPct(pnlEur, investedEur);
               pnlLabelSub = pnlAsset != null && Number.isFinite(pnlAsset)
                 ? `≈ ${formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 })}`
                 : null;
               finalPnlColor = pnlEur >= 0 ? 'text-green-600' : 'text-red-600';
             } else if (pnlAsset != null && Number.isFinite(pnlAsset)) {
-              // P&L temps réel : devise actif principal, EUR secondaire
-              pnlLabelMain = formatMoney(pnlAsset, assetCurrency, { maximumFractionDigits: 2 });
+              const investedForPct =
+                investedAsset != null && Number.isFinite(investedAsset) && investedAsset > 0 ? investedAsset : null;
+              pnlLabelMain = `${pnlAsset >= 0 ? '+' : '-'}${formatMoney(Math.abs(pnlAsset), assetCurrency, { maximumFractionDigits: 2 })}`;
+              pnlPct = computePositionPnlPct(pnlAsset, investedForPct);
               pnlLabelSub = pnlEur != null && Number.isFinite(pnlEur) ? `≈ ${formatAmount(pnlEur, 'EUR')}` : null;
               finalPnlColor = pnlAsset >= 0 ? 'text-green-600' : 'text-red-600';
             } else {
-              pnlLabelMain = pnlEur != null && Number.isFinite(pnlEur) ? formatAmount(pnlEur, 'EUR') : '-';
-              finalPnlColor = pnlEur != null && Number.isFinite(pnlEur) ? (pnlEur >= 0 ? 'text-green-600' : 'text-red-600') : 'text-slate-700';
+              const formatted = formatPositionPnlWithPct(pnlEur, investedEur, 'EUR');
+              pnlLabelMain = formatted.main;
+              pnlPct = computePositionPnlPct(pnlEur, investedEur);
+              finalPnlColor =
+                formatted.isPositive == null
+                  ? 'text-slate-700'
+                  : formatted.isPositive
+                    ? 'text-green-600'
+                    : 'text-red-600';
             }
+
+            const pnlPctLabel =
+              pnlPct != null ? ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)` : '';
             
             return (
-              <tr key={p.id} className="border-b border-slate-100">
-                <td className="py-2 px-3">{formatPositionRange(p)}</td>
-                <td className="py-2 px-3">{p.productName || p.productId}</td>
-                <td className="py-2 px-3">{p.assetName || p.assetId || '-'}</td>
-                <td className="py-2 px-3 text-right">
-                  <div>{Number.isFinite(investedEur) ? formatAmount(investedEur, 'EUR') : '-'}</div>
+              <tr key={p.id} className={positionsTableRowClass}>
+                <td className={`${positionsTableCellClass} whitespace-nowrap`}>{formatPositionRange(p)}</td>
+                <td className={positionsTableCellClass}>
+                  <div className="font-medium text-slate-900">{p.productName || p.productId}</div>
+                </td>
+                <td className={positionsTableCellClass}>
+                  <AssetNameWithLogo
+                    name={p.assetName || p.assetId}
+                    logoUrl={getAssetLogoUrlFromSources(assetsById.get(String(p.assetId || '')), p)}
+                    nameClassName="text-slate-700"
+                  />
+                </td>
+                <td className={`${positionsTableCellClass} text-right whitespace-nowrap`}>
+                  <div className="font-medium text-slate-900">
+                    {Number.isFinite(investedEur) ? formatAmount(investedEur, 'EUR') : '-'}
+                  </div>
                   {p.assetId && investedAsset != null && Number.isFinite(investedAsset) && assetCurrency !== 'EUR' && (
-                    <div className="text-xs text-slate-500 mt-0.5">
+                    <div className="mt-0.5 text-xs text-slate-500">
                       ≈ {formatMoney(investedAsset, assetCurrency, { maximumFractionDigits: 2 })}
                     </div>
                   )}
                 </td>
-                <td className={`py-2 px-3 text-right font-medium ${finalPnlColor}`}>
-                  <div>{pnlLabelMain}</div>
+                <td className={`${positionsTableCellClass} text-right font-medium whitespace-nowrap ${finalPnlColor}`}>
+                  <div>
+                    {pnlLabelMain}
+                    {pnlPctLabel}
+                  </div>
                   {pnlLabelSub && (
-                    <div className="text-xs text-slate-500 mt-0.5">{pnlLabelSub}</div>
+                    <div className="mt-0.5 text-xs font-normal text-slate-500">{pnlLabelSub}</div>
                   )}
                 </td>
-                <td className="py-2 px-3">
-                  {p.status === 'pending'
-                    ? 'À venir'
-                    : p.status === 'open'
-                      ? 'Ouverte'
-                      : p.status === 'done'
-                        ? 'Fermée'
-                        : p.status === 'cancelled'
-                          ? 'Annulée'
-                          : p.status}
+                <td className={positionsTableCellClass}>
+                  <PositionStatusBadge status={p.status} />
                 </td>
-                <td className="py-2 px-3">{p.transactionId || '-'}</td>
-                <td className="py-2 pl-0 pr-3 text-right">
+                <td className={`${positionsTableCellClass} font-mono text-xs text-slate-600`}>{p.transactionId || '-'}</td>
+                <td className={`${positionsTableCellClass} text-right whitespace-nowrap`}>
                   {p.status === 'cancelled' ? (
                     <span className="text-slate-400">—</span>
                   ) : (
-                    <div className="inline-flex items-center gap-3">
+                    <div className="relative flex flex-nowrap justify-end gap-1.5">
                       <Button
-                        variant="link"
+                        variant="ghost"
                         size="sm"
-                        className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
                         onClick={() => onEdit(p)}
+                        className="h-8 rounded-md border border-purple-200/80 bg-purple-50/40 px-2.5 text-slate-700 shadow-sm hover:!bg-purple-50 hover:!text-purple-800 transition-colors duration-200"
+                        title="Modifier la position"
+                        aria-label="Modifier la position"
                       >
-                        <Pencil className="w-3 h-3 mr-1" />
-                        Modifier
+                        <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
-                        variant="link"
+                        variant="ghost"
                         size="sm"
-                        className="h-auto rounded-none bg-transparent shadow-none underline underline-offset-4 !px-0 !py-0 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-slate-50 hover:bg-transparent"
                         onClick={() => {
                           setCancelRow(p);
                           setCancelOpen(true);
                         }}
+                        className="h-8 rounded-md border border-red-200/80 bg-red-50/40 px-2.5 text-slate-700 shadow-sm hover:!bg-red-50 hover:!text-red-700 transition-colors duration-200"
+                        title="Annuler la position"
+                        aria-label="Annuler la position"
                       >
-                        Annuler
+                        <X className="h-4 w-4" />
                       </Button>
                     </div>
                   )}
@@ -1063,9 +1144,11 @@ function PositionsTable({
               </tr>
             );
           })}
-        </tbody>
-      </table>
-    </div>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
   );
 }
 
