@@ -16,7 +16,7 @@ import { TransactionList } from './TransactionList';
 import { ProductTransferSelect } from './ProductTransferSelect';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
-import { PositionGenerationModal } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
 import { getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
@@ -2082,17 +2082,18 @@ export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToke
             loadContractDocuments();
             onRefresh();
           }}
-          onSuccess={async () => {
+          onSuccess={async (result?: PositionGenerationSuccessResult) => {
             const successModalSource = positionModalSource;
-            // Update transaction status to "valide" after position generation completes
-            if (transactionForPositionGeneration) {
+            const alreadyValidated =
+              result?.validationFinalized ||
+              result?.transaction?.status === 'valide';
+
+            // Fallback: update status only if backend did not finalize in save-positions
+            if (transactionForPositionGeneration && !alreadyValidated) {
               try {
-                // Keep datetime in local format, don't convert to UTC
                 let datetimeISO = transactionForPositionGeneration.datetime;
                 if (datetimeISO && typeof datetimeISO === 'string') {
-                  // If it's already in ISO format, keep it
                   if (!datetimeISO.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
-                    // Otherwise format it properly
                     const dt = new Date(datetimeISO);
                     const year = dt.getFullYear();
                     const month = String(dt.getMonth() + 1).padStart(2, '0');
@@ -2103,7 +2104,6 @@ export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToke
                     datetimeISO = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
                   }
                 } else {
-                  // Fallback to current datetime if missing
                   const now = new Date();
                   const year = now.getFullYear();
                   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -2120,9 +2120,9 @@ export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToke
                     type: transactionForPositionGeneration.type,
                     amount: parseFloat(transactionForPositionGeneration.amount),
                     description: transactionForPositionGeneration.description,
-                    status: 'valide', // Update to final status
+                    status: 'valide',
                     datetime: datetimeISO,
-                    skip_position_generation: true // Skip since positions already generated
+                    skip_position_generation: true
                   })
                 });
               } catch (error: any) {

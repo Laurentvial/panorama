@@ -13,6 +13,25 @@ import '../styles/Modal.css';
 // Keep cancellation user-driven from the UI instead of hard-aborting after 2 minutes.
 const API_TIMEOUT_MS = 0;
 
+export type PositionGenerationSuccessResult = {
+  transaction?: any;
+  validationFinalized?: boolean;
+};
+
+function isRecoverableSaveError(err: any): boolean {
+  if (err?.name === 'AbortError') return false;
+  if (err?.isNetworkError) return true;
+  if (err?.status === 0) return true;
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    msg.includes('timeout') ||
+    msg.includes('expir') ||
+    msg.includes('connect') ||
+    msg.includes('network') ||
+    msg.includes('serveur')
+  );
+}
+
 const GENERATION_HORIZON_MIN = 30;
 const GENERATION_HORIZON_MAX = 3650;
 
@@ -70,6 +89,44 @@ function isInvestmentTransferTransaction(txn: any): boolean {
   if (!transferTo) return false;
   if (transferTo === 'solde' || transferTo === 'trading') return false;
   return true;
+}
+
+function getRecalculationRegeneratedTotal(
+  recalculationPreview: RecalculationExecutionPreview | null,
+  recalculationExecution: RecalculationExecutionSummary | null,
+  positionsSaved: boolean,
+): number | null {
+  if (positionsSaved && recalculationExecution?.regenerated_total != null) {
+    return recalculationExecution.regenerated_total;
+  }
+  const expected = recalculationPreview?.regenerated_total_expected;
+  if (expected != null && Number.isFinite(Number(expected))) {
+    return Number(expected);
+  }
+  return null;
+}
+
+function getRecalculationPositionsSummaryText(
+  recalculationPreview: RecalculationExecutionPreview | null,
+  recalculationExecution: RecalculationExecutionSummary | null,
+  positionsSaved: boolean,
+  pendingToDeleteCount: number | null,
+): string {
+  const total = getRecalculationRegeneratedTotal(
+    recalculationPreview,
+    recalculationExecution,
+    positionsSaved,
+  );
+  if (positionsSaved && recalculationExecution?.status === 'ok') {
+    return `${total ?? recalculationExecution.regenerated_total} position(s) régénérée(s) après exécution.`;
+  }
+  if (total != null && total > 0) {
+    return `${total} position(s) attendue(s) après exécution (recalcul sur toutes les transactions d'investissement du produit).`;
+  }
+  if (pendingToDeleteCount != null && pendingToDeleteCount > 0) {
+    return `${pendingToDeleteCount} position(s) pending seront supprimées puis régénérées proportionnellement au retrait.`;
+  }
+  return 'Le recalcul régénérera les positions pending de toutes les transactions d\'investissement sur ce produit.';
 }
 
 /** Proration = effective_rate / base_rate when base ≠ 0 (aligns with backend; works for negative rates). */
@@ -190,7 +247,7 @@ interface PositionGenerationModalProps {
   clientId: string;
   accountCurrency?: string;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (result?: PositionGenerationSuccessResult) => void;
   isWithdrawal?: boolean; // If true, this is a withdrawal transaction
 }
 
@@ -232,6 +289,8 @@ export function PositionGenerationModal({
   const [generationHorizonDays, setGenerationHorizonDays] = useState<string>('30');
   const generationHorizonDaysRef = useRef<string>('30');
   const [skipPositions, setSkipPositions] = useState<boolean>(false);
+  const [saveRecoveryAvailable, setSaveRecoveryAvailable] = useState<boolean>(false);
+  const [lastSaveResult, setLastSaveResult] = useState<PositionGenerationSuccessResult | null>(null);
 
   const [deletedPositions, setDeletedPositions] = useState<{
     total_count: number;
@@ -687,7 +746,9 @@ export function PositionGenerationModal({
           : null;
       const expectedRecalculationTotal =
         (isWithdrawal || isAdditionRecalc) &&
-        recalculationPreview?.regenerated_total_expected != null
+        recalculationPreview?.regenerated_total_expected != null &&
+        Number.isFinite(Number(recalculationPreview.regenerated_total_expected)) &&
+        Number(recalculationPreview.regenerated_total_expected) > 0
           ? Number(recalculationPreview.regenerated_total_expected)
           : null;
       const expectedRecalculationPerTransaction =
@@ -710,6 +771,7 @@ export function PositionGenerationModal({
             rates_used: ratesUsed,
             period_summaries: recalculatedPeriodSummaries,
             manual_regeneration: true,
+            finalize_validation: true,
             ...(opts?.skipPositions ? { skip_positions: true } : {}),
             ...(shouldSendPositionsMonthRange
               ? {
@@ -757,6 +819,13 @@ export function PositionGenerationModal({
       if ((response as any).recalculation_execution) {
         setRecalculationExecution((response as any).recalculation_execution);
       }
+
+      const saveResult: PositionGenerationSuccessResult = {
+        transaction: (response as any).transaction,
+        validationFinalized: Boolean((response as any).validation_finalized),
+      };
+      setLastSaveResult(saveResult);
+      setSaveRecoveryAvailable(false);
       
       // Mark positions as saved
       setPositionsSaved(true);
@@ -770,16 +839,20 @@ export function PositionGenerationModal({
       if (isRecalculationAfterSave) {
         // For recalculations, keep modal open to show real execution summary.
         toast.success(
-          isWithdrawal
-            ? 'Retrait confirmé et recalcul exécuté avec succès'
-            : 'Ajout confirmé et recalcul exécuté avec succès'
+          saveResult.validationFinalized
+            ? isWithdrawal
+              ? 'Retrait validé et recalcul exécuté avec succès'
+              : 'Ajout validé et recalcul exécuté avec succès'
+            : isWithdrawal
+              ? 'Retrait confirmé et recalcul exécuté avec succès'
+              : 'Ajout confirmé et recalcul exécuté avec succès'
         );
         setReadyToConfirm(false);
         setStep('review-positions');
       } else {
         toast.success(opts?.skipPositions ? 'Historique enregistré (positions ignorées)' : 'Positions générées avec succès');
         handleClose();
-        onSuccess();
+        onSuccess(saveResult);
       }
     } catch (err: any) {
       console.error('Error saving positions:', err);
@@ -788,6 +861,59 @@ export function PositionGenerationModal({
         err?.error ||
         err?.message ||
         'Erreur lors de l\'enregistrement des positions';
+      setError(errorMessage);
+      setSaveRecoveryAvailable(isRecoverableSaveError(err));
+      toast.error(errorMessage);
+      setStep('review-positions');
+    }
+  };
+
+  const handleTryFinalizeValidation = async () => {
+    try {
+      setStep('saving');
+      setError(null);
+      setSaveRecoveryAvailable(false);
+
+      const response = await apiCall(
+        `/api/clients/${clientId}/transactions/${transaction.id}/finalize-validation/`,
+        { method: 'POST' }
+      );
+
+      const saveResult: PositionGenerationSuccessResult = {
+        transaction: (response as any).transaction,
+        validationFinalized: Boolean((response as any).validation_finalized ?? true),
+      };
+      setLastSaveResult(saveResult);
+      setPositionsSaved(true);
+      setIsRecalculationSaved(isWithdrawal || !!additionRecalculation);
+      setReadyToConfirm(false);
+
+      toast.success('Transaction validée avec succès');
+      onSuccess(saveResult);
+      setPositionsSaved(false);
+      setLastSaveResult(null);
+      setStep('loading-rates');
+      setRates([]);
+      setEditedRates({});
+      setPositions([]);
+      setError(null);
+      setSaveRecoveryAvailable(false);
+      setWithdrawalRecalculation(null);
+      setAdditionRecalculation(null);
+      setIsRecalculationSaved(false);
+      setRecalculationPreview(null);
+      setRecalculationExecution(null);
+      generationHorizonDaysRef.current = '30';
+      setGenerationHorizonDays('30');
+      setSkipPositions(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Error finalizing validation:', err);
+      const errorMessage =
+        err?.response?.error ||
+        err?.error ||
+        err?.message ||
+        'Impossible de finaliser la validation';
       setError(errorMessage);
       toast.error(errorMessage);
       setStep('review-positions');
@@ -799,7 +925,7 @@ export function PositionGenerationModal({
     // This avoids parent "cancel/keep en_cours" handlers overriding the successful state.
     const isAdditionRecalc = !!additionRecalculation;
     if ((isWithdrawal || isAdditionRecalc || isRecalculationSaved) && positionsSaved) {
-      onSuccess();
+      onSuccess(lastSaveResult || undefined);
       return;
     }
     setStep('loading-rates');
@@ -807,6 +933,8 @@ export function PositionGenerationModal({
     setEditedRates({});
     setPositions([]);
     setError(null);
+    setSaveRecoveryAvailable(false);
+    setLastSaveResult(null);
     setWithdrawalRecalculation(null);
     setAdditionRecalculation(null);
     setIsRecalculationSaved(false);
@@ -1108,6 +1236,17 @@ export function PositionGenerationModal({
               marginBottom: '20px' 
             }}>
               {error}
+            </div>
+          )}
+
+          {saveRecoveryAvailable && (
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>
+                L&apos;enregistrement a peut-être réussi côté serveur malgré le timeout. Vous pouvez tenter de finaliser la validation sans regénérer les positions.
+              </p>
+              <Button type="button" onClick={handleTryFinalizeValidation}>
+                Vérifier et finaliser la validation
+              </Button>
             </div>
           )}
 
@@ -1580,66 +1719,147 @@ export function PositionGenerationModal({
                 </div>
               )}
               
-              <p style={{ marginBottom: '20px', color: '#64748b' }}>
-                {isWithdrawal
-                  ? `${recalculationPreview?.regenerated_total_expected ?? 0} position(s) attendue(s) après exécution.`
-                  : `${positions.length} position(s) générée(s). Veuillez vérifier avant de valider :`}
-              </p>
+              {(() => {
+                const isAdditionRecalcFlow = !!additionRecalculation || isRecalculationSaved;
+                const usesRecalcFlow = isWithdrawal || isAdditionRecalcFlow;
+                const regeneratedTotal = getRecalculationRegeneratedTotal(
+                  recalculationPreview,
+                  recalculationExecution,
+                  positionsSaved,
+                );
+                const showRecalculationSampleTable =
+                  usesRecalcFlow &&
+                  !positionsSaved &&
+                  positions.length > 0 &&
+                  recalculationPreview != null &&
+                  (regeneratedTotal ?? 0) > 0;
 
-              {( !isWithdrawal || (isWithdrawal && positions.length > 0) ) && (
-              <>
-              {isWithdrawal && (
-                <div style={{ marginBottom: '10px', fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
-                  Liste des positions attendues (prévisualisation dry-run)
-                </div>
-              )}
-              <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Actif</th>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date ouverture</th>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date fermeture</th>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Montant investi</th>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Profit/Perte</th>
-                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Période</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {positions.map((pos, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: '8px' }}>
-                          {pos.asset_name ? (
-                            <div>
-                              <div style={{ fontWeight: '500' }}>{pos.asset_name}</div>
-                              {pos.asset_reference && (
-                                <div style={{ fontSize: '12px', color: '#64748b' }}>{pos.asset_reference}</div>
-                              )}
-                            </div>
-                          ) : (
-                            <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun actif</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.opened_at)}</td>
-                        <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.closed_at)}</td>
-                        <td style={{ padding: '8px' }}>{formatCurrency(pos.invested_amount)}</td>
-                        <td style={{ 
-                          padding: '8px', 
-                          color: parseFloat(pos.profit_loss) >= 0 ? '#16a34a' : '#dc2626',
-                          fontWeight: '500'
-                        }}>
-                          {formatCurrency(pos.profit_loss)}
-                        </td>
-                        <td style={{ padding: '8px' }}>{pos.period_index}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              </>
-              )}
+                return (
+                  <>
+                    <p style={{ marginBottom: '20px', color: '#64748b' }}>
+                      {usesRecalcFlow
+                        ? getRecalculationPositionsSummaryText(
+                            recalculationPreview,
+                            recalculationExecution,
+                            positionsSaved,
+                            deletedPositions?.total_count ?? null,
+                          )
+                        : `${positions.length} position(s) générée(s). Veuillez vérifier avant de valider :`}
+                    </p>
 
-              {!isWithdrawal && (
+                    {showRecalculationSampleTable && (
+                      <>
+                        <div style={{ marginBottom: '10px', fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
+                          Échantillon de positions régénérées ({positions.length} affichée(s) sur{' '}
+                          {regeneratedTotal} attendues)
+                        </div>
+                        {recalculationPreview?.generated_positions_preview_note && (
+                          <div style={{ marginBottom: '10px', fontSize: '12px', color: '#475569' }}>
+                            {recalculationPreview.generated_positions_preview_note}
+                          </div>
+                        )}
+                        <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Actif</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Transaction</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date ouverture</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date fermeture</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Montant investi</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Profit/Perte</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Période</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {positions.map((pos, idx) => (
+                                <tr key={pos.id || `${pos.transaction_id}-${idx}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                  <td style={{ padding: '8px' }}>
+                                    {pos.asset_name ? (
+                                      <div>
+                                        <div style={{ fontWeight: '500' }}>{pos.asset_name}</div>
+                                        {pos.asset_reference && (
+                                          <div style={{ fontSize: '12px', color: '#64748b' }}>{pos.asset_reference}</div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun actif</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '8px', fontSize: '12px', color: '#64748b' }}>
+                                    {pos.transaction_id || '-'}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.opened_at)}</td>
+                                  <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.closed_at)}</td>
+                                  <td style={{ padding: '8px' }}>{formatCurrency(pos.invested_amount)}</td>
+                                  <td style={{
+                                    padding: '8px',
+                                    color: parseFloat(pos.profit_loss) >= 0 ? '#16a34a' : '#dc2626',
+                                    fontWeight: '500',
+                                  }}>
+                                    {formatCurrency(pos.profit_loss)}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{pos.period_index}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+
+                    {!usesRecalcFlow && positions.length > 0 && (
+                      <>
+                        <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Actif</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date ouverture</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Date fermeture</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Montant investi</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Profit/Perte</th>
+                                <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Période</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {positions.map((pos, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                  <td style={{ padding: '8px' }}>
+                                    {pos.asset_name ? (
+                                      <div>
+                                        <div style={{ fontWeight: '500' }}>{pos.asset_name}</div>
+                                        {pos.asset_reference && (
+                                          <div style={{ fontSize: '12px', color: '#64748b' }}>{pos.asset_reference}</div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span style={{ color: '#64748b', fontStyle: 'italic' }}>Aucun actif</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.opened_at)}</td>
+                                  <td style={{ padding: '8px' }}>{formatPositionDateTime(pos.closed_at)}</td>
+                                  <td style={{ padding: '8px' }}>{formatCurrency(pos.invested_amount)}</td>
+                                  <td style={{
+                                    padding: '8px',
+                                    color: parseFloat(pos.profit_loss) >= 0 ? '#16a34a' : '#dc2626',
+                                    fontWeight: '500',
+                                  }}>
+                                    {formatCurrency(pos.profit_loss)}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{pos.period_index}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+
+              {!isWithdrawal && !additionRecalculation && !isRecalculationSaved && (
               <div style={{ 
                 padding: '12px', 
                 backgroundColor: '#f0f9ff', 

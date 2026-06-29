@@ -104,8 +104,12 @@ from .position_service import (
     GENERATION_HORIZON_MIN_DAYS,
     _calculate_real_invested_capital,
     create_positions_for_investment,
+    extend_db_transaction_timeouts,
+    finalize_transaction_validation,
     generate_rates_for_investment,
     generate_positions_with_rates,
+    get_latest_successful_recalculation_execution,
+    record_recalculation_execution_in_history,
     save_generated_positions,
     save_position_generation_history,
     recalculate_positions_for_product_addition,
@@ -114,6 +118,8 @@ from .position_service import (
     calculate_remaining_interests_for_transaction,
     delete_pending_positions_for_transaction,
     sync_position_statuses_from_schedule,
+    transaction_has_saved_position_generation,
+    verify_finalize_validation_preconditions,
 )
 
 COMPLETED_TRANSACTION_STATUSES = ('valide', 'cloture')
@@ -284,6 +290,99 @@ def _validate_recalculation_execution_against_expected(
                 f"attendu={expected_created_by_tx}, obtenu={actual_created_by_tx}."
             )
     return None
+
+
+def _serialize_transaction_for_response(transaction, request) -> dict:
+    return TransactionSerializer(transaction, context={'request': request}).data
+
+
+def _apply_post_save_validation(
+    transaction,
+    *,
+    finalize_validation: bool,
+    recalculation_execution: dict | None = None,
+    recalculation_cutoff_datetime=None,
+) -> bool:
+    """
+    Record successful recalculation in history and optionally finalize status to 'valide'.
+    Returns True when validation was finalized (or already completed).
+    """
+    if recalculation_execution and recalculation_execution.get('status') == 'ok':
+        record_recalculation_execution_in_history(
+            transaction,
+            recalculation_execution,
+            cutoff_datetime=recalculation_cutoff_datetime,
+        )
+    if not finalize_validation:
+        return transaction.status in COMPLETED_TRANSACTION_STATUSES
+    finalize_transaction_validation(transaction)
+    return True
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_finalize_validation(request, client_id, transaction_id):
+    """
+    Finalize validation for a transaction stuck in 'en_cours' after save-positions
+    completed on the server but the client timed out before the status update.
+    """
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if transaction.status in COMPLETED_TRANSACTION_STATUSES:
+        return Response(
+            {
+                'message': 'Transaction déjà validée',
+                'validation_finalized': True,
+                'transaction': _serialize_transaction_for_response(transaction, request),
+            }
+        )
+
+    precondition_error = verify_finalize_validation_preconditions(transaction)
+    if precondition_error:
+        return Response({'error': precondition_error}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        with db_transaction.atomic():
+            extend_db_transaction_timeouts()
+            finalize_transaction_validation(transaction)
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    transaction.refresh_from_db()
+    logger.info(
+        "transaction_finalize_validation.success %s",
+        json.dumps(
+            {
+                'transaction_id': transaction.id,
+                'client_id': client_id,
+                'status': transaction.status,
+                'has_recalc_history': get_latest_successful_recalculation_execution(transaction) is not None,
+                'has_saved_positions': transaction_has_saved_position_generation(transaction),
+            },
+            sort_keys=True,
+            default=str,
+        ),
+    )
+    return Response(
+        {
+            'message': 'Transaction validée avec succès',
+            'validation_finalized': True,
+            'transaction': _serialize_transaction_for_response(transaction, request),
+        }
+    )
 
 
 class SafeTokenRefreshView(TokenRefreshView):
@@ -11796,6 +11895,10 @@ def transaction_save_positions(request, client_id, transaction_id):
     if not isinstance(skip_positions, bool):
         skip_positions = str(skip_positions).lower() in ('true', '1', 'yes', 'on')
 
+    finalize_validation = request.data.get('finalize_validation', False)
+    if not isinstance(finalize_validation, bool):
+        finalize_validation = str(finalize_validation).lower() in ('true', '1', 'yes', 'on')
+
     requested_recalculation_cutoff = request.data.get('recalculation_cutoff_datetime')
     parsed_recalculation_cutoff_dt = None
     if requested_recalculation_cutoff:
@@ -11892,6 +11995,7 @@ def transaction_save_positions(request, client_id, transaction_id):
                     'expected_recalculation_per_transaction_count': len(parsed_expected_recalculation_per_transaction or []),
                     'recalculation_cutoff_datetime': parsed_recalculation_cutoff_dt.isoformat() if parsed_recalculation_cutoff_dt else None,
                     'has_preview_contract': parsed_preview_contract is not None,
+                    'finalize_validation': bool(finalize_validation),
                 },
                 sort_keys=True,
                 default=str,
@@ -11928,6 +12032,7 @@ def transaction_save_positions(request, client_id, transaction_id):
             from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
             
             with db_transaction.atomic():
+                extend_db_transaction_timeouts()
                 # Save the generation history
                 save_position_generation_history(
                     transaction,
@@ -12034,10 +12139,20 @@ def transaction_save_positions(request, client_id, transaction_id):
                 if mismatch_error:
                     raise ValueError(f"{mismatch_error} Opération annulée, veuillez régénérer.")
 
+                validation_finalized = _apply_post_save_validation(
+                    transaction,
+                    finalize_validation=finalize_validation,
+                    recalculation_execution=recalculation_execution,
+                    recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
+                )
+
+            transaction.refresh_from_db()
             response_data = {
                 'positions': [], 
                 'count': 0, 
-                'message': 'Historique de génération enregistré pour l\'ajout avec recalcul'
+                'message': 'Historique de génération enregistré pour l\'ajout avec recalcul',
+                'validation_finalized': validation_finalized,
+                'transaction': _serialize_transaction_for_response(transaction, request),
             }
             
             if deleted_positions_info:
@@ -12074,6 +12189,7 @@ def transaction_save_positions(request, client_id, transaction_id):
         
         if is_withdrawal:
             with db_transaction.atomic():
+                extend_db_transaction_timeouts()
                 # For withdrawals, only save the generation history (no positions are created for the withdrawal itself)
                 save_position_generation_history(
                     transaction,
@@ -12178,10 +12294,20 @@ def transaction_save_positions(request, client_id, transaction_id):
                 if mismatch_error:
                     raise ValueError(f"{mismatch_error} Opération annulée, veuillez régénérer.")
 
+                validation_finalized = _apply_post_save_validation(
+                    transaction,
+                    finalize_validation=finalize_validation,
+                    recalculation_execution=recalculation_execution,
+                    recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
+                )
+
+            transaction.refresh_from_db()
             response_data = {
                 'positions': [], 
                 'count': 0, 
-                'message': 'Historique de génération enregistré pour le retrait'
+                'message': 'Historique de génération enregistré pour le retrait',
+                'validation_finalized': validation_finalized,
+                'transaction': _serialize_transaction_for_response(transaction, request),
             }
             
             if deleted_positions_info:
@@ -12223,11 +12349,18 @@ def transaction_save_positions(request, client_id, transaction_id):
                 rates_used=rates_used,
                 period_summaries=period_summaries,
             )
+            validation_finalized = _apply_post_save_validation(
+                transaction,
+                finalize_validation=finalize_validation,
+            )
+            transaction.refresh_from_db()
             serializer = PositionSerializer(created_positions, many=True)
             
             response_data = {
                 'positions': serializer.data, 
-                'count': len(created_positions)
+                'count': len(created_positions),
+                'validation_finalized': validation_finalized,
+                'transaction': _serialize_transaction_for_response(transaction, request),
             }
             
             # Add deletion info if there were positions deleted

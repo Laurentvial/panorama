@@ -11,7 +11,7 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
-import { PositionGenerationModal } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
 import '../styles/Modal.css';
 
 interface EditTransactionModalProps {
@@ -634,31 +634,49 @@ export function EditTransactionModal({
     }
   }
 
-  const handlePositionModalSuccess = async () => {
-    // After positions are generated (or withdrawal confirmed), update transaction status to valide
-    if (pendingStatusUpdate) {
-      try {
-        const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
-          method: 'PUT',
-          body: JSON.stringify(buildUpdatePayload(pendingStatusUpdate, true))  // Always skip: positions already handled
-        });
-        bustTransactionsCache(clientId);
-        
-        // Show toast for both investments and withdrawals
-        if (isWithdrawalTransaction) {
-          toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
-        } else {
-          toast.success('Transaction modifiée avec succès');
-        }
-        setShowPositionModal(false);
-        setPendingStatusUpdate(null);
-        setIsWithdrawalTransaction(false);
-        handleClose();
-        onSuccess(updatedTransaction);
-      } catch (error: any) {
-        console.error('Error updating transaction after position generation:', error);
-        toast.error(error.message || 'Erreur lors de la mise à jour de la transaction');
+  const handlePositionModalSuccess = async (result?: PositionGenerationSuccessResult) => {
+    if (!pendingStatusUpdate) return;
+
+    const alreadyValidated =
+      result?.validationFinalized ||
+      result?.transaction?.status === 'valide';
+
+    if (alreadyValidated) {
+      bustTransactionsCache(clientId);
+      if (isWithdrawalTransaction) {
+        toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
+      } else {
+        toast.success('Transaction modifiée avec succès');
       }
+      setShowPositionModal(false);
+      setPendingStatusUpdate(null);
+      setIsWithdrawalTransaction(false);
+      handleClose();
+      onSuccess(result?.transaction || transaction);
+      return;
+    }
+
+    // Fallback when backend did not finalize in save-positions
+    try {
+      const updatedTransaction = await apiCall(`/api/clients/${clientId}/transactions/${transaction.id}/`, {
+        method: 'PUT',
+        body: JSON.stringify(buildUpdatePayload(pendingStatusUpdate, true))
+      });
+      bustTransactionsCache(clientId);
+
+      if (isWithdrawalTransaction) {
+        toast.success('Transaction modifiée avec succès. Les positions des autres transactions d\'investissement sur ce produit seront recalculées automatiquement.');
+      } else {
+        toast.success('Transaction modifiée avec succès');
+      }
+      setShowPositionModal(false);
+      setPendingStatusUpdate(null);
+      setIsWithdrawalTransaction(false);
+      handleClose();
+      onSuccess(updatedTransaction);
+    } catch (error: any) {
+      console.error('Error updating transaction after position generation:', error);
+      toast.error(error.message || 'Erreur lors de la mise à jour de la transaction');
     }
   };
 

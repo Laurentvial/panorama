@@ -68,7 +68,7 @@ services:
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     preDeployCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput
-    startCommand: python check_startup.py && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile - --log-level info --preload
+    startCommand: python check_startup.py && gunicorn backend.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 300 --keep-alive 5 --access-logfile - --error-logfile - --log-level info --preload
     healthCheckPath: /health/
     envVars:
       - key: PYTHONUNBUFFERED

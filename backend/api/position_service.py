@@ -33,6 +33,130 @@ class InvestmentContext:
 _DURATION_RE = re.compile(r"(\d+)")
 COMPLETED_TRANSACTION_STATUSES = ("valide", "cloture")
 
+# Long-running position recalculation (withdrawal/addition/save) may exceed default PG limits.
+_LONG_TRANSACTION_TIMEOUT_MS = 300000  # 5 minutes
+
+
+def extend_db_transaction_timeouts() -> None:
+    """Extend Postgres timeouts for the current transaction only (SET LOCAL)."""
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(f"SET LOCAL statement_timeout = '{_LONG_TRANSACTION_TIMEOUT_MS}'")
+        cursor.execute(
+            f"SET LOCAL idle_in_transaction_session_timeout = '{_LONG_TRANSACTION_TIMEOUT_MS}'"
+        )
+
+
+def snapshot_recalculation_execution_for_history(
+    execution_summary: dict,
+    *,
+    cutoff_datetime: datetime | None = None,
+) -> dict:
+    cutoff_raw = execution_summary.get("cutoff_datetime")
+    if cutoff_raw is None and cutoff_datetime is not None:
+        cutoff_raw = cutoff_datetime.isoformat()
+    return {
+        "status": execution_summary.get("status"),
+        "regenerated_total": int(execution_summary.get("regenerated_total") or 0),
+        "final_pending_total": int(execution_summary.get("final_pending_total") or 0),
+        "cutoff_datetime": cutoff_raw,
+        "product_id": execution_summary.get("product_id"),
+        "withdrawal_transaction_id": execution_summary.get("withdrawal_transaction_id"),
+        "addition_transaction_id": execution_summary.get("addition_transaction_id"),
+    }
+
+
+def record_recalculation_execution_in_history(
+    txn: Transaction,
+    execution_summary: dict,
+    *,
+    cutoff_datetime: datetime | None = None,
+) -> None:
+    snapshot = snapshot_recalculation_execution_for_history(
+        execution_summary,
+        cutoff_datetime=cutoff_datetime,
+    )
+    history = list(txn.position_generation_history or [])
+    if not history:
+        history.append({"timestamp": timezone.now().isoformat()})
+    last = dict(history[-1])
+    last["recalculation_execution"] = snapshot
+    history[-1] = last
+    txn.position_generation_history = history
+    txn.save(update_fields=["position_generation_history"])
+
+
+def get_latest_successful_recalculation_execution(txn: Transaction) -> dict | None:
+    for entry in reversed(txn.position_generation_history or []):
+        recalc = entry.get("recalculation_execution")
+        if isinstance(recalc, dict) and recalc.get("status") == "ok":
+            return recalc
+    return None
+
+
+def transaction_has_saved_position_generation(txn: Transaction) -> bool:
+    for entry in reversed(txn.position_generation_history or []):
+        summary = entry.get("summary") or {}
+        if int(summary.get("positions_generated") or 0) > 0:
+            return True
+    return Position.objects.filter(transaction=txn).exists()
+
+
+def verify_finalize_validation_preconditions(txn: Transaction) -> str | None:
+    """Return an error message if validation cannot be finalized safely."""
+    if txn.status in COMPLETED_TRANSACTION_STATUSES:
+        return None
+    if txn.status != "en_cours":
+        return f"Statut incompatible pour finalisation: {txn.status}"
+
+    recalc = get_latest_successful_recalculation_execution(txn)
+    if recalc:
+        product_id = recalc.get("product_id")
+        expected_pending = recalc.get("final_pending_total")
+        if product_id is not None and expected_pending is not None:
+            actual = Position.objects.filter(
+                product_id=product_id,
+                client_id=txn.client_id,
+                status="pending",
+            ).count()
+            if int(actual) != int(expected_pending):
+                return (
+                    f"Positions pending incohérentes: attendu {expected_pending}, "
+                    f"trouvé {actual}. Ne pas regénérer sans investigation."
+                )
+        return None
+
+    is_investment = (
+        txn.type == "transfert"
+        and txn.transfer_to
+        and txn.transfer_to != "solde"
+    )
+    if is_investment and transaction_has_saved_position_generation(txn):
+        return None
+
+    return (
+        "Aucun recalcul ou enregistrement de positions détecté. "
+        "Relancez la génération ou contactez l'administrateur."
+    )
+
+
+def finalize_transaction_validation(txn: Transaction) -> Transaction:
+    if txn.status in COMPLETED_TRANSACTION_STATUSES:
+        return txn
+    err = verify_finalize_validation_preconditions(txn)
+    if err:
+        raise ValueError(err)
+    subscription_details = txn.subscription_details or {}
+    if not isinstance(subscription_details, dict):
+        subscription_details = {}
+    subscription_details["skipPositions"] = True
+    txn.subscription_details = subscription_details
+    txn._skip_auto_position_generation = True
+    txn.status = "valide"
+    txn.save(update_fields=["status", "subscription_details"])
+    return txn
+
 
 def _add_months(d: date, months: int) -> date:
     # Keep it simple: normalize to 1st of month then add months.
@@ -3103,6 +3227,7 @@ def save_generated_positions(
     
     Also records generation history in transaction.position_generation_history.
     """
+    extend_db_transaction_timeouts()
     ctx = build_investment_context(txn)
     if ctx is None:
         empty_deletion_info = {
@@ -4930,6 +5055,7 @@ def recalculate_positions_for_product_withdrawal(
             logger.error(message)
 
     try:
+        extend_db_transaction_timeouts()
         recalculation_cutoff_dt = recalculation_cutoff_datetime or timezone.now()
         if timezone.is_naive(recalculation_cutoff_dt):
             recalculation_cutoff_dt = timezone.make_aware(
@@ -5315,6 +5441,7 @@ def calculate_addition_recalculation_metadata(
     }
 
 
+@db_transaction.atomic
 def recalculate_positions_for_product_addition(
     addition_txn: Transaction,
     *,
@@ -5372,6 +5499,7 @@ def recalculate_positions_for_product_addition(
             logger.error(message)
 
     try:
+        extend_db_transaction_timeouts()
         if addition_txn.type != 'transfert':
             execution_summary['status'] = 'skipped_not_transfer'
             return execution_summary

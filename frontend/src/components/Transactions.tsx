@@ -22,7 +22,7 @@ import {
 import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
-import { PositionGenerationModal } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
@@ -590,9 +590,13 @@ export function Transactions() {
             toast.info('Génération des positions annulée.');
             loadData();
           }}
-          onSuccess={async () => {
+          onSuccess={async (result?: PositionGenerationSuccessResult) => {
             const tx = recoverPositionModalTx;
-            if (tx?.clientId) {
+            const alreadyValidated =
+              result?.validationFinalized ||
+              result?.transaction?.status === 'valide';
+
+            if (tx?.clientId && !alreadyValidated) {
               try {
                 let datetimeISO = tx.datetime;
                 if (datetimeISO && typeof datetimeISO === 'string') {
