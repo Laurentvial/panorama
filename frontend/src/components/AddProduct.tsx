@@ -716,6 +716,7 @@ export function AddProduct() {
                     
                     {/* Comptes */}
                     <SelectItem value="Compte titres">Compte titres</SelectItem>
+                    <SelectItem value="DAT">DAT</SelectItem>
                     
                     {/* Produits de placement */}
                     <SelectItem value="ETF">ETF</SelectItem>
