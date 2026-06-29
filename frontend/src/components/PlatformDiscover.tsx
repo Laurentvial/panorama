@@ -357,6 +357,11 @@ export function PlatformDiscover() {
     if (type.includes('etf') || subcategory.includes('etf') || normalize(String(categoryNorm)).includes('etf')) {
       return 'etf';
     }
+
+    // DAT
+    if (type === 'dat' || subcategory === 'dat') {
+      return 'dat';
+    }
     
     // Par défaut, autres produits internes
     return 'autres';
@@ -473,6 +478,7 @@ export function PlatformDiscover() {
     { value: 'livret', label: 'Livret' },
     { value: 'etf', label: 'ETF' },
     { value: 'scalping', label: 'Scalping' },
+    { value: 'dat', label: 'DAT' },
     { value: 'actions', label: 'Actions' },
     { value: 'cryptomonnaies', label: 'Cryptomonnaies' },
     { value: 'obligations', label: 'Obligations' },
@@ -521,6 +527,8 @@ export function PlatformDiscover() {
         return <CircleDollarSign className="h-5 w-5" />;
       case 'scalping':
         return <TrendingUp className="h-5 w-5" />;
+      case 'dat':
+        return <CircleDollarSign className="h-5 w-5" />;
       case 'smart_portfolio':
         return <BarChart3 className="h-5 w-5" />;
       case 'autres':
@@ -552,6 +560,8 @@ export function PlatformDiscover() {
         return { bg: '#ccfbf1', text: '#0f766e', border: '#5eead4' }; // Teal
       case 'scalping':
         return { bg: '#fee2e2', text: '#991b1b', border: '#fca5a5' }; // Rouge clair
+      case 'dat':
+        return { bg: '#cffafe', text: '#155e75', border: '#67e8f9' }; // Cyan
       case 'smart_portfolio':
         return { bg: '#f0f9ff', text: '#0c4a6e', border: '#7dd3fc' }; // Bleu ciel
       case 'autres':
@@ -583,6 +593,8 @@ export function PlatformDiscover() {
         return 'Livret';
       case 'scalping':
         return 'Scalping';
+      case 'dat':
+        return 'DAT';
       case 'smart_portfolio':
         return 'Smart Portfolio';
       case 'autres':
