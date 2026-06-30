@@ -268,7 +268,7 @@ export function AddProduct() {
     try {
       const profitabilityText = formData.isVariableProfitability === 'Non' 
         ? formData.profitabilityRate 
-        : `${formData.profitabilityMin}% - ${formData.profitabilityMax}%`;
+        : `${formData.profitabilityMin}% | ${formData.profitabilityMax}%`;
       
       const response = await apiCall('/api/products/generate-description/', {
         method: 'POST',
@@ -304,7 +304,7 @@ export function AddProduct() {
       if (formData.minEntryValue) parts.push(`avec un investissement minimum de ${formData.minEntryValue}€`);
       const profitabilityText = formData.isVariableProfitability === 'Non' 
         ? formData.profitabilityRate 
-        : `${formData.profitabilityMin}% - ${formData.profitabilityMax}%`;
+        : `${formData.profitabilityMin}% | ${formData.profitabilityMax}%`;
       if (profitabilityText) parts.push(`offre une rentabilité de ${profitabilityText}`);
       if (formData.duration) parts.push(`sur une durée de ${formData.duration}`);
       

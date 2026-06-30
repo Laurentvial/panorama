@@ -1544,6 +1544,8 @@ def client_create(request):
         'funds_sources': funds_sources,
         # Miscellaneous features
         'trading_enabled': bool(request.data.get('tradingEnabled', False)) if not isinstance(request.data.get('tradingEnabled'), str) else request.data.get('tradingEnabled', 'false').lower() == 'true',
+        'show_position_prices': bool(request.data.get('showPositionPrices', False)) if not isinstance(request.data.get('showPositionPrices'), str) else request.data.get('showPositionPrices', 'false').lower() == 'true',
+        'show_term_gains': bool(request.data.get('showTermGains', False)) if not isinstance(request.data.get('showTermGains'), str) else request.data.get('showTermGains', 'false').lower() == 'true',
         'banner_message': request.data.get('bannerMessage', '') or '',
         'referral_enabled': bool(request.data.get('referralEnabled', True)) if not isinstance(request.data.get('referralEnabled'), str) else request.data.get('referralEnabled', 'true').lower() == 'true',
         'referral_offer_text': request.data.get('referralOfferText', '') or '',
@@ -2141,6 +2143,11 @@ def client_detail(request, client_id):
         if 'showPositionPrices' in request.data:
             v = request.data.get('showPositionPrices')
             client.show_position_prices = (v.lower() == 'true') if isinstance(v, str) else bool(v)
+
+        # Update term gains column visibility in client portfolio if provided
+        if 'showTermGains' in request.data:
+            v = request.data.get('showTermGains')
+            client.show_term_gains = (v.lower() == 'true') if isinstance(v, str) else bool(v)
         
         # Update banner message if provided
         if 'bannerMessage' in request.data:

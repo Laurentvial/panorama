@@ -12,6 +12,7 @@ import { CurrencyIcon } from './CurrencyIcon';
 import {
   computePortfolioDisplayPerformance,
   computeProductAccruedGains,
+  computeProductTermGains,
   computeNetContributions,
   getTransferGlobalDelta,
   getTransferProductMovements,
@@ -24,6 +25,7 @@ import '../styles/PlatformPortfolio.css';
 export function PlatformPortfolio() {
   const { currentUser } = useUser();
   const accountCurrency = (currentUser?.accountCurrency || currentUser?.account_currency || 'EUR').toString().trim().toUpperCase();
+  const showTermGains = currentUser?.showTermGains === true;
   const navigate = useNavigate();
   const [assetsIndex, setAssetsIndex] = useState<any[]>([]);
   const [productsIndex, setProductsIndex] = useState<any[]>([]);
@@ -514,6 +516,8 @@ export function PlatformPortfolio() {
           investedAsset: number | null; // valeur investie en devise de l'actif (si dispo)
           pnl: number | null; // P&L (asset currency if possible, else EUR)
           pnlPct: number | null;
+          termGains: null;
+          termGainsPct: null;
         }
       | {
           kind: 'product';
@@ -531,6 +535,8 @@ export function PlatformPortfolio() {
           investedAsset: null;
           pnl: number | null; // P&L en EUR (from positions)
           pnlPct: number | null;
+          termGains: number | null; // gains attendus au terme (EUR)
+          termGainsPct: number | null;
         };
 
     const rows: Row[] = [];
@@ -589,6 +595,8 @@ export function PlatformPortfolio() {
         investedAsset: investedAsset != null && Number.isFinite(investedAsset) ? investedAsset : null,
         pnl,
         pnlPct,
+        termGains: null,
+        termGainsPct: null,
       });
     }
 
@@ -608,6 +616,15 @@ export function PlatformPortfolio() {
       const totalPnl = computeProductAccruedGains(String(p.productId), positions);
       const pnl = totalPnl !== 0 ? totalPnl : null;
       const pnlPct = investedEur != null && investedEur > 0 && pnl != null ? (pnl / investedEur) * 100 : null;
+
+      const totalTermGains = showTermGains
+        ? computeProductTermGains(String(p.productId), positions, transactions, isCompletedStatus)
+        : null;
+      const termGains = totalTermGains != null && Number.isFinite(totalTermGains) ? totalTermGains : null;
+      const termGainsPct =
+        showTermGains && investedEur != null && investedEur > 0 && termGains != null
+          ? (termGains / investedEur) * 100
+          : null;
       
       rows.push({
         kind: 'product',
@@ -625,6 +642,8 @@ export function PlatformPortfolio() {
         investedAsset: null,
         pnl: pnl != null && Number.isFinite(pnl) ? pnl : null,
         pnlPct: pnlPct != null && Number.isFinite(pnlPct) ? pnlPct : null,
+        termGains,
+        termGainsPct: termGainsPct != null && Number.isFinite(termGainsPct) ? termGainsPct : null,
       });
     }
 
@@ -640,7 +659,7 @@ export function PlatformPortfolio() {
       if (ta !== tb) return tb - ta;
       return a.kind === b.kind ? 0 : a.kind === 'asset' ? -1 : 1;
     });
-  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions, positions, transactions]);
+  }, [assetHoldings, investedProducts, assetsIndex, productsById, investedByAssetFromTransactions, positions, transactions, showTermGains]);
 
   // Stats du haut: même logique que le CRM (ClientPortfolioTab)
   const calculatedValues = useMemo(() => {
@@ -1057,6 +1076,9 @@ export function PlatformPortfolio() {
                                 <th className="platform-portfolioTh platform-portfolioAlignRight">Prix moyen d'achat</th>
                                 <th className="platform-portfolioTh platform-portfolioAlignRight">Valeur investie</th>
                                 <th className="platform-portfolioTh platform-portfolioAlignRight">Prix</th>
+                                {showTermGains && (
+                                  <th className="platform-portfolioTh platform-portfolioAlignRight">Gains au terme</th>
+                                )}
                                 <th className="platform-portfolioTh platform-portfolioAlignRight">P&L</th>
                               </tr>
                             </thead>
@@ -1111,6 +1133,12 @@ export function PlatformPortfolio() {
                                 } else {
                                   pnlLabelMain = '—';
                                 }
+                                const termGainsColor =
+                                  r.termGains == null ? '#111827' : r.termGains >= 0 ? '#10b981' : '#ef4444';
+                                const termGainsLabelMain =
+                                  r.kind === 'product' && r.termGains != null && Number.isFinite(r.termGains)
+                                    ? `${r.termGains >= 0 ? '+' : ''}${formatAccountAmount(r.termGains)}${r.termGainsPct != null ? ` (${(r.termGainsPct >= 0 ? '+' : '') + r.termGainsPct.toFixed(2)}%)` : ''}`
+                                    : '—';
                                 return (
                                   <tr key={r.key} className="platform-portfolioTbodyRow">
                                     <td className="platform-portfolioTd">
@@ -1170,6 +1198,14 @@ export function PlatformPortfolio() {
                                       )}
                                     </td>
                                     <td className="platform-portfolioTd platform-portfolioAlignRight">{priceLabel}</td>
+                                    {showTermGains && (
+                                      <td
+                                        className="platform-portfolioTd platform-portfolioAlignRight"
+                                        style={{ fontWeight: 800, color: termGainsColor }}
+                                      >
+                                        {termGainsLabelMain}
+                                      </td>
+                                    )}
                                     <td className="platform-portfolioTd platform-portfolioAlignRight" style={{ fontWeight: 800, color: pnlColor }}>
                                       <div>{pnlLabelMain}</div>
                                       {pnlLabelSub && (
@@ -1237,6 +1273,12 @@ export function PlatformPortfolio() {
                           } else {
                             pnlLabelMain = '—';
                           }
+                          const termGainsColor =
+                            r.termGains == null ? '#111827' : r.termGains >= 0 ? '#10b981' : '#ef4444';
+                          const termGainsLabelMain =
+                            r.kind === 'product' && r.termGains != null && Number.isFinite(r.termGains)
+                              ? `${r.termGains >= 0 ? '+' : ''}${formatAccountAmount(r.termGains)}${r.termGainsPct != null ? ` (${(r.termGainsPct >= 0 ? '+' : '') + r.termGainsPct.toFixed(2)}%)` : ''}`
+                              : '—';
                           return (
                             <div key={r.key} className="platform-portfolioHoldingCard">
                               <div className="platform-portfolioHoldingCardHeader">
@@ -1279,6 +1321,14 @@ export function PlatformPortfolio() {
                                     )}
                                   </span>
                                 </div>
+                                {showTermGains && (
+                                  <div className="platform-portfolioHoldingCardMainItem">
+                                    <span className="platform-portfolioHoldingCardLabel">Gains au terme</span>
+                                    <span className="platform-portfolioHoldingCardValue" style={{ color: termGainsColor }}>
+                                      {termGainsLabelMain}
+                                    </span>
+                                  </div>
+                                )}
                                 <div className="platform-portfolioHoldingCardMainItem">
                                   <span className="platform-portfolioHoldingCardLabel">P&L</span>
                                   <span className="platform-portfolioHoldingCardValue" style={{ color: pnlColor }}>

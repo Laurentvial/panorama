@@ -622,6 +622,7 @@ class ClientSerializer(serializers.ModelSerializer):
         # Fonctionnalités diverses
         ret['tradingEnabled'] = bool(ret.get('trading_enabled', False))
         ret['showPositionPrices'] = bool(ret.get('show_position_prices', False))
+        ret['showTermGains'] = bool(ret.get('show_term_gains', False))
         ret['bannerMessage'] = ret.get('banner_message', '') or ''
         ret['referralEnabled'] = bool(ret.get('referral_enabled', True))
         ret['referralOfferText'] = ret.get('referral_offer_text', '') or ''

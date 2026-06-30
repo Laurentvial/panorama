@@ -409,7 +409,7 @@ export function ProduitsInvestissements({ user }: ProduitsInvestissementsProps) 
                             <td className="py-3 px-4 text-green-600">
                               {product.isVariableProfitability === 'Oui' && product.variableProfitability ? (
                                 <span>
-                                  {product.profitability}% - {product.variableProfitability}%
+                                  {product.profitability}% | {product.variableProfitability}%
                                 </span>
                               ) : (
                                 product.profitability ? `${product.profitability}%` : '-'

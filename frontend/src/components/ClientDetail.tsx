@@ -397,7 +397,12 @@ export function ClientDetail({ clientId, onBack }: ClientDetailProps) {
 
         {/* Assets Tab */}
         <TabsContent value="assets">
-          <ClientAssetsTab clientId={clientId} refreshToken={selfLoadingRefreshToken} />
+          <ClientAssetsTab
+            clientId={clientId}
+            client={client}
+            onRefresh={loadClientData}
+            refreshToken={selfLoadingRefreshToken}
+          />
         </TabsContent>
 
         {/* Portfolio Tab */}

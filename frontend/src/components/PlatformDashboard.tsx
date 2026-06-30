@@ -251,7 +251,7 @@ export function PlatformDashboard() {
     const period = product?.profitabilityPeriod ? ` ${product.profitabilityPeriod}` : '';
     if (hasVariable) {
       const max = parseNumber(product?.variableProfitability);
-      return { text: `${min.toFixed(2)}% - ${max.toFixed(2)}%${period}`, isPositive };
+      return { text: `${min.toFixed(2)}% | ${max.toFixed(2)}%${period}`, isPositive };
     }
     return { text: `${min.toFixed(2)}%${period}`, isPositive };
   };

@@ -38,10 +38,12 @@ type InnerAssetsTab = 'products' | 'assets';
 
 interface ClientAssetsTabProps {
   clientId: string;
+  client?: any;
+  onRefresh?: () => void;
   refreshToken?: number;
 }
 
-export function ClientAssetsTab({ clientId, refreshToken = 0 }: ClientAssetsTabProps) {
+export function ClientAssetsTab({ clientId, client, onRefresh, refreshToken = 0 }: ClientAssetsTabProps) {
   const [activeInnerTab, setActiveInnerTab] = useState<InnerAssetsTab>('products');
   const [loadedInnerTabs, setLoadedInnerTabs] = useState<Set<InnerAssetsTab>>(new Set());
   const [loadingProducts, setLoadingProducts] = useState(false);
@@ -76,6 +78,14 @@ export function ClientAssetsTab({ clientId, refreshToken = 0 }: ClientAssetsTabP
   const [filterProductSubcategory, setFilterProductSubcategory] = useState<string>('all');
   const [assetsPage, setAssetsPage] = useState(1);
   const [productsPage, setProductsPage] = useState(1);
+  const [showTermGains, setShowTermGains] = useState(false);
+  const [savingShowTermGains, setSavingShowTermGains] = useState(false);
+
+  useEffect(() => {
+    if (client?.showTermGains !== undefined) {
+      setShowTermGains(Boolean(client.showTermGains));
+    }
+  }, [client?.showTermGains]);
 
   const loadProductsTabData = useCallback(async (options?: { silent?: boolean }) => {
     if (!clientId) {
@@ -731,8 +741,58 @@ export function ClientAssetsTab({ clientId, refreshToken = 0 }: ClientAssetsTabP
     void loadProductsTabData({ silent: true });
   }
 
+  async function handleSaveShowTermGains() {
+    setSavingShowTermGains(true);
+    try {
+      await apiCall(`/api/clients/${clientId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ showTermGains }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      toast.success('Affichage des gains au terme mis à jour avec succès');
+      onRefresh?.();
+    } catch (error: any) {
+      console.error('Error saving term gains visibility:', error);
+      toast.error(error.message || "Erreur lors de la mise à jour de l'affichage des gains au terme");
+      if (client?.showTermGains !== undefined) {
+        setShowTermGains(Boolean(client.showTermGains));
+      }
+    } finally {
+      setSavingShowTermGains(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="tab-section-title">Portefeuille client</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Si activé, le client verra une colonne « Gains au terme » dans la section Actifs détenus de son portefeuille
+              (produits d'investissement uniquement).
+            </p>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="showTermGains"
+                checked={showTermGains}
+                onCheckedChange={(checked) => setShowTermGains(checked === true)}
+              />
+              <Label htmlFor="showTermGains" className="font-normal cursor-pointer">
+                Afficher les gains au terme
+              </Label>
+            </div>
+            <div className="pt-2">
+              <Button onClick={handleSaveShowTermGains} disabled={savingShowTermGains} size="sm">
+                {savingShowTermGains ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs value={activeInnerTab} onValueChange={handleInnerTabChange} className="space-y-6">
         <TabsList>
           <TabsTrigger value="products">Produits</TabsTrigger>

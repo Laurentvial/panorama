@@ -116,6 +116,63 @@ const resolveProductId = (value: any): string | null => {
   return id ? id : null;
 };
 
+const TERM_GAIN_POSITION_STATUSES = new Set(['pending', 'open', 'done']);
+
+/** Sum profit_loss on pending + open + done positions for one product (gains attendus au terme). */
+export function computeProductTermGains(
+  productId: string,
+  positions: any[],
+  transactions?: any[],
+  isCompletedStatus?: (status: unknown) => boolean
+): number | null {
+  const productKey = String(productId);
+
+  let fromPositions = 0;
+  let hasPositionRows = false;
+  for (const p of positions || []) {
+    const status = String(p?.status || '').trim().toLowerCase();
+    if (status === 'cancelled' || !TERM_GAIN_POSITION_STATUSES.has(status)) continue;
+
+    const posProductId = resolveProductId(p);
+    if (!posProductId || posProductId !== productKey) continue;
+
+    hasPositionRows = true;
+    const gainNum = parseProfitLoss(p?.profit_loss);
+    if (gainNum != null) fromPositions += gainNum;
+  }
+
+  if (hasPositionRows) {
+    return fromPositions !== 0 ? fromPositions : null;
+  }
+
+  if (!transactions?.length || !isCompletedStatus) return null;
+
+  let fromSubscriptions = 0;
+  let hasSubscriptionProfits = false;
+  for (const t of transactions) {
+    if (!isCompletedStatus(t?.status) || String(t?.type || '') !== 'transfert') continue;
+
+    const amountNum = typeof t?.amount === 'string' ? parseFloat(t.amount) : Number(t?.amount);
+    const amt = Number.isFinite(amountNum) ? Math.abs(amountNum) : 0;
+    if (!amt) continue;
+
+    const movements = getTransferProductMovements(t, amt);
+    const inflowToProduct = movements.some((m) => m.productId === productKey && m.delta > 0);
+    if (!inflowToProduct) continue;
+
+    const profitsRaw = t?.subscription_profits ?? t?.subscription_details?.profits;
+    if (profitsRaw == null) continue;
+    const profitsNum = typeof profitsRaw === 'string' ? parseFloat(profitsRaw) : Number(profitsRaw);
+    if (!Number.isFinite(profitsNum)) continue;
+
+    fromSubscriptions += profitsNum;
+    hasSubscriptionProfits = true;
+  }
+
+  if (hasSubscriptionProfits && fromSubscriptions !== 0) return fromSubscriptions;
+  return null;
+}
+
 /** Sum profit_loss on open + done positions for one product (total interest/gains created). */
 export function computeProductAccruedGains(productId: string, positions: any[]): number {
   const productKey = String(productId);
