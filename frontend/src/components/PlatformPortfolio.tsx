@@ -618,7 +618,7 @@ export function PlatformPortfolio() {
       const pnlPct = investedEur != null && investedEur > 0 && pnl != null ? (pnl / investedEur) * 100 : null;
 
       const totalTermGains = showTermGains
-        ? computeProductTermGains(String(p.productId), positions, transactions, isCompletedStatus)
+        ? computeProductTermGains(String(p.productId), positions, transactions, isCompletedStatus, product)
         : null;
       const termGains = totalTermGains != null && Number.isFinite(totalTermGains) ? totalTermGains : null;
       const termGainsPct =

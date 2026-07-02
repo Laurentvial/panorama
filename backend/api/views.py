@@ -117,6 +117,7 @@ from .position_service import (
     calculate_withdrawal_recalculation_metadata,
     calculate_remaining_interests_for_transaction,
     delete_pending_positions_for_transaction,
+    estimate_subscription_term_profits,
     sync_position_statuses_from_schedule,
     transaction_has_saved_position_generation,
     verify_finalize_validation_preconditions,
@@ -690,20 +691,31 @@ def _build_subscription_details_defaults(
     amount: Decimal,
     transaction_datetime: datetime,
     request,
+    interest_period: str | None = None,
 ) -> dict:
     admin_ip = get_client_ip(request)
     duration_str = product.duration or ''
     duration_days = _parse_days_from_duration(duration_str)
 
-    # Profit estimation:
-    # - if profitability period is "Fin de contrat", treat rate as over the contract duration
-    # - otherwise treat it as annualized and prorate by days/365
-    rate = _profitability_rate_for_calc(product)
-    period_label = (product.profitability_period or '').strip().lower()
-    if 'fin' in period_label and 'contrat' in period_label:
-        profits = (amount * (rate / Decimal('100'))).quantize(Decimal('0.01'))
+    resolved_interest_period = (
+        str(interest_period or '').strip()
+        or str(product.interest_period or '').split(',')[0].strip()
+    )
+    estimated_profits = estimate_subscription_term_profits(
+        product,
+        amount,
+        interest_period=resolved_interest_period or None,
+    )
+    if estimated_profits is not None:
+        profits = estimated_profits
     else:
-        profits = (amount * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))).quantize(Decimal('0.01'))
+        # Legacy fallback when product has no profitability configured
+        rate = _profitability_rate_for_calc(product)
+        period_label = (product.profitability_period or '').strip().lower()
+        if 'fin' in period_label and 'contrat' in period_label:
+            profits = (amount * (rate / Decimal('100'))).quantize(Decimal('0.01'))
+        else:
+            profits = (amount * (rate / Decimal('100')) * (Decimal(duration_days) / Decimal('365'))).quantize(Decimal('0.01'))
     total = (amount + profits).quantize(Decimal('0.01'))
 
     try:
@@ -743,7 +755,7 @@ def _build_subscription_details_defaults(
         'country': 'FRANCE',
         'subscriptionDate': subscription_date,
         'duration': duration_str,
-        'interestPeriod': product.interest_period or '',
+        'interestPeriod': resolved_interest_period or (product.interest_period or ''),
         'profitability': _profitability_text_for_contract(product=product, duration_days=duration_days),
         'investment': float(amount),
         'profits': float(profits),
@@ -9425,12 +9437,16 @@ def _client_transaction_create_impl(request, client_id):
         except Exception:
             amount_dec = Decimal('0')
         product_for_defaults = effective_product_for_client(client, product)
+        interest_period = None
+        if isinstance(subscription_details_data, dict):
+            interest_period = subscription_details_data.get('interestPeriod') or subscription_details_data.get('interest_period')
         defaults = _build_subscription_details_defaults(
             client=client,
             product=product_for_defaults,
             amount=amount_dec,
             transaction_datetime=transaction_datetime,
             request=request,
+            interest_period=interest_period,
         )
         subscription_details_data = _merge_missing_fields(subscription_details_data, defaults)
     
@@ -10645,12 +10661,21 @@ def client_transaction_update(request, client_id, transaction_id):
             except Exception:
                 amount_dec = Decimal('0')
             product_for_defaults = effective_product_for_client(client, product)
+            interest_period = None
+            if isinstance(transaction.subscription_details, dict):
+                interest_period = (
+                    transaction.subscription_details.get('interestPeriod')
+                    or transaction.subscription_details.get('interest_period')
+                )
+            if not interest_period and transaction.subscription_interest_period:
+                interest_period = transaction.subscription_interest_period
             defaults = _build_subscription_details_defaults(
                 client=client,
                 product=product_for_defaults,
                 amount=amount_dec,
                 transaction_datetime=transaction.datetime or timezone.now(),
                 request=request,
+                interest_period=interest_period,
             )
             merged = _merge_missing_fields(transaction.subscription_details or {}, defaults)
             transaction.subscription_details = merged

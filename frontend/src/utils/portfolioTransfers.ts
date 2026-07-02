@@ -1,3 +1,5 @@
+import { estimateTransferTermProfits } from './subscriptionProfitability';
+
 const normalizeEndpointValue = (value: unknown): string => String(value ?? '').trim();
 
 export const normalizeProductEndpointId = (value: unknown): string | null => {
@@ -123,7 +125,8 @@ export function computeProductTermGains(
   productId: string,
   positions: any[],
   transactions?: any[],
-  isCompletedStatus?: (status: unknown) => boolean
+  isCompletedStatus?: (status: unknown) => boolean,
+  product?: any
 ): number | null {
   const productKey = String(productId);
 
@@ -160,10 +163,8 @@ export function computeProductTermGains(
     const inflowToProduct = movements.some((m) => m.productId === productKey && m.delta > 0);
     if (!inflowToProduct) continue;
 
-    const profitsRaw = t?.subscription_profits ?? t?.subscription_details?.profits;
-    if (profitsRaw == null) continue;
-    const profitsNum = typeof profitsRaw === 'string' ? parseFloat(profitsRaw) : Number(profitsRaw);
-    if (!Number.isFinite(profitsNum)) continue;
+    const profitsNum = estimateTransferTermProfits(t, amt, product);
+    if (profitsNum == null) continue;
 
     fromSubscriptions += profitsNum;
     hasSubscriptionProfits = true;

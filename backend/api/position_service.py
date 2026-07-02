@@ -2612,6 +2612,74 @@ def _create_period_positions_simple(
     return created
 
 
+def estimate_subscription_term_profits(
+    product: Product | None,
+    amount: Decimal,
+    *,
+    interest_period: str | None = None,
+) -> Decimal | None:
+    """
+    Estimate total expected profits at contract end.
+
+    Mirrors the period loop in ``generate_rates_for_investment`` (average rate, optional compounding).
+    """
+    if product is None:
+        return None
+    try:
+        invested_total = Decimal(str(amount or 0)).quantize(Decimal('0.01'))
+    except Exception:
+        return None
+    if invested_total <= 0:
+        return None
+    if bool(getattr(product, 'no_profitability', False)):
+        return None
+
+    duration_days = _parse_days(getattr(product, 'duration', None))
+    if duration_days <= 0:
+        return None
+
+    duration_months_approx = max(1, duration_days // 30)
+    pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None))
+    profit_period_months = duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
+
+    ip = str(interest_period or getattr(product, 'interest_period', '') or '').split(',')[0].strip()
+    ip_lower = ip.lower()
+    does_compound = 'fin' in ip_lower and ('contrat' in ip_lower or 'matur' in ip_lower)
+
+    rate_min = _parse_decimal(getattr(product, 'profitability', None)) or Decimal('0')
+    period_rate_pct = rate_min
+    if (getattr(product, 'is_variable_profitability', '') or '').lower() == 'oui':
+        rate_max = _parse_decimal(getattr(product, 'variable_profitability', None))
+        if rate_max is not None and rate_max > rate_min:
+            period_rate_pct = (rate_min + rate_max) / Decimal('2')
+    period_rate_pct = _quantize_rate_pct(period_rate_pct)
+    if period_rate_pct <= 0:
+        return None
+
+    capital = invested_total
+    total_profit = Decimal('0')
+    remaining_months = float(duration_months_approx)
+
+    while remaining_months > 0:
+        step_months = min(float(profit_period_months), remaining_months)
+        proration = (
+            (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
+            if profit_period_months and step_months != profit_period_months
+            else Decimal('1')
+        )
+        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
+        capital_base = capital if does_compound else invested_total
+        target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
+        total_profit += target_profit
+        if does_compound:
+            capital = (capital + target_profit).quantize(Decimal('0.01'))
+        remaining_months -= step_months
+
+    if total_profit <= 0:
+        return None
+    return total_profit.quantize(Decimal('0.01'))
+
+
 def generate_rates_for_investment(
     txn: Transaction,
     *,
