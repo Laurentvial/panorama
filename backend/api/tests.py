@@ -12,6 +12,7 @@ from .position_service import (
     _apply_profit_variability,
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
+    _invested_amount_for_recalc_transaction,
     _product_has_explicit_contract_duration,
     calculate_remaining_interests_for_transaction,
     delete_pending_positions_for_transaction,
@@ -418,3 +419,70 @@ class TextVariablesTest(SimpleTestCase):
         self.assertEqual(resolved["description"], "Offre Panorama")
         self.assertEqual(resolved["cgv"], "Email: info@panorama.test")
         self.assertEqual(resolved["name"], "Produit test")
+
+
+class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
+    """Proportional capital allocation after withdrawal/addition recalculation."""
+
+    def _withdrawal_meta(self):
+        return {
+            'principal_before_withdrawal': Decimal('9100.00'),
+            'total_value_after_withdrawal': Decimal('1204.11'),
+            'capital_scale_factor': Decimal('0.130823'),
+        }
+
+    def test_single_investment_gets_full_remaining_value(self):
+        meta = self._withdrawal_meta()
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=meta['total_value_after_withdrawal'],
+            principal_before=meta['principal_before_withdrawal'],
+            transaction_amount=Decimal('9100.00'),
+            real_invested_capital=Decimal('1100.00'),
+            scale_factor=meta['capital_scale_factor'],
+        )
+        self.assertEqual(amount, Decimal('1204.11'))
+
+    def test_four_investments_split_remaining_value_proportionally(self):
+        meta = self._withdrawal_meta()
+        txn_amounts = [
+            Decimal('2000.00'),
+            Decimal('3000.00'),
+            Decimal('2100.00'),
+            Decimal('2000.00'),
+        ]
+        allocated = [
+            _invested_amount_for_recalc_transaction(
+                total_after=meta['total_value_after_withdrawal'],
+                principal_before=meta['principal_before_withdrawal'],
+                transaction_amount=amt,
+                real_invested_capital=Decimal('1100.00'),
+                scale_factor=meta['capital_scale_factor'],
+            )
+            for amt in txn_amounts
+        ]
+        self.assertEqual(sum(allocated, Decimal('0')), Decimal('1204.11'))
+        for amt in allocated:
+            self.assertLess(amt, Decimal('1204.11'))
+            self.assertGreater(amt, Decimal('0'))
+        self.assertEqual(allocated[0], Decimal('264.64'))
+        self.assertEqual(allocated[1], Decimal('396.96'))
+
+    def test_scale_factor_fallback_when_principal_missing(self):
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=Decimal('1204.11'),
+            principal_before=None,
+            transaction_amount=Decimal('9100.00'),
+            real_invested_capital=Decimal('1100.00'),
+            scale_factor=Decimal('0.130823'),
+        )
+        self.assertEqual(amount, Decimal('143.91'))
+
+    def test_addition_metadata_keys(self):
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=Decimal('5500.00'),
+            principal_before=Decimal('5000.00'),
+            transaction_amount=Decimal('2500.00'),
+            real_invested_capital=Decimal('5000.00'),
+            scale_factor=Decimal('1.1'),
+        )
+        self.assertEqual(amount, Decimal('2750.00'))
