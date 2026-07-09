@@ -80,6 +80,21 @@ def cron_process_positions(request):
 
 @csrf_exempt
 @require_POST
+def cron_process_live_pricing(request):
+    """Trigger process_live_pricing_positions management command."""
+    if not _validate_cron_token(request):
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
+    out = StringIO()
+    try:
+        call_command("process_live_pricing_positions", stdout=out)
+        return JsonResponse({"status": "ok", "output": out.getvalue()})
+    except Exception as e:
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_POST
 def cron_database_backup(request):
     """Trigger backup_database_to_s3 management command."""
     if not _validate_cron_token(request):

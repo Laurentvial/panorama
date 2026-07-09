@@ -294,7 +294,14 @@ class AlphaVantageService:
             logger.error(f"Error fetching company overview for {symbol}: {str(e)}")
             return None
     
-    def get_intraday_data(self, symbol: str, interval: str = '1min', outputsize: str = 'compact') -> Optional[Dict]:
+    def get_intraday_data(
+        self,
+        symbol: str,
+        interval: str = '1min',
+        outputsize: str = 'compact',
+        *,
+        quiet: bool = False,
+    ) -> Optional[Dict]:
         """
         Get intraday time series data
         
@@ -302,6 +309,7 @@ class AlphaVantageService:
             symbol: Stock symbol
             interval: Time interval ('1min', '5min', '15min', '30min', '60min')
             outputsize: 'compact' or 'full'
+            quiet: When True, log failures at debug level (for symbol-variant retries)
         
         Returns:
             Dictionary with time series data
@@ -315,7 +323,8 @@ class AlphaVantageService:
                 'meta_data': meta_data
             }
         except Exception as e:
-            logger.error(f"Error fetching intraday data for {symbol}: {str(e)}")
+            log_fn = logger.debug if quiet else logger.error
+            log_fn(f"Error fetching intraday data for {symbol}: {str(e)}")
             return None
     
     def get_daily_data(self, symbol: str, outputsize: str = 'compact') -> Optional[Dict]:

@@ -98,6 +98,45 @@ export const getTypeColors = (type: string): { bg: string; text: string } => {
   return colorMap[type] || { bg: '#f1f5f9', text: '#475569' }; // default gray
 };
 
+export type LivePricingBadgeStatus = 'active' | 'completed' | 'incomplete' | 'switched_to_anticipated';
+
+export function getLivePricingStatus(transaction: any): LivePricingBadgeStatus | null {
+  const history = transaction?.position_generation_history || transaction?.positionGenerationHistory;
+  if (!Array.isArray(history) || history.length === 0) return null;
+
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const entry = history[i];
+    if (entry?.mode !== 'live_pricing') continue;
+    const status = String(entry?.live_config?.status || '').trim().toLowerCase();
+    if (status === 'active') return 'active';
+    if (status === 'completed') return 'completed';
+    if (status === 'incomplete') return 'incomplete';
+    if (status === 'switched_to_anticipated') return 'switched_to_anticipated';
+    return 'active';
+  }
+  return null;
+}
+
+export function getLivePricingBadgeLabel(status: LivePricingBadgeStatus): string {
+  const labels: Record<LivePricingBadgeStatus, string> = {
+    active: 'Live Pricing actif',
+    completed: 'Live Pricing terminé',
+    incomplete: 'Live Pricing incomplet',
+    switched_to_anticipated: 'Génération anticipée (reprise)',
+  };
+  return labels[status] || 'Live Pricing';
+}
+
+export function getLivePricingBadgeColors(status: LivePricingBadgeStatus): { bg: string; text: string } {
+  const colors: Record<LivePricingBadgeStatus, { bg: string; text: string }> = {
+    active: { bg: '#dbeafe', text: '#1d4ed8' },
+    completed: { bg: '#dcfce7', text: '#15803d' },
+    incomplete: { bg: '#fee2e2', text: '#991b1b' },
+    switched_to_anticipated: { bg: '#e0e7ff', text: '#3730a3' },
+  };
+  return colors[status] || { bg: '#dbeafe', text: '#1d4ed8' };
+}
+
 export const extractAssetInfo = (description: string): { name: string; reference: string | null; displayText: string } => {
   if (!description) return { name: '-', reference: null, displayText: '-' };
   

@@ -16,7 +16,8 @@ import { TransactionList } from './TransactionList';
 import { ProductTransferSelect } from './ProductTransferSelect';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
-import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult, LivePricingOpenPayload } from './PositionGenerationModal';
+import { LivePricingGenerationModal, LivePricingSuccessResult } from './LivePricingGenerationModal';
 import { getStatusLabel, parseSubscriptionDetails } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
 import LoadingIndicator from './LoadingIndicator';
@@ -104,9 +105,13 @@ export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToke
   const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
   const [isEditTransactionModalOpen, setIsEditTransactionModalOpen] = useState(false);
   const [isPositionGenerationModalOpen, setIsPositionGenerationModalOpen] = useState(false);
+  const [isLivePricingModalOpen, setIsLivePricingModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [transactionForPositionGeneration, setTransactionForPositionGeneration] = useState<any>(null);
+  const [transactionForLivePricing, setTransactionForLivePricing] = useState<any>(null);
+  const [livePricingPayload, setLivePricingPayload] = useState<LivePricingOpenPayload | null>(null);
   const [isWithdrawalForPositionGeneration, setIsWithdrawalForPositionGeneration] = useState(false);
+  const [isWithdrawalForLivePricing, setIsWithdrawalForLivePricing] = useState(false);
   const [positionModalSource, setPositionModalSource] = useState<'create' | 'validate' | 'recovery'>('create');
   const [assets, setAssets] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -2146,6 +2151,48 @@ export function ClientTransactionsTab({ onRefresh, clientId, client, refreshToke
             onRefresh();
           }}
           isWithdrawal={isWithdrawalForPositionGeneration}
+          onOpenLivePricing={(payload) => {
+            setLivePricingPayload(payload);
+            setTransactionForLivePricing(transactionForPositionGeneration);
+            setIsWithdrawalForLivePricing(isWithdrawalForPositionGeneration);
+            setIsPositionGenerationModalOpen(false);
+            setIsLivePricingModalOpen(true);
+          }}
+        />
+      )}
+
+      {transactionForLivePricing && livePricingPayload && (
+        <LivePricingGenerationModal
+          isOpen={isLivePricingModalOpen}
+          transaction={transactionForLivePricing}
+          clientId={clientId}
+          accountCurrency={accountCurrency}
+          payload={livePricingPayload}
+          isWithdrawal={isWithdrawalForLivePricing}
+          onBack={() => {
+            setIsLivePricingModalOpen(false);
+            setIsPositionGenerationModalOpen(true);
+          }}
+          onClose={() => {
+            setIsLivePricingModalOpen(false);
+            setTransactionForLivePricing(null);
+            setLivePricingPayload(null);
+            setIsWithdrawalForLivePricing(false);
+            setIsPositionGenerationModalOpen(true);
+          }}
+          onSuccess={(result?: LivePricingSuccessResult) => {
+            applyTransactionUpdate(result?.transaction);
+            setIsLivePricingModalOpen(false);
+            setTransactionForLivePricing(null);
+            setLivePricingPayload(null);
+            setIsWithdrawalForLivePricing(false);
+            setTransactionForPositionGeneration(null);
+            setIsWithdrawalForPositionGeneration(false);
+            setPositionModalSource('create');
+            loadTransactions(1, pagination.limit);
+            loadContractDocuments();
+            onRefresh();
+          }}
         />
       )}
     </>

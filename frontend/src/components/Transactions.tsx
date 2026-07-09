@@ -22,7 +22,8 @@ import {
 import { TransactionList } from './TransactionList';
 import { ViewTransactionModal } from './ViewTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
-import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult, LivePricingOpenPayload } from './PositionGenerationModal';
+import { LivePricingGenerationModal, LivePricingSuccessResult } from './LivePricingGenerationModal';
 import { TRANSACTION_TYPES, STATUS_LABELS } from './transactionUtils';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/PageHeader.css';
@@ -48,6 +49,9 @@ export function Transactions() {
   });
   const [recoverPositionModalTx, setRecoverPositionModalTx] = useState<any>(null);
   const [recoverPositionModalOpen, setRecoverPositionModalOpen] = useState(false);
+  const [livePricingModalTx, setLivePricingModalTx] = useState<any>(null);
+  const [livePricingModalOpen, setLivePricingModalOpen] = useState(false);
+  const [livePricingPayload, setLivePricingPayload] = useState<LivePricingOpenPayload | null>(null);
 
   const getAllocationsFromProduct = (p: any): any[] => {
     if (!p) return [];
@@ -642,6 +646,43 @@ export function Transactions() {
             await loadData();
           }}
           isWithdrawal={false}
+          onOpenLivePricing={(payload) => {
+            setLivePricingPayload(payload);
+            setLivePricingModalTx(recoverPositionModalTx);
+            setRecoverPositionModalOpen(false);
+            setLivePricingModalOpen(true);
+          }}
+        />
+      )}
+
+      {livePricingModalTx && livePricingPayload && (
+        <LivePricingGenerationModal
+          isOpen={livePricingModalOpen}
+          transaction={livePricingModalTx}
+          clientId={livePricingModalTx.clientId}
+          accountCurrency={
+            (clients.find((c) => c.id === livePricingModalTx.clientId)?.accountCurrency || 'EUR').toString()
+          }
+          payload={livePricingPayload}
+          onBack={() => {
+            setLivePricingModalOpen(false);
+            setRecoverPositionModalOpen(true);
+          }}
+          onClose={() => {
+            setLivePricingModalOpen(false);
+            setLivePricingPayload(null);
+            setLivePricingModalTx(null);
+            setRecoverPositionModalOpen(true);
+          }}
+          onSuccess={(result?: LivePricingSuccessResult) => {
+            applyTransactionUpdate(result?.transaction);
+            setLivePricingModalOpen(false);
+            setLivePricingPayload(null);
+            setLivePricingModalTx(null);
+            setRecoverPositionModalOpen(false);
+            setRecoverPositionModalTx(null);
+            loadData();
+          }}
         />
       )}
     </div>

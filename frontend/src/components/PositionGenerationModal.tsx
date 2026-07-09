@@ -7,6 +7,7 @@ import { apiCall } from '../utils/api';
 import { formatPositionDateTime } from '../utils/positionDateTime';
 import { formatAmount } from '../utils/currency';
 import { toast } from 'sonner';
+import type { LivePricingOpenPayload } from './LivePricingGenerationModal';
 import '../styles/Modal.css';
 
 // Position generation can legitimately run for several minutes on large portfolios.
@@ -17,6 +18,8 @@ export type PositionGenerationSuccessResult = {
   transaction?: any;
   validationFinalized?: boolean;
 };
+
+export type { LivePricingOpenPayload } from './LivePricingGenerationModal';
 
 function isRecoverableSaveError(err: any): boolean {
   if (err?.name === 'AbortError') return false;
@@ -249,6 +252,7 @@ interface PositionGenerationModalProps {
   onClose: () => void;
   onSuccess: (result?: PositionGenerationSuccessResult) => void;
   isWithdrawal?: boolean; // If true, this is a withdrawal transaction
+  onOpenLivePricing?: (payload: LivePricingOpenPayload) => void;
 }
 
 type Step =
@@ -266,7 +270,8 @@ export function PositionGenerationModal({
   accountCurrency: accountCurrencyProp = 'EUR',
   onClose,
   onSuccess,
-  isWithdrawal = false
+  isWithdrawal = false,
+  onOpenLivePricing,
 }: PositionGenerationModalProps) {
   const displayCurrency = (accountCurrencyProp || transaction?.amountCurrency || transaction?.amount_currency || 'EUR').toString().trim().toUpperCase();
   const [step, setStep] = useState<Step>('loading-rates');
@@ -946,6 +951,21 @@ export function PositionGenerationModal({
     onClose();
   };
 
+  const handleOpenLivePricing = () => {
+    if (!onOpenLivePricing || skipPositions || rates.length === 0 || isWithdrawal) {
+      return;
+    }
+    onOpenLivePricing({
+      rates,
+      editedRates,
+      avoidLosses,
+      positiveGainsOnly,
+      positionsPerMonthMin,
+      positionsPerMonthMax,
+      generationHorizonDays: generationHorizonDaysRef.current || generationHorizonDays,
+    });
+  };
+
   const formatCurrency = (value: string) => {
     const num = parseFloat(value);
     if (isNaN(num)) return '-';
@@ -1527,6 +1547,11 @@ export function PositionGenerationModal({
                 <Button type="button" variant="outline" onClick={handleClose}>
                   Annuler
                 </Button>
+                {rates.length > 0 && !skipPositions && onOpenLivePricing && !isWithdrawal && (
+                  <Button type="button" variant="outline" onClick={handleOpenLivePricing}>
+                    Passer en génération Live Pricing
+                  </Button>
+                )}
                 {rates.length > 0 && (
                   <Button type="button" onClick={handleContinue}>
                     {skipPositions ? 'Enregistrer sans positions' : 'Continuer'}

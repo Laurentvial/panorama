@@ -6,6 +6,7 @@ urlpatterns = [
     # Cron endpoints (Coolify Scheduled Tasks - protected by CRON_SECRET_TOKEN)
     path('cron/refresh-prices/', cron_views.cron_refresh_prices, name='cron-refresh-prices'),
     path('cron/process-positions/', cron_views.cron_process_positions, name='cron-process-positions'),
+    path('cron/process-live-pricing/', cron_views.cron_process_live_pricing, name='cron-process-live-pricing'),
     path('cron/database-backup/', cron_views.cron_database_backup, name='cron-database-backup'),
     # Notes endpoints
     path('notes/', api_views.NoteListCreateView.as_view(), name='note-list-create'),
@@ -182,6 +183,8 @@ urlpatterns = [
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-rates/', api_views.transaction_generate_rates, name='transaction-generate-rates'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/generate-positions/', api_views.transaction_generate_positions, name='transaction-generate-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/save-positions/', api_views.transaction_save_positions, name='transaction-save-positions'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/activate-live-pricing/', api_views.transaction_activate_live_pricing, name='transaction-activate-live-pricing'),
+    path('clients/<str:client_id>/transactions/<str:transaction_id>/live-pricing-status/', api_views.transaction_live_pricing_status, name='transaction-live-pricing-status'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/finalize-validation/', api_views.transaction_finalize_validation, name='transaction-finalize-validation'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/recover-positions/', api_views.transaction_recover_positions, name='transaction-recover-positions'),
     path('clients/<str:client_id>/transactions/<str:transaction_id>/delete/', api_views.client_transaction_delete, name='client-transaction-delete'),

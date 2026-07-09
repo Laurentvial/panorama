@@ -11,7 +11,8 @@ import { apiCall, clearApiCache } from '../utils/api';
 import { toast } from 'sonner';
 import { TRANSACTION_TYPES, STATUS_LABELS, getStatusLabel } from './transactionUtils';
 import { getCurrencySymbol } from '../utils/currency';
-import { PositionGenerationModal, PositionGenerationSuccessResult } from './PositionGenerationModal';
+import { PositionGenerationModal, PositionGenerationSuccessResult, LivePricingOpenPayload } from './PositionGenerationModal';
+import { LivePricingGenerationModal, LivePricingSuccessResult } from './LivePricingGenerationModal';
 import '../styles/Modal.css';
 
 interface EditTransactionModalProps {
@@ -69,6 +70,8 @@ export function EditTransactionModal({
     is_surperformance: false,
   });
   const [showPositionModal, setShowPositionModal] = useState(false);
+  const [showLivePricingModal, setShowLivePricingModal] = useState(false);
+  const [livePricingPayload, setLivePricingPayload] = useState<LivePricingOpenPayload | null>(null);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<string | null>(null);
   const [isWithdrawalTransaction, setIsWithdrawalTransaction] = useState(false);
   const [isClosingTransfer, setIsClosingTransfer] = useState(false);
@@ -688,6 +691,17 @@ export function EditTransactionModal({
     toast.info('La validation requiert la génération des positions. La transaction reste en cours.');
   };
 
+  const handleLivePricingModalSuccess = (result?: LivePricingSuccessResult) => {
+    bustTransactionsCache(clientId);
+    setShowLivePricingModal(false);
+    setLivePricingPayload(null);
+    setShowPositionModal(false);
+    setPendingStatusUpdate(null);
+    setIsWithdrawalTransaction(false);
+    handleClose();
+    onSuccess(result?.transaction || transaction);
+  };
+
   const handleDelete = async () => {
     if (!transaction) return;
     
@@ -966,6 +980,41 @@ export function EditTransactionModal({
           onClose={handlePositionModalClose}
           onSuccess={handlePositionModalSuccess}
           isWithdrawal={isWithdrawalTransaction}
+          onOpenLivePricing={(payload) => {
+            setLivePricingPayload(payload);
+            setShowPositionModal(false);
+            setShowLivePricingModal(true);
+          }}
+        />
+      )}
+
+      {showLivePricingModal && livePricingPayload && (
+        <LivePricingGenerationModal
+          isOpen={showLivePricingModal}
+          accountCurrency={accountCurrencyProp}
+          transaction={{
+            ...transaction,
+            subscription_interest_period:
+              transactionForm.interestPeriod || transaction.subscription_interest_period || '',
+            subscription_details: {
+              ...(transaction.subscription_details || {}),
+              interestPeriod: transactionForm.interestPeriod || '',
+              interest_period: transactionForm.interestPeriod || '',
+            },
+          }}
+          clientId={clientId}
+          payload={livePricingPayload}
+          isWithdrawal={isWithdrawalTransaction}
+          onBack={() => {
+            setShowLivePricingModal(false);
+            setShowPositionModal(true);
+          }}
+          onClose={() => {
+            setShowLivePricingModal(false);
+            setLivePricingPayload(null);
+            setShowPositionModal(true);
+          }}
+          onSuccess={handleLivePricingModalSuccess}
         />
       )}
     </>

@@ -13,7 +13,7 @@ import {
 } from './ui/alert-dialog';
 import { ArrowLeftRight, Eye, Edit, FileText, CheckCircle, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { getStatusLabel, getTypeLabel, getStatusColors } from './transactionUtils';
+import { getStatusLabel, getTypeLabel, getStatusColors, getLivePricingStatus, getLivePricingBadgeLabel, getLivePricingBadgeColors } from './transactionUtils';
 import { formatAmount } from '../utils/currency';
 import { apiCall } from '../utils/api';
 import { getApiBaseUrl } from '../utils/apiBaseUrl';
@@ -895,6 +895,7 @@ export function TransactionList({
                   )}
                 </td>
                 <td className="px-4 py-3 align-middle">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
                   {(() => {
                     const { bg, text } = getStatusColors(transaction.status, transaction.type);
                     return (
@@ -912,6 +913,26 @@ export function TransactionList({
                       </span>
                     );
                   })()}
+                  {(() => {
+                    const liveStatus = getLivePricingStatus(transaction);
+                    if (!liveStatus) return null;
+                    const { bg, text } = getLivePricingBadgeColors(liveStatus);
+                    return (
+                      <span
+                        className={tableStatusBadgeClass}
+                        style={{
+                          backgroundColor: bg,
+                          color: text,
+                          borderColor: `${text}2e`,
+                          zIndex: 1,
+                          position: 'relative',
+                        }}
+                      >
+                        {getLivePricingBadgeLabel(liveStatus)}
+                      </span>
+                    );
+                  })()}
+                  </div>
                 </td>
                 {showInterestTrackingColumns && (
                   <>

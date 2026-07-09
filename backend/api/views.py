@@ -122,6 +122,12 @@ from .position_service import (
     transaction_has_saved_position_generation,
     verify_finalize_validation_preconditions,
 )
+from api.live_pricing_service import (
+    activate_live_pricing,
+    can_activate_live_pricing,
+    get_live_pricing_status,
+    is_live_pricing_active,
+)
 
 COMPLETED_TRANSACTION_STATUSES = ('valide', 'cloture')
 
@@ -11295,6 +11301,17 @@ def transaction_generate_positions(request, client_id, transaction_id):
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if is_live_pricing_active(transaction):
+        return Response(
+            {
+                'error': (
+                    'La génération Live Pricing est active sur cette transaction. '
+                    'Le mode anticipé n\'est pas disponible.'
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     
     # Check if this is an investment or withdrawal transaction
     is_investment = (
@@ -11870,6 +11887,17 @@ def transaction_save_positions(request, client_id, transaction_id):
             return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
     elif not request.user.is_authenticated:
         return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if is_live_pricing_active(transaction):
+        return Response(
+            {
+                'error': (
+                    'La génération Live Pricing est active sur cette transaction. '
+                    'Le mode anticipé n\'est pas disponible.'
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     
     # Check if this is an investment or withdrawal transaction
     is_investment = (
@@ -12403,6 +12431,106 @@ def transaction_save_positions(request, client_id, transaction_id):
     except Exception as e:
         logger.error(f"Failed to save positions/history for transaction {transaction.id}: {str(e)}", exc_info=True)
         return Response({'error': f'Erreur lors de l\'enregistrement des positions: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def transaction_activate_live_pricing(request, client_id, transaction_id):
+    """Activate Live Pricing plan for an investment transaction."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    ok, err = can_activate_live_pricing(transaction)
+    if not ok:
+        return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+
+    period_summaries = request.data.get('period_summaries') or []
+    if not period_summaries:
+        return Response({'error': 'period_summaries est requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rates_used = request.data.get('rates_used') or {}
+    avoid_losses = bool(request.data.get('avoid_losses', False))
+    positive_gains_only = bool(request.data.get('positive_gains_only', False))
+
+    positions_per_month_min = request.data.get('positions_per_month_min')
+    positions_per_month_max = request.data.get('positions_per_month_max')
+    parsed_min = parsed_max = None
+    try:
+        if positions_per_month_min is not None and str(positions_per_month_min).strip() != '':
+            parsed_min = int(positions_per_month_min)
+        if positions_per_month_max is not None and str(positions_per_month_max).strip() != '':
+            parsed_max = int(positions_per_month_max)
+    except (TypeError, ValueError):
+        return Response({'error': 'Fourchette positions/mois invalide'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        history_entry = activate_live_pricing(
+            transaction,
+            rates_used=rates_used,
+            period_summaries=period_summaries,
+            positions_per_month_min=parsed_min,
+            positions_per_month_max=parsed_max,
+            avoid_losses=avoid_losses,
+            positive_gains_only=positive_gains_only,
+        )
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        logger.error(
+            "Failed to activate live pricing for transaction %s: %s",
+            transaction.id,
+            exc,
+            exc_info=True,
+        )
+        return Response(
+            {'error': f'Erreur lors de l\'activation Live Pricing: {exc}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    transaction.refresh_from_db()
+    return Response(
+        {
+            'message': 'Génération Live Pricing activée',
+            'live_pricing': get_live_pricing_status(transaction),
+            'history_entry': history_entry,
+            'transaction': _serialize_transaction_for_response(transaction, request),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def transaction_live_pricing_status(request, client_id, transaction_id):
+    """Return Live Pricing status for a transaction."""
+    client = get_object_or_404(Client, id=client_id)
+    transaction = get_object_or_404(Transaction, id=transaction_id, client=client)
+
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.GET.get('token', '')
+    is_client_token = token and token.startswith('client_')
+
+    if is_client_token:
+        token_client_id = token.replace('client_', '')
+        if token_client_id != client_id:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+        if not client.active:
+            return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+    elif not request.user.is_authenticated:
+        return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    return Response(get_live_pricing_status(transaction), status=status.HTTP_200_OK)
 
 
 @api_view(['DELETE'])
