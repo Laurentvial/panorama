@@ -477,12 +477,25 @@ class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
         )
         self.assertEqual(amount, Decimal('143.91'))
 
-    def test_addition_metadata_keys(self):
+    def test_addition_uses_full_post_addition_value(self):
         amount = _invested_amount_for_recalc_transaction(
             total_after=Decimal('5500.00'),
             principal_before=Decimal('5000.00'),
             transaction_amount=Decimal('2500.00'),
-            real_invested_capital=Decimal('5000.00'),
+            real_invested_capital=Decimal('7500.00'),
             scale_factor=Decimal('1.1'),
+            is_addition=True,
         )
-        self.assertEqual(amount, Decimal('2750.00'))
+        self.assertEqual(amount, Decimal('5500.00'))
+
+    def test_addition_larger_than_existing_principal(self):
+        """Regression: 2040€ addition on 360€ must not inflate capital via amount/principal_before."""
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=Decimal('2401.01'),
+            principal_before=Decimal('360.00'),
+            transaction_amount=Decimal('2040.00'),
+            real_invested_capital=Decimal('2400.00'),
+            scale_factor=Decimal('6.650813'),
+            is_addition=True,
+        )
+        self.assertEqual(amount, Decimal('2401.01'))

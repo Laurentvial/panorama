@@ -4612,16 +4612,24 @@ def _invested_amount_for_recalc_transaction(
     transaction_amount: Decimal,
     real_invested_capital: Decimal,
     scale_factor: Decimal | None,
+    is_addition: bool = False,
 ) -> Decimal:
     """
     Allocate post-withdrawal/addition product value to a single investment transaction.
 
-    Each investment txn receives total_after * (txn.amount / principal_before) so that
-    regenerating positions for N transactions does not apply the full remaining value N times.
+    Withdrawal recalculation regenerates positions per historical investment txn.
+    Each txn receives total_after * (txn.amount / principal_before) so the full
+    remaining value is not applied N times.
+
+    Addition recalculation regenerates all pending positions under the new addition
+    txn only, so that txn receives the full post-addition product value (total_after).
 
     After deploying this fix, clients with pending positions regenerated under the old logic
     must re-run withdrawal position recalculation (CRM modal « Génération des positions »).
     """
+    if is_addition:
+        return total_after.quantize(Decimal('0.01'))
+
     txn_original = transaction_amount if transaction_amount > 0 else Decimal('0')
     principal = principal_before if principal_before is not None else Decimal('0')
     if principal > 0 and txn_original > 0:
@@ -4912,9 +4920,11 @@ def build_investment_context(
             total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_withdrawal'))
             principal_before = _to_decimal(withdrawal_recalc_meta.get('principal_before_withdrawal'))
             scale_factor = _to_decimal(withdrawal_recalc_meta.get('capital_scale_factor'))
+            is_addition_recalc = False
             if total_after is None:
                 total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_addition'))
                 principal_before = _to_decimal(withdrawal_recalc_meta.get('principal_before_addition'))
+                is_addition_recalc = total_after is not None
             if total_after is not None and total_after >= 0:
                 txn_amount = _to_decimal(txn.amount) or Decimal('0')
                 invested_amount = _invested_amount_for_recalc_transaction(
@@ -4923,6 +4933,7 @@ def build_investment_context(
                     transaction_amount=txn_amount,
                     real_invested_capital=real_invested_capital,
                     scale_factor=scale_factor,
+                    is_addition=is_addition_recalc,
                 )
         except Exception:
             pass
