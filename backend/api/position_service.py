@@ -1228,27 +1228,39 @@ def _choose_total_trades_with_min_per_day(
 
 def _build_day_targets(trading_days: list[date], total_trades: int, *, max_per_day: int, rng: random.Random) -> dict[date, int]:
     """
-    Build per-day trade targets such that each day has >=0 and <= max_per_day.
-    Avoids having exactly 1 trade per day every day - allows some days with 0 trades.
+    Build per-day trade targets spread evenly across the trading calendar.
+    Each day has 0..max_per_day trades. Empty days only occur when there are
+    fewer trades than days (then spaced across the period, not clustered).
     """
     if not trading_days:
         return {}
-    total_trades = min(total_trades, len(trading_days) * max_per_day)
-
-    # Start with all days at 0 (no guarantee of 1 trade per day)
+    n_days = len(trading_days)
+    total_trades = min(total_trades, n_days * max_per_day)
     targets: dict[date, int] = {d: 0 for d in trading_days}
-    
-    # Distribute trades randomly across days, capped per day.
-    # This allows some days to have 0 trades, avoiding the pattern of exactly 1 trade per day.
-    candidates = list(trading_days)
-    remaining = total_trades
-    while remaining > 0 and candidates:
-        day = rng.choice(candidates)
-        if targets[day] < max_per_day:
-            targets[day] += 1
-            remaining -= 1
+    if total_trades <= 0:
+        return targets
+
+    counts = _distribute_positions_across_days(total_trades, n_days, rng)
+
+    excess = 0
+    for day, count in zip(trading_days, counts):
+        if count > max_per_day:
+            targets[day] = max_per_day
+            excess += count - max_per_day
         else:
-            candidates = [d for d in candidates if targets[d] < max_per_day]
+            targets[day] = count
+
+    if excess:
+        # Fill remaining capacity on the least-loaded days to keep spread even.
+        while excess > 0:
+            candidates = [d for d in trading_days if targets[d] < max_per_day]
+            if not candidates:
+                break
+            candidates.sort(key=lambda d: (targets[d], trading_days.index(d)))
+            day = candidates[0]
+            targets[day] += 1
+            excess -= 1
+
     return targets
 
 
@@ -1499,11 +1511,14 @@ def _resolve_product_overlap_window(
     product_id: str | None,
     opened_at: datetime,
     closed_at: datetime,
+    client_id: str | None = None,
     exclude_transaction_id: str | None = None,
     max_iterations: int = 20,
 ) -> tuple[datetime, datetime] | None:
     """
-    Ensure there is no overlap with existing pending/open positions for the same product.
+    Ensure there is no overlap with existing pending/open positions for the same
+    client + product. Other clients' schedules must not shift this client's windows
+    (that previously stacked many opens on the same timestamp).
 
     If overlaps exist, shifts the entire window forward (keeping duration) to start right after
     the latest conflicting closed_at. If any conflicting position has closed_at=NULL (open-ended),
@@ -1524,6 +1539,8 @@ def _resolve_product_overlap_window(
             status__in=('pending', 'open'),
             opened_at__isnull=False,
         )
+        if client_id:
+            qs = qs.filter(client_id=client_id)
         if exclude_transaction_id:
             qs = qs.exclude(transaction_id=exclude_transaction_id)
 
@@ -1833,8 +1850,10 @@ def _create_trade_positions_compounding(
 
                 overlap_resolved = _resolve_product_overlap_window(
                     product_id=ctx.product_id,
+                    client_id=ctx.client_id,
                     opened_at=opened_at,
                     closed_at=closed_at,
+                    exclude_transaction_id=ctx.transaction_id,
                 )
                 if overlap_resolved is None:
                     continue
@@ -1998,37 +2017,53 @@ def _distribute_positions_across_days(
     rng: random.Random
 ) -> list[int]:
     """
-    Distribute total_positions across num_days.
-    Returns a list of counts per day.
-    
-    Allows multiple positions per day (0 to total_positions).
-    Uses random distribution with some variation.
+    Distribute total_positions across num_days as evenly as possible.
+
+    - When positions >= days: every day gets at least floor(n/days), remainder
+      spread on evenly spaced days (avoids empty weeks and end-of-period dumps).
+    - When positions < days: place one position on evenly spaced days so the
+      calendar stays covered across the period.
     """
     if num_days <= 0 or total_positions <= 0:
         return []
-    
+
     if num_days == 1:
         return [total_positions]
-    
-    # Random distribution
-    counts = []
-    remaining = total_positions
-    
-    for i in range(num_days - 1):
-        if remaining == 0:
-            counts.append(0)
-            continue
-        
-        # Random count for this day (0 to remaining)
-        # Limit to avoid putting all positions on one day
-        max_for_day = min(remaining, max(1, total_positions // 2))
-        count = rng.randint(0, max_for_day)
-        counts.append(count)
-        remaining -= count
-    
-    # Last day gets remainder
-    counts.append(remaining)
-    
+
+    counts = [0] * num_days
+
+    if total_positions >= num_days:
+        base = total_positions // num_days
+        remainder = total_positions % num_days
+        counts = [base] * num_days
+        if remainder > 0:
+            # Spread remainder on evenly spaced indices with a small random phase.
+            step = num_days / remainder
+            offset = rng.uniform(0, step)
+            for i in range(remainder):
+                idx = int(offset + i * step) % num_days
+                counts[idx] += 1
+        return counts
+
+    # Fewer positions than days: space them evenly across the period.
+    step = num_days / total_positions
+    offset = rng.uniform(0, step)
+    used: set[int] = set()
+    for i in range(total_positions):
+        idx = min(num_days - 1, int(offset + i * step))
+        if idx in used:
+            for delta in range(1, num_days):
+                left = idx - delta
+                right = idx + delta
+                if left >= 0 and left not in used:
+                    idx = left
+                    break
+                if right < num_days and right not in used:
+                    idx = right
+                    break
+        used.add(idx)
+        counts[idx] += 1
+
     return counts
 
 
@@ -2422,8 +2457,10 @@ def _create_period_positions_simple(
 
                             overlap_resolved = _resolve_product_overlap_window(
                                 product_id=ctx.product_id,
+                                client_id=ctx.client_id,
                                 opened_at=retry_opened_at,
                                 closed_at=retry_closed_at,
+                                exclude_transaction_id=ctx.transaction_id,
                             )
                             if overlap_resolved is None:
                                 continue
@@ -2458,8 +2495,10 @@ def _create_period_positions_simple(
 
                     overlap_resolved = _resolve_product_overlap_window(
                         product_id=ctx.product_id,
+                        client_id=ctx.client_id,
                         opened_at=opened_at,
                         closed_at=closed_at,
+                        exclude_transaction_id=ctx.transaction_id,
                     )
                     if overlap_resolved is None:
                         continue
@@ -3123,8 +3162,10 @@ def generate_positions_with_rates(
 
                 overlap_resolved = _resolve_product_overlap_window(
                     product_id=ctx.product_id,
+                    client_id=ctx.client_id,
                     opened_at=opened_at,
                     closed_at=closed_at,
+                    exclude_transaction_id=ctx.transaction_id,
                 )
                 if overlap_resolved is None:
                     continue

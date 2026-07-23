@@ -111,6 +111,7 @@ function getRecalculationPositionsSummaryText(
   recalculationExecution: RecalculationExecutionSummary | null,
   positionsSaved: boolean,
   pendingToDeleteCount: number | null,
+  kind: 'withdrawal' | 'addition' | 'recalculation' = 'recalculation',
 ): string {
   const total = getRecalculationRegeneratedTotal(
     recalculationPreview,
@@ -121,10 +122,12 @@ function getRecalculationPositionsSummaryText(
     return `${total ?? recalculationExecution.regenerated_total} position(s) régénérée(s) après exécution.`;
   }
   if (total != null && total > 0) {
-    return `${total} position(s) attendue(s) après exécution (recalcul sur toutes les transactions d'investissement du produit).`;
+    return `${total} position(s) attendue(s) après exécution (recalcul sur les transactions d'investissement du produit).`;
   }
   if (pendingToDeleteCount != null && pendingToDeleteCount > 0) {
-    return `${pendingToDeleteCount} position(s) pending seront supprimées puis régénérées proportionnellement au retrait.`;
+    const proportionLabel =
+      kind === 'addition' ? "à l'ajout" : kind === 'withdrawal' ? 'au retrait' : 'au recalcul';
+    return `${pendingToDeleteCount} position(s) pending seront supprimées puis régénérées proportionnellement ${proportionLabel}.`;
   }
   return 'Le recalcul régénérera les positions pending de toutes les transactions d\'investissement sur ce produit.';
 }
@@ -564,6 +567,9 @@ export function PositionGenerationModal({
         avoid_losses: avoidLosses,
         positive_only: positiveGainsOnly,
         manual_regeneration: true,
+        // Dry-run the full recalculation engine so the UI can preview positions
+        // that will be created (not only those that will be deleted).
+        include_recalculation_preview: true,
       };
 
       const useHorizonForPositions = transactionRequiresGenerationHorizonDays(transaction, isWithdrawal);
@@ -1557,7 +1563,9 @@ export function PositionGenerationModal({
                   marginBottom: '20px'
                 }}>
                   <div style={{ fontSize: '16px', fontWeight: '600', color: '#92400e', marginBottom: '12px' }}>
-                    ⚠️ {isWithdrawal ? 'Prévisualisation (dry-run): positions qui seront supprimées' : 'Positions qui seront supprimées'}
+                    ⚠️ {(isWithdrawal || !!additionRecalculation)
+                      ? 'Prévisualisation (dry-run): positions qui seront supprimées'
+                      : 'Positions qui seront supprimées'}
                   </div>
                   <div style={{ fontSize: '14px', color: '#78350f', marginBottom: '12px' }}>
                     <strong>{deletedPositions.total_count}</strong> position(s) en attente seront supprimées avant la génération des nouvelles positions.
@@ -1623,7 +1631,7 @@ export function PositionGenerationModal({
                 </div>
               )}
 
-              {isWithdrawal && !positionsSaved && recalculationPreview && (
+              {(isWithdrawal || !!additionRecalculation) && !positionsSaved && recalculationPreview && (
                 <div
                   style={{
                     padding: '16px',
@@ -1727,12 +1735,17 @@ export function PositionGenerationModal({
                   recalculationExecution,
                   positionsSaved,
                 );
+                const expectedOrSampleTotal = regeneratedTotal ?? (positions.length > 0 ? positions.length : null);
                 const showRecalculationSampleTable =
                   usesRecalcFlow &&
                   !positionsSaved &&
                   positions.length > 0 &&
-                  recalculationPreview != null &&
-                  (regeneratedTotal ?? 0) > 0;
+                  (expectedOrSampleTotal ?? 0) > 0;
+                const recalcKind: 'withdrawal' | 'addition' | 'recalculation' = isWithdrawal
+                  ? 'withdrawal'
+                  : isAdditionRecalcFlow
+                    ? 'addition'
+                    : 'recalculation';
 
                 return (
                   <>
@@ -1743,6 +1756,7 @@ export function PositionGenerationModal({
                             recalculationExecution,
                             positionsSaved,
                             deletedPositions?.total_count ?? null,
+                            recalcKind,
                           )
                         : `${positions.length} position(s) générée(s). Veuillez vérifier avant de valider :`}
                     </p>
@@ -1750,8 +1764,8 @@ export function PositionGenerationModal({
                     {showRecalculationSampleTable && (
                       <>
                         <div style={{ marginBottom: '10px', fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
-                          Échantillon de positions régénérées ({positions.length} affichée(s) sur{' '}
-                          {regeneratedTotal} attendues)
+                          Échantillon de positions régénérées ({positions.length} affichée(s)
+                          {regeneratedTotal != null ? ` sur ${regeneratedTotal} attendues` : ''})
                         </div>
                         {recalculationPreview?.generated_positions_preview_note && (
                           <div style={{ marginBottom: '10px', fontSize: '12px', color: '#475569' }}>
@@ -1806,6 +1820,30 @@ export function PositionGenerationModal({
                           </table>
                         </div>
                       </>
+                    )}
+
+                    {usesRecalcFlow && !positionsSaved && positions.length === 0 && (
+                      <div
+                        style={{
+                          marginBottom: '20px',
+                          padding: '12px',
+                          backgroundColor: '#fff7ed',
+                          border: '1px solid #fdba74',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          color: '#9a3412',
+                        }}
+                      >
+                        Aucun échantillon de positions à créer n&apos;a été renvoyé par la prévisualisation.
+                        {recalculationPreview?.regenerated_total_expected != null && (
+                          <> Total attendu : <strong>{recalculationPreview.regenerated_total_expected}</strong>.</>
+                        )}
+                        {recalculationPreview?.errors?.length ? (
+                          <> Vérifiez les erreurs de dry-run ci-dessus.</>
+                        ) : (
+                          <> Relancez la génération (Continuer) pour obtenir l&apos;aperçu dry-run.</>
+                        )}
+                      </div>
                     )}
 
                     {!usesRecalcFlow && positions.length > 0 && (

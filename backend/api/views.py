@@ -11366,6 +11366,9 @@ def transaction_generate_positions(request, client_id, transaction_id):
     include_recalculation_preview = request.data.get('include_recalculation_preview', False)
     if not isinstance(include_recalculation_preview, bool):
         include_recalculation_preview = str(include_recalculation_preview).lower() in ('true', '1', 'yes', 'on')
+    # Manual CRM regeneration should always preview created positions (not only deletions).
+    if manual_regeneration and (is_withdrawal or requires_addition_recalculation):
+        include_recalculation_preview = True
 
     # Parse positions per month override (optional)
     positions_per_month_min = request.data.get('positions_per_month_min')
@@ -11439,11 +11442,45 @@ def transaction_generate_positions(request, client_id, transaction_id):
             deleted_positions_preview = None
             deleted_by_transaction = recalculation_preview.get('deleted_by_transaction') or {}
             if deleted_total_expected > 0:
+                deleted_positions_list = []
+                try:
+                    from .models import Position
+                    product_id_for_preview = transaction.transfer_to if transaction.transfer_to != 'solde' else None
+                    if product_id_for_preview:
+                        pending_qs = (
+                            Position.objects.filter(
+                                product_id=product_id_for_preview,
+                                client_id=transaction.client_id,
+                                status='pending',
+                            )
+                            .select_related('asset')
+                            .order_by('opened_at', 'id')[:100]
+                        )
+                        for pos in pending_qs:
+                            deleted_positions_list.append({
+                                'id': pos.id,
+                                'transaction_id': pos.transaction_id,
+                                'asset_id': pos.asset_id,
+                                'asset_name': pos.asset.name if pos.asset else None,
+                                'invested_amount': str(pos.invested_amount),
+                                'profit_loss': str(pos.profit_loss) if pos.profit_loss else '0',
+                                'opened_at': pos.opened_at.isoformat() if pos.opened_at else None,
+                                'closed_at': pos.closed_at.isoformat() if pos.closed_at else None,
+                                'period_index': pos.period_index,
+                                'period_date': pos.period_date.isoformat() if pos.period_date else None,
+                            })
+                except Exception:
+                    deleted_positions_list = []
                 deleted_positions_preview = {
                     'total_count': deleted_total_expected,
                     'deleted_by_transaction': deleted_by_transaction,
-                    'positions': [],
-                    'note': 'Previsualisation dry-run basee sur execution reelle (sans ecriture base).',
+                    'positions': deleted_positions_list,
+                    'note': (
+                        f'{len(deleted_positions_list)} positions shown (out of {deleted_total_expected} total). '
+                        'Prévisualisation dry-run (sans écriture base).'
+                        if deleted_positions_list
+                        else 'Prévisualisation dry-run basée sur l’exécution réelle (sans écriture base).'
+                    ),
                 }
 
             product = None
