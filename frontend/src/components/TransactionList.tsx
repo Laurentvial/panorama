@@ -520,6 +520,7 @@ export function TransactionList({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          clientId,
           firstName: details.firstName || '',
           lastName: details.lastName || '',
           birthDate: details.birthDate || '',

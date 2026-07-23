@@ -12978,6 +12978,7 @@ def product_contract_pdf(request, product_id):
             current_user = jwt_auth.get_user(validated_token)
             if not current_user or not current_user.is_authenticated:
                 return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
+            request.user = current_user
         except Exception:
             # Invalid token - require authentication
             return Response({'error': 'Authentification requise'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -12999,6 +13000,19 @@ def product_contract_pdf(request, product_id):
     subscription_interest_period = (payload.get('interestPeriod') or '').strip()
     # Base64 encoded signature image (often a data URL) - keep out of URL to avoid 414/Request-Line-too-large.
     subscription_signature = (payload.get('signature') or '').strip()
+    # When CRM generates a contract, resolve the investor from the target client
+    # (admin JWT must not fall back to the logged-in user's email/phone).
+    payload_client_id = (payload.get('clientId') or payload.get('client_id') or '').strip()
+    if current_user and payload_client_id and not current_client:
+        try:
+            target_client = Client.objects.get(id=payload_client_id)
+            allowed_ids = _get_client_ids_user_has_access_to(request)
+            if allowed_ids is not None and target_client.id not in allowed_ids:
+                return Response({'error': 'Accès refusé'}, status=status.HTTP_403_FORBIDDEN)
+            current_client = target_client
+            product = effective_product_for_client(current_client, product)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client introuvable'}, status=status.HTTP_404_NOT_FOUND)
     # Currency for contract amounts (EUR, USD, CHF)
     contract_currency_raw = (payload.get('currency') or '').strip().upper()
     if not contract_currency_raw and current_client:
