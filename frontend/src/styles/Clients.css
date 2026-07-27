@@ -418,6 +418,22 @@
   color: #64748b;
 }
 
+.clients-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border, #e5e7eb);
+  flex-wrap: wrap;
+}
+
+.clients-pagination-info {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
 .clients-filter-section {
   display: flex;
   flex-direction: column;

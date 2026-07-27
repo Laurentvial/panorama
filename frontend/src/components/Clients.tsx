@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Search, LogIn, Trash2, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, LogIn, Trash2, RefreshCw, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
@@ -28,6 +28,7 @@ export function Clients({ onSelectClient }: ClientsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
   const [onlineClientIds, setOnlineClientIds] = useState<Set<string>>(new Set());
 
   const isGestionnaire = currentUser?.role === 'gestionnaire';
@@ -107,7 +108,20 @@ export function Clients({ onSelectClient }: ClientsProps) {
     return dateB - dateA; // Descending order (latest first)
   });
 
-  const displayedClients = sortedClients.slice(0, itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(sortedClients.length / itemsPerPage));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const displayedClients = sortedClients.slice(
+    (safePage - 1) * itemsPerPage,
+    safePage * itemsPerPage
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedTeam, itemsPerPage]);
+
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
 
   function handlePlatformAccess(clientId: string) {
     const client = clients.find(c => c.id === clientId);
@@ -364,6 +378,31 @@ export function Clients({ onSelectClient }: ClientsProps) {
                   ))}
                 </tbody>
               </table>
+              {sortedClients.length > itemsPerPage && (
+                <div className="clients-pagination">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Précédent
+                  </Button>
+                  <span className="clients-pagination-info">
+                    Page {safePage} sur {totalPages} ({sortedClients.length} clients)
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                  >
+                    Suivant
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <p className="clients-empty">Aucun client trouvé</p>
