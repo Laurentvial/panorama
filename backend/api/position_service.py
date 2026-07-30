@@ -4654,6 +4654,7 @@ def _invested_amount_for_recalc_transaction(
     real_invested_capital: Decimal,
     scale_factor: Decimal | None,
     is_addition: bool = False,
+    is_withdrawal_preview_temp: bool = False,
 ) -> Decimal:
     """
     Allocate post-withdrawal/addition product value to a single investment transaction.
@@ -4665,10 +4666,13 @@ def _invested_amount_for_recalc_transaction(
     Addition recalculation regenerates all pending positions under the new addition
     txn only, so that txn receives the full post-addition product value (total_after).
 
+    Withdrawal preview temp (modal rates/positions) uses amount=withdrawal, not an
+    investment share; it represents the whole product and must receive total_after.
+
     After deploying this fix, clients with pending positions regenerated under the old logic
     must re-run withdrawal position recalculation (CRM modal « Génération des positions »).
     """
-    if is_addition:
+    if is_addition or is_withdrawal_preview_temp:
         return total_after.quantize(Decimal('0.01'))
 
     txn_original = transaction_amount if transaction_amount > 0 else Decimal('0')
@@ -4975,6 +4979,7 @@ def build_investment_context(
                     real_invested_capital=real_invested_capital,
                     scale_factor=scale_factor,
                     is_addition=is_addition_recalc,
+                    is_withdrawal_preview_temp=is_withdrawal_temp_transaction,
                 )
         except Exception:
             pass

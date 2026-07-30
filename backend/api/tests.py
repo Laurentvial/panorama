@@ -499,3 +499,33 @@ class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
             is_addition=True,
         )
         self.assertEqual(amount, Decimal('2401.01'))
+
+    def test_withdrawal_preview_temp_uses_full_remaining_value(self):
+        """Regression: preview temp amount is the withdrawal, not an investment share.
+
+        Screen case: principal 1100, gains 6.61, withdraw 100 → total_after 1006.61.
+        Without the preview-temp flag, share would be 100/1100 → capital 91.51.
+        """
+        total_after = Decimal('1006.61')
+        principal_before = Decimal('1100.00')
+        withdrawal_amount = Decimal('100.00')
+
+        buggy_share = _invested_amount_for_recalc_transaction(
+            total_after=total_after,
+            principal_before=principal_before,
+            transaction_amount=withdrawal_amount,
+            real_invested_capital=Decimal('1000.00'),
+            scale_factor=Decimal('0.909634'),
+            is_withdrawal_preview_temp=False,
+        )
+        self.assertEqual(buggy_share, Decimal('91.51'))
+
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=total_after,
+            principal_before=principal_before,
+            transaction_amount=withdrawal_amount,
+            real_invested_capital=Decimal('1000.00'),
+            scale_factor=Decimal('0.909634'),
+            is_withdrawal_preview_temp=True,
+        )
+        self.assertEqual(amount, Decimal('1006.61'))
