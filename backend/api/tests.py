@@ -12,8 +12,11 @@ from .position_service import (
     _apply_profit_variability,
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
+    _ignore_period_existing_profit_for_recalc,
     _invested_amount_for_recalc_transaction,
     _product_has_explicit_contract_duration,
+    _recalc_generation_start_dt,
+    _should_compound_capital_for_txn,
     calculate_remaining_interests_for_transaction,
     delete_pending_positions_for_transaction,
 )
@@ -529,3 +532,97 @@ class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
             is_withdrawal_preview_temp=True,
         )
         self.assertEqual(amount, Decimal('1006.61'))
+
+    def test_withdrawal_product_recalc_uses_full_remaining_value(self):
+        """Focus / product withdrawal path uses full total_after, not a per-versement share.
+
+        Case: invest 550+1000+4000, prior withdraw 200, withdraw 1000 → total_after 4395.99.
+        Even if the focus txn amount is only 4000 (or any smaller tranche), capital_base must
+        be the full remaining product value so one position alone = 4395.99 and concurrent
+        positions in a period sum to 4395.99.
+        """
+        total_after = Decimal('4395.99')
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=total_after,
+            principal_before=Decimal('5350.00'),
+            transaction_amount=Decimal('4000.00'),
+            real_invested_capital=Decimal('4350.00'),
+            scale_factor=Decimal('0.814677'),
+            investment_amounts_total=Decimal('5550.00'),
+            is_withdrawal_product_recalc=True,
+        )
+        self.assertEqual(amount, total_after)
+
+        # Small focus/historical amount must not shrink the product capital base.
+        small_txn_amount = _invested_amount_for_recalc_transaction(
+            total_after=total_after,
+            principal_before=Decimal('5350.00'),
+            transaction_amount=Decimal('550.00'),
+            real_invested_capital=Decimal('4350.00'),
+            scale_factor=Decimal('0.814677'),
+            investment_amounts_total=Decimal('5550.00'),
+            is_withdrawal_product_recalc=True,
+        )
+        self.assertEqual(small_txn_amount, total_after)
+        self.assertNotEqual(
+            small_txn_amount,
+            (total_after * Decimal('550.00') / Decimal('5550.00')).quantize(Decimal('0.01')),
+        )
+
+    def test_allocated_capital_base_override_wins_when_not_product_recalc(self):
+        amount = _invested_amount_for_recalc_transaction(
+            total_after=Decimal('4395.99'),
+            principal_before=Decimal('5350.00'),
+            transaction_amount=Decimal('550.00'),
+            real_invested_capital=Decimal('4350.00'),
+            scale_factor=Decimal('0.814677'),
+            investment_amounts_total=Decimal('5550.00'),
+            allocated_capital_base=Decimal('435.64'),
+            is_withdrawal_product_recalc=False,
+        )
+        self.assertEqual(amount, Decimal('435.64'))
+
+    def test_withdrawal_recalc_does_not_compound_capital_already_including_gains(self):
+        """total_after already embeds unpaid gains (4350 + 45.99 = 4395.99); do not roll done P&L again."""
+        txn = SimpleNamespace(
+            subscription_details={'interestPeriod': 'Fin de contrat', 'interest_period': 'Fin de contrat'},
+            _withdrawal_recalc_metadata={
+                'total_value_after_withdrawal': '4395.99',
+                'unpaid_gains_before_withdrawal': '45.99',
+            },
+        )
+        product = SimpleNamespace(interest_period='Fin de contrat')
+        self.assertFalse(_should_compound_capital_for_txn(txn, product))
+
+        txn_normal = SimpleNamespace(
+            subscription_details={'interestPeriod': 'Fin de contrat'},
+        )
+        self.assertTrue(_should_compound_capital_for_txn(txn_normal, product))
+
+    def test_withdrawal_recalc_ignores_existing_period_profit_and_uses_cutoff_start(self):
+        """Done P&L in the current month must not zero profit_remaining after withdrawal.
+
+        Also generation start follows metadata cutoff (withdrawal datetime), not the
+        historical focus investment datetime — aligns with rates Period 1.
+        period_index may still continue after retained done rows (max+1); that is OK.
+        """
+        default_start = datetime(2026, 7, 31, 7, 51, tzinfo=dt_timezone.utc)
+        cutoff = '2026-08-03T16:12:00+00:00'
+        txn = SimpleNamespace(
+            datetime=default_start,
+            validated_at=None,
+            _withdrawal_recalc_metadata={
+                'total_value_after_withdrawal': '1968.21',
+                'cutoff_datetime': cutoff,
+            },
+        )
+        self.assertTrue(_ignore_period_existing_profit_for_recalc(txn))
+        started = _recalc_generation_start_dt(txn, default=default_start)
+        self.assertEqual(started, datetime(2026, 8, 3, 16, 12, tzinfo=dt_timezone.utc))
+
+        txn_normal = SimpleNamespace(datetime=default_start, validated_at=None)
+        self.assertFalse(_ignore_period_existing_profit_for_recalc(txn_normal))
+        self.assertEqual(
+            _recalc_generation_start_dt(txn_normal, default=default_start),
+            default_start,
+        )

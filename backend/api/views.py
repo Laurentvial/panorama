@@ -183,15 +183,20 @@ def _normalize_recalculation_per_transaction(items) -> list[dict]:
             after_pending = int(item.get('after_pending') or 0)
         except (TypeError, ValueError):
             after_pending = 0
-        normalized.append(
-            {
-                'transaction_id': txn_id,
-                'before_pending': before_pending,
-                'created': created,
-                'after_pending': after_pending,
-                'status': str(item.get('status') or ''),
-            }
-        )
+        row = {
+            'transaction_id': txn_id,
+            'before_pending': before_pending,
+            'created': created,
+            'after_pending': after_pending,
+            'status': str(item.get('status') or ''),
+        }
+        transaction_amount = item.get('transaction_amount')
+        if transaction_amount is not None and str(transaction_amount).strip() != '':
+            row['transaction_amount'] = str(transaction_amount)
+        capital_base = item.get('capital_base')
+        if capital_base is not None and str(capital_base).strip() != '':
+            row['capital_base'] = str(capital_base)
+        normalized.append(row)
     normalized.sort(key=lambda x: x['transaction_id'])
     return normalized
 

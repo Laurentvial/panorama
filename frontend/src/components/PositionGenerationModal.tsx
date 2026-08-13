@@ -178,6 +178,17 @@ interface Position {
   status: string;
 }
 
+interface RecalculationPerTransactionRow {
+  transaction_id: string;
+  transaction_amount?: string;
+  capital_base?: string;
+  before_pending: number;
+  created: number;
+  after_pending: number;
+  status: string;
+  error?: string;
+}
+
 interface RecalculationExecutionSummary {
   withdrawal_transaction_id: string;
   product_id: string | null;
@@ -187,14 +198,7 @@ interface RecalculationExecutionSummary {
   regenerated_total: number;
   final_pending_total: number;
   transaction_count: number;
-  per_transaction: Array<{
-    transaction_id: string;
-    before_pending: number;
-    created: number;
-    after_pending: number;
-    status: string;
-    error?: string;
-  }>;
+  per_transaction: RecalculationPerTransactionRow[];
   errors: string[];
   status: string;
 }
@@ -202,14 +206,7 @@ interface RecalculationExecutionSummary {
 interface RecalculationExecutionPreview {
   deleted_total_expected: number;
   regenerated_total_expected: number;
-  per_transaction_expected: Array<{
-    transaction_id: string;
-    before_pending: number;
-    created: number;
-    after_pending: number;
-    status: string;
-    error?: string;
-  }>;
+  per_transaction_expected: RecalculationPerTransactionRow[];
   status: string;
   errors: string[];
   generated_positions_preview_note?: string | null;
@@ -220,6 +217,7 @@ interface WithdrawalRecalculationMetadata {
   product_id: string | null;
   withdrawal_amount: string;
   principal_before_withdrawal: string;
+  investment_amounts_total?: string;
   accrued_gains_before_withdrawal: string;
   paid_interests_before_withdrawal: string;
   unpaid_gains_before_withdrawal: string;
@@ -1110,6 +1108,11 @@ export function PositionGenerationModal({
               <div style={{ color: '#334155' }}>
                 Capital principal avant retrait : <strong>{formatCurrency(withdrawalRecalculation.principal_before_withdrawal)}</strong>
               </div>
+              {withdrawalRecalculation.investment_amounts_total != null && (
+                <div style={{ color: '#334155' }}>
+                  Somme des versements (brut) : <strong>{formatCurrency(withdrawalRecalculation.investment_amounts_total)}</strong>
+                </div>
+              )}
               <div style={{ color: '#334155' }}>
                 Gains cumulés observés : <strong>{formatCurrency(withdrawalRecalculation.accrued_gains_before_withdrawal)}</strong>
               </div>
@@ -1126,7 +1129,12 @@ export function PositionGenerationModal({
                 Valeur après retrait : <strong>{formatCurrency(withdrawalRecalculation.total_value_after_withdrawal)}</strong>
               </div>
               <div style={{ color: '#334155' }}>
-                Facteur appliqué à la régénération : <strong>{withdrawalRecalculation.capital_scale_factor}</strong>
+                Ratio valeur après / avant : <strong>{withdrawalRecalculation.capital_scale_factor}</strong>
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '12px', color: '#64748b' }}>
+                Base capital post-retrait = valeur après retrait. Une position seule utilise cette base ;
+                si plusieurs positions sont ouvertes en même temps, leur total égale cette base.
+                Le capital est réutilisé à chaque période.
               </div>
             </div>
           )}
@@ -1170,7 +1178,7 @@ export function PositionGenerationModal({
                 Valeur après ajout : <strong>{formatCurrency(additionRecalculation.total_value_after_addition)}</strong>
               </div>
               <div style={{ color: '#334155' }}>
-                Facteur appliqué à la régénération : <strong>{additionRecalculation.capital_scale_factor}</strong>
+                Ratio valeur après / avant : <strong>{additionRecalculation.capital_scale_factor}</strong>
               </div>
             </div>
           )}
@@ -1659,14 +1667,22 @@ export function PositionGenerationModal({
                     </div>
                   )}
                   {recalculationPreview.per_transaction_expected?.length > 0 && (
-                    <details style={{ marginTop: '10px' }}>
+                    <details style={{ marginTop: '10px' }} open>
                       <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: '13px' }}>
                         Voir le détail par transaction ({recalculationPreview.per_transaction_expected.length})
                       </summary>
                       <ul style={{ marginTop: '8px', marginLeft: '18px', fontSize: '13px', color: '#334155' }}>
                         {recalculationPreview.per_transaction_expected.map((item) => (
-                          <li key={item.transaction_id}>
-                            {item.transaction_id}: supprimées={item.before_pending}, régénérées={item.created}, statut={item.status}
+                          <li key={item.transaction_id} style={{ marginBottom: '4px' }}>
+                            <strong>{item.transaction_id}</strong>
+                            {' '}(txn focus)
+                            {item.transaction_amount != null && (
+                              <> — versement d&apos;origine {formatCurrency(item.transaction_amount)}</>
+                            )}
+                            {item.capital_base != null && (
+                              <> — base capital (= valeur après retrait) <strong>{formatCurrency(item.capital_base)}</strong></>
+                            )}
+                            {' '}— pending supprimés (produit)={item.before_pending}, régénérées={item.created}, statut={item.status}
                           </li>
                         ))}
                       </ul>
@@ -1772,6 +1788,23 @@ export function PositionGenerationModal({
                             {recalculationPreview.generated_positions_preview_note}
                           </div>
                         )}
+                        {(() => {
+                          const ratesPeriod1Start = rates[0]?.startDate ? Date.parse(rates[0].startDate) : NaN;
+                          const firstOpen = positions[0]?.opened_at ? Date.parse(positions[0].opened_at) : NaN;
+                          const showFutureOnlyHint =
+                            (isWithdrawal || isAdditionRecalcFlow) &&
+                            Number.isFinite(ratesPeriod1Start) &&
+                            Number.isFinite(firstOpen) &&
+                            firstOpen > ratesPeriod1Start;
+                          if (!showFutureOnlyHint) return null;
+                          return (
+                            <div style={{ marginBottom: '10px', fontSize: '12px', color: '#475569' }}>
+                              Les rates affichent les périodes dès la date du retrait/ajout ; seules les ouvertures
+                              strictement futures (après maintenant) sont régénérées. La colonne « Période » des
+                              positions continue après les positions déjà fermées (ce n’est pas le n° de période rates).
+                            </div>
+                          );
+                        })()}
                         <div style={{ marginBottom: '20px', maxHeight: '400px', overflowY: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                             <thead>

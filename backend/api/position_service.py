@@ -288,6 +288,62 @@ def _txn_compounds_interests(txn: Transaction, product: Product | None = None) -
     return 'fin' in p and ('contrat' in p or 'matur' in p)
 
 
+def _should_compound_capital_for_txn(txn: Transaction, product: Product | None = None) -> bool:
+    """
+    Whether invested capital_base should roll profits forward period after period.
+
+    Withdrawal/addition recalculation attaches `_withdrawal_recalc_metadata` with a
+    product value (total_after) that already includes unpaid accrued gains. Rolling
+    historical done P&L (or newly generated P&L) into capital_base would double-count
+    those gains in position invested_amount.
+    """
+    if getattr(txn, '_withdrawal_recalc_metadata', None):
+        return False
+    return _txn_compounds_interests(txn, product)
+
+
+def _has_withdrawal_recalc_metadata(txn: Transaction) -> bool:
+    return isinstance(getattr(txn, '_withdrawal_recalc_metadata', None), dict)
+
+
+def _recalc_generation_start_dt(txn: Transaction, *, default: datetime) -> datetime:
+    """
+    For withdrawal/addition recalculation, align the generation window with the
+    rates preview (metadata cutoff = withdrawal/addition datetime), not the
+    historical focus investment datetime.
+    """
+    meta = getattr(txn, '_withdrawal_recalc_metadata', None)
+    if not isinstance(meta, dict):
+        return default
+    raw = meta.get('cutoff_datetime')
+    if not raw:
+        return default
+    parsed: datetime | None
+    if isinstance(raw, datetime):
+        parsed = raw
+    else:
+        from django.utils.dateparse import parse_datetime
+        parsed = parse_datetime(str(raw))
+        if parsed is None:
+            try:
+                parsed = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+            except Exception:
+                return default
+    tz = timezone.get_current_timezone()
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, tz)
+    return parsed
+
+
+def _ignore_period_existing_profit_for_recalc(txn: Transaction) -> bool:
+    """
+    During withdrawal/addition recalc, total_after is a fresh product value.
+    Historical done P&L must not zero out the current period's profit_remaining
+    (that skipped the whole month and jumped to ~month-end).
+    """
+    return _has_withdrawal_recalc_metadata(txn)
+
+
 def _parse_interest_payment_period_months(interest_period: str) -> float:
     """
     Convert interest payment period string to number of months.
@@ -1681,6 +1737,7 @@ def _create_trade_positions_compounding(
     start_dt = getattr(txn, 'validated_at', None) or txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
+    start_dt = _recalc_generation_start_dt(txn, default=start_dt)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -1737,7 +1794,7 @@ def _create_trade_positions_compounding(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _txn_compounds_interests(txn, product)
+    does_compound = _should_compound_capital_for_txn(txn, product)
 
     assets_weighted: list[tuple[object, Decimal]] = []
     if allocations:
@@ -1775,17 +1832,18 @@ def _create_trade_positions_compounding(
 
         # Existing realized profit in this period (so reruns remain consistent)
         existing_profit = Decimal('0.00')
-        for v in Position.objects.filter(
-            transaction_id=ctx.transaction_id,
-            period_date__gte=period_days[0],
-            period_date__lte=period_days[-1],
-        ).values_list('profit_loss', flat=True):
-            if v is None:
-                continue
-            try:
-                existing_profit += Decimal(str(v))
-            except Exception:
-                continue
+        if not _ignore_period_existing_profit_for_recalc(txn):
+            for v in Position.objects.filter(
+                transaction_id=ctx.transaction_id,
+                period_date__gte=period_days[0],
+                period_date__lte=period_days[-1],
+            ).values_list('profit_loss', flat=True):
+                if v is None:
+                    continue
+                try:
+                    existing_profit += Decimal(str(v))
+                except Exception:
+                    continue
 
         # Target profit for this period.
         # The profitability rate is configured per `profitability_period` (monthly/quarterly/etc).
@@ -2092,6 +2150,8 @@ def _create_period_positions_simple(
     start_dt = getattr(txn, 'validated_at', None) or txn.datetime or timezone.now()
     if timezone.is_naive(start_dt):
         start_dt = timezone.make_aware(start_dt, tz)
+    # Withdrawal/addition recalc: align with rates window (metadata cutoff).
+    start_dt = _recalc_generation_start_dt(txn, default=start_dt)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
     
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -2165,7 +2225,7 @@ def _create_period_positions_simple(
         getattr(product, 'profitability_period', None) if product else None
     )
     profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _txn_compounds_interests(txn, product)
+    does_compound = _should_compound_capital_for_txn(txn, product)
     
     created: list[Position] = []
     period_summaries: list[dict] = []
@@ -2204,16 +2264,17 @@ def _create_period_positions_simple(
         
         # Check existing profit in this period
         existing_profit = Decimal('0.00')
-        for v in Position.objects.filter(
-            transaction_id=ctx.transaction_id,
-            period_date__gte=period_days[0],
-            period_date__lte=period_days[-1],
-        ).values_list('profit_loss', flat=True):
-            if v is not None:
-                try:
-                    existing_profit += Decimal(str(v))
-                except Exception:
-                    continue
+        if not _ignore_period_existing_profit_for_recalc(txn):
+            for v in Position.objects.filter(
+                transaction_id=ctx.transaction_id,
+                period_date__gte=period_days[0],
+                period_date__lte=period_days[-1],
+            ).values_list('profit_loss', flat=True):
+                if v is not None:
+                    try:
+                        existing_profit += Decimal(str(v))
+                    except Exception:
+                        continue
         
         # Calculate target profit for this period
         rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
@@ -2777,7 +2838,7 @@ def generate_rates_for_investment(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _txn_compounds_interests(txn, product)
+    does_compound = _should_compound_capital_for_txn(txn, product)
 
     capital = invested_total.quantize(Decimal('0.01'))
     skip_compound_rollforward = bool(getattr(txn, '_withdrawal_recalc_metadata', None))
@@ -2918,6 +2979,7 @@ def generate_positions_with_rates(
             allocations = allocations_list
 
     start_dt = _position_generation_window_start_dt(txn)
+    start_dt = _recalc_generation_start_dt(txn, default=start_dt)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -2984,7 +3046,7 @@ def generate_positions_with_rates(
     pm = _period_months_from_profitability_period(getattr(product, 'profitability_period', None) if product else None)
     # For daily/weekly periods (< 1 month), use the fraction directly; otherwise use at least 1 month
     profit_period_months = ctx.duration_months_approx if pm == 0 else (pm if pm < 1.0 else max(1.0, pm))
-    does_compound = _txn_compounds_interests(txn, product)
+    does_compound = _should_compound_capital_for_txn(txn, product)
 
     # Market hours will be determined per asset in the loop
     tz = timezone.get_current_timezone()
@@ -3045,22 +3107,23 @@ def generate_positions_with_rates(
         # that are already closed or currently open.
         now = timezone.now()
         existing_profit = Decimal('0.00')
-        existing_positions = Position.objects.filter(
-            transaction_id=ctx.transaction_id,
-            period_date__gte=period_days[0],
-            period_date__lte=period_days[-1],
-        ).filter(
-            # Only count positions that are already closed (done) or currently open
-            # Exclude future positions (pending with opened_at > now) - they will be regenerated
-            Q(status='done') | 
-            Q(status='open')
-        )
-        for pos in existing_positions:
-            if pos.profit_loss is not None:
-                try:
-                    existing_profit += Decimal(str(pos.profit_loss))
-                except Exception:
-                    continue
+        if not _ignore_period_existing_profit_for_recalc(txn):
+            existing_positions = Position.objects.filter(
+                transaction_id=ctx.transaction_id,
+                period_date__gte=period_days[0],
+                period_date__lte=period_days[-1],
+            ).filter(
+                # Only count positions that are already closed (done) or currently open
+                # Exclude future positions (pending with opened_at > now) - they will be regenerated
+                Q(status='done') |
+                Q(status='open')
+            )
+            for pos in existing_positions:
+                if pos.profit_loss is not None:
+                    try:
+                        existing_profit += Decimal(str(pos.profit_loss))
+                    except Exception:
+                        continue
 
         # Use custom rate - must be provided
         import logging
@@ -4281,6 +4344,7 @@ def calculate_withdrawal_recalculation_metadata(
             'product_id': None,
             'withdrawal_amount': '0.00',
             'principal_before_withdrawal': '0.00',
+            'investment_amounts_total': '0.00',
             'accrued_gains_before_withdrawal': '0.00',
             'paid_interests_before_withdrawal': '0.00',
             'unpaid_gains_before_withdrawal': '0.00',
@@ -4300,6 +4364,18 @@ def calculate_withdrawal_recalculation_metadata(
         up_to_datetime=cutoff_dt,
         exclude_transaction_id=withdrawal_txn.id,
     ).quantize(Decimal('0.01'))
+
+    # Gross sum of investment transfers (ignores prior withdrawals). Used as share
+    # denominator so Σ allocated bases == total_after even after earlier retraits.
+    investment_amounts_total = Decimal('0.00')
+    for amt in Transaction.objects.filter(
+        client_id=withdrawal_txn.client_id,
+        type='transfert',
+        transfer_to=resolved_product.id,
+        status__in=COMPLETED_TRANSACTION_STATUSES,
+    ).exclude(id=withdrawal_txn.id).values_list('amount', flat=True):
+        investment_amounts_total += (_to_decimal(amt) or Decimal('0'))
+    investment_amounts_total = investment_amounts_total.quantize(Decimal('0.01'))
 
     accrued_before = _sum_accrued_position_gains(
         client_id=withdrawal_txn.client_id,
@@ -4330,6 +4406,7 @@ def calculate_withdrawal_recalculation_metadata(
         'product_id': resolved_product.id,
         'withdrawal_amount': str(withdrawal_amount),
         'principal_before_withdrawal': str(principal_before),
+        'investment_amounts_total': str(investment_amounts_total),
         'accrued_gains_before_withdrawal': str(accrued_before),
         'paid_interests_before_withdrawal': str(paid_interests_before),
         'unpaid_gains_before_withdrawal': str(unpaid_gains_before),
@@ -4646,6 +4723,42 @@ def _description_indicates_withdrawal_to_balance(description: str | None) -> boo
     )
 
 
+def _allocate_recalc_capital_shares(
+    *,
+    total_after: Decimal,
+    transaction_amounts: list[Decimal],
+) -> list[Decimal]:
+    """
+    Split total_after across investment amounts so shares sum exactly to total_after.
+    Residual cents are applied to the last positive-amount transaction.
+    """
+    if not transaction_amounts:
+        return []
+    total_after = (total_after if total_after is not None else Decimal('0')).quantize(Decimal('0.01'))
+    amounts = [
+        (amt if amt is not None and amt > 0 else Decimal('0')).quantize(Decimal('0.01'))
+        for amt in transaction_amounts
+    ]
+    denom = sum(amounts, Decimal('0'))
+    if denom <= 0:
+        return [Decimal('0.00') for _ in amounts]
+
+    allocated: list[Decimal] = []
+    running = Decimal('0.00')
+    last_positive_idx = max(i for i, amt in enumerate(amounts) if amt > 0)
+    for i, amt in enumerate(amounts):
+        if amt <= 0:
+            allocated.append(Decimal('0.00'))
+            continue
+        if i == last_positive_idx:
+            allocated.append((total_after - running).quantize(Decimal('0.01')))
+        else:
+            share = (total_after * amt / denom).quantize(Decimal('0.01'))
+            allocated.append(share)
+            running += share
+    return allocated
+
+
 def _invested_amount_for_recalc_transaction(
     *,
     total_after: Decimal,
@@ -4653,32 +4766,40 @@ def _invested_amount_for_recalc_transaction(
     transaction_amount: Decimal,
     real_invested_capital: Decimal,
     scale_factor: Decimal | None,
+    investment_amounts_total: Decimal | None = None,
+    allocated_capital_base: Decimal | None = None,
     is_addition: bool = False,
     is_withdrawal_preview_temp: bool = False,
+    is_withdrawal_product_recalc: bool = False,
 ) -> Decimal:
     """
-    Allocate post-withdrawal/addition product value to a single investment transaction.
+    Allocate post-withdrawal/addition product value for position generation.
 
-    Withdrawal recalculation regenerates positions per historical investment txn.
-    Each txn receives total_after * (txn.amount / principal_before) so the full
-    remaining value is not applied N times.
+    Withdrawal product recalculation (focus investment txn) and withdrawal preview temp
+    both receive the full remaining product value (total_after). Concurrent positions
+    within a period then share that single capital_base (sum == total_after).
 
     Addition recalculation regenerates all pending positions under the new addition
-    txn only, so that txn receives the full post-addition product value (total_after).
+    txn only, so that txn also receives the full post-addition product value.
 
-    Withdrawal preview temp (modal rates/positions) uses amount=withdrawal, not an
-    investment share; it represents the whole product and must receive total_after.
-
-    After deploying this fix, clients with pending positions regenerated under the old logic
-    must re-run withdrawal position recalculation (CRM modal « Génération des positions »).
+    After deploying this fix, clients with pending positions regenerated under the old
+    per-investment share logic must re-run withdrawal position recalculation
+    (CRM modal « Génération des positions »).
     """
-    if is_addition or is_withdrawal_preview_temp:
+    if is_addition or is_withdrawal_preview_temp or is_withdrawal_product_recalc:
         return total_after.quantize(Decimal('0.01'))
 
+    if allocated_capital_base is not None and allocated_capital_base >= 0:
+        return allocated_capital_base.quantize(Decimal('0.01'))
+
     txn_original = transaction_amount if transaction_amount > 0 else Decimal('0')
-    principal = principal_before if principal_before is not None else Decimal('0')
-    if principal > 0 and txn_original > 0:
-        share = txn_original / principal
+    denom = (
+        investment_amounts_total
+        if investment_amounts_total is not None and investment_amounts_total > 0
+        else (principal_before if principal_before is not None else Decimal('0'))
+    )
+    if denom > 0 and txn_original > 0:
+        share = txn_original / denom
         return (total_after * share).quantize(Decimal('0.01'))
     if scale_factor is not None and scale_factor >= 0:
         return (real_invested_capital * scale_factor).quantize(Decimal('0.01'))
@@ -4965,11 +5086,15 @@ def build_investment_context(
             total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_withdrawal'))
             principal_before = _to_decimal(withdrawal_recalc_meta.get('principal_before_withdrawal'))
             scale_factor = _to_decimal(withdrawal_recalc_meta.get('capital_scale_factor'))
+            investment_amounts_total = _to_decimal(withdrawal_recalc_meta.get('investment_amounts_total'))
+            allocated_capital_base = _to_decimal(withdrawal_recalc_meta.get('allocated_capital_base'))
+            is_withdrawal_product_recalc = total_after is not None
             is_addition_recalc = False
             if total_after is None:
                 total_after = _to_decimal(withdrawal_recalc_meta.get('total_value_after_addition'))
                 principal_before = _to_decimal(withdrawal_recalc_meta.get('principal_before_addition'))
                 is_addition_recalc = total_after is not None
+                is_withdrawal_product_recalc = False
             if total_after is not None and total_after >= 0:
                 txn_amount = _to_decimal(txn.amount) or Decimal('0')
                 invested_amount = _invested_amount_for_recalc_transaction(
@@ -4978,8 +5103,11 @@ def build_investment_context(
                     transaction_amount=txn_amount,
                     real_invested_capital=real_invested_capital,
                     scale_factor=scale_factor,
+                    investment_amounts_total=investment_amounts_total,
+                    allocated_capital_base=allocated_capital_base,
                     is_addition=is_addition_recalc,
                     is_withdrawal_preview_temp=is_withdrawal_temp_transaction,
+                    is_withdrawal_product_recalc=is_withdrawal_product_recalc,
                 )
         except Exception:
             pass
@@ -5356,132 +5484,155 @@ def recalculate_positions_for_product_withdrawal(
                 f"Deleted positions mismatch for product {product.id}: deleted={deleted_count}, expected={total_pending_count}."
             )
         
-        # Find all investment transactions (transfer_to = product_id) for the same client and product
-        # that are 'valide' and have positions
-        investment_transactions = Transaction.objects.filter(
-            client_id=withdrawal_txn.client_id,
-            type='transfert',
-            transfer_to=product.id,
-            status__in=COMPLETED_TRANSACTION_STATUSES
-        ).exclude(id=withdrawal_txn.id).order_by('datetime', 'id')  # Exclude the withdrawal transaction itself
-        
-        txn_count = investment_transactions.count()
-        execution_summary['transaction_count'] = int(txn_count)
-        logger.info(f"Recalculating positions for {txn_count} investment transactions "
-                    f"on product {product.id} after withdrawal transaction {withdrawal_txn.id}")
+        # Withdrawal flow attribution rule (aligned with addition recalculation):
+        # delete all pending for the product, then regenerate a single upcoming schedule
+        # under the latest investment transaction with the full remaining product value
+        # (total_after). Concurrent positions in a period share that one capital_base.
+        focus_txn = (
+            Transaction.objects.filter(
+                client_id=withdrawal_txn.client_id,
+                type='transfert',
+                transfer_to=product.id,
+                status__in=COMPLETED_TRANSACTION_STATUSES,
+            )
+            .exclude(id=withdrawal_txn.id)
+            .order_by('-datetime', '-id')
+            .first()
+        )
 
-        if total_pending_count > 0 and txn_count == 0:
+        execution_summary['transaction_count'] = 1 if focus_txn is not None else 0
+        logger.info(
+            f"Recalculating positions on product {product.id} after withdrawal {withdrawal_txn.id} "
+            f"using focus investment transaction {getattr(focus_txn, 'id', None)}"
+        )
+
+        if total_pending_count > 0 and focus_txn is None:
             _record_failure(
                 f"Pending positions were deleted ({total_pending_count}) but no investment transactions were eligible for regeneration "
                 f"(product={product.id}, client={withdrawal_txn.client_id})."
             )
-        
-        # For each investment transaction, recalculate positions
-        # This will use the updated capital (which now excludes the withdrawal)
-        # Note: We already deleted all pending positions above, so delete_pending=False
+
         regenerated_total = 0
         preview_sample_cap = 500
-        preview_sample_count = 0
-        for inv_txn in investment_transactions:
-            before_pending = int(deleted_by_transaction.get(inv_txn.id, 0))
+        total_after_value = (
+            _to_decimal(withdrawal_meta.get('total_value_after_withdrawal')) or Decimal('0')
+        ).quantize(Decimal('0.01'))
+        before_pending_total = int(total_pending_count)
+
+        def _preview_row_from_position(p) -> dict:
+            asset_name = ''
+            asset_reference = ''
+            asset_type = ''
+            if getattr(p, 'asset_id', None):
+                asset_obj = Asset.objects.filter(id=p.asset_id).first()
+                if asset_obj:
+                    asset_name = asset_obj.name or ''
+                    asset_reference = asset_obj.reference or ''
+                    asset_type = asset_obj.type or ''
+            return {
+                'id': str(getattr(p, 'id', '') or ''),
+                'client_id': str(getattr(p, 'client_id', '') or ''),
+                'product_id': str(getattr(p, 'product_id', '') or ''),
+                'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
+                'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
+                'asset_name': asset_name,
+                'asset_reference': asset_reference,
+                'asset_type': asset_type,
+                'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
+                'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
+                'invested_amount': str(getattr(p, 'invested_amount', '0')),
+                'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
+                'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
+                'profit_loss': str(getattr(p, 'profit_loss', '0')),
+                'period_index': int(getattr(p, 'period_index', 0) or 0),
+                'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
+                'status': str(getattr(p, 'status', 'pending') or 'pending'),
+            }
+
+        if focus_txn is not None:
+            txn_amount = (_to_decimal(focus_txn.amount) or Decimal('0')).quantize(Decimal('0.01'))
+            capital_base = total_after_value
             try:
                 if positions_per_month_min is not None or positions_per_month_max is not None:
-                    merged_sub = dict(inv_txn.subscription_details or {})
+                    merged_sub = dict(focus_txn.subscription_details or {})
                     if positions_per_month_min is not None:
                         merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
                     if positions_per_month_max is not None:
                         merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
-                    inv_txn.subscription_details = merged_sub
+                    focus_txn.subscription_details = merged_sub
 
-                # Pass recalculation context to context builder without persisting anything.
-                inv_txn._capital_cutoff_datetime = recalculation_cutoff_dt
-                inv_txn._withdrawal_recalc_metadata = withdrawal_meta
+                focus_txn._capital_cutoff_datetime = recalculation_cutoff_dt
+                focus_txn._withdrawal_recalc_metadata = {
+                    **withdrawal_meta,
+                    'allocated_capital_base': str(capital_base),
+                }
 
-                # Check all existing positions before recalculation
-                # Note: All pending positions have already been deleted above for the entire product/client
-                all_existing = Position.objects.filter(transaction_id=inv_txn.id)
+                all_existing = Position.objects.filter(transaction_id=focus_txn.id)
                 total_before = all_existing.count()
                 pending_before = all_existing.filter(status='pending').count()
                 open_before = all_existing.filter(status='open').count()
                 done_before = all_existing.filter(status='done').count()
-                
-                logger.info(f"Before recalculation for investment transaction {inv_txn.id} after withdrawal {withdrawal_txn.id}: "
-                        f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}")
-                
-                # Regenerate positions for this investment transaction
-                # This will use the updated capital (reduced by the withdrawal)
-                # delete_pending=False because we already deleted ALL pending positions above (for all transactions)
+
+                logger.info(
+                    f"Before recalculation for focus investment {focus_txn.id} after withdrawal {withdrawal_txn.id}: "
+                    f"total={total_before}, pending={pending_before}, open={open_before}, done={done_before}, "
+                    f"capital_base={capital_base}"
+                )
+
                 created_positions = create_positions_for_investment(
-                    inv_txn,
+                    focus_txn,
                     trigger="withdrawal_recalculation",
                     delete_pending=False,
                     future_only=True,
                     future_cutoff_datetime=recalculation_cutoff_dt,
                 )
                 created_count = len(created_positions or [])
-                regenerated_total += created_count
+                regenerated_total = int(created_count)
                 if dry_run and created_positions:
-                    for p in created_positions:
-                        if preview_sample_count >= preview_sample_cap:
-                            break
-                        preview_sample_count += 1
-                        asset_name = ''
-                        asset_reference = ''
-                        asset_type = ''
-                        if getattr(p, 'asset_id', None):
-                            asset_obj = Asset.objects.filter(id=p.asset_id).first()
-                            if asset_obj:
-                                asset_name = asset_obj.name or ''
-                                asset_reference = asset_obj.reference or ''
-                                asset_type = asset_obj.type or ''
-                        execution_summary['generated_positions_preview'].append({
-                            'id': str(getattr(p, 'id', '') or ''),
-                            'client_id': str(getattr(p, 'client_id', '') or ''),
-                            'product_id': str(getattr(p, 'product_id', '') or ''),
-                            'transaction_id': str(getattr(p, 'transaction_id', '') or ''),
-                            'asset_id': str(getattr(p, 'asset_id', '') or '') or None,
-                            'asset_name': asset_name,
-                            'asset_reference': asset_reference,
-                            'asset_type': asset_type,
-                            'opened_at': p.opened_at.isoformat() if getattr(p, 'opened_at', None) else None,
-                            'closed_at': p.closed_at.isoformat() if getattr(p, 'closed_at', None) else None,
-                            'invested_amount': str(getattr(p, 'invested_amount', '0')),
-                            'fx_rate_eur_to_asset': str(getattr(p, 'fx_rate_eur_to_asset', None)) if getattr(p, 'fx_rate_eur_to_asset', None) else None,
-                            'invested_amount_asset_currency': str(getattr(p, 'invested_amount_asset_currency', None)) if getattr(p, 'invested_amount_asset_currency', None) else None,
-                            'profit_loss': str(getattr(p, 'profit_loss', '0')),
-                            'period_index': int(getattr(p, 'period_index', 0) or 0),
-                            'period_date': p.period_date.isoformat() if getattr(p, 'period_date', None) else None,
-                            'status': str(getattr(p, 'status', 'pending') or 'pending'),
-                        })
-                after_pending = Position.objects.filter(transaction_id=inv_txn.id, status='pending').count()
+                    for p in created_positions[:preview_sample_cap]:
+                        execution_summary['generated_positions_preview'].append(
+                            _preview_row_from_position(p)
+                        )
+                after_pending = Position.objects.filter(
+                    transaction_id=focus_txn.id, status='pending'
+                ).count()
                 execution_summary['per_transaction'].append({
-                    'transaction_id': inv_txn.id,
-                    'before_pending': before_pending,
+                    'transaction_id': focus_txn.id,
+                    'transaction_amount': str(txn_amount),
+                    'capital_base': str(capital_base),
+                    'before_pending': before_pending_total,
                     'created': int(created_count),
                     'after_pending': int(after_pending),
                     'status': 'ok',
                 })
 
-                if before_pending > 0 and created_count == 0:
+                if before_pending_total > 0 and created_count == 0:
                     _record_failure(
-                        f"Regeneration produced 0 positions for transaction {inv_txn.id} although {before_pending} pending positions were deleted."
+                        f"Regeneration produced 0 positions for focus transaction {focus_txn.id} "
+                        f"although {before_pending_total} pending positions were deleted."
                     )
                 if created_count > 0 and after_pending < created_count:
                     _record_failure(
-                        f"Post-regeneration mismatch for transaction {inv_txn.id}: created={created_count}, after_pending={after_pending}."
+                        f"Post-regeneration mismatch for transaction {focus_txn.id}: "
+                        f"created={created_count}, after_pending={after_pending}."
                     )
-                logger.info(f"Regenerated positions for investment transaction {inv_txn.id} after withdrawal")
+                logger.info(
+                    f"Regenerated positions for focus investment {focus_txn.id} after withdrawal "
+                    f"with full product capital_base={capital_base}"
+                )
             except Exception as e:
                 execution_summary['per_transaction'].append({
-                    'transaction_id': inv_txn.id,
-                    'before_pending': before_pending,
+                    'transaction_id': focus_txn.id,
+                    'transaction_amount': str(txn_amount),
+                    'capital_base': str(capital_base),
+                    'before_pending': before_pending_total,
                     'created': 0,
                     'after_pending': 0,
                     'status': 'failed',
                     'error': str(e),
                 })
                 _record_failure(
-                    f"Failed to recalculate positions for investment transaction {inv_txn.id} "
+                    f"Failed to recalculate positions for focus investment {focus_txn.id} "
                     f"after withdrawal {withdrawal_txn.id}: {str(e)}",
                     exc=e
                 )
@@ -5500,9 +5651,11 @@ def recalculate_positions_for_product_withdrawal(
                 f"regenerated_total={regenerated_total}."
             )
 
-        if dry_run and regenerated_total > preview_sample_cap:
+        preview_shown = len(execution_summary.get('generated_positions_preview') or [])
+        if dry_run and regenerated_total > preview_shown:
             execution_summary['generated_positions_preview_note'] = (
-                f"{preview_sample_cap} positions affichées en aperçu (sur {regenerated_total} attendues)."
+                f"{preview_shown} positions affichées en aperçu (sur {regenerated_total} attendues). "
+                f"Base capital = valeur après retrait ({total_after_value})."
             )
 
         execution_summary['status'] = 'ok' if len(execution_summary['errors']) == 0 else 'failed'
