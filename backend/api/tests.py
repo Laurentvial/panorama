@@ -582,8 +582,13 @@ class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
         )
         self.assertEqual(amount, Decimal('435.64'))
 
-    def test_withdrawal_recalc_does_not_compound_capital_already_including_gains(self):
-        """total_after already embeds unpaid gains (4350 + 45.99 = 4395.99); do not roll done P&L again."""
+    def test_fin_de_contrat_still_compounds_after_withdrawal_recalc(self):
+        """Fin de contrat must keep compounding NEW profits after withdrawal.
+
+        total_after already embeds unpaid gains — historical done P&L is ignored via
+        `_ignore_period_existing_profit_for_recalc`, but period-to-period compound of
+        newly generated profits must remain enabled.
+        """
         txn = SimpleNamespace(
             subscription_details={'interestPeriod': 'Fin de contrat', 'interest_period': 'Fin de contrat'},
             _withdrawal_recalc_metadata={
@@ -592,12 +597,14 @@ class WithdrawalRecalcInvestedAmountTest(SimpleTestCase):
             },
         )
         product = SimpleNamespace(interest_period='Fin de contrat')
-        self.assertFalse(_should_compound_capital_for_txn(txn, product))
+        self.assertTrue(_should_compound_capital_for_txn(txn, product))
+        self.assertTrue(_ignore_period_existing_profit_for_recalc(txn))
 
-        txn_normal = SimpleNamespace(
-            subscription_details={'interestPeriod': 'Fin de contrat'},
+        txn_mensuel = SimpleNamespace(
+            subscription_details={'interestPeriod': 'Mensuel'},
+            _withdrawal_recalc_metadata={'total_value_after_withdrawal': '1000.00'},
         )
-        self.assertTrue(_should_compound_capital_for_txn(txn_normal, product))
+        self.assertFalse(_should_compound_capital_for_txn(txn_mensuel, product=None))
 
     def test_withdrawal_recalc_ignores_existing_period_profit_and_uses_cutoff_start(self):
         """Done P&L in the current month must not zero profit_remaining after withdrawal.

@@ -290,15 +290,13 @@ def _txn_compounds_interests(txn: Transaction, product: Product | None = None) -
 
 def _should_compound_capital_for_txn(txn: Transaction, product: Product | None = None) -> bool:
     """
-    Whether invested capital_base should roll profits forward period after period.
+    Whether invested capital_base should roll NEW period profits forward (Fin de contrat).
 
-    Withdrawal/addition recalculation attaches `_withdrawal_recalc_metadata` with a
-    product value (total_after) that already includes unpaid accrued gains. Rolling
-    historical done P&L (or newly generated P&L) into capital_base would double-count
-    those gains in position invested_amount.
+    Withdrawal/addition recalculation still compounds future generated profits — that is
+    the métier meaning of « cumul des intérêts ». Historical done/open P&L must not be
+    re-injected: callers zero `existing_profit` via `_ignore_period_existing_profit_for_recalc`
+    and skip the initial done/open rollforward when metadata is present.
     """
-    if getattr(txn, '_withdrawal_recalc_metadata', None):
-        return False
     return _txn_compounds_interests(txn, product)
 
 
