@@ -66,7 +66,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
 from django.utils import timezone
 from django.core import signing
-from django.db.models import Count, Q, F
+from django.db.models import Count, Q, F, Max
 from django.db import IntegrityError
 from django.db import connection
 from django.db import transaction as db_transaction
@@ -8728,6 +8728,45 @@ def _resolve_client_manager_user(client: Client):
     return manager_user
 
 
+def _mark_crm_conversation_read_by_manager(request, client, conversation_id):
+    """Mark client messages and related CRM notifications read when a manager opens a thread."""
+    if not getattr(request, 'user', None) or not request.user.is_authenticated:
+        return
+
+    is_legacy = conversation_id is None or str(conversation_id) == 'legacy'
+
+    if is_legacy:
+        ClientChatMessage.objects.filter(
+            client=client,
+            sender='client',
+            read_by_manager=False,
+            conversation__isnull=True,
+        ).update(read_by_manager=True)
+    else:
+        ClientChatMessage.objects.filter(
+            client=client,
+            sender='client',
+            read_by_manager=False,
+            conversation_id=conversation_id,
+        ).update(read_by_manager=True)
+
+    notif_qs = AppNotification.objects.filter(
+        recipient_type=AppNotification.RECIPIENT_CRM_USER,
+        recipient_user=request.user,
+        notification_type=AppNotification.TYPE_MESSAGE_FROM_CLIENT,
+        read=False,
+        payload__client_id=client.id,
+    )
+    if is_legacy:
+        notif_qs = notif_qs.filter(
+            Q(payload__conversation_id__isnull=True) | Q(payload__conversation_id='legacy')
+        )
+    else:
+        notif_qs = notif_qs.filter(payload__conversation_id=str(conversation_id))
+
+    notif_qs.update(read=True)
+
+
 def _get_manager_profile_photo(manager_user: DjangoUser, request):
     """Return manager profile photo URL if available (UserDetails.profile_photo)."""
     if not manager_user:
@@ -8969,6 +9008,12 @@ def client_conversation_messages(request, client_id, conversation_id):
                 read_by_client=False,
                 conversation=None if is_legacy else conversation,
             ).update(read_by_client=True)
+        elif is_admin_token:
+            _mark_crm_conversation_read_by_manager(
+                request,
+                client,
+                'legacy' if is_legacy else conversation.id,
+            )
         serializer = ClientChatMessageSerializer(qs, many=True, context={'request': request})
         
         # Get manager status, availability schedule, and phone from UserDetails
@@ -14339,6 +14384,116 @@ Description:"""
             {'error': f'Error generating description: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+def _message_preview_text(message):
+    if not message:
+        return ''
+    text = (message.message or '').strip()
+    if not text and getattr(message, 'attachment', None):
+        return 'Pièce jointe'
+    if len(text) > 120:
+        return text[:120] + '…'
+    return text
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def messaging_inbox(request):
+    """Paginated CRM inbox: all client conversations accessible to the current user."""
+    try:
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 10))
+    except (TypeError, ValueError):
+        page, limit = 1, 10
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
+
+    client_ids = _get_client_ids_user_has_access_to(request)
+
+    conv_qs = ClientConversation.objects.select_related('client').annotate(
+        last_msg_at=Max('messages__created_at'),
+    )
+    if client_ids is not None:
+        conv_qs = conv_qs.filter(client_id__in=client_ids)
+
+    inbox_items = []
+    for conv in conv_qs:
+        last_at = conv.last_msg_at or conv.updated_at
+        client_name = f"{conv.client.fname or ''} {conv.client.lname or ''}".strip() or conv.client.email or conv.client.id
+        inbox_items.append({
+            'clientId': conv.client_id,
+            'conversationId': conv.id,
+            'clientName': client_name,
+            'subject': conv.subject or 'Conversation',
+            'lastMessageAt': last_at,
+            'lastMessagePreview': '',
+            '_sort_key': last_at.timestamp() if last_at else 0,
+            '_type': 'conv',
+            '_conv_id': conv.id,
+        })
+
+    legacy_qs = ClientChatMessage.objects.filter(conversation__isnull=True).select_related('client')
+    if client_ids is not None:
+        legacy_qs = legacy_qs.filter(client_id__in=client_ids)
+    legacy_latest = {}
+    for msg in legacy_qs.order_by('-created_at'):
+        if msg.client_id not in legacy_latest:
+            legacy_latest[msg.client_id] = msg
+
+    for client_id, last_msg in legacy_latest.items():
+        client = last_msg.client
+        client_name = f"{client.fname or ''} {client.lname or ''}".strip() or client.email or client.id
+        inbox_items.append({
+            'clientId': client_id,
+            'conversationId': 'legacy',
+            'clientName': client_name,
+            'subject': 'Conversation précédente',
+            'lastMessageAt': last_msg.created_at,
+            'lastMessagePreview': _message_preview_text(last_msg),
+            '_sort_key': last_msg.created_at.timestamp() if last_msg.created_at else 0,
+            '_type': 'legacy',
+        })
+
+    inbox_items.sort(key=lambda item: item['_sort_key'], reverse=True)
+    total = len(inbox_items)
+    offset = (page - 1) * limit
+    page_items = inbox_items[offset:offset + limit]
+
+    conv_ids = [item['_conv_id'] for item in page_items if item.get('_type') == 'conv']
+    if conv_ids:
+        preview_by_conv = {}
+        msgs = ClientChatMessage.objects.filter(conversation_id__in=conv_ids).order_by('conversation_id', '-created_at')
+        for msg in msgs:
+            if msg.conversation_id not in preview_by_conv:
+                preview_by_conv[msg.conversation_id] = _message_preview_text(msg)
+        for item in page_items:
+            if item.get('_type') == 'conv':
+                item['lastMessagePreview'] = preview_by_conv.get(item['_conv_id'], '')
+
+    requests_data = []
+    for item in page_items:
+        requests_data.append({
+            'id': f"{item['clientId']}:{item['conversationId']}",
+            'clientId': item['clientId'],
+            'conversationId': item['conversationId'],
+            'clientName': item['clientName'],
+            'subject': item['subject'],
+            'lastMessageAt': item['lastMessageAt'],
+            'lastMessagePreview': item['lastMessagePreview'],
+        })
+
+    total_pages = (total + limit - 1) // limit if limit > 0 else 1
+    return Response({
+        'requests': requests_data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'totalPages': total_pages,
+            'hasMore': page < total_pages,
+        },
+    })
 
 
 @api_view(['POST'])

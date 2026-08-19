@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
@@ -10,6 +10,7 @@ import LoadingIndicator from './LoadingIndicator';
 import { useUser } from '../contexts/UserContext';
 import { toast } from 'sonner';
 import '../styles/PageHeader.css';
+import '../styles/Messagerie.css';
 
 type Client = {
   id: string;
@@ -48,6 +49,20 @@ type RequestItem = {
   lastMessagePreview?: string;
 };
 
+const CONVERSATIONS_PAGE_SIZE = 10;
+
+function mapInboxRequests(rawRequests: Array<Record<string, unknown>>): RequestItem[] {
+  return rawRequests.map((item) => ({
+    id: String(item.id),
+    clientId: String(item.clientId),
+    conversationId: String(item.conversationId),
+    clientName: String(item.clientName || ''),
+    subject: String(item.subject || 'Conversation'),
+    lastMessageAt: (item.lastMessageAt as string | null | undefined) ?? null,
+    lastMessagePreview: String(item.lastMessagePreview || ''),
+  }));
+}
+
 export function Messagerie() {
   const { currentUser } = useUser();
   const navigate = useNavigate();
@@ -58,6 +73,10 @@ export function Messagerie() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingRequests, setLoadingRequests] = useState(false);
+  const [loadingMoreRequests, setLoadingMoreRequests] = useState(false);
+  const [hasMoreRequests, setHasMoreRequests] = useState(false);
+  const [totalRequests, setTotalRequests] = useState(0);
+  const [inboxPage, setInboxPage] = useState(1);
   const [loadingChat, setLoadingChat] = useState(false);
   const [sending, setSending] = useState(false);
   const [reformulating, setReformulating] = useState(false);
@@ -73,10 +92,6 @@ export function Messagerie() {
   const [editingText, setEditingText] = useState('');
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-
-  // Backend /api/clients/ already filters by permissions (admin/teamleader/gestionnaire)
-  const visibleClients = useMemo(() => clients, [clients]);
-  const visibleClientIdsKey = useMemo(() => visibleClients.map((c) => c.id).join(','), [visibleClients]);
 
   const selectedRequest = useMemo(
     () => requests.find((r) => r.id === selectedRequestId) || null,
@@ -107,57 +122,90 @@ export function Messagerie() {
     }
   }
 
-  async function loadRequests(sourceClients?: Client[]) {
-    setLoadingRequests(true);
+  async function loadRequests(options?: { reset?: boolean; page?: number }) {
+    const reset = options?.reset !== false;
+    const page = options?.page ?? (reset ? 1 : inboxPage);
+    if (reset) {
+      setLoadingRequests(true);
+    } else {
+      setLoadingMoreRequests(true);
+    }
     try {
-      const clientsToUse = sourceClients ?? visibleClients;
-      const conversationLists = await Promise.all(
-        clientsToUse.map(async (c) => {
-          try {
-            const data = await apiCall(`/api/clients/${c.id}/conversations/`);
-            return { client: c, conversations: (data?.conversations || []) as Conversation[] };
-          } catch (e) {
-            console.error('Error loading conversations for client:', c.id, e);
-            return { client: c, conversations: [] as Conversation[] };
-          }
-        }),
+      const data = await apiCall(
+        `/api/messaging/inbox/?page=${page}&limit=${CONVERSATIONS_PAGE_SIZE}`,
       );
+      const all = mapInboxRequests((data?.requests || []) as Array<Record<string, unknown>>);
+      const pagination = data?.pagination || {};
 
-      const all: RequestItem[] = conversationLists.flatMap(({ client, conversations }) => {
-        const clientName =
-          (client.fullName || `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.email || client.id).trim();
-        return conversations.map((conv) => ({
-          id: `${client.id}:${conv.id}`,
-          clientId: client.id,
-          conversationId: conv.id,
-          clientName,
-          subject: conv.subject || 'Conversation',
-          lastMessageAt: conv.lastMessageAt,
-          lastMessagePreview: conv.lastMessagePreview,
-        }));
-      });
+      setHasMoreRequests(Boolean(pagination.hasMore));
+      setTotalRequests(Number(pagination.total || all.length));
+      setInboxPage(page);
 
-      all.sort((a, b) => {
-        const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
-        const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
-        return tb - ta;
-      });
+      setRequests((prev) => (reset
+        ? all
+        : [...prev, ...all.filter((item) => !prev.some((existing) => existing.id === item.id))]));
 
-      setRequests(all);
-
-      setSelectedRequestId((prev) => {
-        if (prev && all.some((r) => r.id === prev)) return prev;
-        if (requestedMode === 'new' && requestedClientId) return '';
-        return all.length > 0 ? all[0].id : '';
-      });
+      if (reset) {
+        setSelectedRequestId((prev) => {
+          if (prev && all.some((r) => r.id === prev)) return prev;
+          if (requestedMode === 'new' && requestedClientId) return '';
+          return all.length > 0 ? all[0].id : '';
+        });
+      }
       return all;
     } catch (error) {
       console.error('Error loading requests:', error);
-      setRequests([]);
-      setSelectedRequestId('');
+      if (reset) {
+        setRequests([]);
+        setSelectedRequestId('');
+        setHasMoreRequests(false);
+        setTotalRequests(0);
+        setInboxPage(1);
+      }
       return [] as RequestItem[];
     } finally {
-      setLoadingRequests(false);
+      if (reset) {
+        setLoadingRequests(false);
+      } else {
+        setLoadingMoreRequests(false);
+      }
+    }
+  }
+
+  async function loadMoreRequests() {
+    if (loadingRequests || loadingMoreRequests || !hasMoreRequests) return;
+    await loadRequests({ reset: false, page: inboxPage + 1 });
+  }
+
+  async function ensureRequestedConversationLoaded() {
+    if (requestedMode === 'new') return;
+    if (!requestedClientId || !requestedConversationId) return;
+    const targetId = `${requestedClientId}:${requestedConversationId}`;
+    if (requests.some((r) => r.id === targetId)) return;
+
+    try {
+      const data = await apiCall(`/api/clients/${requestedClientId}/conversations/`);
+      const client = clients.find((c) => c.id === requestedClientId);
+      const clientName =
+        (client?.fullName || `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || client?.email || requestedClientId).trim();
+      const conversations = (data?.conversations || []) as Conversation[];
+      const targetConv = conversations.find((conv) => conv.id === requestedConversationId);
+      if (!targetConv) return;
+
+      const targetRequest: RequestItem = {
+        id: targetId,
+        clientId: requestedClientId,
+        conversationId: requestedConversationId,
+        clientName,
+        subject: targetConv.subject || 'Conversation',
+        lastMessageAt: targetConv.lastMessageAt,
+        lastMessagePreview: targetConv.lastMessagePreview,
+      };
+
+      setRequests((prev) => (prev.some((r) => r.id === targetId) ? prev : [targetRequest, ...prev]));
+      setSelectedRequestId(targetId);
+    } catch (error) {
+      console.error('Error loading requested conversation:', error);
     }
   }
 
@@ -166,6 +214,9 @@ export function Messagerie() {
     try {
       const data = await apiCall(`/api/clients/${clientId}/conversations/${conversationId}/messages/`);
       setChatMessages((data?.messages || []) as ChatMessage[]);
+      clearApiCache('/api/notifications/');
+      clearApiCache('/api/notifications/unread-messages-count/');
+      window.dispatchEvent(new CustomEvent('crm-messaging-read'));
     } catch (error) {
       console.error('Error loading chat:', error);
     } finally {
@@ -208,7 +259,7 @@ export function Messagerie() {
       setEditingText('');
       clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
       await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
-      await loadRequests();
+      await loadRequests({ reset: true });
     } catch (e) {
       console.error('Error updating message:', e);
       alert('Erreur lors de la modification.');
@@ -227,7 +278,7 @@ export function Messagerie() {
       setDeletingMessageId(null);
       clearApiCache(`/api/clients/${selectedRequest.clientId}/conversations/`);
       await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
-      await loadRequests();
+      await loadRequests({ reset: true });
     } catch (e) {
       console.error('Error deleting message:', e);
       setDeletingMessageId(null);
@@ -263,7 +314,7 @@ export function Messagerie() {
       } else {
         await loadChat(selectedRequest.clientId, selectedRequest.conversationId);
       }
-      await loadRequests(); // met à jour l'ordre dans la liste
+      await loadRequests({ reset: true }); // met à jour l'ordre dans la liste
     } catch (error) {
       console.error('Error sending chat message:', error);
     } finally {
@@ -305,7 +356,7 @@ export function Messagerie() {
       });
 
       clearApiCache(`/api/clients/${newConversationClientId}/conversations/`);
-      const refreshedRequests = await loadRequests();
+      const refreshedRequests = await loadRequests({ reset: true });
       const conversationId = response?.conversation?.id as string | undefined;
       const requestId =
         (conversationId && refreshedRequests.find((r) => r.id === `${newConversationClientId}:${conversationId}`)?.id) ||
@@ -336,21 +387,15 @@ export function Messagerie() {
 
   useEffect(() => {
     loadClients();
+    loadRequests({ reset: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // when visible clients set changes, reload requests
-    if (loadingClients) return;
-    if (!visibleClients.length) {
-      setRequests([]);
-      setSelectedRequestId('');
-      setChatMessages([]);
-      return;
-    }
-    loadRequests();
+    if (loadingClients || loadingRequests) return;
+    ensureRequestedConversationLoaded();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingClients, visibleClientIdsKey]);
+  }, [loadingClients, loadingRequests, requestedClientId, requestedConversationId, requestedMode, clients.length]);
 
   useEffect(() => {
     if (requestedMode !== 'new') {
@@ -419,8 +464,8 @@ export function Messagerie() {
   }, [chatMessages.length]);
 
   return (
-    <div className="space-y-6">
-      <div className="page-header">
+    <div className="messagerie-page">
+      <div className="page-header shrink-0">
         <div className="page-title-section">
           <h1 className="page-title">Messagerie</h1>
           <p className="page-subtitle">Demandes clients</p>
@@ -429,10 +474,10 @@ export function Messagerie() {
           <Button
             variant="outline"
             onClick={async () => {
-              const refreshedClients = await loadClients();
-              await loadRequests(refreshedClients);
+              await loadClients();
+              await loadRequests({ reset: true });
             }}
-            disabled={loadingClients || loadingRequests}
+            disabled={loadingClients || loadingRequests || loadingMoreRequests}
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Actualiser
@@ -440,23 +485,26 @@ export function Messagerie() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="flex items-center gap-2">
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-4" style={{ minHeight: 560 }}>
+      <Card className="messagerie-card">
+        <CardContent className="messagerie-card-content">
+          <div className="flex gap-4 messagerie-layout">
             {/* Left: requests */}
-            <div className="border rounded-lg bg-white" style={{ width: 360, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-600">
-                {loadingRequests ? 'Chargement…' : `${requests.length} demande(s)`}
+            <div className="border rounded-lg bg-white messagerie-conversations-panel">
+              <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-600 shrink-0">
+                {loadingRequests
+                  ? 'Chargement…'
+                  : `${requests.length}${totalRequests > requests.length ? ` / ${totalRequests}` : ''} demande(s)`}
               </div>
-              <div style={{ overflowY: 'auto', flex: 1 }}>
-                {loadingClients || loadingRequests ? (
-                  <div className="p-3 text-sm text-slate-500">Chargement…</div>
+              <div className="messagerie-conversations-list">
+                {loadingRequests && requests.length === 0 ? (
+                  <div className="p-3 flex items-center justify-center">
+                    <LoadingIndicator />
+                  </div>
                 ) : requests.length === 0 ? (
                   <div className="p-3 text-sm text-slate-500">Aucune demande.</div>
                 ) : (
-                  requests.map((r) => {
+                  <>
+                  {requests.map((r) => {
                     const isActive = r.id === selectedRequestId;
                     return (
                       <button
@@ -486,14 +534,28 @@ export function Messagerie() {
                         )}
                       </button>
                     );
-                  })
+                  })}
+                  {hasMoreRequests && (
+                    <div className="p-3 border-t">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={loadMoreRequests}
+                        disabled={loadingMoreRequests || loadingRequests}
+                      >
+                        {loadingMoreRequests ? 'Chargement…' : 'Charger plus de conversations'}
+                      </Button>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             </div>
 
             {/* Right: conversation */}
-            <div className="flex-1 border rounded-lg bg-white" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-700 truncate">
+            <div className="border rounded-lg bg-white messagerie-thread-panel">
+              <div className="px-3 py-2 border-b bg-slate-50 text-sm text-slate-700 truncate shrink-0">
                 {isNewConversationMode ? (
                   <>
                     <span>Nouveau message — </span>
@@ -525,7 +587,7 @@ export function Messagerie() {
                 )}
               </div>
 
-              <div ref={listRef} className="p-3 bg-slate-50" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              <div ref={listRef} className="p-3 bg-slate-50 messagerie-thread-messages flex flex-col">
                 {isNewConversationMode ? (
                   <div className="space-y-4">
                     <div className="rounded-lg border bg-white p-4">
@@ -713,7 +775,7 @@ export function Messagerie() {
                       <Send className="w-4 h-4 mr-2" />
                       {creatingConversation ? 'Création…' : 'Créer la conversation'}
                     </Button>
-                    <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests || creatingConversation}>
+                    <Button type="button" variant="outline" onClick={() => loadRequests({ reset: true })} disabled={loadingRequests || creatingConversation}>
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Rafraîchir
                     </Button>
@@ -782,7 +844,7 @@ export function Messagerie() {
                       <Send className="w-4 h-4 mr-2" />
                       Envoyer
                     </Button>
-                    <Button type="button" variant="outline" onClick={() => loadRequests()} disabled={loadingRequests}>
+                    <Button type="button" variant="outline" onClick={() => loadRequests({ reset: true })} disabled={loadingRequests}>
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Rafraîchir
                     </Button>

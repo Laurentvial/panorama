@@ -1193,7 +1193,7 @@ export function PlatformDashboard() {
                         lineHeight: '1.55',
                       }}
                     >
-                      La vérification de votre identité aide à empêcher quelqu’un d’autre de créer un compte en votre nom.
+                      Justifions votre identité en quelques clics, vos documents sont immédiatement chiffrés et protégés.
                     </p>
 
                     <div style={{ flex: 1, minHeight: 24 }} />

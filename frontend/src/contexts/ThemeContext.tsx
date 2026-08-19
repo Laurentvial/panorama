@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiCall } from '../utils/api';
+import { resolveMediaProxyUrlForBrowser } from '../utils/apiBaseUrl';
+import { applyAppFavicon } from '../utils/faviconBadge';
 
 export interface AppSettings {
   id: string;
@@ -135,10 +137,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       genericTitle = 'Mentions légales';
     }
     document.title = genericTitle;
-    
-    // Remove existing favicon links
-    const existingFavicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
-    existingFavicons.forEach(link => link.remove());
+
+    const faviconUrl = appSettings.favicon_url
+      ? resolveMediaProxyUrlForBrowser(appSettings.favicon_url)
+      : null;
+    applyAppFavicon(faviconUrl);
     
     // Apply primary color
     if (appSettings.primary_color) {

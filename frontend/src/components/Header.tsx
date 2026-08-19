@@ -14,6 +14,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { apiCall } from '../utils/api';
 import { formatRoleLabel } from '../utils/constants';
+import { useFaviconBadge } from '../utils/faviconBadge';
 import '../styles/Header.css';
 
 type AppNotification = {
@@ -38,6 +39,8 @@ export function Header({ user }: HeaderProps) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useFaviconBadge('crm-notifications', user?.id ? unreadCount : 0);
 
   const fetchNotifications = useCallback(async (markAllReadOnOpen = false, options?: { bypassCache?: boolean; silent?: boolean }) => {
     const { bypassCache = false, silent = false } = options ?? {};
@@ -81,6 +84,15 @@ export function Header({ user }: HeaderProps) {
       fetchNotifications(false, { bypassCache: true, silent: true });
     }, 10000);
     return () => clearInterval(interval);
+  }, [user?.id, fetchNotifications]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const handleMessagingRead = () => {
+      fetchNotifications(false, { bypassCache: true, silent: true });
+    };
+    window.addEventListener('crm-messaging-read', handleMessagingRead);
+    return () => window.removeEventListener('crm-messaging-read', handleMessagingRead);
   }, [user?.id, fetchNotifications]);
 
   useEffect(() => {

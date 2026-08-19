@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, Paperclip, Send, X } from 'lucide-react';
 import { apiCall, clearApiCache } from '../utils/api';
 import { useUser } from '../contexts/UserContext';
+import { useFaviconBadge } from '../utils/faviconBadge';
 import { useIsPhone } from './ui/use-mobile';
 import { Button } from './ui/button';
 import LoadingIndicator from './LoadingIndicator';
@@ -132,6 +133,11 @@ export function ManagerChatWidget({ bottomOffsetPx = 0, variant = 'floating' }: 
   /** Re-tick périodiquement pour mettre à jour le point (passage d’un créneau / jour). */
   const [agendaTick, setAgendaTick] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  useFaviconBadge(
+    'platform-messages',
+    currentUser?.userType === 'client' ? unreadMessagesCount : 0,
+  );
 
   const isPhone = useIsPhone();
   const effectiveOpen = isPage || open;

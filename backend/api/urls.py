@@ -78,6 +78,7 @@ urlpatterns = [
         name='client-conversation-message-detail',
     ),
     path('messages/reformulate/', api_views.message_reformulate, name='message-reformulate'),
+    path('messaging/inbox/', api_views.messaging_inbox, name='messaging-inbox'),
     path('users/', api_views.user_list, name='user-list'),
     path('users/create/', api_views.UserCreateView.as_view(), name='user-create'),
     path('users/<str:user_id>/', api_views.user_delete, name='user-delete'),

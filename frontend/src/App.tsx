@@ -11,6 +11,7 @@ import { Toaster } from './components/ui/sonner';
 import LoadingIndicator from './components/LoadingIndicator';
 import LoginPage from './components/LoginPage';
 import { ACCESS_TOKEN, CLIENT_ACCESS_TOKEN, REFRESH_TOKEN } from './utils/constants';
+import { FaviconBadgeGate } from './components/FaviconBadgeGate';
 import './styles/Card.css';
 
 // Lazy load all route components for better performance
@@ -564,6 +565,7 @@ function App() {
             <ScrollToTopOnRouteChange />
             <UserProvider>
                 <ThemeProvider>
+                    <FaviconBadgeGate />
                     <AppRoutes />
                 </ThemeProvider>
             </UserProvider>

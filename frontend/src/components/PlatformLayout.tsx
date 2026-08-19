@@ -23,6 +23,7 @@ import { LegalFooterLinks } from './legal/LegalFooterLinks';
 import { ClientBanner } from './ClientBanner';
 import { ManagerChatWidget } from './ManagerChatWidget';
 import { useIsMobile, useIsPhone } from './ui/use-mobile';
+import { useFaviconBadge } from '../utils/faviconBadge';
 import { logPlatformAction } from '../utils/platformLogger';
 import { toast } from 'sonner';
 import '../styles/PlatformTypography.css';
@@ -78,6 +79,11 @@ export function PlatformLayout() {
   const [clientNotificationsLoading, setClientNotificationsLoading] = useState(false);
   const [clientNotificationsOpen, setClientNotificationsOpen] = useState(false);
   const [referralModalOpen, setReferralModalOpen] = useState(false);
+
+  useFaviconBadge(
+    'platform-notifications',
+    currentUser?.userType === 'client' ? clientUnreadCount : 0,
+  );
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${BOTTOM_NAV_BREAKPOINT}px)`);

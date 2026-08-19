@@ -17,6 +17,7 @@ import {
 } from 'react-icons/hi';
 import { FaBitcoin } from 'react-icons/fa';
 import { Wallet } from '../utils/iconMapping';
+import { useFaviconBadge } from '../utils/faviconBadge';
 import '../styles/Sidebar.css';
 
 interface SidebarProps {
@@ -80,6 +81,8 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
   const location = useLocation();
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
+  useFaviconBadge('crm-messages', unreadMessagesCount);
+
   const fetchUnreadMessagesCount = useCallback(async () => {
     try {
       const data = await apiCall(`/api/notifications/unread-messages-count/?_=${Date.now()}`) as { unreadCount?: number };
@@ -93,6 +96,13 @@ function Sidebar({ currentPage, onNavigate, userRole }: SidebarProps) {
   useEffect(() => {
     const interval = setInterval(fetchUnreadMessagesCount, 10000);
     return () => clearInterval(interval);
+  }, [fetchUnreadMessagesCount]);
+  useEffect(() => {
+    const handleMessagingRead = () => {
+      fetchUnreadMessagesCount();
+    };
+    window.addEventListener('crm-messaging-read', handleMessagingRead);
+    return () => window.removeEventListener('crm-messaging-read', handleMessagingRead);
   }, [fetchUnreadMessagesCount]);
 
   const normalizedUserRole = useMemo(() => userRole?.toLowerCase()?.trim() || '', [userRole]);
