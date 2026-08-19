@@ -664,19 +664,19 @@ export function PlatformAccountVerification() {
   }, [step, verificationConfig]);
 
   // Helper functions to check if specific config steps are completed
-  const isConfigStepCompleted = (configStepNumber: number): boolean => {
-    if (!currentUser) return false;
+  const isConfigStepCompletedForUser = (user: typeof currentUser, configStepNumber: number): boolean => {
+    if (!user) return false;
 
     const hasValue = (...keys: string[]): boolean =>
       keys.some((key) => {
-        const value = (currentUser as any)?.[key];
+        const value = (user as any)?.[key];
         if (value === null || value === undefined) return false;
         if (typeof value === 'string') return value.trim().length > 0;
         return true;
       });
 
     const hasArrayValues = (...keys: string[]): boolean =>
-      keys.some((key) => Array.isArray((currentUser as any)?.[key]) && ((currentUser as any)[key] as unknown[]).length > 0);
+      keys.some((key) => Array.isArray((user as any)?.[key]) && ((user as any)[key] as unknown[]).length > 0);
     
     switch (configStepNumber) {
       case 1: // Identity
@@ -709,12 +709,15 @@ export function PlatformAccountVerification() {
         return hasArrayValues('fundsSources', 'funds_sources');
       
       case 8: // KYC
-        return ['approved', 'submitted'].includes((currentUser.kycStatus || currentUser.kyc_status || '').toString());
+        return ['approved', 'submitted'].includes((user.kycStatus || user.kyc_status || '').toString());
       
       default:
         return false;
     }
   };
+
+  const isConfigStepCompleted = (configStepNumber: number): boolean =>
+    isConfigStepCompletedForUser(currentUser, configStepNumber);
 
   // Check which steps are completed
   const isStep1Completed = useMemo(() => {
@@ -752,22 +755,66 @@ export function PlatformAccountVerification() {
     return isConfigStepCompleted(8);
   }, [currentUser, verificationConfig]);
 
-  const getNextIncompleteStep2SubStep = (): number => {
+  const getNextIncompleteStep2SubStepForUser = (user: typeof currentUser): number => {
     // Step 2 substeps map to Config steps 3-7
     const map: Record<number, number> = { 3: 1, 4: 2, 5: 3, 6: 4, 7: 5 };
     for (const configStep of [3, 4, 5, 6, 7]) {
       if (!isConfigStepEnabled(configStep)) continue;
-      if (!isConfigStepCompleted(configStep)) return map[configStep];
+      if (!isConfigStepCompletedForUser(user, configStep)) return map[configStep];
     }
     // Fallback: first substep (even if already complete)
     return 1;
   };
+
+  const getNextIncompleteStep2SubStep = (): number =>
+    getNextIncompleteStep2SubStepForUser(currentUser);
 
   const getNextIncompleteStep1SubStep = (): number => {
     // Step 1 UI includes Config steps 1 (identity) and 2 (address, optional)
     if (!isConfigStepCompleted(1)) return 1;
     if (isConfigStepEnabled(2) && !isConfigStepCompleted(2)) return 2;
     return 1;
+  };
+
+  const advanceAfterMainStepComplete = (completedStep: 1 | 2) => {
+    toast.success(`Étape ${completedStep} complétée avec succès !`);
+
+    if (completedStep === 1) {
+      if (isStepEnabled(2)) {
+        setStep(2);
+        setSubStep(getNextIncompleteStep2SubStep());
+      } else if (isStepEnabled(3)) {
+        setStep(3);
+        setSubStep(1);
+      } else {
+        setTimeout(() => navigate('/platform'), 1500);
+      }
+      return;
+    }
+
+    if (isStepEnabled(3)) {
+      setStep(3);
+      setSubStep(1);
+    } else {
+      setTimeout(() => navigate('/platform'), 1500);
+    }
+  };
+
+  const mergePatchClientUser = (patchResponse: Awaited<ReturnType<typeof patchClientIdentity>>) =>
+    patchResponse?.client ? { ...currentUser, ...patchResponse.client } : currentUser;
+
+  const advanceStep2AfterSubmit = (updatedUser?: typeof currentUser) => {
+    const user = updatedUser ?? currentUser;
+    const enabledConfigSteps = [3, 4, 5, 6, 7].filter(isConfigStepEnabled);
+    const allEnabledComplete = enabledConfigSteps.every((configStep) =>
+      isConfigStepCompletedForUser(user, configStep),
+    );
+
+    if (allEnabledComplete) {
+      advanceAfterMainStepComplete(2);
+    } else {
+      setSubStep(getNextIncompleteStep2SubStepForUser(user));
+    }
   };
 
   // Auto-open next incomplete enabled step (skip manual selection screen)
@@ -950,12 +997,7 @@ export function PlatformAccountVerification() {
 
       await refreshUser();
 
-      toast.success('Étape 1 complétée avec succès !');
-      
-      // Close verification and return to home page
-      setTimeout(() => {
-        navigate('/platform');
-      }, 1500);
+      advanceAfterMainStepComplete(1);
 
     } catch (error: any) {
 
@@ -1021,13 +1063,13 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ preferences });
+      const data = await patchClientIdentity({ preferences });
 
       await refreshUser();
 
       toast.success('Préférences enregistrées.');
 
-      setSubStep(3); // Go to goals substep within step 2
+      advanceStep2AfterSubmit(mergePatchClientUser(data));
 
     } catch (error: any) {
 
@@ -1083,11 +1125,11 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ tradingObjective, plannedInvestment12m });
+      const data = await patchClientIdentity({ tradingObjective, plannedInvestment12m });
 
       await refreshUser();
 
-      setSubStep(4); // Go to compliance substep within step 2
+      advanceStep2AfterSubmit(mergePatchClientUser(data));
 
     } catch (error: any) {
 
@@ -1119,11 +1161,11 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ complianceFamilyFlags });
+      const data = await patchClientIdentity({ complianceFamilyFlags });
 
       await refreshUser();
 
-      setSubStep(5); // Go to funds sources substep within step 2
+      advanceStep2AfterSubmit(mergePatchClientUser(data));
 
     } catch (error: any) {
 
@@ -1155,22 +1197,11 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ fundsSources });
+      const data = await patchClientIdentity({ fundsSources });
 
       await refreshUser();
 
-      toast.success('Étape 2 complétée avec succès !');
-      
-      // Vérifier si l'étape 3 est activée avant d'y accéder
-      if (isStepEnabled(3)) {
-        setStep(3);
-        setSubStep(1);
-      } else {
-        // Si l'étape 3 n'est pas activée, retourner à la plateforme
-        setTimeout(() => {
-          navigate('/platform');
-        }, 1500);
-      }
+      advanceStep2AfterSubmit(mergePatchClientUser(data));
 
     } catch (error: any) {
 
@@ -1228,13 +1259,13 @@ export function PlatformAccountVerification() {
 
       setSubmitting(true);
 
-      await patchClientIdentity({ primaryProfession, employerName: employerName.trim(), annualNetIncome, totalLiquidities });
+      const data = await patchClientIdentity({ primaryProfession, employerName: employerName.trim(), annualNetIncome, totalLiquidities });
 
       await refreshUser();
 
       toast.success('Informations enregistrées.');
 
-      setSubStep(2); // Go to preferences substep within step 2
+      advanceStep2AfterSubmit(mergePatchClientUser(data));
 
     } catch (error: any) {
 
