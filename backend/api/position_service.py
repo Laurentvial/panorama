@@ -905,6 +905,59 @@ def _naturalize_positive_pnl_parts(
     return values
 
 
+def _distribute_group_budget(
+    indices: list[int],
+    amounts: list[Decimal],
+    budget: Decimal,
+    *,
+    negative: bool = False,
+) -> dict[int, Decimal]:
+    """Split a P&L budget across indices with jittered weights (cent drift on last slot)."""
+    if not indices:
+        return {}
+    budget = abs(budget).quantize(Decimal('0.01'))
+    sign = Decimal('-1') if negative else Decimal('1')
+    if len(indices) == 1:
+        return {indices[0]: (budget * sign).quantize(Decimal('0.01'))}
+
+    weights = [
+        (amounts[i] * Decimal(str(random.uniform(0.70, 1.30)))).quantize(Decimal('0.0001'))
+        for i in indices
+    ]
+    total_weight = sum(weights) or Decimal('1')
+    acc = Decimal('0')
+    result: dict[int, Decimal] = {}
+    for j, i in enumerate(indices[:-1]):
+        share = (budget * weights[j] / total_weight).quantize(Decimal('0.01'))
+        result[i] = (share * sign).quantize(Decimal('0.01'))
+        acc += share
+    result[indices[-1]] = ((budget - acc) * sign).quantize(Decimal('0.01'))
+    return result
+
+
+def _naturalize_mixed_pnl_parts(parts: list[Decimal], caps: list[Decimal]) -> list[Decimal]:
+    """Add cent-level irregularity within winner and loser groups separately."""
+    values = [p.quantize(Decimal('0.01')) for p in parts]
+    winner_idx = [i for i, p in enumerate(values) if p > 0]
+    loser_idx = [i for i, p in enumerate(values) if p < 0]
+
+    if len(winner_idx) > 2:
+        w_parts = [values[i] for i in winner_idx]
+        w_caps = [caps[i] for i in winner_idx]
+        naturalized = _naturalize_positive_pnl_parts(w_parts, w_caps, floor=Decimal('0.01'))
+        for j, i in enumerate(winner_idx):
+            values[i] = naturalized[j]
+
+    if len(loser_idx) > 2:
+        l_parts = [abs(values[i]) for i in loser_idx]
+        l_caps = [caps[i] for i in loser_idx]
+        naturalized = _naturalize_positive_pnl_parts(l_parts, l_caps, floor=Decimal('0.01'))
+        for j, i in enumerate(loser_idx):
+            values[i] = (-naturalized[j]).quantize(Decimal('0.01'))
+
+    return values
+
+
 def _distribute_pnl_total_capped(
     target_total: Decimal,
     amounts: list[Decimal],
@@ -1058,11 +1111,36 @@ def _distribute_pnl_total_capped(
     elif target_total < 0:
         parts = _proportional_pnl_parts(target_total, amounts)
         parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
-    else:
-        parts = _distribute_pnl_total(target_total, amounts)
+    elif target_total > 0:
+        total_amt = sum(amounts)
+        if total_amt <= 0:
+            parts = [Decimal('0.00')] * n
+        else:
+            # Split explicitly between winners and losers so drift rebalance cannot
+            # wipe out losses by dumping the whole period P&L on one trade.
+            loser_count = max(1, int(n * 0.35))
+            loser_indices = set(random.sample(range(n), loser_count))
+            winner_indices = [i for i in range(n) if i not in loser_indices]
+            if not winner_indices:
+                winner_indices = [loser_indices.pop()]
+
+            loss_budget = (target_total * Decimal('0.35')).quantize(Decimal('0.01'))
+            gain_budget = (target_total + loss_budget).quantize(Decimal('0.01'))
+
+            loser_list = sorted(loser_indices)
+            winner_list = sorted(winner_indices)
+
+            parts = [Decimal('0.00')] * n
+            for i, p in _distribute_group_budget(
+                loser_list, amounts, loss_budget, negative=True
+            ).items():
+                parts[i] = p
+            for i, p in _distribute_group_budget(
+                winner_list, amounts, gain_budget, negative=False
+            ).items():
+                parts[i] = p
+
         parts = [max(-caps[i], min(caps[i], parts[i])).quantize(Decimal('0.01')) for i in range(n)]
-        if avoid_losses:
-            parts = [max(Decimal('0'), p).quantize(Decimal('0.01')) for p in parts]
 
     # Adjust drift: spread changes across positions with slack (proportional to slack), not only the largest.
     drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
@@ -1107,6 +1185,16 @@ def _distribute_pnl_total_capped(
         floor = step if positive_only else Decimal('0.00')
         parts = _naturalize_positive_pnl_parts(parts, caps, floor=floor)
         parts = _reduce_identical_adjacent_parts(parts, caps, floor=floor)
+    elif target_total > 0:
+        parts = _naturalize_mixed_pnl_parts(parts, caps)
+
+    drift = (target_total - sum(parts)).quantize(Decimal('0.01'))
+    if drift and parts:
+        for idx in range(n - 1, -1, -1):
+            adjusted = (parts[idx] + drift).quantize(Decimal('0.01'))
+            if -caps[idx] <= adjusted <= caps[idx]:
+                parts[idx] = adjusted
+                break
 
     return parts
 
@@ -1419,18 +1507,23 @@ def _schedule_trades_for_day(
         return []
     scheduled: list[tuple[datetime, datetime]] = []
     cursor = day_open
+    window_minutes = max(5, int((day_close - day_open).total_seconds() // 60))
+    # Tighter spacing when many trades are requested on the same day.
+    max_gap = 8 if count >= 8 else (15 if count >= 5 else 45)
+    max_duration = min(90, max(10, window_minutes // max(1, count)))
     for i in range(count):
-        # Leave a random gap (0..45min), but ensure we can still fit at least 5 minutes.
-        gap_minutes = rng.randint(0, 45)
+        remaining = max(0, int((day_close - cursor).total_seconds() // 60))
+        if remaining < 5:
+            break
+        gap_minutes = min(max_gap, max(0, remaining - 5))
+        gap_minutes = rng.randint(0, gap_minutes) if gap_minutes > 0 else 0
         opened_at = cursor + timedelta(minutes=gap_minutes)
         if opened_at >= day_close - timedelta(minutes=5):
-            # Force a minimal trade at the end of the window if none scheduled yet.
             if not scheduled:
                 opened_at = day_close - timedelta(minutes=5)
             else:
                 break
-        # duration <= 1h30 (90 minutes), but must fit before market close
-        duration_minutes = rng.randint(5, 90)
+        duration_minutes = rng.randint(5, min(max_duration, max(5, remaining - 1)))
         closed_at = opened_at + timedelta(minutes=duration_minutes)
         if closed_at > day_close:
             closed_at = day_close
@@ -2067,6 +2160,55 @@ def _create_trade_positions_compounding(
     return created
 
 
+def _month_units_in_step(step_months: float) -> int:
+    """Whole calendar months covered by a profitability step (>= 1 month steps)."""
+    if step_months >= 1.0:
+        return max(1, int(step_months))
+    return 1
+
+
+def _draw_positions_total_for_step_months(
+    *,
+    positions_per_month_min: int,
+    positions_per_month_max: int,
+    step_months: float,
+    txn_id: str,
+    period_idx: int,
+) -> int:
+    """
+    Draw an independent positions/month target for each calendar month in the step.
+    Sub-monthly steps (weekly/daily profitability) prorate the monthly range.
+    """
+    if positions_per_month_max < positions_per_month_min:
+        return 0
+
+    if step_months < 1.0:
+        draw_rng = random.Random(f"{txn_id}:{period_idx}:posmonth:0")
+        per_month = draw_rng.randint(positions_per_month_min, positions_per_month_max)
+        return max(0, int(round(Decimal(per_month) * Decimal(str(step_months)))))
+
+    total = 0
+    for month_idx in range(_month_units_in_step(step_months)):
+        month_rng = random.Random(f"{txn_id}:{period_idx}:posmonth:{month_idx}")
+        total += month_rng.randint(positions_per_month_min, positions_per_month_max)
+    return total
+
+
+def _max_per_day_for_position_target(
+    *,
+    desired_total: int,
+    trading_days_count: int,
+    default_max_per_day: int = 3,
+) -> int:
+    """Raise the per-day cap when the monthly override requires more slots."""
+    if trading_days_count <= 0 or desired_total <= 0:
+        return default_max_per_day
+    needed = (desired_total + trading_days_count - 1) // trading_days_count
+    if needed <= default_max_per_day:
+        return default_max_per_day
+    return min(max(default_max_per_day, needed), 50)
+
+
 def _distribute_positions_across_days(
     total_positions: int,
     num_days: int,
@@ -2123,6 +2265,63 @@ def _distribute_positions_across_days(
     return counts
 
 
+def _parse_subscription_pnl_options(subscription_details: dict | None) -> tuple[bool, bool]:
+    """Read avoid-losses / positive-only flags from subscription_details."""
+    avoid_losses = False
+    positive_only = False
+    if isinstance(subscription_details, dict):
+        avoid_losses_val = subscription_details.get('avoidLosses')
+        if avoid_losses_val is not None:
+            avoid_losses = avoid_losses_val in (True, 'true', '1', 1)
+        positive_val = subscription_details.get('positiveGainsOnly')
+        if positive_val is not None:
+            positive_only = positive_val in (True, 'true', '1', 1)
+        if positive_only:
+            avoid_losses = True
+    return avoid_losses, positive_only
+
+
+def _merge_recalc_subscription_overrides(
+    txn: Transaction,
+    *,
+    positions_per_month_min: int | None = None,
+    positions_per_month_max: int | None = None,
+    avoid_losses: bool | None = None,
+    positive_only: bool | None = None,
+) -> None:
+    """Merge CRM recalculation overrides into txn.subscription_details (in-memory)."""
+    if (
+        positions_per_month_min is None
+        and positions_per_month_max is None
+        and avoid_losses is None
+        and positive_only is None
+    ):
+        return
+    merged_sub = dict(txn.subscription_details or {})
+    if positions_per_month_min is not None:
+        merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
+    if positions_per_month_max is not None:
+        merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
+    if avoid_losses is not None:
+        merged_sub['avoidLosses'] = bool(avoid_losses)
+    if positive_only is not None:
+        merged_sub['positiveGainsOnly'] = bool(positive_only)
+    txn.subscription_details = merged_sub
+
+
+def _attach_custom_rates_for_generation(
+    txn: Transaction,
+    custom_rates: dict[int, Decimal] | None,
+) -> None:
+    if custom_rates:
+        txn._custom_rates_for_generation = {
+            int(k): Decimal(str(v)).quantize(Decimal('0.001'))
+            for k, v in custom_rates.items()
+        }
+    elif hasattr(txn, '_custom_rates_for_generation'):
+        delattr(txn, '_custom_rates_for_generation')
+
+
 def _create_period_positions_simple(
     *,
     txn: Transaction,
@@ -2164,8 +2363,9 @@ def _create_period_positions_simple(
     subscription_details = getattr(txn, 'subscription_details', None) or {}
     positions_per_month_min = None
     positions_per_month_max = None
-    avoid_losses = True  # Default: avoid losses
-    positive_only = False
+    avoid_losses, positive_only = _parse_subscription_pnl_options(
+        subscription_details if isinstance(subscription_details, dict) else None
+    )
 
     if isinstance(subscription_details, dict):
         try:
@@ -2180,22 +2380,13 @@ def _create_period_positions_simple(
                 positions_per_month_max = int(max_val)
         except (ValueError, TypeError):
             pass
-        # Check if "avoid losses" option is enabled
-        avoid_losses_val = subscription_details.get('avoidLosses')
-        if avoid_losses_val is not None:
-            avoid_losses = avoid_losses_val in (True, 'true', '1', 1)
-        positive_val = subscription_details.get('positiveGainsOnly')
-        if positive_val is not None:
-            positive_only = positive_val in (True, 'true', '1', 1)
-        if positive_only:
-            avoid_losses = True
 
         # Debug logging
         import logging
         logger = logging.getLogger(__name__)
         logger.info(
             f"Position generation settings for txn {txn.id}: "
-            f"avoidLosses (raw)={avoid_losses_val}, "
+            f"avoidLosses (raw)={subscription_details.get('avoidLosses')}, "
             f"avoidLosses (computed)={avoid_losses}, "
             f"positiveGainsOnly={positive_only}, "
             f"positionsPerMonthMin={positions_per_month_min}, "
@@ -2241,24 +2432,52 @@ def _create_period_positions_simple(
                 timezone.get_current_timezone(),
             )
 
-    while remaining_months > 0:
-        step_months = min(float(profit_period_months), float(remaining_months))
-        period_end_dt = _add_months_dt(cursor_dt, step_months)
+    custom_rates = getattr(txn, '_custom_rates_for_generation', None)
+    rate_period_summaries = (
+        generate_rates_for_investment(txn, custom_rates=custom_rates)
+        if custom_rates
+        else None
+    )
+    using_rate_periods = bool(rate_period_summaries)
+    rate_period_iter = iter(rate_period_summaries or [])
+
+    while remaining_months > 0 or using_rate_periods:
+        preset_target_profit: Decimal | None = None
+        if using_rate_periods:
+            try:
+                summary = next(rate_period_iter)
+            except StopIteration:
+                break
+            period_idx = int(summary['periodIndex'])
+            step_months = float(summary.get('months') or 1)
+            start_raw = summary.get('startDate')
+            end_raw = summary.get('endDate')
+            period_days = []
+            if start_raw and end_raw:
+                start_d = date.fromisoformat(str(start_raw))
+                end_d = date.fromisoformat(str(end_raw))
+                period_days = [d for d in trading_days if start_d <= d <= end_d]
+            if not period_days:
+                continue
+            preset_target_profit = Decimal(str(summary['targetProfit'])).quantize(Decimal('0.01'))
+        else:
+            step_months = min(float(profit_period_months), float(remaining_months))
+            period_end_dt = _add_months_dt(cursor_dt, step_months)
         
-        # CRITICAL: Ensure we don't go beyond the contract end date
-        if period_end_dt > end_dt:
-            period_end_dt = end_dt
-        
-        # CRITICAL: Stop if cursor has reached or passed the end date
-        if cursor_dt.date() >= end_dt.date():
-            break
-        
-        period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
-        if not period_days:
-            cursor_dt = period_end_dt
-            remaining_months -= step_months
-            period_idx += 1
-            continue
+            # CRITICAL: Ensure we don't go beyond the contract end date
+            if period_end_dt > end_dt:
+                period_end_dt = end_dt
+            
+            # CRITICAL: Stop if cursor has reached or passed the end date
+            if cursor_dt.date() >= end_dt.date():
+                break
+            
+            period_days = [d for d in trading_days if d >= cursor_dt.date() and d < period_end_dt.date()]
+            if not period_days:
+                cursor_dt = period_end_dt
+                remaining_months -= step_months
+                period_idx += 1
+                continue
         
         # Check existing profit in this period
         existing_profit = Decimal('0.00')
@@ -2275,33 +2494,64 @@ def _create_period_positions_simple(
                         continue
         
         # Calculate target profit for this period
-        rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
-        period_rate_pct = _quantize_rate_pct(_choose_profitability_rate_pct(product, rng=rate_rng))
-        proration = (
-            (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
-            if profit_period_months and step_months != profit_period_months
-            else Decimal('1')
-        )
-        effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
-        
+        if preset_target_profit is not None:
+            target_profit = preset_target_profit
+            effective_rate_pct = Decimal('0')
+        else:
+            rate_rng = random.Random(f"{txn.id}:rate:{period_idx}")
+            period_rate_pct = _quantize_rate_pct(_choose_profitability_rate_pct(product, rng=rate_rng))
+            proration = (
+                (Decimal(str(step_months)) / Decimal(str(profit_period_months)))
+                if profit_period_months and step_months != profit_period_months
+                else Decimal('1')
+            )
+            effective_rate_pct = (period_rate_pct * proration).quantize(Decimal('0.001'))
+            capital_base = capital if does_compound else invested_total
+            target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
+
         capital_base = capital if does_compound else invested_total
-        target_profit = (capital_base * effective_rate_pct / Decimal('100')).quantize(Decimal('0.01'))
         profit_remaining = (target_profit - existing_profit).quantize(Decimal('0.01'))
+        if _ignore_period_existing_profit_for_recalc(txn):
+            profit_remaining = target_profit
         
-        # Determine how many positions to create for this period
-        # positionsPerMonthMin/Max: number of positions to create per period
-        # Applies directly to the current period regardless of its length
+        # positionsPerMonthMin/Max: independent draw per calendar month in this step.
         num_positions_for_period = 1
+        day_targets_for_period: dict[date, int] | None = None
         if positions_per_month_min is not None and positions_per_month_max is not None:
-            # Use the configured range directly for this period
-            # If period is monthly: creates 5-20 positions for the month
-            # If period is daily: creates 5-20 positions for the day (distributed if needed)
-            num_positions_for_period = rng.randint(positions_per_month_min, positions_per_month_max)
+            desired_total = _draw_positions_total_for_step_months(
+                positions_per_month_min=positions_per_month_min,
+                positions_per_month_max=positions_per_month_max,
+                step_months=float(step_months),
+                txn_id=str(txn.id),
+                period_idx=period_idx,
+            )
+            max_per_day = _max_per_day_for_position_target(
+                desired_total=desired_total,
+                trading_days_count=len(period_days),
+            )
+            capped_total = min(desired_total, len(period_days) * max_per_day)
+            if desired_total > capped_total and positions_per_month_min > 0:
+                avg_days_per_month = len(period_days) / max(1, _month_units_in_step(float(step_months)))
+                max_theoretical_per_month = int((avg_days_per_month * max_per_day) + 0.5)
+                raise ValueError(
+                    f"La fourchette demandée ({positions_per_month_min}-{positions_per_month_max} positions/mois) "
+                    f"est trop élevée pour cette période (~{max_theoretical_per_month} positions/mois max "
+                    f"sur {len(period_days)} jours de bourse)."
+                )
+            day_targets_for_period = _build_day_targets(
+                period_days,
+                capped_total,
+                max_per_day=max_per_day,
+                rng=rng,
+            )
+            num_positions_for_period = sum(day_targets_for_period.values())
         
-        # Apply controlled variability to reduce repeated cent values across periods.
-        # For small profits, this includes a tiny cent-level jitter.
-        variability_rng = random.Random(f"{txn.id}:{period_idx}:variability")
-        profit_with_variability = _apply_profit_variability(profit_remaining, variability_rng)
+        # Modal/custom rates: exact target (no jitter) so Σ P&L matches profit cible.
+        if preset_target_profit is not None:
+            profit_with_variability = profit_remaining
+        else:
+            variability_rng = random.Random(f"{txn.id}:{period_idx}:variability")
+            profit_with_variability = _apply_profit_variability(profit_remaining, variability_rng)
         
         # Create position(s) for this period if profit_remaining > 0
         if profit_with_variability > Decimal('0') and num_positions_for_period > 0:
@@ -2361,21 +2611,11 @@ def _create_period_positions_simple(
                         positive_only=positive_only,
                     )
                 else:
-                    # Allow random gains AND losses for each position
-                    # Some positions can have negative P&L, but total must equal profit_with_variability
-                    logger.info(f"Using RANDOM P&L distribution (allow losses) for period {period_idx}")
-                    for i, inv_amt in enumerate(invested_amounts[:-1]):
-                        pnl_rng = random.Random(f"{txn.id}:{period_idx}:{i}:pnl")
-                        # Random P&L between -15% and +30% of invested amount
-                        pnl_pct = Decimal(str(pnl_rng.uniform(-0.15, 0.30)))
-                        pos_pnl = (inv_amt * pnl_pct).quantize(Decimal('0.01'))
-                        profit_parts.append(pos_pnl)
-                        logger.info(f"  Position {i}: invested={inv_amt}, pnl_pct={pnl_pct}, pnl={pos_pnl}")
-                    
-                    # Last position adjusts to hit the exact total
-                    last_pnl = (profit_with_variability - sum(profit_parts)).quantize(Decimal('0.01'))
-                    profit_parts.append(last_pnl)
-                    logger.info(f"  Position {len(profit_parts)-1} (last): pnl={last_pnl} (adjusted to total)")
+                    profit_parts = _distribute_pnl_total_capped(
+                        profit_with_variability,
+                        invested_amounts,
+                        avoid_losses=False,
+                    )
             else:
                 # Fallback: equal distribution
                 equal_profit = (profit_with_variability / Decimal(str(num_positions_for_period))).quantize(Decimal('0.01'))
@@ -2383,11 +2623,14 @@ def _create_period_positions_simple(
                 profit_parts[-1] = (profit_with_variability - equal_profit * (num_positions_for_period - 1)).quantize(Decimal('0.01'))
             
             # Distribute positions across days of the period
-            positions_per_day = _distribute_positions_across_days(
-                num_positions_for_period,
-                len(period_days),
-                rng
-            )
+            if day_targets_for_period is not None:
+                positions_per_day = [day_targets_for_period.get(day, 0) for day in period_days]
+            else:
+                positions_per_day = _distribute_positions_across_days(
+                    num_positions_for_period,
+                    len(period_days),
+                    rng
+                )
             
             # Collect all planned windows first, then allocate invested amounts by concurrent exposure.
             # This avoids treating invested capital as a "cumulative budget" across positions (wrong when
@@ -2461,90 +2704,13 @@ def _create_period_positions_simple(
                 if len(windows) < len(day_positions_data):
                     import logging
                     logger = logging.getLogger(__name__)
+                    dropped = len(day_positions_data) - len(windows)
                     logger.warning(
                         f"Only {len(windows)} trade windows scheduled for {len(day_positions_data)} positions "
-                        f"on day {day} (period {period_idx}). Redistributing skipped positions to other days."
+                        f"on day {day} (period {period_idx}). Dropping {dropped} unschedulable slot(s) "
+                        f"(no cross-day redistribution — keeps position count aligned with monthly target)."
                     )
-                    
-                    # Collect the skipped positions to redistribute
-                    skipped_positions = day_positions_data[len(windows):]
                     day_positions_data = day_positions_data[:len(windows)]
-                    
-                    # Find other days in this period that could accommodate more positions
-                    for other_day_idx in range(len(period_days)):
-                        if other_day_idx == day_idx or not skipped_positions:
-                            continue
-                        
-                        # Try to add skipped positions to the next available day
-                        other_day = period_days[other_day_idx]
-                        
-                        # Get market hours for sample asset
-                        sample_asset = skipped_positions[0]['asset'] if skipped_positions else None
-                        other_market_open, other_market_close = _get_market_hours_for_asset(
-                            sample_asset,
-                            reference_date=other_day
-                        )
-                        
-                        other_day_window = _day_market_window(
-                            day=other_day,
-                            start_dt=timezone.make_aware(datetime.combine(period_days[0], datetime.min.time()), tz),
-                            end_dt=timezone.make_aware(datetime.combine(period_days[-1], datetime.max.time()), tz),
-                            market_open=other_market_open,
-                            market_close=other_market_close,
-                            tz=tz
-                        )
-                        
-                        if other_day_window is None:
-                            continue
-                        
-                        other_day_open, other_day_close = other_day_window
-                        
-                        # Schedule windows for skipped positions on this day
-                        retry_rng = random.Random(f"{txn.id}:{period_idx}:{other_day_idx}:retry")
-                        retry_windows = _schedule_trades_for_day(
-                            day_open=other_day_open,
-                            day_close=other_day_close,
-                            count=len(skipped_positions),
-                            rng=retry_rng
-                        )
-                        
-                        # Create positions for whatever windows we could schedule
-                        for pos_data, (retry_opened_at, retry_closed_at) in zip(skipped_positions, retry_windows):
-                            asset_obj = pos_data['asset']
-                            pos_invested_desired = Decimal(str(pos_data['invested'])).quantize(Decimal('0.01'))
-                            pos_profit_desired = Decimal(str(pos_data['profit'])).quantize(Decimal('0.01'))
-
-                            overlap_resolved = _resolve_product_overlap_window(
-                                product_id=ctx.product_id,
-                                client_id=ctx.client_id,
-                                opened_at=retry_opened_at,
-                                closed_at=retry_closed_at,
-                                exclude_transaction_id=ctx.transaction_id,
-                            )
-                            if overlap_resolved is None:
-                                continue
-                            retry_opened_at, retry_closed_at = overlap_resolved
-                            
-                            planned_positions.append(
-                                {
-                                    "asset": asset_obj,
-                                    "opened_at": retry_opened_at,
-                                    "closed_at": retry_closed_at,
-                                    "invested_desired": pos_invested_desired,
-                                    "profit_desired": pos_profit_desired,
-                                }
-                            )
-                        
-                        # Remove successfully scheduled positions from skipped list
-                        skipped_positions = skipped_positions[len(retry_windows):]
-                    
-                    # Log if any positions remain unscheduled
-                    if skipped_positions:
-                        logger.error(
-                            f"Failed to schedule {len(skipped_positions)} positions for period {period_idx}. "
-                            f"Total lost: invested={sum(p['invested'] for p in skipped_positions)}, "
-                            f"profit={sum(p['profit'] for p in skipped_positions)}"
-                        )
                 
                 # Create positions with scheduled windows
                 for pos_data, (opened_at, closed_at) in zip(day_positions_data, windows):
@@ -2596,11 +2762,18 @@ def _create_period_positions_simple(
                     t["invested_amount"] = remainder
                     active.append(t)
                 
-                invested_amounts_final = [
-                    Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01"))
-                    for p in planned_positions
-                    if Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01")) > 0
+                def _position_invested(p: dict) -> Decimal:
+                    return Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01"))
+
+                positions_for_pnl = [
+                    p for p in planned_positions
+                    if _position_invested(p) > 0
+                    and (
+                        generation_cutoff_now is None
+                        or p["opened_at"] > generation_cutoff_now
+                    )
                 ]
+                invested_amounts_final = [_position_invested(p) for p in positions_for_pnl]
                 if invested_amounts_final:
                     if avoid_losses:
                         pnl_parts_final = _distribute_pnl_total_capped(
@@ -2617,21 +2790,13 @@ def _create_period_positions_simple(
                         )
                 else:
                     pnl_parts_final = []
-                
-                pnl_iter = iter(pnl_parts_final)
-                for p in planned_positions:
-                    pos_invested = Decimal(str(p.get("invested_amount", Decimal("0.00")))).quantize(Decimal("0.01"))
-                    if pos_invested <= 0:
-                        continue
-                    pos_profit = Decimal(str(next(pnl_iter, Decimal("0.00")))).quantize(Decimal("0.01"))
+
+                for p, pos_profit in zip(positions_for_pnl, pnl_parts_final):
+                    pos_invested = _position_invested(p)
+                    pos_profit = Decimal(str(pos_profit)).quantize(Decimal("0.01"))
                     asset_obj = p.get("asset")
                     opened_at = p["opened_at"]
                     closed_at = p["closed_at"]
-
-                    if generation_cutoff_now is not None and opened_at <= generation_cutoff_now:
-                        # Regeneration must only recreate upcoming positions.
-                        continue
-                    
                     fx_rate = None
                     invested_amount_asset_currency = None
                     now = timezone.now()
@@ -2691,6 +2856,15 @@ def _create_period_positions_simple(
             "createdCount": num_positions_for_period if profit_with_variability > Decimal('0') else 0,
         })
         
+        if using_rate_periods:
+            if does_compound:
+                new_profit = sum(
+                    (p.profit_loss or Decimal('0')) for p in created
+                    if p.period_date and period_days[0] <= p.period_date <= period_days[-1]
+                )
+                capital = (capital + existing_profit + new_profit).quantize(Decimal('0.01'))
+            continue
+
         cursor_dt = period_end_dt
         remaining_months -= step_months
         period_idx += 1
@@ -2812,6 +2986,7 @@ def generate_rates_for_investment(
         has_allocations = ProductAssetAllocation.objects.filter(product_id=product.id).exists()
 
     start_dt = _position_generation_window_start_dt(txn)
+    start_dt = _recalc_generation_start_dt(txn, default=start_dt)
     end_dt = start_dt + timedelta(days=ctx.duration_days)
 
     trading_days = _trading_days_between(start_dt, end_dt)
@@ -3388,6 +3563,8 @@ def save_generated_positions(
     *,
     rates_used: dict[int, Decimal] | None = None,
     period_summaries: list[dict] | None = None,
+    skip_other_transactions_recalc: bool = False,
+    replace_all_pending_schedule: bool = False,
 ) -> tuple[list[Position], dict]:
     """
     Save previously generated positions (from generate_positions_with_rates) to database.
@@ -3582,10 +3759,10 @@ def save_generated_positions(
     # In regeneration flows, a period can legitimately contain both historical open/done
     # rows and newly generated future pending rows.
 
-    # Keep retroactive rows for first generation.
-    # For regeneration flows (transaction already has positions), keep future-only replacement.
+    # For regeneration flows (transaction already has positions), keep future-only replacement
+    # unless we just deleted the full pending schedule and are persisting a modal preview (WYSIWYG).
     has_existing_positions_for_txn = Position.objects.filter(transaction_id=txn.id).exists()
-    if has_existing_positions_for_txn:
+    if has_existing_positions_for_txn and not replace_all_pending_schedule:
         future_filtered_positions_data: list[dict] = []
         dropped_past_rows = 0
         now_cutoff = timezone.now()
@@ -3811,9 +3988,7 @@ def save_generated_positions(
 
     # IMPORTANT: When capital changes on a product, all other investment transactions
     # on the same product must have their future positions recalculated.
-    # This is because the total invested capital affects position calculations.
-    # Recalculate positions for all other investment transactions on the same product
-    if ctx.product_id:
+    if ctx.product_id and not skip_other_transactions_recalc:
         import logging
         logger = logging.getLogger(__name__)
         
@@ -5299,6 +5474,9 @@ def recalculate_positions_for_product_withdrawal(
     dry_run: bool = False,
     positions_per_month_min: int | None = None,
     positions_per_month_max: int | None = None,
+    avoid_losses: bool | None = None,
+    positive_only: bool | None = None,
+    custom_rates: dict[int, Decimal] | None = None,
     recalculation_cutoff_datetime: datetime | None = None,
 ) -> dict:
     """
@@ -5316,6 +5494,9 @@ def recalculate_positions_for_product_withdrawal(
         'dry_run': bool(dry_run),
         'positions_per_month_min': positions_per_month_min,
         'positions_per_month_max': positions_per_month_max,
+        'avoid_losses': avoid_losses,
+        'positive_only': positive_only,
+        'custom_rates': {int(k): str(v) for k, v in (custom_rates or {}).items()} or None,
         'deleted_total': 0,
         'deleted_by_transaction': {},
         'regenerated_total': 0,
@@ -5551,19 +5732,20 @@ def recalculate_positions_for_product_withdrawal(
             txn_amount = (_to_decimal(focus_txn.amount) or Decimal('0')).quantize(Decimal('0.01'))
             capital_base = total_after_value
             try:
-                if positions_per_month_min is not None or positions_per_month_max is not None:
-                    merged_sub = dict(focus_txn.subscription_details or {})
-                    if positions_per_month_min is not None:
-                        merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
-                    if positions_per_month_max is not None:
-                        merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
-                    focus_txn.subscription_details = merged_sub
+                _merge_recalc_subscription_overrides(
+                    focus_txn,
+                    positions_per_month_min=positions_per_month_min,
+                    positions_per_month_max=positions_per_month_max,
+                    avoid_losses=avoid_losses,
+                    positive_only=positive_only,
+                )
 
                 focus_txn._capital_cutoff_datetime = recalculation_cutoff_dt
                 focus_txn._withdrawal_recalc_metadata = {
                     **withdrawal_meta,
                     'allocated_capital_base': str(capital_base),
                 }
+                _attach_custom_rates_for_generation(focus_txn, custom_rates)
 
                 all_existing = Position.objects.filter(transaction_id=focus_txn.id)
                 total_before = all_existing.count()
@@ -5761,6 +5943,9 @@ def recalculate_positions_for_product_addition(
     dry_run: bool = False,
     positions_per_month_min: int | None = None,
     positions_per_month_max: int | None = None,
+    avoid_losses: bool | None = None,
+    positive_only: bool | None = None,
+    custom_rates: dict[int, Decimal] | None = None,
     include_focus_transaction: bool = False,
     recalculation_cutoff_datetime: datetime | None = None,
 ) -> dict:
@@ -5784,6 +5969,9 @@ def recalculate_positions_for_product_addition(
         'dry_run': bool(dry_run),
         'positions_per_month_min': positions_per_month_min,
         'positions_per_month_max': positions_per_month_max,
+        'avoid_losses': avoid_losses,
+        'positive_only': positive_only,
+        'custom_rates': {int(k): str(v) for k, v in (custom_rates or {}).items()} or None,
         'deleted_total': 0,
         'deleted_by_transaction': {},
         'regenerated_total': 0,
@@ -5962,16 +6150,17 @@ def recalculate_positions_for_product_addition(
 
         target_txn = addition_txn
         try:
-            if positions_per_month_min is not None or positions_per_month_max is not None:
-                merged_sub = dict(target_txn.subscription_details or {})
-                if positions_per_month_min is not None:
-                    merged_sub['positionsPerMonthMin'] = int(positions_per_month_min)
-                if positions_per_month_max is not None:
-                    merged_sub['positionsPerMonthMax'] = int(positions_per_month_max)
-                target_txn.subscription_details = merged_sub
+            _merge_recalc_subscription_overrides(
+                target_txn,
+                positions_per_month_min=positions_per_month_min,
+                positions_per_month_max=positions_per_month_max,
+                avoid_losses=avoid_losses,
+                positive_only=positive_only,
+            )
 
             target_txn._capital_cutoff_datetime = recalculation_cutoff_dt
             target_txn._withdrawal_recalc_metadata = addition_meta  # reuse metadata hook
+            _attach_custom_rates_for_generation(target_txn, custom_rates)
 
             created_positions = create_positions_for_investment(
                 target_txn,

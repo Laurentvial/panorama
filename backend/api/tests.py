@@ -10,10 +10,16 @@ from .position_service import (
     GENERATION_HORIZON_MAX_DAYS,
     GENERATION_HORIZON_MIN_DAYS,
     _apply_profit_variability,
+    _attach_custom_rates_for_generation,
     _clamp_generation_horizon_days,
     _distribute_pnl_total_capped,
+    _draw_positions_total_for_step_months,
     _ignore_period_existing_profit_for_recalc,
     _invested_amount_for_recalc_transaction,
+    _max_per_day_for_position_target,
+    _merge_recalc_subscription_overrides,
+    _month_units_in_step,
+    _parse_subscription_pnl_options,
     _product_has_explicit_contract_duration,
     _recalc_generation_start_dt,
     _should_compound_capital_for_txn,
@@ -157,6 +163,150 @@ class DistributePnlAvoidLossesTest(SimpleTestCase):
         self.assertGreaterEqual(len(set(parts)), 4)
         self.assertLessEqual(self._longest_adjacent_run(parts), 2)
         self.assertGreaterEqual(max(parts) - min(parts), Decimal('0.10'))
+
+
+class SubscriptionPnlOptionsTest(SimpleTestCase):
+    def test_default_allows_losses(self):
+        avoid, positive = _parse_subscription_pnl_options({})
+        self.assertFalse(avoid)
+        self.assertFalse(positive)
+
+    def test_avoid_losses_from_subscription_details(self):
+        avoid, positive = _parse_subscription_pnl_options({'avoidLosses': True})
+        self.assertTrue(avoid)
+        self.assertFalse(positive)
+
+        avoid, positive = _parse_subscription_pnl_options({'avoidLosses': False})
+        self.assertFalse(avoid)
+
+    def test_positive_only_implies_avoid_losses(self):
+        avoid, positive = _parse_subscription_pnl_options({'positiveGainsOnly': True})
+        self.assertTrue(avoid)
+        self.assertTrue(positive)
+
+
+class RecalcSubscriptionOverridesTest(SimpleTestCase):
+    def test_merge_avoid_losses_into_subscription_details(self):
+        txn = SimpleNamespace(subscription_details={'positionsPerMonthMin': 5})
+        _merge_recalc_subscription_overrides(
+            txn,
+            avoid_losses=False,
+            positive_only=False,
+        )
+        self.assertFalse(txn.subscription_details['avoidLosses'])
+        self.assertFalse(txn.subscription_details['positiveGainsOnly'])
+        self.assertEqual(txn.subscription_details['positionsPerMonthMin'], 5)
+
+    def test_merge_positive_only_into_subscription_details(self):
+        txn = SimpleNamespace(subscription_details=None)
+        _merge_recalc_subscription_overrides(txn, positive_only=True)
+        self.assertTrue(txn.subscription_details['positiveGainsOnly'])
+
+
+class PositionsPerMonthHelpersTest(SimpleTestCase):
+    def test_month_units_in_step(self):
+        self.assertEqual(_month_units_in_step(1.0), 1)
+        self.assertEqual(_month_units_in_step(2.0), 2)
+        self.assertEqual(_month_units_in_step(1.9), 1)
+        self.assertEqual(_month_units_in_step(0.25), 1)
+
+    def test_draw_positions_total_per_month_in_step(self):
+        total_two_months = _draw_positions_total_for_step_months(
+            positions_per_month_min=150,
+            positions_per_month_max=150,
+            step_months=2.0,
+            txn_id='txn-test',
+            period_idx=0,
+        )
+        self.assertEqual(total_two_months, 300)
+
+        total_one_month = _draw_positions_total_for_step_months(
+            positions_per_month_min=160,
+            positions_per_month_max=160,
+            step_months=1.0,
+            txn_id='txn-test',
+            period_idx=1,
+        )
+        self.assertEqual(total_one_month, 160)
+
+    def test_max_per_day_raises_for_high_monthly_target(self):
+        self.assertEqual(
+            _max_per_day_for_position_target(desired_total=165, trading_days_count=22),
+            8,
+        )
+        self.assertEqual(
+            _max_per_day_for_position_target(desired_total=60, trading_days_count=22),
+            3,
+        )
+
+
+class MixedPnlNoOutlierTest(SimpleTestCase):
+    """Mixed P&L must not dump the whole period profit on one trade."""
+
+    @patch('api.position_service._pick_pnl_cap_pct', return_value=Decimal('0.30'))
+    @patch('api.position_service.random.sample', side_effect=lambda pool, k: list(pool)[:k])
+    def test_no_single_position_absorbs_period_total(self, _mock_sample, _mock_cap):
+        amounts = [Decimal('108046.71')] * 152
+        target = Decimal('34234.60')
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+
+        self.assertEqual(len(parts), 152)
+        self.assertEqual(sum(parts), target)
+        avg_abs = (target / Decimal('152')).quantize(Decimal('0.01'))
+        for p in parts:
+            self.assertLess(abs(p), avg_abs * Decimal('5'))
+        self.assertLess(max(abs(p) for p in parts), Decimal('5000.00'))
+
+    @patch('api.position_service._pick_pnl_cap_pct', return_value=Decimal('0.30'))
+    @patch('api.position_service.random.sample', side_effect=lambda pool, k: list(pool)[:k])
+    def test_mixed_distribution_includes_losses(self, _mock_sample, _mock_cap):
+        amounts = [Decimal('5000.00')] * 20
+        target = Decimal('1200.00')
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+        self.assertTrue(any(p < 0 for p in parts))
+        self.assertTrue(any(p > 0 for p in parts))
+        self.assertEqual(sum(parts), target)
+
+    @patch('api.position_service._pick_pnl_cap_pct', return_value=Decimal('0.30'))
+    @patch('api.position_service.random.sample', side_effect=lambda pool, k: list(pool)[:k])
+    @patch(
+        'api.position_service.random.uniform',
+        side_effect=[0.72, 1.28, 0.85, 1.15, 0.78, 1.22] * 100,
+    )
+    def test_winners_and_losers_are_not_all_identical(self, _mock_uniform, _mock_sample, _mock_cap):
+        amounts = [Decimal('108046.71')] * 30
+        target = Decimal('6000.00')
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+        winners = [p for p in parts if p > 0]
+        losers = [p for p in parts if p < 0]
+        self.assertGreater(len(winners), 1)
+        self.assertGreater(len(losers), 1)
+        self.assertGreater(len(set(winners)), 1)
+        self.assertGreater(len(set(losers)), 1)
+        self.assertEqual(sum(parts), target)
+
+
+class CustomRatesGenerationAttachmentTest(SimpleTestCase):
+    def test_attach_custom_rates_quantizes_and_clears(self):
+        txn = SimpleNamespace(id='txn-attach')
+        _attach_custom_rates_for_generation(txn, {0: Decimal('31.685')})
+        self.assertEqual(txn._custom_rates_for_generation[0], Decimal('31.685'))
+
+        _attach_custom_rates_for_generation(txn, None)
+        self.assertFalse(hasattr(txn, '_custom_rates_for_generation'))
+
+
+class ModalTargetProfitSumTest(SimpleTestCase):
+    """Σ P&L distribué doit égaler le profit cible modal (ex. 34 234,60 €)."""
+
+    @patch('api.position_service._pick_pnl_cap_pct', return_value=Decimal('0.30'))
+    @patch('api.position_service.random.sample', side_effect=lambda pool, k: list(pool)[:k])
+    def test_three_hundred_fifty_six_positions_sum_to_modal_target(self, _mock_sample, _mock_cap):
+        amounts = [Decimal('108046.71')] * 356
+        target = Decimal('34234.60')
+        parts = _distribute_pnl_total_capped(target, amounts, avoid_losses=False)
+        self.assertEqual(len(parts), 356)
+        self.assertEqual(sum(parts), target)
 
 
 class ProfitVariabilityTest(SimpleTestCase):

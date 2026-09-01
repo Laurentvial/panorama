@@ -112,6 +112,7 @@ from .position_service import (
     record_recalculation_execution_in_history,
     save_generated_positions,
     save_position_generation_history,
+    _merge_recalc_subscription_overrides,
     recalculate_positions_for_product_addition,
     recalculate_positions_for_product_withdrawal,
     calculate_withdrawal_recalculation_metadata,
@@ -323,6 +324,57 @@ def _apply_post_save_validation(
         return transaction.status in COMPLETED_TRANSACTION_STATUSES
     finalize_transaction_validation(transaction)
     return True
+
+
+def _build_recalculation_execution_from_saved_positions(
+    *,
+    transaction,
+    product_id: str | None,
+    created_positions: list,
+    deletion_info: dict,
+    source: str,
+) -> dict:
+    from .models import Position
+
+    final_pending_total = 0
+    if product_id:
+        final_pending_total = Position.objects.filter(
+            product_id=product_id,
+            client_id=transaction.client_id,
+            status='pending',
+        ).count()
+
+    created_count = len(created_positions or [])
+    return {
+        'addition_transaction_id': transaction.id,
+        'product_id': product_id,
+        'status': 'ok',
+        'strict_mode': True,
+        'dry_run': False,
+        'deleted_total': int(deletion_info.get('total_count') or 0),
+        'regenerated_total': int(created_count),
+        'final_pending_total': int(final_pending_total),
+        'per_transaction': [{
+            'transaction_id': transaction.id,
+            'created': int(created_count),
+            'after_pending': int(final_pending_total),
+            'status': 'ok',
+        }],
+        'errors': [],
+        'source': source,
+    }
+
+
+def _ensure_recalculation_execution_ok(execution_summary: dict | None) -> None:
+    status = (execution_summary or {}).get('status')
+    if status == 'ok':
+        return
+    errors = (execution_summary or {}).get('errors') or []
+    detail = '; '.join(str(e) for e in errors if e) or str(status or 'unknown')
+    raise ValueError(
+        f"Le recalcul n'a pas pu remplacer les positions en attente ({detail}). "
+        "Opération annulée, veuillez régénérer."
+    )
 
 
 @api_view(['POST'])
@@ -11481,6 +11533,9 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 dry_run=True,
                 positions_per_month_min=min_val if positions_per_month_min is not None else None,
                 positions_per_month_max=max_val if positions_per_month_max is not None else None,
+                avoid_losses=avoid_losses,
+                positive_only=positive_only,
+                custom_rates=custom_rates,
                 include_focus_transaction=include_focus_transaction,
                 recalculation_cutoff_datetime=preview_cutoff_dt,
             )
@@ -11586,6 +11641,9 @@ def transaction_generate_positions(request, client_id, transaction_id):
                 dry_run=True,
                 positions_per_month_min=min_val if positions_per_month_min is not None else None,
                 positions_per_month_max=max_val if positions_per_month_max is not None else None,
+                avoid_losses=avoid_losses,
+                positive_only=positive_only,
+                custom_rates=custom_rates,
                 recalculation_cutoff_datetime=preview_cutoff_dt,
             )
 
@@ -12018,6 +12076,16 @@ def transaction_save_positions(request, client_id, transaction_id):
     if not isinstance(finalize_validation, bool):
         finalize_validation = str(finalize_validation).lower() in ('true', '1', 'yes', 'on')
 
+    avoid_losses = request.data.get('avoid_losses', False)
+    if not isinstance(avoid_losses, bool):
+        avoid_losses = str(avoid_losses).lower() in ('true', '1', 'yes', 'on')
+
+    positive_only = request.data.get('positive_only', False)
+    if not isinstance(positive_only, bool):
+        positive_only = str(positive_only).lower() in ('true', '1', 'yes', 'on')
+    if positive_only:
+        avoid_losses = True
+
     requested_recalculation_cutoff = request.data.get('recalculation_cutoff_datetime')
     parsed_recalculation_cutoff_dt = None
     if requested_recalculation_cutoff:
@@ -12150,15 +12218,9 @@ def transaction_save_positions(request, client_id, transaction_id):
             # Handle addition with recalculation (existing pending positions)
             from .position_service import recalculate_positions_for_product_addition, calculate_addition_recalculation_metadata
             
+            created_positions_from_preview: list = []
             with db_transaction.atomic():
                 extend_db_transaction_timeouts()
-                # Save the generation history
-                save_position_generation_history(
-                    transaction,
-                    rates_used=rates_used,
-                    period_summaries=period_summaries,
-                    positions_data=positions_data,
-                )
 
                 # Collect information about positions that are expected to be deleted
                 deleted_positions_info = None
@@ -12240,15 +12302,70 @@ def transaction_save_positions(request, client_id, transaction_id):
                     if save_min_val < 0 or save_max_val < save_min_val:
                         raise ValueError(f'Fourchette invalide: min ({save_min_val}) doit être >= 0 et <= max ({save_max_val})')
 
-                recalculation_execution = recalculate_positions_for_product_addition(
+                _merge_recalc_subscription_overrides(
                     transaction,
-                    force_recalculate=True,
-                    strict=True,
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
-                    include_focus_transaction=include_focus_transaction,
-                    recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
+                    avoid_losses=avoid_losses,
+                    positive_only=positive_only,
                 )
+
+                created_positions_from_preview = []
+                if positions_data:
+                    # WYSIWYG: persist exactly what the modal previewed (delete pending + bulk insert).
+                    created_positions_from_preview, deletion_info = save_generated_positions(
+                        transaction,
+                        positions_data,
+                        rates_used=rates_used,
+                        period_summaries=period_summaries,
+                        skip_other_transactions_recalc=True,
+                        replace_all_pending_schedule=True,
+                    )
+                    if not created_positions_from_preview:
+                        raise ValueError(
+                            "Aucune position future n'a pu être enregistrée après suppression des positions en attente. "
+                            "Opération annulée, veuillez régénérer."
+                        )
+                    if len(created_positions_from_preview) != len(positions_data):
+                        raise ValueError(
+                            f"Incohérence enregistrement: {len(positions_data)} positions envoyées "
+                            f"mais {len(created_positions_from_preview)} enregistrées. "
+                            "Opération annulée, veuillez régénérer."
+                        )
+                    if deletion_info.get('total_count'):
+                        deleted_positions_info = {
+                            'total_count': deletion_info['total_count'],
+                            'deleted_by_transaction': deletion_info.get('deleted_by_transaction') or {},
+                            'positions': deletion_info.get('positions') or [],
+                            'note': deletion_info.get('note'),
+                        }
+                    recalculation_execution = _build_recalculation_execution_from_saved_positions(
+                        transaction=transaction,
+                        product_id=str(product.id) if product is not None else transaction.transfer_to,
+                        created_positions=created_positions_from_preview,
+                        deletion_info=deletion_info,
+                        source='save_generated_positions_from_preview',
+                    )
+                else:
+                    save_position_generation_history(
+                        transaction,
+                        rates_used=rates_used,
+                        period_summaries=period_summaries,
+                        positions_data=positions_data,
+                    )
+                    recalculation_execution = recalculate_positions_for_product_addition(
+                        transaction,
+                        force_recalculate=True,
+                        strict=True,
+                        positions_per_month_min=save_min_val,
+                        positions_per_month_max=save_max_val,
+                        avoid_losses=avoid_losses,
+                        positive_only=positive_only,
+                        custom_rates=rates_used,
+                        include_focus_transaction=include_focus_transaction,
+                        recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
+                    )
+                    _ensure_recalculation_execution_ok(recalculation_execution)
 
                 mismatch_error = _validate_recalculation_execution_against_expected(
                     expected_total=parsed_expected_recalculation_total,
@@ -12267,9 +12384,17 @@ def transaction_save_positions(request, client_id, transaction_id):
 
             transaction.refresh_from_db()
             response_data = {
-                'positions': [], 
-                'count': 0, 
-                'message': 'Historique de génération enregistré pour l\'ajout avec recalcul',
+                'positions': (
+                    PositionSerializer(created_positions_from_preview, many=True).data
+                    if created_positions_from_preview
+                    else []
+                ),
+                'count': len(created_positions_from_preview),
+                'message': (
+                    'Positions enregistrées et recalcul exécuté avec succès'
+                    if created_positions_from_preview
+                    else 'Historique de génération enregistré pour l\'ajout avec recalcul'
+                ),
                 'validation_finalized': validation_finalized,
                 'transaction': _serialize_transaction_for_response(transaction, request),
             }
@@ -12402,8 +12527,12 @@ def transaction_save_positions(request, client_id, transaction_id):
                     strict=True,
                     positions_per_month_min=save_min_val,
                     positions_per_month_max=save_max_val,
+                    avoid_losses=avoid_losses,
+                    positive_only=positive_only,
+                    custom_rates=rates_used,
                     recalculation_cutoff_datetime=parsed_recalculation_cutoff_dt,
                 )
+                _ensure_recalculation_execution_ok(recalculation_execution)
 
                 mismatch_error = _validate_recalculation_execution_against_expected(
                     expected_total=parsed_expected_recalculation_total,

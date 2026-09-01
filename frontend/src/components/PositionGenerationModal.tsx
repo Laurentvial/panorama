@@ -750,11 +750,14 @@ export function PositionGenerationModal({
           : null;
       const expectedRecalculationTotal =
         (isWithdrawal || isAdditionRecalc) &&
-        recalculationPreview?.regenerated_total_expected != null &&
-        Number.isFinite(Number(recalculationPreview.regenerated_total_expected)) &&
-        Number(recalculationPreview.regenerated_total_expected) > 0
-          ? Number(recalculationPreview.regenerated_total_expected)
-          : null;
+        positions.length > 0
+          ? positions.length
+          : (isWithdrawal || isAdditionRecalc) &&
+            recalculationPreview?.regenerated_total_expected != null &&
+            Number.isFinite(Number(recalculationPreview.regenerated_total_expected)) &&
+            Number(recalculationPreview.regenerated_total_expected) > 0
+            ? Number(recalculationPreview.regenerated_total_expected)
+            : null;
       const expectedRecalculationPerTransaction =
         (isWithdrawal || isAdditionRecalc) &&
         Array.isArray(recalculationPreview?.per_transaction_expected)
@@ -776,6 +779,8 @@ export function PositionGenerationModal({
             period_summaries: recalculatedPeriodSummaries,
             manual_regeneration: true,
             finalize_validation: true,
+            avoid_losses: avoidLosses,
+            positive_only: positiveGainsOnly,
             ...(opts?.skipPositions ? { skip_positions: true } : {}),
             ...(shouldSendPositionsMonthRange
               ? {
@@ -1529,8 +1534,9 @@ export function PositionGenerationModal({
                     </div>
                     
                     <p style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
-                      Note: Le système limite à 3 positions maximum par jour de bourse. 
-                      Si votre fourchette est trop élevée, elle sera automatiquement ajustée ou une erreur sera affichée.
+                      Note: Par défaut, le système limite à 3 positions par jour de bourse. Si la fourchette mensuelle
+                      saisie l’exige, la capacité journalière est relevée automatiquement (dans la limite du réalisable
+                      sur les jours de bourse de la période). Si la fourchette reste trop élevée, une erreur sera affichée.
                     </p>
                   </div>
                   )}
@@ -1780,8 +1786,16 @@ export function PositionGenerationModal({
                     {showRecalculationSampleTable && (
                       <>
                         <div style={{ marginBottom: '10px', fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
-                          Échantillon de positions régénérées ({positions.length} affichée(s)
-                          {regeneratedTotal != null ? ` sur ${regeneratedTotal} attendues` : ''})
+                          Positions générées : <strong>{positions.length}</strong>
+                          {regeneratedTotal != null && regeneratedTotal !== positions.length
+                            ? ` (moteur recalcul: ${regeneratedTotal})`
+                            : ''}
+                        </div>
+                        <div style={{ marginBottom: '10px', fontSize: '12px', color: '#475569' }}>
+                          La colonne « Période » est un numéro de séquence (pas le total de positions).
+                          {positions.length > 0 && positions[0]?.period_index != null && (
+                            <> Dernière séquence affichée : {Math.max(...positions.map((p) => Number(p.period_index) || 0))}.</>
+                          )}
                         </div>
                         {recalculationPreview?.generated_positions_preview_note && (
                           <div style={{ marginBottom: '10px', fontSize: '12px', color: '#475569' }}>
